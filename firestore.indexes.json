@@ -1,0 +1,208 @@
+{
+  "indexes": [
+
+    // ── CHAMADOS ──────────────────────────────────────────────
+    {
+      "collectionGroup": "chamados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chamados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "area",      "order": "ASCENDING" },
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chamados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tecnico",   "order": "ASCENDING" },
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chamados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "categoria",   "order": "ASCENDING" },
+        { "fieldPath": "slaAtingido", "order": "ASCENDING" },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chamados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "prioridade", "order": "ASCENDING" },
+        { "fieldPath": "status",     "order": "ASCENDING" },
+        { "fieldPath": "createdAt",  "order": "DESCENDING" }
+      ]
+    },
+
+    // ── ATIVOS ────────────────────────────────────────────────
+    {
+      "collectionGroup": "ativos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "area",      "order": "ASCENDING" },
+        { "fieldPath": "status",    "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ativos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "garantia",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ativos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tipo",      "order": "ASCENDING" },
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // ── APROVAÇÕES ────────────────────────────────────────────
+    {
+      "collectionGroup": "aprovacoes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // ── SMARTPHONES ───────────────────────────────────────────
+    {
+      "collectionGroup": "smartphones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "empSetor",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "smartphones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empMat",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // ── MDM ACTIONS ───────────────────────────────────────────
+    {
+      "collectionGroup": "mdm_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "smId",      "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mdm_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tipo",      "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // ── SWITCHES ──────────────────────────────────────────────
+    {
+      "collectionGroup": "switches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "local",     "order": "ASCENDING" }
+      ]
+    },
+
+    // ── MOBILIÁRIO ────────────────────────────────────────────
+    {
+      "collectionGroup": "mobiliario",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tipo",      "order": "ASCENDING" },
+        { "fieldPath": "status",    "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mobiliario",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "setor",     "order": "ASCENDING" },
+        { "fieldPath": "status",    "order": "ASCENDING" }
+      ]
+    },
+
+    // ── AUDIT LOGS ────────────────────────────────────────────
+    {
+      "collectionGroup": "audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "resourceId",   "order": "ASCENDING" },
+        { "fieldPath": "createdAt",    "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "action",    "order": "ASCENDING" },
+        { "fieldPath": "module",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // ── NOTIFICAÇÕES ──────────────────────────────────────────
+    {
+      "collectionGroup": "items",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "lida",      "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+
+  ],
+
+  "fieldOverrides": [
+    // Desativa índice automático em campos com alta cardinalidade
+    {
+      "collectionGroup": "audit_logs",
+      "fieldPath": "details",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "chamados",
+      "fieldPath": "obs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ativos",
+      "fieldPath": "obs",
+      "indexes": []
+    }
+  ]
+}
