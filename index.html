@@ -33,14 +33,158 @@ try {
   window.dispatchEvent(new Event('firebase-ready'));
 }
 </script>
-<!-- ZXing barcode/QR reader (funciona em http e file://) -->
-<script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"
-  onerror="console.log('[Scanner] ZXing não carregado — modo manual disponível')"></script>
+<!-- ZXing carregado dinamicamente dentro de startDecoding() -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 
 /* ══ DARK MODE ══ */
+/* ══ LOGIN PAGE ══ */
+#login-page {
+  position:fixed; inset:0; z-index:9999;
+  display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,#070D1A 0%,#0C1526 40%,#111E35 100%);
+  font-family:'Inter',sans-serif;
+}
+#login-page.hidden { display:none; }
+
+.login-bg-grid {
+  position:absolute; inset:0; overflow:hidden; opacity:.06;
+  background-image:
+    linear-gradient(rgba(37,99,235,.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37,99,235,.6) 1px, transparent 1px);
+  background-size:40px 40px;
+}
+.login-blob {
+  position:absolute; border-radius:50%; filter:blur(80px); opacity:.15;
+  animation:blobFloat 8s ease-in-out infinite alternate;
+}
+.login-blob-1 { width:400px; height:400px; background:#2563EB; top:-80px; right:-80px; }
+.login-blob-2 { width:300px; height:300px; background:#7C3AED; bottom:-60px; left:-60px; animation-delay:3s; }
+@keyframes blobFloat { 0%{transform:scale(1) translateY(0)} 100%{transform:scale(1.1) translateY(-20px)} }
+
+.login-card {
+  position:relative; z-index:1;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.08);
+  backdrop-filter:blur(20px);
+  border-radius:20px;
+  padding:44px 40px;
+  width:420px; max-width:95vw;
+  box-shadow:0 32px 80px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.05);
+  animation:fadeUp .4s cubic-bezier(.4,0,.2,1);
+}
+.login-logo-wrap {
+  display:flex; align-items:center; gap:12px; margin-bottom:32px; justify-content:center;
+}
+.login-logo-mark {
+  width:44px; height:44px;
+  background:linear-gradient(135deg,#2563EB,#7C3AED);
+  border-radius:12px;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 8px 24px rgba(37,99,235,.4);
+  flex-shrink:0;
+}
+.login-title { font-size:22px; font-weight:800; color:#fff; letter-spacing:-.5px; }
+.login-title em { color:#60A5FA; font-style:normal; }
+.login-sub { font-size:11px; color:rgba(255,255,255,.3); font-weight:500; letter-spacing:.5px; text-transform:uppercase; }
+
+.login-heading { font-size:26px; font-weight:800; color:#fff; text-align:center; margin-bottom:6px; }
+.login-desc { font-size:13px; color:rgba(255,255,255,.4); text-align:center; margin-bottom:28px; }
+
+.login-field { margin-bottom:16px; }
+.login-field label {
+  display:block; font-size:11.5px; font-weight:600;
+  color:rgba(255,255,255,.5); margin-bottom:6px; letter-spacing:.03em;
+}
+.login-input-wrap { position:relative; }
+.login-input {
+  width:100%; padding:12px 44px 12px 14px;
+  background:rgba(255,255,255,.05);
+  border:1.5px solid rgba(255,255,255,.1);
+  border-radius:10px; color:#fff; font-size:14px;
+  outline:none; font-family:'Inter',sans-serif;
+  transition:all .2s; box-sizing:border-box;
+}
+.login-input::placeholder { color:rgba(255,255,255,.2); }
+.login-input:focus {
+  border-color:#2563EB;
+  background:rgba(37,99,235,.08);
+  box-shadow:0 0 0 4px rgba(37,99,235,.15);
+}
+.login-input.error { border-color:#EF4444; box-shadow:0 0 0 4px rgba(239,68,68,.15); }
+.login-input-icon {
+  position:absolute; right:13px; top:50%; transform:translateY(-50%);
+  color:rgba(255,255,255,.25); font-size:15px; pointer-events:none;
+}
+.login-toggle-pw {
+  position:absolute; right:13px; top:50%; transform:translateY(-50%);
+  background:none; border:none; cursor:pointer;
+  color:rgba(255,255,255,.3); font-size:14px; padding:2px;
+  transition:color .15s;
+}
+.login-toggle-pw:hover { color:rgba(255,255,255,.7); }
+
+.login-btn {
+  width:100%; padding:13px; margin-top:8px;
+  background:linear-gradient(135deg,#2563EB,#1D4ED8);
+  color:#fff; border:none; border-radius:10px;
+  font-size:15px; font-weight:700; cursor:pointer;
+  font-family:'Inter',sans-serif;
+  box-shadow:0 4px 20px rgba(37,99,235,.4);
+  transition:all .2s;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.login-btn:hover:not(:disabled) {
+  background:linear-gradient(135deg,#1D4ED8,#1E40AF);
+  box-shadow:0 8px 28px rgba(37,99,235,.55);
+  transform:translateY(-1px);
+}
+.login-btn:disabled { opacity:.6; cursor:not-allowed; transform:none; }
+.login-btn .btn-spinner {
+  width:16px; height:16px; border:2px solid rgba(255,255,255,.3);
+  border-top-color:#fff; border-radius:50%;
+  animation:spin .7s linear infinite; display:none;
+}
+.login-btn.loading .btn-spinner { display:block; }
+.login-btn.loading .btn-text { display:none; }
+
+.login-error {
+  background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.3);
+  color:#FCA5A5; border-radius:8px; padding:10px 14px;
+  font-size:12.5px; font-weight:500; margin-bottom:16px; display:none;
+  text-align:center;
+}
+.login-error.show { display:block; animation:fadeUp .2s ease; }
+
+.login-footer {
+  text-align:center; margin-top:24px;
+  font-size:11px; color:rgba(255,255,255,.2);
+}
+.login-footer a { color:rgba(255,255,255,.4); text-decoration:none; }
+.login-footer a:hover { color:rgba(255,255,255,.7); }
+
+.login-divider {
+  display:flex; align-items:center; gap:10px; margin:20px 0;
+}
+.login-divider::before,.login-divider::after {
+  content:''; flex:1; height:1px; background:rgba(255,255,255,.08);
+}
+.login-divider span { font-size:11px; color:rgba(255,255,255,.2); white-space:nowrap; }
+
+/* User badge no topbar após login */
+.tb-user-info {
+  display:flex; align-items:center; gap:8px;
+  padding:4px 10px 4px 6px;
+  background:var(--g50); border:1px solid var(--g200);
+  border-radius:20px; cursor:pointer; transition:all .18s;
+}
+.tb-user-info:hover { background:var(--g100); }
+.tb-user-role {
+  font-size:10px; font-weight:700; color:var(--g400);
+  text-transform:uppercase; letter-spacing:.05em;
+}
+
 [data-theme="dark"] {
   --brand:#0A0F1E; --brand-2:#0C1526;
   --g50:#0F172A; --g100:#1E293B; --g200:#334155; --g300:#475569;
@@ -437,6 +581,87 @@ textarea.form-control{resize:vertical;min-height:80px}
 </style>
 </head>
 <body>
+
+<!-- ══════════════════════════════════════════════════════════
+     LOGIN PAGE
+══════════════════════════════════════════════════════════ -->
+<div id="login-page">
+  <div class="login-bg-grid"></div>
+  <div class="login-blob login-blob-1"></div>
+  <div class="login-blob login-blob-2"></div>
+
+  <div class="login-card">
+    <!-- Logo -->
+    <div class="login-logo-wrap">
+      <div class="login-logo-mark">
+        <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="1" width="6" height="6" rx="1.5" fill="white" opacity=".95"/>
+          <rect x="9" y="1" width="6" height="6" rx="1.5" fill="white" opacity=".65"/>
+          <rect x="1" y="9" width="6" height="6" rx="1.5" fill="white" opacity=".65"/>
+          <rect x="9" y="9" width="6" height="6" rx="1.5" fill="white" opacity=".3"/>
+        </svg>
+      </div>
+      <div>
+        <div class="login-title">Asset <em>Tools</em></div>
+        <div class="login-sub">A-DSI · Gestão de TI</div>
+      </div>
+    </div>
+
+    <div class="login-heading">Bem-vindo de volta</div>
+    <div class="login-desc">Faça login para acessar o painel de gestão</div>
+
+    <!-- Error box -->
+    <div class="login-error" id="login-error-box">
+      🔒 Usuário ou senha incorretos. Verifique e tente novamente.
+    </div>
+
+    <!-- EMAIL -->
+    <div class="login-field">
+      <label for="login-email">E-mail ou usuário</label>
+      <div class="login-input-wrap">
+        <input type="text" id="login-email" class="login-input"
+          placeholder="Usuário ou e-mail"
+          autocomplete="username"
+          onkeydown="if(event.key==='Enter') document.getElementById('login-senha').focus()">
+        <span class="login-input-icon">👤</span>
+      </div>
+    </div>
+
+    <!-- SENHA -->
+    <div class="login-field">
+      <label for="login-senha">Senha</label>
+      <div class="login-input-wrap">
+        <input type="password" id="login-senha" class="login-input"
+          placeholder="••••••••••"
+          autocomplete="current-password"
+          onkeydown="if(event.key==='Enter') fazerLogin()">
+        <button class="login-toggle-pw" type="button" onclick="toggleSenha()" id="toggle-pw-btn" title="Mostrar/ocultar senha">👁️</button>
+      </div>
+    </div>
+
+    <!-- ESQUECI SENHA -->
+    <div style="text-align:right;margin-bottom:8px">
+      <a href="#" style="font-size:12px;color:rgba(255,255,255,.35);text-decoration:none" onclick="esqueciSenha()">Esqueci a senha</a>
+    </div>
+
+    <!-- BOTÃO -->
+    <button class="login-btn" id="login-btn" onclick="fazerLogin()">
+      <span class="btn-spinner"></span>
+      <span class="btn-text">Entrar no sistema</span>
+    </button>
+
+    <!-- Info Firebase -->
+    <div id="login-firebase-status" style="text-align:center;margin-top:14px;font-size:11px;color:rgba(255,255,255,.2)">
+      Conectando ao Firebase...
+    </div>
+
+    <div class="login-footer">
+      Asset Tools · A-DSI &nbsp;·&nbsp; <a href="#">Política de Privacidade</a><br>
+      <span style="margin-top:4px;display:block">🔒 Acesso restrito a usuários autorizados</span>
+    </div>
+  </div>
+</div>
+
 <aside class="sidebar">
   <div class="sb-logo">
     <div class="logo-mark">
@@ -3259,6 +3484,247 @@ function salvarChamado() {
   showToast(`✓ Chamado ${id} aberto com sucesso!`);
 }
 
+// ============================================================
+// LOGIN & AUTENTICAÇÃO
+// ============================================================
+
+// Usuários locais (fallback quando Firebase Auth não está disponível)
+// Em produção: use APENAS Firebase Auth + Firestore /users
+const LOCAL_USERS = {
+  'admin': {
+    email:    'admin@adsi.com.br',
+    password: 'Bufferocs123',
+    nome:     'Administrador',
+    avatar:   'AD',
+    role:     'admin',
+    uid:      'local_admin_001',
+    permissions: {
+      canApprove: true, canDeleteAssets: true,
+      canWipeDevice: true, canGeolocate: true,
+      canViewAudit: true, canExecDashboard: true,
+    }
+  },
+  'admin@adsi.com.br': {
+    email:    'admin@adsi.com.br',
+    password: 'Bufferocs123',
+    nome:     'Administrador',
+    avatar:   'AD',
+    role:     'admin',
+    uid:      'local_admin_001',
+    permissions: {
+      canApprove: true, canDeleteAssets: true,
+      canWipeDevice: true, canGeolocate: true,
+      canViewAudit: true, canExecDashboard: true,
+    }
+  },
+};
+
+let SESSION_USER = null;  // usuário logado na sessão atual
+
+// ─── Verifica sessão salva (lembrar acesso) ──────────────────
+function checkSavedSession() {
+  try {
+    const saved = localStorage.getItem('at_session');
+    if (!saved) return false;
+    const session = JSON.parse(saved);
+    if (!session || !session.uid || !session.nome) return false;
+    // Valida expiração (24h)
+    const age = Date.now() - (session.savedAt || 0);
+    if (age > 24 * 3600 * 1000) { localStorage.removeItem('at_session'); return false; }
+    loginSuccess(session, false);
+    return true;
+  } catch { return false; }
+}
+
+// ─── Login principal ─────────────────────────────────────────
+async function fazerLogin() {
+  const emailInput = document.getElementById('login-email')?.value?.trim();
+  const senha      = document.getElementById('login-senha')?.value;
+
+  clearLoginError();
+  if (!emailInput || !senha) {
+    return showLoginError('Preencha o e-mail e a senha.');
+  }
+
+  setLoginLoading(true);
+
+  // ── Tentativa 1: Firebase Auth (se disponível) ──────────────
+  if (FB_READY && auth && window._fbModules?.signInWithEmailAndPassword) {
+    try {
+      const { signInWithEmailAndPassword } = window._fbModules;
+      const cred = await signInWithEmailAndPassword(auth, emailInput, senha);
+      const fbUser = cred.user;
+      // Busca perfil no Firestore
+      let profile = { nome: fbUser.displayName || emailInput, role: 'viewer', uid: fbUser.uid, avatar: (fbUser.displayName||'?')[0].toUpperCase() };
+      if (db && window._fs) {
+        const { doc } = window._fs; // getDoc not in _fs by default — use compat below
+        try {
+          const snap = await db.collection?.('users').doc(fbUser.uid).get?.();
+          if (snap?.exists) Object.assign(profile, snap.data());
+        } catch (_) {}
+      }
+      const user = {
+        uid: fbUser.uid, email: fbUser.email,
+        nome: profile.nome || fbUser.displayName || emailInput,
+        avatar: (profile.nome || fbUser.displayName || '?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase(),
+        role: profile.role || 'viewer',
+        permissions: permissionsForRole(profile.role || 'viewer'),
+      };
+      loginSuccess(user, true);
+      return;
+    } catch (err) {
+      // Firebase Auth falhou — tenta fallback local
+      if (err.code !== 'auth/user-not-found' && err.code !== 'auth/wrong-password' && err.code !== 'auth/invalid-credential') {
+        console.warn('[Auth] Firebase error:', err.code);
+      }
+    }
+  }
+
+  // ── Tentativa 2: usuários locais (offline / desenvolvimento) ─
+  await new Promise(r => setTimeout(r, 600)); // simula latência
+  const key = emailInput.toLowerCase();
+  const local = LOCAL_USERS[key] || LOCAL_USERS[emailInput];
+  if (local && local.password === senha) {
+    const user = {
+      uid:    local.uid,
+      email:  local.email,
+      nome:   local.nome,
+      avatar: local.avatar,
+      role:   local.role,
+      permissions: local.permissions || permissionsForRole(local.role),
+    };
+    loginSuccess(user, true);
+    return;
+  }
+
+  setLoginLoading(false);
+  showLoginError('Usuário ou senha incorretos.');
+  document.getElementById('login-email')?.classList.add('error');
+  document.getElementById('login-senha')?.classList.add('error');
+}
+
+function permissionsForRole(role) {
+  const map = {
+    admin:     { canApprove:true, canDeleteAssets:true, canWipeDevice:true, canGeolocate:true, canViewAudit:true, canExecDashboard:true },
+    gestor:    { canApprove:true, canDeleteAssets:false, canWipeDevice:true, canGeolocate:true, canViewAudit:true, canExecDashboard:true },
+    tecnico:   { canApprove:false, canDeleteAssets:false, canWipeDevice:false, canGeolocate:false, canViewAudit:false, canExecDashboard:false },
+    mdm_admin: { canApprove:false, canDeleteAssets:false, canWipeDevice:true, canGeolocate:true, canViewAudit:false, canExecDashboard:false },
+    viewer:    { canApprove:false, canDeleteAssets:false, canWipeDevice:false, canGeolocate:false, canViewAudit:false, canExecDashboard:false },
+  };
+  return map[role] || map.viewer;
+}
+
+function loginSuccess(user, showWelcome = true) {
+  SESSION_USER = user;
+  // Atualiza CURRENT_USER global
+  Object.assign(CURRENT_USER, user);
+
+  // Atualiza UI
+  const av = document.getElementById('tb-user-avatar');
+  if (av) { av.childNodes[0].textContent = user.avatar || user.nome[0]; }
+  const nameEl = document.getElementById('tb-user-name-label');
+  if (nameEl) nameEl.textContent = user.nome;
+  const roleEl = document.getElementById('tb-user-role-label');
+  if (roleEl) roleEl.textContent = user.role;
+  document.getElementById('tb-user-name-wrap')?.style?.setProperty('display','block');
+
+  // Atualiza sidebar user
+  const uname = document.querySelector('.u-name');
+  if (uname) uname.textContent = user.nome;
+  const urole = document.querySelector('.u-role');
+  if (urole) urole.textContent = user.role.charAt(0).toUpperCase() + user.role.slice(1) + ' · A-DSI';
+  const uav = document.querySelector('.u-avatar');
+  if (uav) uav.textContent = user.avatar || user.nome[0];
+
+  // Esconde login, mostra app
+  setLoginLoading(false);
+  document.getElementById('login-page')?.classList.add('hidden');
+
+  if (showWelcome) {
+    const hora = new Date().getHours();
+    const saud = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
+    showToast(`${saud}, ${user.nome.split(' ')[0]}! 👋 Bem-vindo ao Asset Tools.`, 'success');
+  }
+  auditLog('LOGIN', 'auth', user.uid, 'user', { nome: user.nome, role: user.role });
+}
+
+// ─── Logout ──────────────────────────────────────────────────
+function confirmarLogout() {
+  if (!confirm('Deseja sair do sistema?')) return;
+  fazerLogout();
+}
+
+async function fazerLogout() {
+  auditLog('LOGOUT', 'auth', CURRENT_USER.uid, 'user', {});
+  localStorage.removeItem('at_session');
+  SESSION_USER = null;
+  if (FB_READY && auth) {
+    try { await auth.signOut?.(); } catch (_) {}
+  }
+  // Volta para login
+  document.getElementById('login-page')?.classList.remove('hidden');
+  // Limpa campos
+  const em = document.getElementById('login-email');
+  const pw = document.getElementById('login-senha');
+  if (em) em.value = ''; if (pw) pw.value = '';
+  clearLoginError();
+}
+
+// ─── Esqueci a senha ─────────────────────────────────────────
+async function esqueciSenha() {
+  const email = document.getElementById('login-email')?.value?.trim();
+  if (!email) {
+    showLoginError('Digite seu e-mail no campo acima para resetar a senha.');
+    return;
+  }
+  if (FB_READY && auth && window._fbModules?.sendPasswordResetEmail) {
+    try {
+      await window._fbModules.sendPasswordResetEmail(auth, email);
+      clearLoginError();
+      showToast(`✉️ E-mail de recuperação enviado para ${email}`, 'success');
+    } catch (err) {
+      showLoginError('Erro ao enviar e-mail: ' + (err.message || err.code));
+    }
+  } else {
+    showLoginError('Reset de senha requer conexão com Firebase. Contate o administrador.');
+  }
+}
+
+// ─── Helpers UI ──────────────────────────────────────────────
+function showLoginError(msg) {
+  const box = document.getElementById('login-error-box');
+  if (!box) return;
+  box.textContent = '🔒 ' + msg;
+  box.classList.add('show');
+}
+function clearLoginError() {
+  const box = document.getElementById('login-error-box');
+  box?.classList.remove('show');
+  document.getElementById('login-email')?.classList.remove('error');
+  document.getElementById('login-senha')?.classList.remove('error');
+}
+function setLoginLoading(on) {
+  const btn = document.getElementById('login-btn');
+  if (!btn) return;
+  btn.disabled = on;
+  btn.classList.toggle('loading', on);
+}
+function toggleSenha() {
+  const inp = document.getElementById('login-senha');
+  const btn = document.getElementById('toggle-pw-btn');
+  if (!inp) return;
+  const isText = inp.type === 'text';
+  inp.type = isText ? 'password' : 'text';
+  if (btn) btn.textContent = isText ? '👁️' : '🙈';
+}
+function showUserMenu() {
+  // Simples toggle para exibir info — pode ser expandido
+  const wrap = document.getElementById('tb-user-name-wrap');
+  if (!wrap) return;
+  const visible = wrap.style.display !== 'none' && wrap.style.display !== '';
+  wrap.style.display = visible ? 'none' : 'block';
+}
+
 // ── DARK/LIGHT THEME ──
 function toggleTheme() {
   const root = document.documentElement;
@@ -3980,10 +4446,28 @@ function previewFoto(input, prevId) { const p=document.getElementById(prevId); i
 document.addEventListener('DOMContentLoaded', () => {
   initSeedData();
   initTheme();
+
+  // ── Verifica sessão salva ou exibe login ──
+  if (!checkSavedSession()) {
+    // Mostra login — app fica oculto até autenticar
+    // (o login-page já está visível por padrão)
+    document.getElementById('login-email')?.focus();
+  }
+
   renderDashboard();
   renderNotificacoes();
-  // Inicia Firebase (não bloqueia UI)
-  initFirebase().catch(e => console.warn('[Firebase] init:', e));
+
+  // Firebase — atualiza status no login
+  initFirebase().then(() => {
+    const st = document.getElementById('login-firebase-status');
+    if (st) st.textContent = FB_READY
+      ? '🔥 Firebase conectado'
+      : '📡 Modo offline — dados locais';
+  }).catch(e => {
+    const st = document.getElementById('login-firebase-status');
+    if (st) st.textContent = '📡 Sem conexão com Firebase';
+    console.warn('[Firebase] init:', e);
+  });
 
   // Nav
   document.querySelectorAll('.nav-i[data-page]').forEach(el => {
@@ -5495,28 +5979,54 @@ async function startCamera() {
   }
 }
 
-function startDecoding(video) {
-  // Usa ZXing se disponível, senão tenta BarcodeDetector nativo
-  if (typeof ZXing !== 'undefined') {
-    _codeReader = new ZXing.BrowserMultiFormatReader();
-    _codeReader.decodeFromVideoElement(video, (result, err) => {
-      if (result) onCodeRead(result.getText());
-    });
-  } else if ('BarcodeDetector' in window) {
-    // BarcodeDetector API nativa (Chrome/Android)
-    const detector = new BarcodeDetector({ formats: ['qr_code','code_128','ean_13','code_39','data_matrix'] });
-    const detect = async () => {
-      if (!_videoStream) return;
-      try {
-        const barcodes = await detector.detect(video);
-        if (barcodes.length) { onCodeRead(barcodes[0].rawValue); return; }
-      } catch {}
-      if (_videoStream) requestAnimationFrame(detect);
-    };
-    requestAnimationFrame(detect);
-  } else {
-    setScannerStatus('📷 Câmera ativa — sem lib de decode', 'Digite o patrimônio manualmente');
+async function startDecoding(video) {
+  // ── Prioridade 1: BarcodeDetector API nativa (Chrome 83+, Android, Edge) ──
+  if ('BarcodeDetector' in window) {
+    try {
+      const detector = new BarcodeDetector({
+        formats: ['qr_code','code_128','ean_13','ean_8','code_39','data_matrix','itf','codabar']
+      });
+      setScannerStatus('📸 Aponte para o código', 'Usando leitor nativo do navegador');
+      const detect = async () => {
+        if (!_videoStream) return;
+        try {
+          const barcodes = await detector.detect(video);
+          if (barcodes.length) { onCodeRead(barcodes[0].rawValue); return; }
+        } catch (_) {}
+        if (_videoStream) requestAnimationFrame(detect);
+      };
+      requestAnimationFrame(detect);
+      return;
+    } catch (_) { /* fallback */ }
   }
+
+  // ── Prioridade 2: ZXing via ES module (funciona em http:// e https://) ──
+  // Não funciona em file:// — cai para modo manual nesse caso
+  if (location.protocol !== 'file:') {
+    try {
+      setScannerStatus('⏳ Carregando leitor...', 'Aguarde um momento');
+      // ZXing via jsDelivr (CDN com suporte a ES modules)
+      const { BrowserMultiFormatReader } = await import(
+        'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/esm/index.js'
+      );
+      _codeReader = new BrowserMultiFormatReader();
+      setScannerStatus('📸 Aponte para o código', 'QR Code · Code 128 · EAN · Code 39');
+      _codeReader.decodeFromVideoElement(video, (result, err) => {
+        if (result) onCodeRead(result.getText());
+      });
+      return;
+    } catch (e) {
+      console.warn('[Scanner] ZXing import falhou:', e.message);
+    }
+  }
+
+  // ── Modo manual (file:// ou falha de rede) ──
+  setScannerStatus(
+    location.protocol === 'file:'
+      ? '📷 Câmera ativa (file://)'
+      : '📷 Câmera ativa',
+    'Digite o patrimônio no campo abaixo e pressione OK'
+  );
 }
 
 function onCodeRead(value) {
