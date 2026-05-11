@@ -29,7 +29,7 @@
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
 <title>SYSACK – Gestão Inteligente de Ativos</title>
 <!-- Firebase SDK via module shim — funciona em file://, http:// e https:// -->
 <!-- Usa importmap para resolver os módulos sem problemas de CORS/CSP -->
@@ -575,6 +575,133 @@ textarea.form-control{resize:vertical;min-height:80px}
 .mdm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:24px}
 .mdm-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:22px}
 @media(max-width:1200px){.mdm-stats{grid-template-columns:repeat(3,1fr)}}
+
+/* ══ RESPONSIVO MOBILE ══ */
+/* Botão hamburguer */
+.menu-toggle{
+  display:none;width:36px;height:36px;border:none;background:transparent;
+  cursor:pointer;border-radius:8px;align-items:center;justify-content:center;
+  color:var(--g600);transition:background .15s;flex-shrink:0;
+}
+.menu-toggle:hover{background:var(--g100)}
+.menu-toggle svg{width:20px;height:20px}
+
+/* Overlay quando sidebar aberta no mobile */
+.sidebar-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
+  z-index:99;backdrop-filter:blur(2px);
+}
+.sidebar-overlay.open{display:block}
+
+@media(max-width:768px){
+  :root{--sw:0px}
+
+  /* Sidebar vira drawer */
+  .sidebar{
+    transform:translateX(-260px);
+    transition:transform .28s cubic-bezier(.4,0,.2,1);
+    width:260px !important;
+    z-index:200;
+    box-shadow:none;
+  }
+  .sidebar.open{
+    transform:translateX(0);
+    box-shadow:8px 0 32px rgba(0,0,0,.35);
+  }
+
+  /* Main ocupa tudo */
+  .main{
+    margin-left:0 !important;
+    width:100%;
+  }
+
+  /* Topbar mobile */
+  .menu-toggle{display:flex}
+  .tb-search{display:none}
+  .tb-kbd{display:none}
+  .bc-seg:not(.cur){display:none}
+  .bc-sep:not(:last-of-type){display:none}
+
+  /* Topbar mais compacta */
+  .topbar{padding:0 12px;gap:8px}
+
+  /* Conteúdo das páginas */
+  .page-content{padding:14px !important}
+  .page{padding:16px 14px !important}
+
+  /* Grids → coluna única */
+  .grid-2,.grid-3,.stats-grid,
+  .grid-2[style*="grid-template-columns"],
+  [style*="grid-template-columns:repeat(2"],
+  [style*="grid-template-columns:repeat(3"],
+  [style*="grid-template-columns:repeat(4"],
+  [style*="grid-template-columns:repeat(5"]{
+    grid-template-columns:1fr !important;
+  }
+  .form-row.c2,.form-row.c3,.form-row{
+    grid-template-columns:1fr !important;
+  }
+
+  /* Tabelas — scroll horizontal */
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{min-width:500px}
+
+  /* Cards stats compactos */
+  .stat-card{padding:12px}
+  .stat-value{font-size:22px !important}
+
+  /* Modal fullscreen */
+  .modal-overlay{align-items:flex-end}
+  .modal{
+    border-radius:16px 16px 0 0 !important;
+    max-height:92vh;
+    margin:0;
+    width:100% !important;
+    max-width:100% !important;
+  }
+  .modal.modal-xl,.modal.modal-lg{
+    width:100% !important;
+    max-width:100% !important;
+  }
+
+  /* AI Panel — fullscreen no mobile */
+  .ai-panel{
+    width:100% !important;
+    border-left:none;
+    border-top:1px solid var(--g200);
+  }
+
+  /* Botões de ação — empilhar */
+  .flex.gap-8.flex-wrap{flex-direction:column}
+  .modal-footer{flex-wrap:wrap;gap:8px}
+  .modal-footer .btn{flex:1;min-width:120px}
+
+  /* Self-service cards — 2 colunas no mobile */
+  #page-self-service > div:nth-child(2){
+    grid-template-columns:repeat(2,1fr) !important;
+  }
+
+  /* Topbar user info — compacto */
+  #tb-user-name-wrap{display:none !important}
+
+  /* Tabs — scroll horizontal */
+  .tabs{overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;
+        display:flex;flex-wrap:nowrap}
+  .tab{flex-shrink:0}
+
+  /* Oculta colunas menos importantes nas tabelas */
+  .td-hide-mobile{display:none}
+  th.hide-mobile{display:none}
+}
+
+@media(max-width:480px){
+  /* Self-service cards — 1 coluna em telas muito pequenas */
+  #page-self-service > div:nth-child(2){
+    grid-template-columns:1fr !important;
+  }
+  .stat-value{font-size:18px !important}
+  .page{padding:12px !important}
+}
 .mdm-stat{background:#fff;border:1px solid var(--g200);border-radius:var(--r);padding:12px 14px;text-align:center;transition:all .2s}
 .mdm-stat:hover{box-shadow:var(--shm);transform:translateY(-2px)}
 .mdm-stat .count{font-size:22px;font-weight:800;margin-bottom:2px}
@@ -810,10 +937,14 @@ textarea.form-control{resize:vertical;min-height:80px}
     </div>
   </div>
 </aside>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
 
 <div class="main">
   <div class="topbar">
+    <button class="menu-toggle" id="menu-toggle-btn" onclick="toggleSidebar()" aria-label="Menu">
+      <svg viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <div class="tb-bc">
       <div class="bc-root-icon">
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x=".5" y=".5" width="3.5" height="3.5" rx="1" fill="white" opacity=".9"/><rect x="6" y=".5" width="3.5" height="3.5" rx="1" fill="white" opacity=".6"/><rect x=".5" y="6" width="3.5" height="3.5" rx="1" fill="white" opacity=".6"/><rect x="6" y="6" width="3.5" height="3.5" rx="1" fill="white" opacity=".3"/></svg>
@@ -3487,18 +3618,26 @@ async function initFirebase() {
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     db   = getFirestore(app);
     auth = getAuth(app);
-    // Firebase App Check — só ativa em HTTPS (não em file:// ou localhost)
-    if (location.protocol === 'https:' && !location.hostname.includes('localhost')) {
+    // Firebase App Check — só ativa em HTTPS com domínio Vercel/produção
+    // Em file://, localhost ou qualquer outro domínio não autorizado: desativado
+    const isProduction = location.protocol === 'https:'
+      && !location.hostname.includes('localhost')
+      && !location.hostname.includes('127.0.0.1')
+      && location.hostname !== '';
+
+    if (isProduction) {
       try {
         const acMod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js');
         acMod.initializeAppCheck(app, {
           provider: new acMod.ReCaptchaV3Provider('6LciCuUsAAAADjlcurM26D7fGpMjdyCeFLDNUOG'),
           isTokenAutoRefreshEnabled: true,
         });
-        console.log('[AppCheck] reCAPTCHA v3 ativo');
-      } catch(e){ console.warn('[AppCheck]', e.message); }
+        console.log('[AppCheck] ✓ reCAPTCHA v3 ativo — produção');
+      } catch(e) { console.warn('[AppCheck]', e.message); }
     } else {
-      console.log('[AppCheck] Desativado em desenvolvimento (file:// ou localhost)');
+      console.log('[AppCheck] Desativado — ambiente de desenvolvimento');
+      // Em desenvolvimento: desabilita App Check completamente para não bloquear
+      // O Firebase Auth ainda funciona normalmente sem App Check
     }
     FB_READY = true;
 
@@ -4433,6 +4572,52 @@ function sanitizeObj(obj) {
   }
   return out;
 }
+
+// ════════════════════════════════════════════════════════════
+// MOBILE — Sidebar drawer + responsivo
+// ════════════════════════════════════════════════════════════
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!sidebar) return;
+  const isOpen = sidebar.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('open', isOpen);
+  document.body.style.overflow = isOpen ? 'hidden' : '';
+}
+
+function closeSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  sidebar?.classList.remove('open');
+  overlay?.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+// Fecha sidebar ao navegar (mobile)
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.nav-i').forEach(el => {
+    el.addEventListener('click', () => {
+      if (window.innerWidth <= 768) closeSidebar();
+    });
+  });
+  // Fecha ao pressionar ESC
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSidebar();
+  });
+  // Swipe para fechar (mobile)
+  let touchStartX = 0;
+  document.addEventListener('touchstart', e => {
+    touchStartX = e.changedTouches[0].screenX;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].screenX - touchStartX;
+    if (dx < -60) closeSidebar();          // swipe left → fecha
+    if (dx > 60 && window.innerWidth <= 768) { // swipe right → abre
+      document.querySelector('.sidebar')?.classList.add('open');
+      document.getElementById('sidebar-overlay')?.classList.add('open');
+    }
+  }, { passive: true });
+});
 
 // ── DARK/LIGHT THEME ──
 function toggleTheme() {
