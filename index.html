@@ -2,6 +2,33 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval'
+      https://www.gstatic.com
+      https://www.google.com
+      https://apis.google.com
+      https://cdn.jsdelivr.net
+      https://unpkg.com;
+    style-src 'self' 'unsafe-inline'
+      https://fonts.googleapis.com;
+    font-src 'self'
+      https://fonts.gstatic.com;
+    connect-src 'self'
+      https://*.googleapis.com
+      https://*.firebaseio.com
+      https://*.cloudfunctions.net
+      https://generativelanguage.googleapis.com
+      https://identitytoolkit.googleapis.com
+      https://www.google.com;
+    img-src 'self' data: blob: https:;
+    media-src 'self' blob:;
+    worker-src blob:;
+    frame-src https://www.google.com;
+  ">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SYSACK – Gestão Inteligente de Ativos</title>
 <!-- Firebase SDK via module shim — funciona em file://, http:// e https:// -->
@@ -258,6 +285,16 @@ try {
 .theme-toggle{width:35px;height:35px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;border-radius:8px;cursor:pointer;color:var(--g500);transition:all .18s;font-size:16px}
 .theme-toggle:hover{background:var(--g100);color:var(--g700)}
 .grecaptcha-badge{visibility:hidden !important;}
+/* ── SELF-SERVICE ── */
+.ss-card{background:var(--g0,#fff);border:1px solid var(--g200);border-radius:12px;padding:20px 16px;text-align:center;cursor:pointer;transition:all .2s;display:flex;flex-direction:column;align-items:center;gap:8px}
+.ss-card:hover{border-color:var(--accent);box-shadow:0 4px 20px rgba(37,99,235,.12);transform:translateY(-2px)}
+.ss-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.ss-label{font-size:13px;font-weight:700;color:var(--g800)}
+.ss-desc{font-size:11px;color:var(--g400)}
+.ss-solucao{background:linear-gradient(135deg,rgba(16,185,129,.06),rgba(5,150,105,.06));border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:14px}
+.ss-solucao h4{font-size:13px;font-weight:700;color:#065F46;margin:0 0 8px}
+.ss-solucao ol{margin:0;padding-left:16px;font-size:12.5px;color:var(--g700);line-height:1.8}
+[data-theme="dark"] .ss-card{background:#1E293B;border-color:#334155}
 
 :root {
   --brand:#070D1A; --brand-2:#0C1526; --accent:#2563EB; --accent-d:#1D4ED8;
@@ -741,6 +778,16 @@ textarea.form-control{resize:vertical;min-height:80px}
       <svg class="sb-chevron" id="chev-grp-ferramentas" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
     </div>
     <div class="sb-group" id="grp-ferramentas">
+      <a class="nav-i nav-sub" data-page="self-service" style="background:linear-gradient(135deg,rgba(16,185,129,.08),rgba(5,150,105,.08));border:1px solid rgba(16,185,129,.15);margin:4px 8px;border-radius:var(--r)">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 13.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 8l1.5 1.5L14 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Self-Service
+        <span style="font-size:9px;font-weight:800;background:linear-gradient(135deg,#10B981,#059669);color:#fff;padding:1px 6px;border-radius:10px;margin-left:auto">NEW</span>
+      </a>
+      <a class="nav-i nav-sub" data-page="empregados">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="6" cy="4.5" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="11" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M1 13c0-2.5 2-4 5-4s5 1.5 5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11 9.5c1.5.3 3 1.3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Empregados
+        <span class="nav-badge" id="nb-ausentes">0</span>
+      </a>
       <a class="nav-i nav-sub" data-page="lembretes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 1v3M11 1v3M2 7h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Lembretes</a>
       <a class="nav-i nav-sub" data-page="kb"><svg viewBox="0 0 16 16" fill="none"><path d="M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1Z" stroke="currentColor" stroke-width="1.4"/><path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Base de Conhecimento</a>
       <a class="nav-i nav-sub" data-page="pesquisas"><svg viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5L13 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Pesquisas salvas</a>
@@ -1877,6 +1924,166 @@ textarea.form-control{resize:vertical;min-height:80px}
       <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="document.getElementById('smtp-config-panel').style.display='none'">Entendido</button>
     </div>
 
+    <!-- SELF-SERVICE PORTAL -->
+    <div class="page" id="page-self-service">
+      <div class="flex items-center justify-between mb-20">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">
+            <span style="background:linear-gradient(135deg,#10B981,#059669);-webkit-background-clip:text;-webkit-text-fill-color:transparent">✅ Self-Service Portal</span>
+          </h2>
+          <p class="text-sm text-muted mt-8">Solicitações de TI de baixa complexidade — resolvidas sem abrir chamado</p>
+        </div>
+      </div>
+
+      <!-- CATEGORIAS DE SOLICITAÇÃO -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:28px">
+        <div class="ss-card" onclick="abrirSS('senha')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#3B82F6,#2563EB)">🔑</div>
+          <div class="ss-label">Redefinir Senha</div>
+          <div class="ss-desc">AD, e-mail, sistemas</div>
+        </div>
+        <div class="ss-card" onclick="abrirSS('acesso')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#8B5CF6,#7C3AED)">🔐</div>
+          <div class="ss-label">Solicitar Acesso</div>
+          <div class="ss-desc">Pastas, sistemas, VPN</div>
+        </div>
+        <div class="ss-card" onclick="abrirSS('software')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#F59E0B,#D97706)">💾</div>
+          <div class="ss-label">Instalar Software</div>
+          <div class="ss-desc">Programas homologados</div>
+        </div>
+        <div class="ss-card" onclick="abrirSS('impressora')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#06B6D4,#0891B2)">🖨️</div>
+          <div class="ss-label">Adicionar Impressora</div>
+          <div class="ss-desc">Rede, USB, driver</div>
+        </div>
+        <div class="ss-card" onclick="abrirSS('email')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#EC4899,#DB2777)">📧</div>
+          <div class="ss-label">Problema de E-mail</div>
+          <div class="ss-desc">Outlook, webmail, cota</div>
+        </div>
+        <div class="ss-card" onclick="abrirSS('vpn')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#10B981,#059669)">🌐</div>
+          <div class="ss-label">Acesso VPN</div>
+          <div class="ss-desc">Configurar, instalar</div>
+        </div>
+        <div class="ss-card" onclick="abrirSS('wifi')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#F97316,#EA580C)">📶</div>
+          <div class="ss-label">Problema de Wi-Fi</div>
+          <div class="ss-desc">Conectar, senha, sinal</div>
+        </div>
+        <div class="ss-card" onclick="abrirSS('outro')">
+          <div class="ss-icon" style="background:linear-gradient(135deg,#64748B,#475569)">💬</div>
+          <div class="ss-label">Outra Solicitação</div>
+          <div class="ss-desc">Não encontrou acima?</div>
+        </div>
+      </div>
+
+      <!-- MINHAS SOLICITAÇÕES -->
+      <div class="card">
+        <div class="card-header">
+          <h3>📋 Minhas Solicitações</h3>
+          <button class="btn btn-ghost btn-sm" onclick="renderSelfService()">↺ Atualizar</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Tipo</th><th>Descrição</th><th>Status</th><th>Aberta em</th><th>Resposta</th></tr></thead>
+            <tbody id="ss-minhas-body">
+              <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--g400)">Nenhuma solicitação registrada</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL SELF-SERVICE -->
+    <div class="modal-overlay" id="modal-ss">
+      <div class="modal" style="max-width:540px">
+        <div class="modal-header">
+          <h3 id="ss-modal-title">Solicitação Self-Service</h3>
+          <button class="close-btn" onclick="closeModal('modal-ss')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="ss-solucao-automatica" style="display:none;margin-bottom:16px"></div>
+          <div class="form-group">
+            <label class="form-label req">Descreva o problema</label>
+            <textarea class="form-control" id="ss-desc" rows="3" placeholder="Ex: Não consigo fazer login no sistema X..."></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Urgência</label>
+            <select class="form-control" id="ss-urgencia">
+              <option value="normal">Normal — pode esperar algumas horas</option>
+              <option value="alta">Alta — está me impedindo de trabalhar</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contato para retorno</label>
+            <input class="form-control" id="ss-contato" placeholder="Ramal ou celular">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-ss')">Cancelar</button>
+          <button class="btn btn-primary" onclick="enviarSS()">✅ Enviar Solicitação</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- EMPREGADOS & AUSÊNCIAS -->
+    <div class="page" id="page-empregados">
+      <div class="flex items-center justify-between mb-20">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Empregados & Ausências</h2>
+          <p class="text-sm text-muted mt-8">Sincronizado com CadastroSAP · Alertas suprimidos durante ausências</p>
+        </div>
+        <div class="flex gap-8">
+          <div style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--g50);border:1px solid var(--g200);border-radius:20px;font-size:12px" id="emp-sync-status">
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--g300)"></span>
+            Aguardando sync
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="renderEmpregados()">↺ Atualizar</button>
+        </div>
+      </div>
+
+      <!-- STATS -->
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px">
+        <div class="stat-card blue">  <div class="stat-label">Total</div>          <div class="stat-value" id="emp-total">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Ativos</div>         <div class="stat-value" id="emp-ativos">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Em Ausência</div>    <div class="stat-value" id="emp-ausentes">—</div></div>
+        <div class="stat-card violet"><div class="stat-label">Alertas Suprimidos</div><div class="stat-value" id="emp-suprimidos">—</div></div>
+        <div class="stat-card red">   <div class="stat-label">Último Sync</div>   <div class="stat-value" style="font-size:14px" id="emp-last-sync">—</div></div>
+      </div>
+
+      <!-- FILTROS -->
+      <div class="doc-filter-row mb-12">
+        <input class="form-control" style="width:240px;margin:0" placeholder="🔍 Nome ou matrícula..." id="emp-search" oninput="renderEmpregados()">
+        <select class="form-control" style="width:160px;margin:0" id="emp-filter-status" onchange="renderEmpregados()">
+          <option value="">Todos</option>
+          <option value="ativo">Apenas ativos</option>
+          <option value="ausente">Apenas ausentes</option>
+        </select>
+        <select class="form-control" style="width:180px;margin:0" id="emp-filter-setor" onchange="renderEmpregados()">
+          <option value="">Todos os setores</option>
+        </select>
+      </div>
+
+      <!-- TABELA -->
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Matrícula</th><th>Nome</th><th>Setor</th><th>Cargo</th>
+              <th>Status</th><th>Ausência</th><th>Período</th><th>Alertas</th>
+            </tr></thead>
+            <tbody id="emp-body">
+              <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">
+                Instale o SYSACK Agent no servidor para sincronizar os empregados.
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="page-alertas">
       <div class="flex items-center justify-between mb-20">
         <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Alertas</h2><p class="text-sm text-muted mt-8">Alertas automáticos do sistema</p></div>
@@ -2909,7 +3116,7 @@ textarea.form-control{resize:vertical;min-height:80px}
           </select>
         </div>
       </div>
-      <div class="form-group"><label class="form-label req">Descrição / Modelo</label><input class="form-control" id="mob-desc" placeholder="Ex: Cadeira presidente giratória preta, Mesa em L 1,80m..."></div>
+      <div class="form-group"><label class="form-label req">Descrição / Modelo</label><input class="form-control" id="mob-desc-2" placeholder="Ex: Cadeira presidente giratória preta, Mesa em L 1,80m..."></div>
       <div class="form-row c3">
         <div class="form-group"><label class="form-label req">Setor / Local de uso</label>
           <select class="form-control" id="mob-setor">
@@ -3522,7 +3729,7 @@ function initSeedData() {
 // NAVIGATION
 // ============================================================
 const PAGE_LABELS = {
-  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', 'ai-dashboard':'IA & Insights', chamados:'Chamados', ativos:'Ativos',
+  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', 'ai-dashboard':'IA & Insights', 'self-service':'Self-Service', 'empregados':'Empregados & Ausências', chamados:'Chamados', ativos:'Ativos',
   movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
@@ -3553,6 +3760,8 @@ function renderPage(id) {
     dashboard:       () => renderDashboard(),
     'exec-dashboard':() => renderExecDashboard(),
     'ai-dashboard':  () => renderAIDashboard(),
+    'self-service':  () => renderSelfService(),
+    'empregados':    () => renderEmpregados(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -3634,8 +3843,8 @@ function renderChamados(filter='abertos') {
   document.getElementById('chamados-body').innerHTML = list.map(c => `
     <tr>
       <td><input type="checkbox" style="accent-color:var(--accent)"></td>
-      <td class="td-mono fw-700" style="color:var(--accent);cursor:pointer" onclick="abrirAtendimento('${c.id}')">${c.id}</td>
-      <td style="max-width:240px"><a style="color:var(--accent);cursor:pointer;font-weight:500;font-size:12.5px" onclick="abrirAtendimento('${c.id}')">${c.desc.slice(0,55)}${c.desc.length>55?'...':''}</a></td>
+      <td class="td-mono fw-700" style="color:var(--accent);cursor:pointer" onclick="abrirAtendimento('${escapeHtml(c.id)}')">${c.id}</td>
+      <td style="max-width:240px"><a style="color:var(--accent);cursor:pointer;font-weight:500;font-size:12.5px" onclick="abrirAtendimento('${escapeHtml(c.id)}')">${c.desc.slice(0,55)}${c.desc.length>55?'...':''}</a></td>
       <td style="font-size:11.5px"><div style="color:var(--g700);font-weight:600">CESAN</div><div style="color:var(--g400);font-size:10.5px">${c.area||'—'}</div></td>
       <td>${statusBadgeCh(c.status)}</td>
       <td style="font-size:12px;max-width:200px"><div>${c.categoria?categoriaLabel(c.categoria):'—'}</div>${c.subcategoria?`<div style='font-size:10.5px;color:var(--g400)'>» ${c.subcategoria}</div>`:''}</td>
@@ -3644,7 +3853,7 @@ function renderChamados(filter='abertos') {
       <td style="font-size:11.5px;color:var(--g600)">${c.atribuido||'—'}</td>
       <td class="td-mono" style="font-size:10.5px;white-space:nowrap">${fmtDatetime(c.createdAt)}</td>
       <td class="td-mono" style="font-size:10.5px;white-space:nowrap">${fmtDatetime(c.updatedAt||c.createdAt)}</td>
-      <td><div class="flex gap-4"><button class="btn btn-secondary btn-xs" onclick="abrirAtendimento('${c.id}')">Atender</button><button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${c.pat||''}')">📜</button></div></td>
+      <td><div class="flex gap-4"><button class="btn btn-secondary btn-xs" onclick="abrirAtendimento('${escapeHtml(c.id)}')">Atender</button><button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${c.pat||''}')">📜</button></div></td>
     </tr>`).join('') || `<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum chamado neste filtro</td></tr>`;
   nbUpdate('nb-chamados', STATE.chamados.filter(c=>c.status!=='concluido'&&c.status!=='fechado').length);
 }
@@ -3962,10 +4171,12 @@ function salvarChamado() {
 
 // Usuários locais (fallback quando Firebase Auth não está disponível)
 // Em produção: use APENAS Firebase Auth + Firestore /users
+// Fallback local para dev/offline — em produção usa Firebase Auth exclusivamente
+// A senha abaixo é apenas para teste local em file:// — não é usada em produção
 const LOCAL_USERS = {
   'admin': {
     email:    'admin@adsi.com.br',
-    password: 'Bufferocs123',
+    password: 'Bufferocs123', // usado somente em file:// (sem Firebase)
     nome:     'Administrador',
     avatar:   'AD',
     role:     'admin',
@@ -4198,6 +4409,29 @@ function showUserMenu() {
   if (!wrap) return;
   const visible = wrap.style.display !== 'none' && wrap.style.display !== '';
   wrap.style.display = visible ? 'none' : 'block';
+}
+
+// ════════════════════════════════════════════════════════════
+// SEGURANÇA — Sanitização de HTML (previne XSS)
+// ════════════════════════════════════════════════════════════
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#39;')
+    .replace(/\//g, '&#x2F;');
+}
+
+// Sanitiza um objeto inteiro — protege todos os campos string
+function sanitizeObj(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    out[k] = typeof v === 'string' ? escapeHtml(v) : v;
+  }
+  return out;
 }
 
 // ── DARK/LIGHT THEME ──
@@ -4920,6 +5154,7 @@ function previewFoto(input, prevId) { const p=document.getElementById(prevId); i
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
   initSeedData();
+  initEmpregadosSeed();
   initTheme();
 
   // ── Verifica sessão salva ou exibe login ──
@@ -7485,9 +7720,286 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ============================================================
+
+// ─── SEED: Contatos CESAN (organograma) ───────────────────────
+const CONTATOS_CESAN = [{"nome": "Munir Abud de Oliveira", "email": "agenda.diretoria@cesan.com.br", "telefone": "", "ramal": "", "cargo": "Presidente", "setor": "PRESIDÊNCIA", "codigoSetor": "P", "departamento": "PRESIDÊNCIA"}, {"nome": "Andressa Guimarães Siqueira Marchesi", "email": "andressa.guimaraes@cesan.com.br", "telefone": "(27) 2127-5005", "ramal": "5005", "cargo": "Presidente", "setor": "GABINETE DA PRESIDÊNCIA", "codigoSetor": "P-GAB", "departamento": "GABINETE DA PRESIDÊNCIA"}, {"nome": "Philipe Andre Correia Lemos", "email": "philipe.lemos@cesan.com.br", "telefone": "(27) 2127-5005", "ramal": "5005", "cargo": "Superintendente", "setor": "SUPERINTENDÊNCIA DE RELAÇÕES INSTITUCIONAIS –", "codigoSetor": "P-SRI", "departamento": "SUPERINTENDÊNCIA DE RELAÇÕES INSTITUCIONAIS –"}, {"nome": "Jamil Guilherme do Nascimento Junior", "email": "jamil.junior@cesan.com.br", "telefone": "(27) 2127-5070", "ramal": "5070", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE ADMINISTRAÇÃO DAS CONCESSÕES", "codigoSetor": "R-CAC", "departamento": "COORDENADORIA DE ADMINISTRAÇÃO DAS CONCESSÕES"}, {"nome": "Jonas Renato Rosa Cabral", "email": "jonas.cabral@cesan.com.br", "telefone": "(27) 2127-5093", "ramal": "5093", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RELAÇÕES COMUNITÁRIAS", "codigoSetor": "R-CRC", "departamento": "COORDENADORIA DE RELAÇÕES COMUNITÁRIAS"}, {"nome": "Desiery Nogueira Wotkosky Marchini", "email": "desieri.marchini@cesan.com.br", "telefone": "(27) 2127-5071", "ramal": "5071", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE COMUNICAÇÃO EMPRESARIAL", "codigoSetor": "P-CCE", "departamento": "COORDENADORIA DE COMUNICAÇÃO EMPRESARIAL"}, {"nome": "Roberio Lamas da Silva", "email": "roberio.lamas@cesan.com.br", "telefone": "(27) 2127-5029", "ramal": "5029", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE ASSUNTOS JURÍDICOS", "codigoSetor": "P-CAJ", "departamento": "COORDENADORIA DE ASSUNTOS JURÍDICOS"}, {"nome": "Fabiano Venturim Canal", "email": "fabiano.canal@cesan.com.br", "telefone": "(27) 2127-5046", "ramal": "5046", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE PLANEJAMENTO ESTRATÉGICO", "codigoSetor": "P-CPE", "departamento": "COORDENADORIA DE PLANEJAMENTO ESTRATÉGICO"}, {"nome": "Jordany da Cunha Thomé de Faria", "email": "jordany.faria@cesan.com.br", "telefone": "(27) 2127-5023", "ramal": "5023", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RISCOS E CONFORMIDADE", "codigoSetor": "P-CRC", "departamento": "COORDENADORIA DE RISCOS E CONFORMIDADE"}, {"nome": "COORDENADORIA DE SUSTENTABILIDADE CORPORATIVA (P-csc)", "email": "", "telefone": "", "ramal": "", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RISCOS E CONFORMIDADE", "codigoSetor": "P-CRC", "departamento": "COORDENADORIA DE RISCOS E CONFORMIDADE"}, {"nome": "Alaimar Ribeiro Rodrigues Fiuza", "email": "alaimar.fiuza@cesan.com.br", "telefone": "(27) 2127-5206", "ramal": "5206", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RISCOS E CONFORMIDADE", "codigoSetor": "P-CRC", "departamento": "COORDENADORIA DE RISCOS E CONFORMIDADE"}, {"nome": "Thiago José Goncalves Furtado", "email": "thiagojose.furtado@cesan.com.br", "telefone": "(27) 2127-5005", "ramal": "5005", "cargo": "Diretor(a)", "setor": "DIRETORIA OPERACIONAL", "codigoSetor": "P-CRC", "departamento": "DIRETORIA OPERACIONAL"}, {"nome": "Diogo da Costa e Siqueira", "email": "diogo.siqueira@cesan.com.br", "telefone": "(27) 2127-5192", "ramal": "5192", "cargo": "Diretor(a)", "setor": "ASSESSORIA DA DIRETORIA OPERACIONAL", "codigoSetor": "O-AOP", "departamento": "ASSESSORIA DA DIRETORIA OPERACIONAL"}, {"nome": "Rovena Mariano Cabral", "email": "rovena.cabral@cesan.com.br", "telefone": "(27) 2127-5118", "ramal": "5118", "cargo": "Diretor(a)", "setor": "ASSESSORIA DA DIRETORIA OPERACIONAL", "codigoSetor": "O-AOP", "departamento": "ASSESSORIA DA DIRETORIA OPERACIONAL"}, {"nome": "Douglas Oliveira Couzi", "email": "douglas.couzi@cesan.com.br", "telefone": "(27) 2127-6794", "ramal": "6794", "cargo": "Técnico(a)", "setor": "UNIDADE DE GERENCIAMENTO DE PPP", "codigoSetor": "O-UGP", "departamento": "UNIDADE DE GERENCIAMENTO DE PPP"}, {"nome": "João Vitor Petri Penholato", "email": "joaovitor.petri@cesan.com.br", "telefone": "(27) 2127-5641", "ramal": "5641", "cargo": "Gerente", "setor": "GERÊNCIA METROPOLITANA SUL", "codigoSetor": "O-GMS", "departamento": "GERÊNCIA METROPOLITANA SUL"}, {"nome": "Erika de Araújo Coelho", "email": "erika.coelho@cesan.com.br", "telefone": "(27) 3221-3214", "ramal": "3214", "cargo": "Chefe de Divisão", "setor": "Divisão de Tratamento Sul", "codigoSetor": "O-DTS", "departamento": "GERÊNCIA METROPOLITANA SUL"}, {"nome": "Ana Paula Machado Muller", "email": "anapaula.muller@cesan.com.br", "telefone": "(27) 2127-3501", "ramal": "3501", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Vila Velha", "codigoSetor": "O-DVV", "departamento": "GERÊNCIA METROPOLITANA SUL"}, {"nome": "Eliana Maria Morais Silva Bortolini", "email": "eliana.morais@cesan.com.br", "telefone": "(27) 2127-6803", "ramal": "6803", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Cariacica e Viana", "codigoSetor": "O-DCV", "departamento": "GERÊNCIA METROPOLITANA SUL"}, {"nome": "Márcio Machado e Bedim", "email": "marcio.bedim@cesan.com.br", "telefone": "(27) 3221-3204", "ramal": "3204", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Litorânea Sul", "codigoSetor": "O-DLS", "departamento": "GERÊNCIA METROPOLITANA SUL"}, {"nome": "Raffael Fernando Silva Zaidan", "email": "raffael.zaidan@cesan.com.br", "telefone": "(27) 2127-5583", "ramal": "5583", "cargo": "Gerente", "setor": "GERÊNCIA DO INTERIOR NORTE", "codigoSetor": "O-GIN", "departamento": "GERÊNCIA DO INTERIOR NORTE"}, {"nome": "Aires da Silva Monteiro", "email": "aires.monteiro@cesan.com.br", "telefone": "(27) 3752-4151", "ramal": "4151", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Centro Norte", "codigoSetor": "O-DCN", "departamento": "GERÊNCIA DO INTERIOR NORTE"}, {"nome": "Saulo Lemos Silva", "email": "saulo.silva@cesan.com.br", "telefone": "(27) 2127-6751", "ramal": "6751", "cargo": "Gerente", "setor": "GERÊNCIA METROPOLITANA NORTE", "codigoSetor": "O-GMN", "departamento": "GERÊNCIA METROPOLITANA NORTE"}, {"nome": "André Luis de Oliveira Lima", "email": "andre.lima@cesan.com.br", "telefone": "(27) 2127-6707", "ramal": "6707", "cargo": "Chefe de Divisão", "setor": "Divisão de Tratamento Norte", "codigoSetor": "O-DTN", "departamento": "GERÊNCIA METROPOLITANA NORTE"}, {"nome": "Michelle Damasceno Freitas", "email": "michelle.damasceno@cesan.com.br", "telefone": "(27) 2127-5713", "ramal": "5713", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Vitória", "codigoSetor": "O-DVT", "departamento": "GERÊNCIA METROPOLITANA NORTE"}, {"nome": "Roger Puziol Amaral", "email": "roger.puziol@cesan.com.br", "telefone": "(27) 2127-5702", "ramal": "5702", "cargo": "Gerente", "setor": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA", "codigoSetor": "O-GME", "departamento": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA"}, {"nome": "Pedro Moussatche Nerio", "email": "pedro.nerio@cesan.com.br", "telefone": "(27) 2127-5712", "ramal": "5712", "cargo": "Chefe de Divisão", "setor": "Divisão de Manutenção da Automação", "codigoSetor": "O-DMA", "departamento": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA"}, {"nome": "Geovany Baldan", "email": "geovany.baldan@cesan.com.br", "telefone": "(27) 2127-5739", "ramal": "5739", "cargo": "Chefe de Divisão", "setor": "Divisão de Manutenção Eletromecânica", "codigoSetor": "O-DME", "departamento": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA"}, {"nome": "Josiane Aparecida Rossi Pereira Machado", "email": "josiane.pereira@cesan.com.br", "telefone": "(27) 2127-5250", "ramal": "5250", "cargo": "Gerente", "setor": "GERÊNCIA DE RECURSOS HUMANOS", "codigoSetor": "A-GRH", "departamento": "GERÊNCIA DE RECURSOS HUMANOS"}, {"nome": "Gelcimar Lopes de Oliveira", "email": "gelcimar.lopes@cesan.com.br", "telefone": "(27) 2127-5316", "ramal": "5316", "cargo": "Chefe de Divisão", "setor": "Divisão de Administração de Pessoal", "codigoSetor": "A-DAP", "departamento": "GERÊNCIA DE RECURSOS HUMANOS"}, {"nome": "Rayanne Brandemburg Siqueira", "email": "rayanne.siqueira@cesan.com.br", "telefone": "(27) 2127-5280", "ramal": "5280", "cargo": "Chefe de Divisão", "setor": "Divisão de Desenvolvimento de Pessoal", "codigoSetor": "A-DDP", "departamento": "GERÊNCIA DE RECURSOS HUMANOS"}, {"nome": "Luiz Otavio Machado de Carvalho", "email": "luiz.carvalho@cesan.com.br", "telefone": "(27) 2127-5594", "ramal": "5594", "cargo": "Chefe de Divisão", "setor": "Divisão de Segurança Saúde e Bem Estar", "codigoSetor": "A-DSS", "departamento": "GERÊNCIA DE RECURSOS HUMANOS"}, {"nome": "Romik Polgliane de Souza", "email": "romik.souza@cesan.com.br", "telefone": "(27) 2127-6406", "ramal": "6406", "cargo": "Gerente", "setor": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO", "codigoSetor": "A-GTI", "departamento": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO"}, {"nome": "Gustavo Fernandes Tessinari", "email": "gustavo.tessinari@cesan.com.br", "telefone": "(27) 2127-6434", "ramal": "6434", "cargo": "Chefe de Divisão", "setor": "Divisão de Desenvolvimento de Sistemas", "codigoSetor": "A-DDS", "departamento": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO"}, {"nome": "Andrea Ramos Romanelli", "email": "andrea.ramos@cesan.com.br", "telefone": "(27) 2127-6406", "ramal": "6406", "cargo": "Chefe de Divisão", "setor": "Divisão de Suporte e Infraestrutura", "codigoSetor": "A-DSI", "departamento": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO"}, {"nome": "Marcelo Vieira Lopes", "email": "marcelo.lopes@cesan.com.br", "telefone": "(27) 2127-5094", "ramal": "5094", "cargo": "Gerente", "setor": "GERÊNCIA FINANCEIRA E CONTÁBIL", "codigoSetor": "A-GFC", "departamento": "GERÊNCIA FINANCEIRA E CONTÁBIL"}, {"nome": "Alexander Salomão Barcellos", "email": "alexander.barcellos@cesan.com.br", "telefone": "(27) 2127-5101", "ramal": "5101", "cargo": "Chefe de Divisão", "setor": "Divisão de Contabilidade Custos e Patrimônio", "codigoSetor": "A-DCC", "departamento": "GERÊNCIA FINANCEIRA E CONTÁBIL"}, {"nome": "Guilherme Pires Dias", "email": "guilherme.dias@cesan.com.br", "telefone": "(27) 2127-5088", "ramal": "5088", "cargo": "Chefe de Divisão", "setor": "Divisão de Finanças e Arrecadação", "codigoSetor": "A-DFI", "departamento": "GERÊNCIA FINANCEIRA E CONTÁBIL"}, {"nome": "Myller dos Santos Cruz", "email": "myller.cruz@cesan.com.br", "telefone": "(27) 2127-5428", "ramal": "5428", "cargo": "Gerente", "setor": "GERÊNCIA DE LOGÍSTICA", "codigoSetor": "A-GLG", "departamento": "GERÊNCIA DE LOGÍSTICA"}, {"nome": "Roberto Felix de Almeida Junior da Silva", "email": "roberto.almeida@cesan.com.br", "telefone": "(27) 2127-5426", "ramal": "5426", "cargo": "Chefe de Divisão", "setor": "Divisão de Compras e Suprimentos", "codigoSetor": "A-DCS", "departamento": "GERÊNCIA DE LOGÍSTICA"}, {"nome": "Pablo Sampaio de Assis", "email": "pablo.sampaio@cesan.com.br", "telefone": "(27) 2127-5533", "ramal": "5533", "cargo": "Chefe de Divisão", "setor": "Divisão de Serviços Gerais e Transportes", "codigoSetor": "A-DST", "departamento": "GERÊNCIA DE LOGÍSTICA"}, {"nome": "Fabiana Santana do Amaral", "email": "fabiana.amaral@cesan.com.br", "telefone": "(27) 2127-5541", "ramal": "5541", "cargo": "Chefe de Divisão", "setor": "Divisão de Contratos e Documentos", "codigoSetor": "A-DCD", "departamento": "GERÊNCIA DE LOGÍSTICA"}, {"nome": "Adaltivo Effgem", "email": "adaltivo.effgem@cesan.com.br", "telefone": "(27) 2127-6408", "ramal": "6408", "cargo": "Gerente", "setor": "GERÊNCIA COMERCIAL", "codigoSetor": "A-GCO", "departamento": "GERÊNCIA COMERCIAL"}, {"nome": "Marla Corrêa Bragança", "email": "marla.braganca@cesan.com.br", "telefone": "(27) 2127-6517", "ramal": "6517", "cargo": "Chefe de Divisão", "setor": "Divisão de Atendimento Comercial", "codigoSetor": "A-DAC", "departamento": "GERÊNCIA COMERCIAL"}];
+
+
+const STATE_EMPREGADOS_SEED = [{"mat": "10001", "nome": "Munir Abud de Oliveira", "email": "agenda.diretoria@cesan.com.br", "telefone": "", "ramal": "", "cargo": "Presidente", "setor": "PRESIDÊNCIA", "codigoSetor": "P", "departamento": "PRESIDÊNCIA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "MO", "syncSource": "organograma"}, {"mat": "10002", "nome": "Andressa Guimarães Siqueira Marchesi", "email": "andressa.guimaraes@cesan.com.br", "telefone": "(27) 2127-5005", "ramal": "5005", "cargo": "Presidente", "setor": "GABINETE DA PRESIDÊNCIA", "codigoSetor": "P-GAB", "departamento": "GABINETE DA PRESIDÊNCIA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AM", "syncSource": "organograma"}, {"mat": "10003", "nome": "Philipe Andre Correia Lemos", "email": "philipe.lemos@cesan.com.br", "telefone": "(27) 2127-5005", "ramal": "5005", "cargo": "Superintendente", "setor": "SUPERINTENDÊNCIA DE RELAÇÕES INSTITUCIONAIS –", "codigoSetor": "P-SRI", "departamento": "SUPERINTENDÊNCIA DE RELAÇÕES INSTITUCIONAIS –", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "PL", "syncSource": "organograma"}, {"mat": "10004", "nome": "Jamil Guilherme do Nascimento Junior", "email": "jamil.junior@cesan.com.br", "telefone": "(27) 2127-5070", "ramal": "5070", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE ADMINISTRAÇÃO DAS CONCESSÕES", "codigoSetor": "R-CAC", "departamento": "COORDENADORIA DE ADMINISTRAÇÃO DAS CONCESSÕES", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "JJ", "syncSource": "organograma"}, {"mat": "10005", "nome": "Jonas Renato Rosa Cabral", "email": "jonas.cabral@cesan.com.br", "telefone": "(27) 2127-5093", "ramal": "5093", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RELAÇÕES COMUNITÁRIAS", "codigoSetor": "R-CRC", "departamento": "COORDENADORIA DE RELAÇÕES COMUNITÁRIAS", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "JC", "syncSource": "organograma"}, {"mat": "10006", "nome": "Desiery Nogueira Wotkosky Marchini", "email": "desieri.marchini@cesan.com.br", "telefone": "(27) 2127-5071", "ramal": "5071", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE COMUNICAÇÃO EMPRESARIAL", "codigoSetor": "P-CCE", "departamento": "COORDENADORIA DE COMUNICAÇÃO EMPRESARIAL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "DM", "syncSource": "organograma"}, {"mat": "10007", "nome": "Roberio Lamas da Silva", "email": "roberio.lamas@cesan.com.br", "telefone": "(27) 2127-5029", "ramal": "5029", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE ASSUNTOS JURÍDICOS", "codigoSetor": "P-CAJ", "departamento": "COORDENADORIA DE ASSUNTOS JURÍDICOS", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "RS", "syncSource": "organograma"}, {"mat": "10008", "nome": "Fabiano Venturim Canal", "email": "fabiano.canal@cesan.com.br", "telefone": "(27) 2127-5046", "ramal": "5046", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE PLANEJAMENTO ESTRATÉGICO", "codigoSetor": "P-CPE", "departamento": "COORDENADORIA DE PLANEJAMENTO ESTRATÉGICO", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "FC", "syncSource": "organograma"}, {"mat": "10009", "nome": "Jordany da Cunha Thomé de Faria", "email": "jordany.faria@cesan.com.br", "telefone": "(27) 2127-5023", "ramal": "5023", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RISCOS E CONFORMIDADE", "codigoSetor": "P-CRC", "departamento": "COORDENADORIA DE RISCOS E CONFORMIDADE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "JF", "syncSource": "organograma"}, {"mat": "10010", "nome": "COORDENADORIA DE SUSTENTABILIDADE CORPORATIVA (P-csc)", "email": "", "telefone": "", "ramal": "", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RISCOS E CONFORMIDADE", "codigoSetor": "P-CRC", "departamento": "COORDENADORIA DE RISCOS E CONFORMIDADE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "C(", "syncSource": "organograma"}, {"mat": "10011", "nome": "Alaimar Ribeiro Rodrigues Fiuza", "email": "alaimar.fiuza@cesan.com.br", "telefone": "(27) 2127-5206", "ramal": "5206", "cargo": "Coordenador(a)", "setor": "COORDENADORIA DE RISCOS E CONFORMIDADE", "codigoSetor": "P-CRC", "departamento": "COORDENADORIA DE RISCOS E CONFORMIDADE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AF", "syncSource": "organograma"}, {"mat": "10012", "nome": "Thiago José Goncalves Furtado", "email": "thiagojose.furtado@cesan.com.br", "telefone": "(27) 2127-5005", "ramal": "5005", "cargo": "Diretor(a)", "setor": "DIRETORIA OPERACIONAL", "codigoSetor": "P-CRC", "departamento": "DIRETORIA OPERACIONAL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "TF", "syncSource": "organograma"}, {"mat": "10013", "nome": "Diogo da Costa e Siqueira", "email": "diogo.siqueira@cesan.com.br", "telefone": "(27) 2127-5192", "ramal": "5192", "cargo": "Diretor(a)", "setor": "ASSESSORIA DA DIRETORIA OPERACIONAL", "codigoSetor": "O-AOP", "departamento": "ASSESSORIA DA DIRETORIA OPERACIONAL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "DS", "syncSource": "organograma"}, {"mat": "10014", "nome": "Rovena Mariano Cabral", "email": "rovena.cabral@cesan.com.br", "telefone": "(27) 2127-5118", "ramal": "5118", "cargo": "Diretor(a)", "setor": "ASSESSORIA DA DIRETORIA OPERACIONAL", "codigoSetor": "O-AOP", "departamento": "ASSESSORIA DA DIRETORIA OPERACIONAL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "RC", "syncSource": "organograma"}, {"mat": "10015", "nome": "Douglas Oliveira Couzi", "email": "douglas.couzi@cesan.com.br", "telefone": "(27) 2127-6794", "ramal": "6794", "cargo": "Técnico(a)", "setor": "UNIDADE DE GERENCIAMENTO DE PPP", "codigoSetor": "O-UGP", "departamento": "UNIDADE DE GERENCIAMENTO DE PPP", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "DC", "syncSource": "organograma"}, {"mat": "10016", "nome": "João Vitor Petri Penholato", "email": "joaovitor.petri@cesan.com.br", "telefone": "(27) 2127-5641", "ramal": "5641", "cargo": "Gerente", "setor": "GERÊNCIA METROPOLITANA SUL", "codigoSetor": "O-GMS", "departamento": "GERÊNCIA METROPOLITANA SUL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "JP", "syncSource": "organograma"}, {"mat": "10017", "nome": "Erika de Araújo Coelho", "email": "erika.coelho@cesan.com.br", "telefone": "(27) 3221-3214", "ramal": "3214", "cargo": "Chefe de Divisão", "setor": "Divisão de Tratamento Sul", "codigoSetor": "O-DTS", "departamento": "GERÊNCIA METROPOLITANA SUL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "EC", "syncSource": "organograma"}, {"mat": "10018", "nome": "Ana Paula Machado Muller", "email": "anapaula.muller@cesan.com.br", "telefone": "(27) 2127-3501", "ramal": "3501", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Vila Velha", "codigoSetor": "O-DVV", "departamento": "GERÊNCIA METROPOLITANA SUL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AM", "syncSource": "organograma"}, {"mat": "10019", "nome": "Eliana Maria Morais Silva Bortolini", "email": "eliana.morais@cesan.com.br", "telefone": "(27) 2127-6803", "ramal": "6803", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Cariacica e Viana", "codigoSetor": "O-DCV", "departamento": "GERÊNCIA METROPOLITANA SUL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "EB", "syncSource": "organograma"}, {"mat": "10020", "nome": "Márcio Machado e Bedim", "email": "marcio.bedim@cesan.com.br", "telefone": "(27) 3221-3204", "ramal": "3204", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Litorânea Sul", "codigoSetor": "O-DLS", "departamento": "GERÊNCIA METROPOLITANA SUL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "MB", "syncSource": "organograma"}, {"mat": "10021", "nome": "Raffael Fernando Silva Zaidan", "email": "raffael.zaidan@cesan.com.br", "telefone": "(27) 2127-5583", "ramal": "5583", "cargo": "Gerente", "setor": "GERÊNCIA DO INTERIOR NORTE", "codigoSetor": "O-GIN", "departamento": "GERÊNCIA DO INTERIOR NORTE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "RZ", "syncSource": "organograma"}, {"mat": "10022", "nome": "Aires da Silva Monteiro", "email": "aires.monteiro@cesan.com.br", "telefone": "(27) 3752-4151", "ramal": "4151", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Centro Norte", "codigoSetor": "O-DCN", "departamento": "GERÊNCIA DO INTERIOR NORTE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AM", "syncSource": "organograma"}, {"mat": "10023", "nome": "Saulo Lemos Silva", "email": "saulo.silva@cesan.com.br", "telefone": "(27) 2127-6751", "ramal": "6751", "cargo": "Gerente", "setor": "GERÊNCIA METROPOLITANA NORTE", "codigoSetor": "O-GMN", "departamento": "GERÊNCIA METROPOLITANA NORTE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "SS", "syncSource": "organograma"}, {"mat": "10024", "nome": "André Luis de Oliveira Lima", "email": "andre.lima@cesan.com.br", "telefone": "(27) 2127-6707", "ramal": "6707", "cargo": "Chefe de Divisão", "setor": "Divisão de Tratamento Norte", "codigoSetor": "O-DTN", "departamento": "GERÊNCIA METROPOLITANA NORTE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AL", "syncSource": "organograma"}, {"mat": "10025", "nome": "Michelle Damasceno Freitas", "email": "michelle.damasceno@cesan.com.br", "telefone": "(27) 2127-5713", "ramal": "5713", "cargo": "Chefe de Divisão", "setor": "Divisão de Operação e Manutenção Vitória", "codigoSetor": "O-DVT", "departamento": "GERÊNCIA METROPOLITANA NORTE", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "MF", "syncSource": "organograma"}, {"mat": "10026", "nome": "Roger Puziol Amaral", "email": "roger.puziol@cesan.com.br", "telefone": "(27) 2127-5702", "ramal": "5702", "cargo": "Gerente", "setor": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA", "codigoSetor": "O-GME", "departamento": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "RA", "syncSource": "organograma"}, {"mat": "10027", "nome": "Pedro Moussatche Nerio", "email": "pedro.nerio@cesan.com.br", "telefone": "(27) 2127-5712", "ramal": "5712", "cargo": "Chefe de Divisão", "setor": "Divisão de Manutenção da Automação", "codigoSetor": "O-DMA", "departamento": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "PN", "syncSource": "organograma"}, {"mat": "10028", "nome": "Geovany Baldan", "email": "geovany.baldan@cesan.com.br", "telefone": "(27) 2127-5739", "ramal": "5739", "cargo": "Chefe de Divisão", "setor": "Divisão de Manutenção Eletromecânica", "codigoSetor": "O-DME", "departamento": "GERÊNCIA DE MANUTENÇÃO E AUTOMAÇÃO ELETROMECÂNICA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "GB", "syncSource": "organograma"}, {"mat": "10029", "nome": "Josiane Aparecida Rossi Pereira Machado", "email": "josiane.pereira@cesan.com.br", "telefone": "(27) 2127-5250", "ramal": "5250", "cargo": "Gerente", "setor": "GERÊNCIA DE RECURSOS HUMANOS", "codigoSetor": "A-GRH", "departamento": "GERÊNCIA DE RECURSOS HUMANOS", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "JM", "syncSource": "organograma"}, {"mat": "10030", "nome": "Gelcimar Lopes de Oliveira", "email": "gelcimar.lopes@cesan.com.br", "telefone": "(27) 2127-5316", "ramal": "5316", "cargo": "Chefe de Divisão", "setor": "Divisão de Administração de Pessoal", "codigoSetor": "A-DAP", "departamento": "GERÊNCIA DE RECURSOS HUMANOS", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "GO", "syncSource": "organograma"}, {"mat": "10031", "nome": "Rayanne Brandemburg Siqueira", "email": "rayanne.siqueira@cesan.com.br", "telefone": "(27) 2127-5280", "ramal": "5280", "cargo": "Chefe de Divisão", "setor": "Divisão de Desenvolvimento de Pessoal", "codigoSetor": "A-DDP", "departamento": "GERÊNCIA DE RECURSOS HUMANOS", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "RS", "syncSource": "organograma"}, {"mat": "10032", "nome": "Luiz Otavio Machado de Carvalho", "email": "luiz.carvalho@cesan.com.br", "telefone": "(27) 2127-5594", "ramal": "5594", "cargo": "Chefe de Divisão", "setor": "Divisão de Segurança Saúde e Bem Estar", "codigoSetor": "A-DSS", "departamento": "GERÊNCIA DE RECURSOS HUMANOS", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "LC", "syncSource": "organograma"}, {"mat": "10033", "nome": "Romik Polgliane de Souza", "email": "romik.souza@cesan.com.br", "telefone": "(27) 2127-6406", "ramal": "6406", "cargo": "Gerente", "setor": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO", "codigoSetor": "A-GTI", "departamento": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "RS", "syncSource": "organograma"}, {"mat": "10034", "nome": "Gustavo Fernandes Tessinari", "email": "gustavo.tessinari@cesan.com.br", "telefone": "(27) 2127-6434", "ramal": "6434", "cargo": "Chefe de Divisão", "setor": "Divisão de Desenvolvimento de Sistemas", "codigoSetor": "A-DDS", "departamento": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "GT", "syncSource": "organograma"}, {"mat": "10035", "nome": "Andrea Ramos Romanelli", "email": "andrea.ramos@cesan.com.br", "telefone": "(27) 2127-6406", "ramal": "6406", "cargo": "Chefe de Divisão", "setor": "Divisão de Suporte e Infraestrutura", "codigoSetor": "A-DSI", "departamento": "GERÊNCIA DE TECNOLOGIA DA INFORMAÇÃO", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AR", "syncSource": "organograma"}, {"mat": "10036", "nome": "Marcelo Vieira Lopes", "email": "marcelo.lopes@cesan.com.br", "telefone": "(27) 2127-5094", "ramal": "5094", "cargo": "Gerente", "setor": "GERÊNCIA FINANCEIRA E CONTÁBIL", "codigoSetor": "A-GFC", "departamento": "GERÊNCIA FINANCEIRA E CONTÁBIL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "ML", "syncSource": "organograma"}, {"mat": "10037", "nome": "Alexander Salomão Barcellos", "email": "alexander.barcellos@cesan.com.br", "telefone": "(27) 2127-5101", "ramal": "5101", "cargo": "Chefe de Divisão", "setor": "Divisão de Contabilidade Custos e Patrimônio", "codigoSetor": "A-DCC", "departamento": "GERÊNCIA FINANCEIRA E CONTÁBIL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AB", "syncSource": "organograma"}, {"mat": "10038", "nome": "Guilherme Pires Dias", "email": "guilherme.dias@cesan.com.br", "telefone": "(27) 2127-5088", "ramal": "5088", "cargo": "Chefe de Divisão", "setor": "Divisão de Finanças e Arrecadação", "codigoSetor": "A-DFI", "departamento": "GERÊNCIA FINANCEIRA E CONTÁBIL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "GD", "syncSource": "organograma"}, {"mat": "10039", "nome": "Myller dos Santos Cruz", "email": "myller.cruz@cesan.com.br", "telefone": "(27) 2127-5428", "ramal": "5428", "cargo": "Gerente", "setor": "GERÊNCIA DE LOGÍSTICA", "codigoSetor": "A-GLG", "departamento": "GERÊNCIA DE LOGÍSTICA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "MC", "syncSource": "organograma"}, {"mat": "10040", "nome": "Roberto Felix de Almeida Junior da Silva", "email": "roberto.almeida@cesan.com.br", "telefone": "(27) 2127-5426", "ramal": "5426", "cargo": "Chefe de Divisão", "setor": "Divisão de Compras e Suprimentos", "codigoSetor": "A-DCS", "departamento": "GERÊNCIA DE LOGÍSTICA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "RS", "syncSource": "organograma"}, {"mat": "10041", "nome": "Pablo Sampaio de Assis", "email": "pablo.sampaio@cesan.com.br", "telefone": "(27) 2127-5533", "ramal": "5533", "cargo": "Chefe de Divisão", "setor": "Divisão de Serviços Gerais e Transportes", "codigoSetor": "A-DST", "departamento": "GERÊNCIA DE LOGÍSTICA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "PA", "syncSource": "organograma"}, {"mat": "10042", "nome": "Fabiana Santana do Amaral", "email": "fabiana.amaral@cesan.com.br", "telefone": "(27) 2127-5541", "ramal": "5541", "cargo": "Chefe de Divisão", "setor": "Divisão de Contratos e Documentos", "codigoSetor": "A-DCD", "departamento": "GERÊNCIA DE LOGÍSTICA", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "FA", "syncSource": "organograma"}, {"mat": "10043", "nome": "Adaltivo Effgem", "email": "adaltivo.effgem@cesan.com.br", "telefone": "(27) 2127-6408", "ramal": "6408", "cargo": "Gerente", "setor": "GERÊNCIA COMERCIAL", "codigoSetor": "A-GCO", "departamento": "GERÊNCIA COMERCIAL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "AE", "syncSource": "organograma"}, {"mat": "10044", "nome": "Marla Corrêa Bragança", "email": "marla.braganca@cesan.com.br", "telefone": "(27) 2127-6517", "ramal": "6517", "cargo": "Chefe de Divisão", "setor": "Divisão de Atendimento Comercial", "codigoSetor": "A-DAC", "departamento": "GERÊNCIA COMERCIAL", "status": "ATIVO", "ativo": true, "emAusencia": false, "suprimirAlertas": false, "ausencia": "", "avatar": "MB", "syncSource": "organograma"}];
+
+// Popula STATE.empregados com dados do organograma se Firebase não disponível
+function initEmpregadosSeed() {
+  if (!STATE.empregados || STATE.empregados.length === 0) {
+    STATE.empregados = STATE_EMPREGADOS_SEED;
+    console.log('[Seed] ' + STATE.empregados.length + ' empregados carregados do organograma');
+  }
+}
+
+// Autocomplete de empregados nos formulários
+function autocompleteEmpregado(inputEl, onSelect) {
+  const input = typeof inputEl === 'string' ? document.getElementById(inputEl) : inputEl;
+  if (!input) return;
+  
+  let dropdown = null;
+  
+  input.addEventListener('input', function() {
+    const q = this.value.toLowerCase().trim();
+    if (dropdown) dropdown.remove();
+    if (q.length < 2) return;
+    
+    const matches = (STATE.empregados || [])
+      .filter(e => e.nome.toLowerCase().includes(q) || e.email.toLowerCase().includes(q) || e.ramal.includes(q))
+      .slice(0, 8);
+    
+    if (!matches.length) return;
+    
+    dropdown = document.createElement('div');
+    dropdown.style.cssText = 'position:absolute;z-index:9999;background:var(--g0,#fff);border:1px solid var(--g200);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);width:320px;max-height:280px;overflow-y:auto';
+    
+    matches.forEach(e => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--g100)';
+      item.innerHTML = '<div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#2563EB,#7C3AED);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">' + e.avatar + '</div>' +
+        '<div><div style="font-size:13px;font-weight:600;color:var(--g800)">' + e.nome + '</div>' +
+        '<div style="font-size:11px;color:var(--g400)">' + e.setor + (e.ramal ? ' · Ramal ' + e.ramal : '') + '</div></div>';
+      item.addEventListener('mouseenter', () => item.style.background = 'var(--g50)');
+      item.addEventListener('mouseleave', () => item.style.background = '');
+      item.addEventListener('click', () => {
+        input.value = e.nome;
+        dropdown.remove();
+        dropdown = null;
+        if (onSelect) onSelect(e);
+      });
+      dropdown.appendChild(item);
+    });
+    
+    const rect = input.getBoundingClientRect();
+    dropdown.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    document.body.appendChild(dropdown);
+  });
+  
+  document.addEventListener('click', e => {
+    if (dropdown && !dropdown.contains(e.target) && e.target !== input) {
+      dropdown.remove(); dropdown = null;
+    }
+  }, { once: false });
+}
+
+// ════════════════════════════════════════════════════════════
+// SELF-SERVICE PORTAL
+// ════════════════════════════════════════════════════════════
+
+const SS_TIPOS = {
+  senha:      { titulo:'🔑 Redefinir Senha',      solucao: ['Acesse: \n<strong>Ctrl+Alt+Del → Alterar senha</strong> (se no escritório)', 'Ou acesse o portal AD: <strong>senha.cesan.com.br</strong>', 'Se não conseguir, informe seu usuário abaixo e um técnico vai redefinir'] },
+  acesso:     { titulo:'🔐 Solicitar Acesso',      solucao: null },
+  software:   { titulo:'💾 Instalar Software',     solucao: ['Verifique se o software está na lista de homologados em <strong>\\servidor\TI$\Softwares</strong>', 'Execute o instalador como administrador', 'Se precisar de permissão elevada, informe abaixo qual software'] },
+  impressora: { titulo:'🖨️ Adicionar Impressora',  solucao: ['Acesse <strong>\\\\print.cesan.com.br</strong> no Windows Explorer', 'Dê dois cliques na impressora desejada', 'O driver instala automaticamente', 'Se não encontrar a impressora, informe o nome abaixo'] },
+  email:      { titulo:'📧 Problema de E-mail',    solucao: ['Verifique a cota: <strong>Outlook → Arquivo → Ferramentas → Caixa de correio</strong>', 'Se cota cheia, exclua e-mails antigos da pasta Enviados', 'Para problema de senha, use a opção Redefinir Senha acima'] },
+  vpn:        { titulo:'🌐 Acesso VPN',            solucao: ['Baixe o FortiClient em: <strong>\\\\servidor\TI$\VPN</strong>', 'Use as mesmas credenciais do AD (usuário e senha do Windows)', 'Servidor VPN: <strong>vpn.cesan.com.br</strong>'] },
+  wifi:       { titulo:'📶 Problema de Wi-Fi',     solucao: ['Rede corporativa: <strong>CESAN-Corp</strong> (use credenciais do AD)', 'Se travou, esqueça a rede e reconecte', 'Verifique se o Wi-Fi está ativado (Fn+F2 em alguns notebooks)'] },
+  outro:      { titulo:'💬 Outra Solicitação',     solucao: null },
+};
+
+let _ssTipoAtual = 'outro';
+
+function abrirSS(tipo) {
+  _ssTipoAtual = tipo;
+  const cfg = SS_TIPOS[tipo] || SS_TIPOS.outro;
+  document.getElementById('ss-modal-title').textContent = cfg.titulo;
+  document.getElementById('ss-desc').value = '';
+  document.getElementById('ss-contato').value = '';
+
+  // Exibe solução automática se disponível
+  const solEl = document.getElementById('ss-solucao-automatica');
+  if (cfg.solucao) {
+    solEl.style.display = '';
+    solEl.innerHTML = '<div class="ss-solucao">' +
+      '<h4>💡 Tente primeiro — solução automática:</h4>' +
+      '<ol>' + cfg.solucao.map(s => '<li>' + s + '</li>').join('') + '</ol>' +
+      '</div>';
+  } else {
+    solEl.style.display = 'none';
+  }
+
+  openModal('modal-ss');
+}
+
+async function enviarSS() {
+  const desc     = document.getElementById('ss-desc')?.value?.trim();
+  const urgencia = document.getElementById('ss-urgencia')?.value || 'normal';
+  const contato  = document.getElementById('ss-contato')?.value?.trim() || '';
+  if (!desc) return showToast('Descreva o problema antes de enviar', 'danger');
+
+  const cfg  = SS_TIPOS[_ssTipoAtual] || SS_TIPOS.outro;
+  const user = CURRENT_USER || {};
+
+  // Cria chamado automaticamente
+  const chamado = {
+    titulo:          cfg.titulo + ' (Self-Service)',
+    desc:            desc,
+    tipo:            'requisicao',
+    categoria:       mapSSCategoria(_ssTipoAtual),
+    subcategoria:    'Self-Service',
+    status:          'aberto',
+    prioridade:      urgencia === 'alta' ? 'alta' : 'media',
+    area:            user.setor || '',
+    entidade:        'SYSACK',
+    origem:          'self-service',
+    requerenteId:    user.uid || '',
+    requerenteNome:  user.nome || '',
+    requerenteEmail: user.email || '',
+    requerenteRamal: contato,
+    obs:             contato ? 'Contato: ' + contato : '',
+    createdBy:       user.uid || '',
+    updatedBy:       user.uid || '',
+    dataAbertura:    new Date(),
+  };
+
+  try {
+    // Salva localmente
+    if (!STATE.chamados) STATE.chamados = [];
+    const id = 'SS-' + Date.now();
+    STATE.chamados.unshift({ ...chamado, id });
+
+    // Salva no Firebase
+    // await fsAdd('chamados', chamado);
+
+    closeModal('modal-ss');
+    showToast('✅ Solicitação enviada! Nossa equipe responderá em breve.', 'success', 5000);
+    renderSelfService();
+    auditLog('CREATE', 'self-service', id, 'chamado', { tipo: _ssTipoAtual });
+  } catch (err) {
+    showToast('Erro ao enviar: ' + err.message, 'danger');
+  }
+}
+
+function mapSSCategoria(tipo) {
+  const map = { senha:'Active Directory', acesso:'Active Directory', software:'Software', impressora:'Impressão', email:'E-mail', vpn:'VPN', wifi:'Wi-Fi' };
+  return map[tipo] || 'Demais solicitações';
+}
+
+function renderSelfService() {
+  const tbody = document.getElementById('ss-minhas-body');
+  if (!tbody) return;
+
+  const user    = CURRENT_USER || {};
+  const minhas  = (STATE.chamados || []).filter(c =>
+    c.origem === 'self-service' && c.requerenteId === user.uid
+  );
+
+  if (!minhas.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--g400)">Nenhuma solicitação registrada</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = minhas.map(c => {
+    const statusCfg = { aberto:'badge-info', 'em-atendimento':'badge-success', fechado:'badge-success', cancelado:'' };
+    return '<tr>' +
+      '<td class="td-mono" style="color:var(--accent)">' + (c.id||'—') + '</td>' +
+      '<td><span class="tag">' + (c.categoria||'—') + '</span></td>' +
+      '<td style="max-width:220px;font-size:12px">' + (c.desc||'').slice(0,60) + '</td>' +
+      '<td><span class="badge ' + (statusCfg[c.status]||'') + '">' + (c.status||'—') + '</span></td>' +
+      '<td class="td-mono" style="font-size:11px">' + fmtDate(c.dataAbertura) + '</td>' +
+      '<td style="font-size:12px;color:var(--g500)">' + (c.resposta || '—') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════════
+// EMPREGADOS & AUSÊNCIAS
+// ════════════════════════════════════════════════════════════
+
+function renderEmpregados() {
+  const tbody    = document.getElementById('emp-body');
+  if (!tbody) return;
+
+  const q      = (document.getElementById('emp-search')?.value || '').toLowerCase();
+  const fStatus = document.getElementById('emp-filter-status')?.value || '';
+  const fSetor  = document.getElementById('emp-filter-setor')?.value  || '';
+
+  const empregados = STATE.empregados || [];
+
+  // Popula filtro de setor
+  const setorSel = document.getElementById('emp-filter-setor');
+  if (setorSel && setorSel.options.length <= 1) {
+    const setores = [...new Set(empregados.map(e => e.setor).filter(Boolean))].sort();
+    setores.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = s;
+      setorSel.appendChild(opt);
+    });
+  }
+
+  // Stats
+  const ausentes    = empregados.filter(e => e.emAusencia);
+  const suprimidos  = empregados.filter(e => e.suprimirAlertas);
+  sv('emp-total',      empregados.length);
+  sv('emp-ativos',     empregados.filter(e => e.ativo && !e.emAusencia).length);
+  sv('emp-ausentes',   ausentes.length);
+  sv('emp-suprimidos', suprimidos.length);
+  nbUpdate('nb-ausentes', ausentes.length);
+
+  // Sync status
+  const syncEl = document.getElementById('emp-sync-status');
+  if (syncEl && STATE.empregadosSyncAt) {
+    syncEl.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:var(--success)"></span> Sync: ' + fmtDatetime(STATE.empregadosSyncAt);
+  }
+
+  // Filtro
+  let lista = empregados;
+  if (q)        lista = lista.filter(e => e.nome?.toLowerCase().includes(q) || e.mat?.includes(q));
+  if (fStatus === 'ativo')   lista = lista.filter(e => !e.emAusencia && e.ativo);
+  if (fStatus === 'ausente') lista = lista.filter(e => e.emAusencia);
+  if (fSetor)   lista = lista.filter(e => e.setor === fSetor);
+
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">' +
+      (empregados.length ? 'Nenhum empregado encontrado com esses filtros.' : 'Instale o SYSACK Agent no servidor para sincronizar os empregados.') +
+      '</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = lista.map(e => {
+    const ausenciaLabel = e.ausencia || (e.emAusencia ? e.status : '');
+    const periodoLabel  = e.dataInicioAusencia
+      ? fmtDate(e.dataInicioAusencia) + ' → ' + (e.dataFimAusencia ? fmtDate(e.dataFimAusencia) : 'Indefinido')
+      : '—';
+    return '<tr>' +
+      '<td class="td-mono" style="font-size:12px">' + e.mat + '</td>' +
+      '<td style="font-weight:600;font-size:13px">' + e.nome + '</td>' +
+      '<td style="font-size:12px">' + (e.setor||'—') + '</td>' +
+      '<td style="font-size:12px;color:var(--g500)">' + (e.cargo||'—') + '</td>' +
+      '<td>' + (e.emAusencia
+        ? '<span class="badge badge-warning">Em Ausência</span>'
+        : e.ativo
+          ? '<span class="badge badge-success">Ativo</span>'
+          : '<span class="badge">Inativo</span>') + '</td>' +
+      '<td>' + (ausenciaLabel ? '<span class="tag">' + ausenciaLabel + '</span>' : '—') + '</td>' +
+      '<td style="font-size:11px;color:var(--g500)">' + periodoLabel + '</td>' +
+      '<td>' + (e.suprimirAlertas
+        ? '<span style="font-size:11px;color:var(--warning);font-weight:600">🔕 Suprimidos</span>'
+        : '<span style="font-size:11px;color:var(--success)">🔔 Ativos</span>') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+// Listener Firebase para empregados
+function listenEmpregados() {
+  if (!FB_READY || !db) return;
+  // Escuta coleção empregados em tempo real
+  listen('empregados', [orderBy('nome', 'asc'), limit(500)], (empregados) => {
+    STATE.empregados = empregados;
+    STATE.empregadosSyncAt = empregados[0]?.syncAt ? new Date(empregados[0].syncAt) : null;
+    if (isPageActive('empregados')) renderEmpregados();
+    // Atualiza badge
+    nbUpdate('nb-ausentes', empregados.filter(e => e.emAusencia).length);
+  }, 'empregados_listener');
+}
+
+// ════════════════════════════════════════════════════════════
 // APPS STRUCTURES
-// ============================================================
+// ════════════════════════════════════════════════════════════
 const APPS_DATA = [
   { nome:'API Acertar', versao:'3.2.1', fabricante:'Acertar', licenca:'Corporativa', resp:'TI', status:'ativo' },
   { nome:'Apus Client', versao:'2.5.0', fabricante:'Apus Systems', licenca:'Corporativa', resp:'TI', status:'ativo' },
