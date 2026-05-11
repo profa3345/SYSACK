@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Asset Tools · A-DSI</title>
+<title>SYSACK – Gestão Inteligente de Ativos</title>
 <!-- Firebase SDK via module shim — funciona em file://, http:// e https:// -->
 <!-- Usa importmap para resolver os módulos sem problemas de CORS/CSP -->
 <script type="importmap">
@@ -34,6 +34,8 @@ try {
 }
 </script>
 <!-- ZXing carregado dinamicamente dentro de startDecoding() -->
+<!-- Google reCAPTCHA v3 -->
+<script src="https://www.google.com/recaptcha/api.js?render=6LciCuUsAAAADjlcurM26D7fGpMjdyCeFLDNUOG" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -255,6 +257,7 @@ try {
 /* Dark toggle button */
 .theme-toggle{width:35px;height:35px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;border-radius:8px;cursor:pointer;color:var(--g500);transition:all .18s;font-size:16px}
 .theme-toggle:hover{background:var(--g100);color:var(--g700)}
+.grecaptcha-badge{visibility:hidden !important;}
 
 :root {
   --brand:#070D1A; --brand-2:#0C1526; --accent:#2563EB; --accent-d:#1D4ED8;
@@ -602,8 +605,8 @@ textarea.form-control{resize:vertical;min-height:80px}
         </svg>
       </div>
       <div>
-        <div class="login-title">Asset <em>Tools</em></div>
-        <div class="login-sub">A-DSI · Gestão de TI</div>
+        <div class="login-title">SYS<em>ACK</em></div>
+        <div class="login-sub">Gestão Inteligente de Ativos</div>
       </div>
     </div>
 
@@ -656,7 +659,7 @@ textarea.form-control{resize:vertical;min-height:80px}
     </div>
 
     <div class="login-footer">
-      Asset Tools · A-DSI &nbsp;·&nbsp; <a href="#">Política de Privacidade</a><br>
+      SYSACK – Gestão Inteligente de Ativos &nbsp;·&nbsp; <a href="#">Política de Privacidade</a><br>
       <span style="margin-top:4px;display:block">🔒 Acesso restrito a usuários autorizados</span>
     </div>
   </div>
@@ -673,11 +676,16 @@ textarea.form-control{resize:vertical;min-height:80px}
       </svg>
     </div>
     <div>
-      <div class="logo-name">Asset <em>Tools</em></div>
-      <div class="logo-sub">A-DSI · Gestão de TI</div>
+      <div class="logo-name">SYS<em>ACK</em></div>
+      <div class="logo-sub">SYSACK – Gestão Inteligente de Ativos</div>
     </div>
   </div>
   <nav class="sb-nav">
+    <a class="nav-i" data-page="ai-dashboard" title="IA & Insights" style="background:linear-gradient(135deg,rgba(37,99,235,.08),rgba(124,58,237,.08));border:1px solid rgba(37,99,235,.15);margin:4px 8px;border-radius:var(--r)">
+      <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      IA &amp; Insights
+      <span style="font-size:9px;font-weight:800;background:linear-gradient(135deg,#2563EB,#7C3AED);color:#fff;padding:1px 6px;border-radius:10px;margin-left:auto">NEW</span>
+    </a>
     <a class="nav-i" data-page="exec-dashboard" title="Dashboard Executivo">
       <svg viewBox="0 0 16 16" fill="none"><path d="M2 12V8l4-4 3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14" cy="3" r="1.5" fill="currentColor" opacity=".5"/></svg>
       Dashboard Executivo
@@ -712,8 +720,9 @@ textarea.form-control{resize:vertical;min-height:80px}
     <div class="sb-group" id="grp-assistencia">
       <a class="nav-i nav-sub" data-page="chamados"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v3.5L10 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Chamados<span class="nav-badge" id="nb-chamados">0</span></a>
       <a class="nav-i nav-sub" onclick="openModal('modal-novo-chamado')"><svg viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>+ Criar chamado</a>
-      <a class="nav-i nav-sub" data-page="movimentacoes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M5 7l2 2 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Mudanças<span class="nav-badge o" id="nb-mov">0</span></a>
-      <a class="nav-i nav-sub" data-page="aprovacoes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Planejamento<span class="nav-badge" id="nb-aprov">0</span></a>
+      <a class="nav-i nav-sub" data-page="mudancas-itil"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 2.5C6.2 1.9 7.5 1.8 8.8 2.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Mudanças (ITIL)<span class="nav-badge v" id="nb-mudancas">0</span></a>
+      <a class="nav-i nav-sub" data-page="movimentacoes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M5 7l2 2 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Movimentações<span class="nav-badge o" id="nb-mov">0</span></a>
+      <a class="nav-i nav-sub" data-page="aprovacoes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Aprovações<span class="nav-badge" id="nb-aprov">0</span></a>
     </div>
     <!-- GERÊNCIA -->
     <div class="sb-group-header" onclick="toggleSbGroup('grp-gerencia')">
@@ -749,7 +758,7 @@ textarea.form-control{resize:vertical;min-height:80px}
   <div class="sb-footer">
     <div class="user-row">
       <div class="u-avatar">JM</div>
-      <div><div class="u-name">João Martins</div><div class="u-role">Gestor A-DSI</div></div>
+      <div><div class="u-name">João Martins</div><div class="u-role">Gestor · SYSACK</div></div>
       <span class="u-online">● on</span>
     </div>
   </div>
@@ -762,7 +771,7 @@ textarea.form-control{resize:vertical;min-height:80px}
       <div class="bc-root-icon">
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x=".5" y=".5" width="3.5" height="3.5" rx="1" fill="white" opacity=".9"/><rect x="6" y=".5" width="3.5" height="3.5" rx="1" fill="white" opacity=".6"/><rect x=".5" y="6" width="3.5" height="3.5" rx="1" fill="white" opacity=".6"/><rect x="6" y="6" width="3.5" height="3.5" rx="1" fill="white" opacity=".3"/></svg>
       </div>
-      <span class="bc-seg" id="bc-root">A-DSI</span>
+      <span class="bc-seg" id="bc-root">SYSACK</span>
       <span class="bc-sep">›</span>
       <span class="bc-seg cur" id="bc-main">Dashboard</span>
       <span class="bc-sep" id="bc-sep2" style="display:none">›</span>
@@ -775,7 +784,11 @@ textarea.form-control{resize:vertical;min-height:80px}
     </div>
     <div class="tb-actions">
       <button class="tb-btn"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5a2 2 0 113 1.7L7.5 8.5V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="7.5" cy="12" r=".75" fill="currentColor"/></svg></button>
-      <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Alternar tema claro/escuro">🌙</button>
+      <button class="tb-btn" id="ai-chat-btn" onclick="toggleAIPanel()" title="Assistente IA" style="position:relative">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" fill="currentColor" opacity=".3"/><circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <span style="position:absolute;top:4px;right:4px;width:7px;height:7px;background:var(--success);border-radius:50%;border:1.5px solid var(--g0,#fff)" id="ai-status-dot"></span>
+    </button>
+    <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Alternar tema claro/escuro">🌙</button>
       <button class="tb-btn" id="notif-btn">
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1.5A4 4 0 003.5 5.5V8L2 9.5h11L11.5 8V5.5A4 4 0 007.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 11.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span class="notif-count" id="notif-count-badge">5</span>
@@ -797,7 +810,7 @@ textarea.form-control{resize:vertical;min-height:80px}
       <div class="flex items-center justify-between mb-20">
         <div>
           <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Painel de Controle</h2>
-          <p class="text-sm text-muted mt-8">Visão geral dos ativos e operações — A-DSI</p>
+          <p class="text-sm text-muted mt-8">Visão geral dos ativos e operações</p>
         </div>
         <div class="flex gap-8">
           <span class="fb-badge">🔥 Firebase</span>
@@ -841,12 +854,125 @@ textarea.form-control{resize:vertical;min-height:80px}
       </div>
     </div>
 
+    <!-- AI & INSIGHTS DASHBOARD -->
+    <div class="page" id="page-ai-dashboard">
+      <div class="flex items-center justify-between mb-20">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">
+            <span style="background:linear-gradient(135deg,#2563EB,#7C3AED);-webkit-background-clip:text;-webkit-text-fill-color:transparent">✨ IA &amp; Insights</span>
+          </h2>
+          <p class="text-sm text-muted mt-8">Análise inteligente operada por Gemini 1.5 Flash via Firebase Genkit</p>
+        </div>
+        <div class="flex gap-8">
+          <div style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(37,99,235,.08);border:1px solid rgba(37,99,235,.2);border-radius:20px">
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--success)" id="ai-conn-dot"></span>
+            <span style="font-size:12px;font-weight:600;color:var(--accent)" id="ai-conn-label">Gemini 1.5 Flash</span>
+          </div>
+          <button class="btn btn-primary" onclick="rodarAnaliseCompleta()">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:4px"><path d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Analisar Agora
+          </button>
+        </div>
+      </div>
+
+      <!-- SCORE OPERACIONAL + MODELO -->
+      <div class="grid-2 mb-20" style="grid-template-columns:280px 1fr;gap:16px">
+        <div class="card" style="background:linear-gradient(135deg,#0A0F1E,#111E35);border:none;text-align:center;padding:24px">
+          <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">Score Operacional de TI</div>
+          <div style="position:relative;display:inline-block;margin-bottom:12px">
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="10"/>
+              <circle cx="60" cy="60" r="52" fill="none" stroke="url(#aiGrad)" stroke-width="10"
+                stroke-dasharray="327" id="ai-score-arc" stroke-dashoffset="327"
+                stroke-linecap="round" transform="rotate(-90 60 60)" style="transition:stroke-dashoffset 1s ease"/>
+              <defs><linearGradient id="aiGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#2563EB"/><stop offset="100%" stop-color="#7C3AED"/></linearGradient></defs>
+            </svg>
+            <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+              <div style="font-size:32px;font-weight:900;color:#fff" id="ai-score-num">—</div>
+              <div style="font-size:10px;color:rgba(255,255,255,.4)">/100</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:rgba(255,255,255,.5)" id="ai-score-label">Analisando...</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>🧠 Resumo Executivo (IA)</h3><span class="ai-triage-badge">✨ Gemini</span></div>
+          <div class="card-body">
+            <div id="ai-resumo-exec" style="font-size:13.5px;color:var(--g700);line-height:1.7">
+              <div style="display:flex;gap:6px;align-items:center;color:var(--g400);font-size:12.5px">
+                <div class="ai-typing"><span></span><span></span><span></span></div>
+                Aguardando análise...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INSIGHTS (4 cards) -->
+      <div style="margin-bottom:20px">
+        <div class="flex items-center justify-between mb-12">
+          <h3 style="font-size:15px;font-weight:800;color:var(--g800)">💡 Insights Automáticos</h3>
+          <span class="badge badge-info" id="ai-insights-count">0 insights</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px" id="ai-insights-grid">
+          <div style="grid-column:1/-1;text-align:center;padding:32px;color:var(--g400);font-size:13px">
+            Clique em <strong>Analisar Agora</strong> para gerar insights com IA
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2 mb-20">
+        <!-- RISCOS -->
+        <div class="card">
+          <div class="card-header"><h3>⚠️ Mapa de Risco (IA)</h3><span class="ai-triage-badge">✨ Gemini</span></div>
+          <div class="card-body" id="ai-riscos-list">
+            <p class="text-sm text-muted">Aguardando análise...</p>
+          </div>
+        </div>
+        <!-- ANOMALIAS -->
+        <div class="card">
+          <div class="card-header"><h3>🔍 Anomalias Detectadas</h3></div>
+          <div class="card-body" id="ai-anomalias-list">
+            <p class="text-sm text-muted">Aguardando análise...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- RECOMENDAÇÕES -->
+      <div class="card mb-20">
+        <div class="card-header"><h3>📋 Recomendações Prioritárias</h3><span class="ai-triage-badge">✨ Gemini</span></div>
+        <div class="card-body">
+          <div id="ai-recomendacoes" style="display:flex;flex-direction:column;gap:8px">
+            <p class="text-sm text-muted">Aguardando análise...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRIAGEM AUTOMÁTICA DE CHAMADOS -->
+      <div class="card">
+        <div class="card-header">
+          <h3>🎫 Triagem Automática de Chamados</h3>
+          <span class="ai-triage-badge">✨ Gemini 1.5 Flash</span>
+          <button class="btn btn-secondary btn-sm ml-auto" onclick="triagemLote()">⚡ Triar em Lote</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>ID</th><th>Título</th><th>Prioridade IA</th><th>Categoria IA</th>
+              <th>Tipo</th><th>Tempo Est.</th><th>Confiança</th><th>Ação</th>
+            </tr></thead>
+            <tbody id="ai-triage-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- EXECUTIVE DASHBOARD -->
+
     <div class="page" id="page-exec-dashboard">
       <div class="flex items-center justify-between mb-20">
         <div>
           <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Dashboard Executivo</h2>
-          <p class="text-sm text-muted mt-8">KPIs, SLA, MTTR, Compliance e Risco — A-DSI</p>
+          <p class="text-sm text-muted mt-8">KPIs, SLA, MTTR, Compliance e Risco</p>
         </div>
         <div class="flex gap-8">
           <select class="form-control" style="width:130px;margin:0;font-size:12px" onchange="renderExecDashboard()">
@@ -1060,6 +1186,78 @@ textarea.form-control{resize:vertical;min-height:80px}
       </div>
     </div>
 
+    <!-- MUDANÇAS ITIL -->
+    <div class="page" id="page-mudancas-itil">
+      <div class="flex items-center justify-between mb-20">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Mudanças (ITIL)</h2>
+          <p class="text-sm text-muted mt-8">Gerenciamento de Mudanças — RFC, CAB, implementação e revisão</p>
+        </div>
+        <div class="flex gap-8">
+          <span class="fb-badge">🔥 Firebase</span>
+          <button class="btn btn-secondary btn-sm" onclick="goPage('mudancas-itil')">🗓️ Calendário CAB</button>
+          <button class="btn btn-primary" onclick="openModal('modal-nova-mudanca')">+ Nova RFC</button>
+        </div>
+      </div>
+
+      <!-- STATS -->
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px">
+        <div class="stat-card blue">  <div class="stat-label">Total RFCs</div>     <div class="stat-value" id="itil-total">—</div><div class="stat-sub">Abertas</div></div>
+        <div class="stat-card green"> <div class="stat-label">Aprovadas</div>      <div class="stat-value" id="itil-aprov">—</div><div class="stat-sub">Prontas para impl.</div></div>
+        <div class="stat-card orange"><div class="stat-label">Em Implementação</div><div class="stat-value" id="itil-impl">—</div><div class="stat-sub">Em andamento</div></div>
+        <div class="stat-card red">   <div class="stat-label">Pendentes CAB</div>  <div class="stat-value" id="itil-cab">—</div><div class="stat-sub">Aguardando reunião</div></div>
+        <div class="stat-card violet"><div class="stat-label">Emergenciais</div>   <div class="stat-value" id="itil-emerg">—</div><div class="stat-sub">Alta prioridade</div></div>
+      </div>
+
+      <!-- FILTER TABS -->
+      <div class="tabs" id="itil-tabs">
+        <div class="tab active" data-itil-tab="todos">Todas</div>
+        <div class="tab" data-itil-tab="normal">Normal</div>
+        <div class="tab" data-itil-tab="emergencial">Emergencial</div>
+        <div class="tab" data-itil-tab="padrao">Padrão</div>
+        <div class="tab" data-itil-tab="rfc-pendente">Pendente CAB</div>
+        <div class="tab" data-itil-tab="aprovada">Aprovada</div>
+        <div class="tab" data-itil-tab="implementando">Implementando</div>
+        <div class="tab" data-itil-tab="concluida">Concluída</div>
+      </div>
+
+      <!-- FILTERS BAR -->
+      <div class="doc-filter-row mb-12">
+        <input class="form-control" style="width:260px;margin:0" placeholder="🔍 Buscar RFC, título, responsável..." id="itil-search" oninput="renderMudancasITIL()">
+        <select class="form-control" style="width:140px;margin:0" id="itil-filter-risco" onchange="renderMudancasITIL()">
+          <option value="">Todos os riscos</option>
+          <option value="critico">Crítico</option>
+          <option value="alto">Alto</option>
+          <option value="medio">Médio</option>
+          <option value="baixo">Baixo</option>
+        </select>
+        <select class="form-control" style="width:160px;margin:0" id="itil-filter-tipo" onchange="renderMudancasITIL()">
+          <option value="">Todos os tipos</option>
+          <option value="normal">Normal</option>
+          <option value="emergencial">Emergencial</option>
+          <option value="padrao">Padrão</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto">⬇ Exportar</button>
+      </div>
+
+      <!-- TABLE -->
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>RFC</th><th>Título</th><th>Tipo</th><th>Risco</th>
+              <th>Responsável</th><th>Data Impl.</th><th>CAB</th>
+              <th>Status</th><th>Ações</th>
+            </tr></thead>
+            <tbody id="itil-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL NOVA RFC / MUDANÇA ITIL -->
+    <!-- injected below -->
+
     <!-- MOVIMENTAÇÕES -->
     <div class="page" id="page-movimentacoes">
       <div class="flex items-center justify-between mb-20">
@@ -1145,7 +1343,7 @@ textarea.form-control{resize:vertical;min-height:80px}
     <!-- TÉCNICOS -->
     <div class="page" id="page-tecnicos">
       <div class="flex items-center justify-between mb-20">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Técnicos</h2><p class="text-sm text-muted mt-8">A-DSI e Empresa Terceirizada</p></div>
+        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Técnicos</h2><p class="text-sm text-muted mt-8">SYSACK e Empresa Terceirizada</p></div>
         <button class="btn btn-primary" onclick="openModal('modal-novo-tecnico')">+ Novo Técnico</button>
       </div>
       <div class="card"><div class="table-wrap"><table><thead><tr><th>Nome</th><th>Empresa</th><th>E-mail</th><th>Telefone</th><th>Status</th><th>Ações</th></tr></thead><tbody id="tecnicos-body"></tbody></table></div></div>
@@ -1473,6 +1671,212 @@ textarea.form-control{resize:vertical;min-height:80px}
     </div>
 
     <!-- ALERTAS -->
+    <!-- MODAL NOVA RFC / MUDANÇA ITIL -->
+<div class="modal-overlay" id="modal-nova-mudanca">
+  <div class="modal modal-xl">
+    <div class="modal-header">
+      <h3>🔄 Nova Requisição de Mudança (RFC)</h3>
+      <button class="close-btn" onclick="closeModal('modal-nova-mudanca')">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- TABS -->
+      <div class="tabs" id="rfc-tabs">
+        <div class="tab active" data-rfc-tab="geral">Geral</div>
+        <div class="tab" data-rfc-tab="impacto">Impacto &amp; Risco</div>
+        <div class="tab" data-rfc-tab="plano">Plano de Implementação</div>
+        <div class="tab" data-rfc-tab="rollback">Plano de Rollback</div>
+        <div class="tab" data-rfc-tab="cab">CAB &amp; Aprovação</div>
+      </div>
+
+      <!-- ABA GERAL -->
+      <div id="rfc-tab-geral">
+        <div class="form-row c3">
+          <div class="form-group"><label class="form-label req">Tipo de Mudança</label>
+            <select class="form-control" id="rfc-tipo">
+              <option value="normal">Normal — passa pelo CAB</option>
+              <option value="emergencial">Emergencial — aprovação imediata</option>
+              <option value="padrao">Padrão — pré-aprovada</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label req">Categoria</label>
+            <select class="form-control" id="rfc-categoria">
+              <option value="">Selecione...</option>
+              <option>Infraestrutura de Rede</option>
+              <option>Servidores e Storage</option>
+              <option>Software / Aplicação</option>
+              <option>Banco de Dados</option>
+              <option>Segurança</option>
+              <option>MDM / Dispositivos</option>
+              <option>Active Directory</option>
+              <option>Backup e Restore</option>
+              <option>Outros</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label req">Prioridade</label>
+            <select class="form-control" id="rfc-prioridade">
+              <option value="critica">Crítica</option>
+              <option value="alta">Alta</option>
+              <option value="media" selected>Média</option>
+              <option value="baixa">Baixa</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label req">Título da Mudança</label>
+          <input class="form-control" id="rfc-titulo" placeholder="Ex: Atualização do Firewall FortiGate para FortiOS 7.6.1"></div>
+        <div class="form-group"><label class="form-label req">Descrição Detalhada</label>
+          <textarea class="form-control" id="rfc-desc" rows="3" placeholder="Descreva o que será alterado, por que e qual o impacto esperado..."></textarea></div>
+        <div class="form-group"><label class="form-label req">Justificativa / Motivo</label>
+          <textarea class="form-control" id="rfc-justificativa" rows="2" placeholder="Por que esta mudança é necessária? Qual problema resolve?"></textarea></div>
+        <div class="form-row c2">
+          <div class="form-group"><label class="form-label req">Responsável pela Mudança</label>
+            <input class="form-control" id="rfc-responsavel" placeholder="Nome do técnico responsável"></div>
+          <div class="form-group"><label class="form-label">Área/Sistema Afetado</label>
+            <input class="form-control" id="rfc-area" placeholder="Ex: Toda a rede, Setor RH, Sistema SAP..."></div>
+        </div>
+        <div class="form-row c3">
+          <div class="form-group"><label class="form-label req">Data de Implementação</label>
+            <input class="form-control" type="datetime-local" id="rfc-data-impl"></div>
+          <div class="form-group"><label class="form-label">Duração Estimada</label>
+            <input class="form-control" id="rfc-duracao" placeholder="Ex: 2 horas, 30 minutos"></div>
+          <div class="form-group"><label class="form-label">Janela de Manutenção</label>
+            <select class="form-control" id="rfc-janela">
+              <option value="">Sem janela específica</option>
+              <option>Sábado 00h–06h</option>
+              <option>Domingo 00h–06h</option>
+              <option>Dia útil fora do horário comercial</option>
+              <option>Horário comercial (com risco)</option>
+              <option>Emergencial — qualquer horário</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ABA IMPACTO & RISCO -->
+      <div id="rfc-tab-impacto" style="display:none">
+        <div class="alert alert-warning"><span>⚠️</span><span>Avalie cuidadosamente o risco antes de submeter ao CAB. Mudanças com risco alto ou crítico exigem aprovação da gestão sênior.</span></div>
+        <div class="form-row c3">
+          <div class="form-group"><label class="form-label req">Nível de Risco</label>
+            <select class="form-control" id="rfc-risco">
+              <option value="baixo">Baixo — impacto mínimo</option>
+              <option value="medio" selected>Médio — impacto moderado</option>
+              <option value="alto">Alto — impacto significativo</option>
+              <option value="critico">Crítico — impacto severo</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label req">Impacto nos Usuários</label>
+            <select class="form-control" id="rfc-impacto-users">
+              <option value="nenhum">Nenhum</option>
+              <option value="minimo">Mínimo — poucos usuários</option>
+              <option value="parcial">Parcial — setor específico</option>
+              <option value="total">Total — todos os usuários</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Requer downtime?</label>
+            <div class="radio-group" style="margin-top:6px">
+              <label class="radio-opt"><input type="radio" name="rfc-downtime" value="sim"> Sim</label>
+              <label class="radio-opt"><input type="radio" name="rfc-downtime" value="nao" checked> Não</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label req">Análise de Risco</label>
+          <textarea class="form-control" id="rfc-analise-risco" rows="3" placeholder="O que pode dar errado? Quais sistemas ficam indisponíveis? Qual o impacto no negócio?"></textarea></div>
+        <div class="form-group"><label class="form-label">Sistemas / Ativos Impactados</label>
+          <textarea class="form-control" id="rfc-sistemas" rows="2" placeholder="Ex: Firewall FW-EDGE-01, Switch SW-CORE-01, todos os usuários com acesso à internet..."></textarea></div>
+        <div class="form-group"><label class="form-label">Critérios de Sucesso</label>
+          <textarea class="form-control" id="rfc-criterios" rows="2" placeholder="Como saber que a mudança foi bem-sucedida? Quais testes serão realizados?"></textarea></div>
+      </div>
+
+      <!-- ABA PLANO DE IMPLEMENTAÇÃO -->
+      <div id="rfc-tab-plano" style="display:none">
+        <div class="form-group"><label class="form-label req">Passos de Implementação</label>
+          <textarea class="form-control" id="rfc-passos" rows="8"
+            placeholder="1. Realizar backup da configuração atual&#10;2. Notificar usuários afetados&#10;3. Aplicar patch/atualização&#10;4. Testar conectividade&#10;5. Monitorar por 30 minutos&#10;6. Confirmar sucesso ou acionar rollback"></textarea></div>
+        <div class="form-row c2">
+          <div class="form-group"><label class="form-label">Recursos Necessários</label>
+            <textarea class="form-control" id="rfc-recursos" rows="3" placeholder="Técnicos, ferramentas, acessos, mídias de instalação..."></textarea></div>
+          <div class="form-group"><label class="form-label">Pré-requisitos</label>
+            <textarea class="form-control" id="rfc-prereqs" rows="3" placeholder="O que precisa estar pronto antes de iniciar?"></textarea></div>
+        </div>
+      </div>
+
+      <!-- ABA ROLLBACK -->
+      <div id="rfc-tab-rollback" style="display:none">
+        <div class="alert alert-danger"><span>🚨</span><span>O plano de rollback é <strong>obrigatório</strong> para mudanças de risco alto ou crítico. Documente exatamente como reverter a mudança se algo der errado.</span></div>
+        <div class="form-group"><label class="form-label req">Plano de Rollback</label>
+          <textarea class="form-control" id="rfc-rollback" rows="6"
+            placeholder="1. Identificar falha nos critérios de sucesso&#10;2. Notificar gestor e equipe&#10;3. Restaurar backup da configuração anterior&#10;4. Verificar funcionamento normal&#10;5. Registrar ocorrência no chamado"></textarea></div>
+        <div class="form-row c2">
+          <div class="form-group"><label class="form-label">Tempo de Rollback Estimado</label>
+            <input class="form-control" id="rfc-tempo-rollback" placeholder="Ex: 30 minutos"></div>
+          <div class="form-group"><label class="form-label">Responsável pelo Rollback</label>
+            <input class="form-control" id="rfc-resp-rollback" placeholder="Nome do técnico"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Backup realizado antes da mudança?</label>
+          <div class="radio-group" style="margin-top:6px">
+            <label class="radio-opt"><input type="radio" name="rfc-backup" value="sim"> Sim — backup confirmado</label>
+            <label class="radio-opt"><input type="radio" name="rfc-backup" value="nao" checked> Ainda não</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- ABA CAB -->
+      <div id="rfc-tab-cab" style="display:none">
+        <div class="alert alert-info"><span>📋</span><span>O <strong>CAB (Change Advisory Board)</strong> analisa RFCs de mudanças normais. Mudanças padrão são pré-aprovadas; emergenciais passam pelo CAB pós-implementação.</span></div>
+        <div class="form-row c2">
+          <div class="form-group"><label class="form-label">Data da Reunião CAB</label>
+            <input class="form-control" type="datetime-local" id="rfc-cab-data"></div>
+          <div class="form-group"><label class="form-label">Membros do CAB</label>
+            <input class="form-control" id="rfc-cab-membros" placeholder="Gestor TI, Gestor de Negócio, Técnico Sênior..."></div>
+        </div>
+        <div class="form-group"><label class="form-label">Impacto no Negócio (para o CAB)</label>
+          <textarea class="form-control" id="rfc-impacto-negocio" rows="3" placeholder="Descreva o impacto desta mudança no negócio de forma clara para os gestores não-técnicos..."></textarea></div>
+        <div class="form-group"><label class="form-label">Aprovadores Necessários</label>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="rfc-aprov-gest" style="accent-color:var(--accent)"> Gestor de TI</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="rfc-aprov-neg" style="accent-color:var(--accent)"> Gestor de Negócio</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="rfc-aprov-seg" style="accent-color:var(--accent)"> Segurança da Informação</label>
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label">Observações para o CAB</label>
+          <textarea class="form-control" id="rfc-obs-cab" rows="2" placeholder="Informações adicionais para os membros do CAB..."></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-nova-mudanca')">Cancelar</button>
+      <button class="btn btn-secondary" onclick="salvarRFC('rascunho')">💾 Salvar Rascunho</button>
+      <button class="btn btn-primary" onclick="salvarRFC('pendente-cab')">📤 Submeter ao CAB</button>
+    </div>
+  </div>
+</div>
+
+<!-- SMTP CONFIG REFERENCE -->
+    <div id="smtp-config-panel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--g0,#fff);border:1px solid var(--g200);border-radius:16px;padding:28px;width:480px;max-width:95vw;z-index:3000;box-shadow:0 24px 64px rgba(0,0,0,.2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h3 style="font-size:16px;font-weight:800;color:var(--g900)">⚙️ Configuração SMTP — Firebase Auth</h3>
+        <button onclick="document.getElementById('smtp-config-panel').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--g400)">✕</button>
+      </div>
+      <div class="alert alert-info mb-16"><span>ℹ️</span><span>Configure em: <strong>Firebase Console → Authentication → Templates → Configurações do SMTP</strong></span></div>
+      <div class="form-group"><label class="form-label">Host do servidor SMTP</label><input class="form-control" value="smtp.cesan.com.br" readonly style="font-family:'JetBrains Mono',monospace"></div>
+      <div class="form-row c2">
+        <div class="form-group"><label class="form-label">Porta</label><input class="form-control" value="587" readonly style="font-family:'JetBrains Mono',monospace"></div>
+        <div class="form-group"><label class="form-label">Modo de segurança</label><input class="form-control" value="STARTTLS" readonly></div>
+      </div>
+      <div class="form-group"><label class="form-label">Usuário SMTP</label><input class="form-control" value="ana.penha@cesan.com.br" readonly style="font-family:'JetBrains Mono',monospace"></div>
+      <div class="form-group"><label class="form-label">Endereço do remetente</label><input class="form-control" value="ana.penha@cesan.com.br" readonly style="font-family:'JetBrains Mono',monospace"></div>
+      <div class="alert alert-warning"><span>⚠️</span><span>A <strong>senha</strong> do SMTP deve ser inserida diretamente no Firebase Console. Nunca armazene senhas no código.</span></div>
+      <div style="margin-top:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:8px">Para Cloud Functions (firebase secrets):</div>
+        <div style="background:#0A0F1E;color:#10B981;font-family:'JetBrains Mono',monospace;font-size:11.5px;padding:12px;border-radius:8px;line-height:1.8">
+          firebase functions:secrets:set SMTP_HOST<br>
+          firebase functions:secrets:set SMTP_PORT<br>
+          firebase functions:secrets:set SMTP_USER<br>
+          firebase functions:secrets:set SMTP_PASS<br>
+          firebase functions:secrets:set SMTP_FROM
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="document.getElementById('smtp-config-panel').style.display='none'">Entendido</button>
+    </div>
+
     <div class="page" id="page-alertas">
       <div class="flex items-center justify-between mb-20">
         <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Alertas</h2><p class="text-sm text-muted mt-8">Alertas automáticos do sistema</p></div>
@@ -1594,7 +1998,7 @@ textarea.form-control{resize:vertical;min-height:80px}
     <div style="padding:14px 20px 0;border-bottom:1px solid var(--g100);background:#fff">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
         <div style="width:32px;height:32px;background:var(--g700);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:11px;flex-shrink:0" id="ch-avatar-iniciais">??</div>
-        <input id="ch-titulo" class="form-control" style="font-size:15px;font-weight:700;border:none;border-bottom:2px solid var(--g200);border-radius:0;padding:4px 0;flex:1;background:transparent" placeholder="Título do chamado..." oninput="atualizarIniciais()">
+        <input id="ch-titulo" onblur="if(this.value.length>10)mostrarSugestaoAIchamado(this.value,document.getElementById('ch-desc')?.value||'')" class="form-control" style="font-size:15px;font-weight:700;border:none;border-bottom:2px solid var(--g200);border-radius:0;padding:4px 0;flex:1;background:transparent" placeholder="Título do chamado..." oninput="atualizarIniciais()">
         <span style="font-size:12px;color:var(--g400);white-space:nowrap" id="ch-numero-display">#NOVO</span>
       </div>
       <!-- ABAS estilo GLPI -->
@@ -1683,7 +2087,7 @@ textarea.form-control{resize:vertical;min-height:80px}
             <div class="ch-prop-row">
               <label class="ch-prop-label">Entidade</label>
               <select class="form-control ch-prop-ctrl" id="ch-entidade">
-                <option>A-DSI</option><option>A-GTI</option><option>TI Corporativo</option>
+                <option>SYSACK</option><option>A-GTI</option><option>TI Corporativo</option>
               </select>
             </div>
             <div class="ch-prop-row">
@@ -2220,7 +2624,7 @@ textarea.form-control{resize:vertical;min-height:80px}
           <select class="form-control" id="ret-patrimonio"><option value="">Selecione o ativo...</option></select>
         </div>
         <div class="form-group">
-          <label class="form-label req">Técnico A-DSI que Recebeu</label>
+          <label class="form-label req">Técnico SYSACK que Recebeu</label>
           <select class="form-control" id="ret-tecnico-adsi"><option value="">Selecione...</option></select>
         </div>
       </div>
@@ -2551,6 +2955,59 @@ textarea.form-control{resize:vertical;min-height:80px}
 </div>
 
 
+<!-- AI CHAT PANEL -->
+<div class="ai-panel" id="ai-panel">
+  <div class="ai-panel-header">
+    <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#2563EB,#7C3AED);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="white" stroke-width="1.5" opacity=".5"/><circle cx="12" cy="12" r="4" fill="white"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div>
+      <div class="ai-panel-title">Assistente IA — SYSACK</div>
+      <div class="ai-model-badge">Gemini 1.5 Flash · Firebase Genkit</div>
+    </div>
+    <button onclick="toggleAIPanel()" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,.5);font-size:18px;margin-left:auto">✕</button>
+  </div>
+
+  <!-- Quick action chips -->
+  <div class="ai-quick-chips">
+    <div class="ai-quick-chip" onclick="aiQuickAction('quantos chamados estão abertos agora?')">📊 Chamados abertos</div>
+    <div class="ai-quick-chip" onclick="aiQuickAction('qual é o SLA atual?')">🎯 SLA atual</div>
+    <div class="ai-quick-chip" onclick="aiQuickAction('há algum ativo em manutenção?')">🔧 Ativos em manutenção</div>
+    <div class="ai-quick-chip" onclick="aiQuickAction('mostre os alertas críticos')">🚨 Alertas críticos</div>
+    <div class="ai-quick-chip" onclick="aiQuickAction('quais smartphones estão offline?')">📱 MDM status</div>
+    <div class="ai-quick-chip" onclick="aiQuickAction('gere um resumo executivo do dia')">📋 Resumo do dia</div>
+  </div>
+
+  <!-- Messages -->
+  <div class="ai-messages" id="ai-messages">
+    <div class="ai-msg ai">
+      <div class="ai-avatar">✨</div>
+      <div>
+        <div class="ai-bubble">
+          Olá! Sou o assistente de IA do <strong>SYSACK</strong>, operado por Gemini via Firebase Genkit.<br><br>
+          Posso ajudar com análise de chamados, insights operacionais, status de ativos e muito mais.<br><br>
+          Como posso ajudar você hoje?
+        </div>
+        <div class="ai-actions-bar">
+          <div class="ai-action-btn" onclick="aiQuickAction('analise os chamados em aberto')">📊 Analisar chamados</div>
+          <div class="ai-action-btn" onclick="rodarAnaliseCompleta()">✨ Insights completos</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="ai-input-bar">
+    <textarea class="ai-input" id="ai-input" placeholder="Pergunte algo sobre o sistema..." rows="1"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMsgAI()}"
+      oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+    <button class="ai-send-btn" onclick="enviarMsgAI()" title="Enviar">
+      <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Scanner overlay -->
 <!-- SCANNER DE PATRIMÔNIO (QR Code / Código de Barras / Câmera) -->
 <div class="scanner-modal-overlay" id="scanner-overlay">
   <div style="width:min(380px,95vw);text-align:center">
@@ -2823,6 +3280,15 @@ async function initFirebase() {
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     db   = getFirestore(app);
     auth = getAuth(app);
+    // Firebase App Check com reCAPTCHA v3
+    try {
+      const acMod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js');
+      acMod.initializeAppCheck(app, {
+        provider: new acMod.ReCaptchaV3Provider('6LciCuUsAAAADjlcurM26D7fGpMjdyCeFLDNUOG'),
+        isTokenAutoRefreshEnabled: true,
+      });
+      console.log('[AppCheck] reCAPTCHA v3 ativo');
+    } catch(e){ console.warn('[AppCheck]', e.message); }
     FB_READY = true;
 
     await enableIndexedDbPersistence(db).catch(e => {
@@ -3052,8 +3518,8 @@ function initSeedData() {
 // NAVIGATION
 // ============================================================
 const PAGE_LABELS = {
-  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', chamados:'Chamados', ativos:'Ativos',
-  movimentacoes:'Movimentações', terceirizada:'Empresa Terceirizada',
+  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', 'ai-dashboard':'IA & Insights', chamados:'Chamados', ativos:'Ativos',
+  movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
   mdm:'Smartphones / MDM', switches:'Switches & Roteadores', apps:'Apps structures',
@@ -3082,9 +3548,11 @@ function renderPage(id) {
   const map = {
     dashboard:       () => renderDashboard(),
     'exec-dashboard':() => renderExecDashboard(),
+    'ai-dashboard':  () => renderAIDashboard(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
+    'mudancas-itil': () => renderMudancasITIL(),
     terceirizada:    () => renderTerceirizada(),
     'santa-clara':   () => renderSantaClara(),
     aprovacoes:      () => renderAprovacoes(),
@@ -3403,7 +3871,7 @@ function abrirHistorico(pat) {
   const movs = STATE.movimentacoes.filter(m=>m.pat===pat);
   const chs  = STATE.chamados.filter(c=>c.pat===pat);
   const entries = [
-    {dot:'green', title:'Cadastro inicial no sistema', desc:`Patrimônio ${pat} registrado no Asset Tools`, time: ativo?fmtDate(ativo.createdAt):'—'},
+    {dot:'green', title:'Cadastro inicial no sistema', desc:`Patrimônio ${pat} registrado no SYSACK`, time: ativo?fmtDate(ativo.createdAt):'—'},
     ...chs.map(c=>({dot:'blue', title:`Chamado ${c.id} — ${tipoLabel(c.tipo)}`, desc:c.desc.slice(0,60), time:fmtDate(c.createdAt)})),
     ...movs.map(m=>({dot:m.tipo==='Terceirizada'?'orange':m.tipo==='Santa Clara'?'violet':'blue', title:`${m.tipo}: ${m.de} → ${m.para}`, desc:`Técnico: ${m.tecnico} · Aprovação: ${m.status}`, time:fmtDate(m.data)})),
   ].sort((a,b)=>0);
@@ -3581,9 +4049,9 @@ async function fazerLogin() {
   }
 
   // ── Tentativa 2: usuários locais (offline / desenvolvimento) ─
-  await new Promise(r => setTimeout(r, 600)); // simula latência
-  const key = emailInput.toLowerCase();
-  const local = LOCAL_USERS[key] || LOCAL_USERS[emailInput];
+  await new Promise(r => setTimeout(r, 600));
+  // Tenta com o valor original (ex: 'admin') e com o normalizado
+  const local = LOCAL_USERS[emailRaw.toLowerCase()] || LOCAL_USERS[emailInput.toLowerCase()] || LOCAL_USERS[emailRaw];
   if (local && local.password === senha) {
     const user = {
       uid:    local.uid,
@@ -3632,7 +4100,7 @@ function loginSuccess(user, showWelcome = true) {
   const uname = document.querySelector('.u-name');
   if (uname) uname.textContent = user.nome;
   const urole = document.querySelector('.u-role');
-  if (urole) urole.textContent = user.role.charAt(0).toUpperCase() + user.role.slice(1) + ' · A-DSI';
+  if (urole) urole.textContent = user.role.charAt(0).toUpperCase() + user.role.slice(1) + ' · SYSACK';
   const uav = document.querySelector('.u-avatar');
   if (uav) uav.textContent = user.avatar || user.nome[0];
 
@@ -3643,7 +4111,7 @@ function loginSuccess(user, showWelcome = true) {
   if (showWelcome) {
     const hora = new Date().getHours();
     const saud = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
-    showToast(`${saud}, ${user.nome.split(' ')[0]}! 👋 Bem-vindo ao Asset Tools.`, 'success');
+    showToast(`${saud}, ${user.nome.split(' ')[0]}! 👋 Bem-vindo ao SYSACK.`, 'success');
   }
   auditLog('LOGIN', 'auth', user.uid, 'user', { nome: user.nome, role: user.role });
 }
@@ -3672,11 +4140,10 @@ async function fazerLogout() {
 
 // ─── Esqueci a senha ─────────────────────────────────────────
 async function esqueciSenha() {
-  const email = document.getElementById('login-email')?.value?.trim();
-  if (!email) {
-    showLoginError('Digite seu e-mail no campo acima para resetar a senha.');
-    return;
-  }
+  const emailRaw = document.getElementById('login-email')?.value?.trim();
+  if (!emailRaw) { showLoginError('Digite seu e-mail ou usuário no campo acima.'); return; }
+  // Normaliza antes de enviar ao Firebase
+  const email = emailRaw.includes('@') ? emailRaw : emailRaw + '@adsi.com.br';
   if (FB_READY && auth && window._fbModules?.sendPasswordResetEmail) {
     try {
       await window._fbModules.sendPasswordResetEmail(auth, email);
@@ -4236,7 +4703,7 @@ function salvarAtendimento() {
   closeModal('modal-atender-chamado');
   const destino = document.getElementById('at-destino-antigo').value;
   if (destino==='terceirizada') {
-    const aprov = { id:'ap'+Date.now(), tipo:'Envio para Terceirizada', pat:document.getElementById('at-patrimonio').value||'—', ativo:'—', solicitante:'Técnico A-DSI', data:new Date(), status:'pendente', obs:'' };
+    const aprov = { id:'ap'+Date.now(), tipo:'Envio para Terceirizada', pat:document.getElementById('at-patrimonio').value||'—', ativo:'—', solicitante:'Técnico SYSACK', data:new Date(), status:'pendente', obs:'' };
     STATE.aprovacoes.unshift(aprov);
     // TODO Firebase + SMTP: enviar email gestor
     showToast('⏳ Enviado para aprovação do gestor', 'warning');
@@ -4531,8 +4998,31 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="form-group"><label class="form-label req">Modelo</label><input class="form-control" id="sm-modelo" placeholder="Ex: Galaxy A54, iPhone 13..."></div>
         </div>
         <div class="form-row c2">
-          <div class="form-group"><label class="form-label req">IMEI 1</label><input class="form-control imei-field" id="sm-imei1" placeholder="000000000000000" maxlength="17"></div>
-          <div class="form-group"><label class="form-label">IMEI 2 (dual SIM)</label><input class="form-control imei-field" id="sm-imei2" placeholder="000000000000000" maxlength="17"></div>
+          <div class="form-group">
+            <label class="form-label req">IMEI 1</label>
+            <div class="pat-input-group">
+              <input class="form-control imei-field" id="sm-imei1" placeholder="000000000000000" maxlength="17"
+                oninput="validarIMEILive('sm-imei1')" style="font-family:'JetBrains Mono',monospace;letter-spacing:.05em">
+              <button class="pat-scan-btn" type="button" onclick="openScanner('sm-imei1', processarIMEIScaneado)" title="Ler IMEI por câmera — *#06# mostra o IMEI na tela">
+                <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="10" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="1" y="10" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M10 10h2v2h-2v2h2M14 10v2M14 14h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                📷
+              </button>
+            </div>
+            <div class="imei-status" id="imei1-status" style="font-size:11px;margin-top:4px;display:none"></div>
+            <div style="font-size:10.5px;color:var(--g400);margin-top:3px">📷 Câmera (código de barras/QR) &nbsp;·&nbsp; ⌨️ Manual &nbsp;·&nbsp; 💡 Dica: digite *#06# no aparelho</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">IMEI 2 (dual SIM)</label>
+            <div class="pat-input-group">
+              <input class="form-control imei-field" id="sm-imei2" placeholder="000000000000000" maxlength="17"
+                oninput="validarIMEILive('sm-imei2')" style="font-family:'JetBrains Mono',monospace;letter-spacing:.05em">
+              <button class="pat-scan-btn" type="button" onclick="openScanner('sm-imei2', processarIMEIScaneado)" title="Ler IMEI 2">
+                <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="10" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="1" y="10" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M10 10h2v2h-2v2h2M14 10v2M14 14h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                📷
+              </button>
+            </div>
+            <div class="imei-status" id="imei2-status" style="font-size:11px;margin-top:4px;display:none"></div>
+          </div>
         </div>
         <div class="form-row c3">
           <div class="form-group"><label class="form-label">Número da Linha / Chip</label><input class="form-control" id="sm-linha" placeholder="(27) 99999-9999"></div>
@@ -4676,7 +5166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div><h4>Atenção — LGPD</h4><p id="mdm-action-lgpd-text">Esta ação envolve dados pessoais. O motivo é obrigatório e ficará registrado em log de auditoria.</p></div>
       </div>
       <div class="form-group"><label class="form-label req">Motivo / Justificativa</label><textarea class="form-control" id="mdm-action-motivo" rows="3" placeholder="Descreva o motivo desta ação..."></textarea></div>
-      <div class="consent-check"><label><input type="checkbox" id="mdm-action-consent"><span>Confirmo que esta ação está em conformidade com as políticas de uso da A-DSI.</span></label></div>
+      <div class="consent-check"><label><input type="checkbox" id="mdm-action-consent"><span>Confirmo que esta ação está em conformidade com as políticas de uso do SYSACK.</span></label></div>
       <div class="alert alert-warning mt-8" id="mdm-action-warn" style="display:none"><span>⚠️</span><span id="mdm-action-warn-text"></span></div>
     </div>
     <div class="modal-footer">
@@ -5476,7 +5966,7 @@ function gerarTermoSm(id) {
   document.getElementById('termo-preview-content').innerHTML = `
     <div style="font-size:12px;line-height:1.8;color:var(--g800)">
       <div style="text-align:center;font-weight:800;font-size:14px;margin-bottom:12px">TERMO DE RESPONSABILIDADE — DISPOSITIVO MÓVEL CORPORATIVO</div>
-      <div style="text-align:center;color:var(--g500);margin-bottom:16px;font-size:11.5px">A-DSI · ${new Date().toLocaleDateString('pt-BR')}</div>
+      <div style="text-align:center;color:var(--g500);margin-bottom:16px;font-size:11.5px">SYSACK · ${new Date().toLocaleDateString('pt-BR')}</div>
       <p>Eu, <strong>${sm.empNome||'_______________'}</strong>, matrícula <strong>${sm.empMat||'_______'}</strong>, lotado no setor de <strong>${sm.empSetor||'_______________'}</strong>, declaro ter recebido em perfeito estado de funcionamento o seguinte dispositivo móvel:</p>
       <div style="background:var(--g100);border-radius:6px;padding:10px 14px;margin:12px 0;font-size:11.5px">
         <div><strong>Patrimônio:</strong> ${sm.pat}</div>
@@ -5490,7 +5980,7 @@ function gerarTermoSm(id) {
       <p>Declaro ainda estar ciente de que o dispositivo poderá ser monitorado e gerenciado remotamente, conforme as políticas de uso da empresa e em conformidade com a LGPD.</p>
       <div style="margin-top:20px;display:flex;gap:24px">
         <div style="flex:1;border-top:1px solid var(--g400);padding-top:6px;text-align:center;font-size:11px">Assinatura do Empregado</div>
-        <div style="flex:1;border-top:1px solid var(--g400);padding-top:6px;text-align:center;font-size:11px">Assinatura Responsável TI / A-DSI</div>
+        <div style="flex:1;border-top:1px solid var(--g400);padding-top:6px;text-align:center;font-size:11px">Assinatura Responsável TI / SYSACK</div>
       </div>
     </div>`;
   openModal('modal-gerar-termo');
@@ -5927,6 +6417,73 @@ function salvarMobiliario() {
 }
 
 // ============================================================
+// IMEI — VALIDAÇÃO EM TEMPO REAL + PROCESSAMENTO DE SCAN
+// ============================================================
+
+/**
+ * Algoritmo de Luhn — valida IMEI de 15 dígitos
+ * IMEIs também vêm em formato XX-XXXXXX-XXXXXX-X (com hífens)
+ */
+function validarIMEI(imei) {
+  const digits = imei.replace(/[\s\-]/g, '');
+  if (digits.length !== 15 || !/^\d+$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = 0; i < 15; i++) {
+    let d = parseInt(digits[i]);
+    if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+  }
+  return sum % 10 === 0;
+}
+
+function validarIMEILive(inputId) {
+  const el  = document.getElementById(inputId);
+  const statusEl = document.getElementById(inputId.replace('sm-imei', 'imei') + '-status');
+  if (!el || !statusEl) return;
+  const val = el.value.replace(/[\s\-]/g, '');
+  if (!val) { statusEl.style.display = 'none'; return; }
+  statusEl.style.display = '';
+  if (val.length < 15) {
+    statusEl.innerHTML = `<span style="color:var(--g400)">⌛ ${val.length}/15 dígitos</span>`;
+    return;
+  }
+  if (validarIMEI(val)) {
+    statusEl.innerHTML = '<span style="color:var(--success);font-weight:600">✓ IMEI válido (Luhn OK)</span>';
+    el.style.borderColor = 'var(--success)';
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--danger);font-weight:600">✕ IMEI inválido — verifique os dígitos</span>';
+    el.style.borderColor = 'var(--danger)';
+  }
+}
+
+/**
+ * Processa IMEI lido pela câmera
+ * O código de barras do IMEI pode vir com/sem prefixo, hífens etc.
+ * Formatos conhecidos: 
+ *   - "351234567890123" (puro)
+ *   - "35-123456-789012-3" (hifenizado)
+ *   - "IMEI:351234567890123" (prefixo)
+ *   - "01/351234567890123/..." (GS1-128 com Application Identifier 01)
+ */
+function processarIMEIScaneado(valor) {
+  // Remove espaços e hífens
+  let clean = valor.replace(/[\s\-]/g, '');
+  // Remove prefixo "IMEI:" se presente
+  clean = clean.replace(/^IMEI:?/i, '');
+  // GS1-128: "01" + 14 dígitos (EAN-14) → extrai os 15 dígitos do IMEI
+  if (/^01\d{14}/.test(clean)) clean = clean.slice(2, 17);
+  // Se ainda tiver 16 dígitos, remove o primeiro (TAC check digit)
+  if (clean.length === 16 && /^\d+$/.test(clean)) clean = clean.slice(1);
+  return clean;
+}
+
+// Dica: como ler IMEI por câmera
+// 1. Câmera do celular → caixa do aparelho (código de barras GS1-128)
+// 2. Câmera → tela do aparelho com *#06# digitado (QR Code em alguns modelos)
+// 3. Câmera → etiqueta colada no aparelho
+// 4. Manual: digitar os 15 números exibidos em *#06#
+
+// ============================================================
 // PATRIMÔNIO SCANNER — QR Code / Barcode / Camera / Manual
 // ============================================================
 let _scannerCallback = null;
@@ -5935,12 +6492,21 @@ let _videoStream    = null;
 let _cameraIndex    = 0;
 let _cameraDevices  = [];
 
-async function openScanner(fieldId, callback) {
+async function openScanner(fieldId, processor, callback) {
   // fieldId: id do input que receberá o valor lido
+  // processor: função opcional que transforma o valor bruto (ex: processarIMEIScaneado)
   // callback: função opcional chamada após leitura
   _scannerCallback = callback || ((val) => {
+    const processed = typeof processor === 'function' ? processor(val) : val;
     const el = document.getElementById(fieldId);
-    if (el) { el.value = val; el.focus(); }
+    if (el) {
+      el.value = processed;
+      el.focus();
+      // Dispara validação se for IMEI
+      if (fieldId.startsWith('sm-imei')) validarIMEILive(fieldId);
+      // Dispara validação de patrimônio se for PAT
+      if (processed) el.dispatchEvent(new Event('input'));
+    }
   });
   const overlay = document.getElementById('scanner-overlay');
   if (!overlay) return;
@@ -6093,6 +6659,820 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('[data-mob-tab]').forEach(t=>t.classList.remove('active'));
       tab.classList.add('active');
       renderMobiliario(tab.dataset.mobTab);
+    });
+  });
+});
+
+// ============================================================
+// AI ENGINE — Gemini via Firebase Genkit
+// ============================================================
+
+const FUNCTIONS_BASE = 'https://us-central1-sysack-829e2.cloudfunctions.net';
+let _aiChatHistory = [];
+let _aiAnalyzing   = false;
+
+// ─── Contexto atual do sistema para a IA ──────────────────────
+function getAIContext() {
+  const chamados    = STATE.chamados || [];
+  const ativos      = STATE.ativos   || [];
+  const smartphones = STATE.smartphones || [];
+  return {
+    totalChamados:  chamados.filter(c => !['fechado','concluido'].includes(c.status)).length,
+    ativosEmUso:    ativos.filter(a => a.status === 'ativo').length,
+    slaPct:         calcSLAPct(chamados),
+    mttr:           calcMTTRGlobal(chamados),
+    alertas: [
+      ...smartphones.filter(s => s.status === 'extraviado').map(s => `Smartphone extraviado: ${s.pat}`),
+      ...ativos.filter(a => a.status === 'terceirizada').map(a => `Ativo na terceirizada: ${a.pat}`),
+    ],
+    userRole: CURRENT_USER?.role || 'tecnico',
+  };
+}
+
+function calcSLAPct(chamados) {
+  if (!chamados.length) return 92;
+  const ok = chamados.filter(c => c.slaAtingido !== false).length;
+  return Math.round(ok / chamados.length * 100);
+}
+function calcMTTRGlobal(chamados) {
+  const fechados = chamados.filter(c => c.mttrMinutos > 0);
+  if (!fechados.length) return 4.2;
+  return Math.round(fechados.reduce((s,c) => s + c.mttrMinutos, 0) / fechados.length / 60 * 10) / 10;
+}
+
+// ─── Chat Panel toggle ─────────────────────────────────────────
+function toggleAIPanel() {
+  const panel = document.getElementById('ai-panel');
+  panel?.classList.toggle('open');
+  if (panel?.classList.contains('open')) {
+    document.getElementById('ai-input')?.focus();
+  }
+}
+
+// ─── Enviar mensagem ao chatbot ────────────────────────────────
+async function enviarMsgAI() {
+  const input = document.getElementById('ai-input');
+  const msg   = input?.value?.trim();
+  if (!msg) return;
+  input.value = '';
+  input.style.height = 'auto';
+  addAIMessage('user', msg);
+  await processarMsgAI(msg);
+}
+
+function aiQuickAction(msg) {
+  const input = document.getElementById('ai-input');
+  if (input) input.value = msg;
+  enviarMsgAI();
+  // Abre o painel se fechado
+  document.getElementById('ai-panel')?.classList.add('open');
+}
+
+async function processarMsgAI(msg) {
+  const typingId = addAITyping();
+  try {
+    _aiChatHistory.push({ role: 'user', content: msg });
+    // Mantém histórico compacto (últimas 10 mensagens)
+    if (_aiChatHistory.length > 10) _aiChatHistory = _aiChatHistory.slice(-10);
+
+    const result = await callGenkitFlow('chatbotADSI', {
+      mensagem:  msg,
+      historico: _aiChatHistory.slice(0,-1),
+      contexto:  getAIContext(),
+    });
+
+    removeAITyping(typingId);
+    const resposta = result?.resposta || result?.response || 'Desculpe, não consegui processar sua mensagem.';
+    _aiChatHistory.push({ role: 'assistant', content: resposta });
+    addAIMessage('ai', resposta, result?.acoesSugeridas || []);
+  } catch (err) {
+    removeAITyping(typingId);
+    // Fallback local
+    const respFallback = respostaLocalAI(msg);
+    addAIMessage('ai', respFallback.resposta, respFallback.acoes);
+  }
+}
+
+// ─── Respostas locais (offline / sem Functions) ────────────────
+function respostaLocalAI(msg) {
+  const m = msg.toLowerCase();
+  const ctx = getAIContext();
+  if (m.includes('chamado') && (m.includes('quantos') || m.includes('aberto'))) {
+    return { resposta: `Há atualmente **${ctx.totalChamados}** chamados em aberto no sistema. O SLA geral está em **${ctx.slaPct}%** (meta: 95%).`, acoes: [{ label:'Ver Chamados', action:'goPage:chamados' }] };
+  }
+  if (m.includes('sla')) {
+    const status = ctx.slaPct >= 95 ? '✅ dentro da meta' : ctx.slaPct >= 80 ? '⚠️ abaixo da meta' : '🚨 crítico';
+    return { resposta: `SLA atual: **${ctx.slaPct}%** — ${status}. Meta definida: 95%. MTTR médio: **${ctx.mttr}h** (meta: <8h).`, acoes: [{ label:'Dashboard Executivo', action:'goPage:exec-dashboard' }] };
+  }
+  if (m.includes('ativo') || m.includes('inventário')) {
+    return { resposta: `Inventário atual: **${ctx.ativosEmUso}** ativos em uso. Acesse o módulo Ativos para ver detalhes completos.`, acoes: [{ label:'Ver Ativos', action:'goPage:ativos' }] };
+  }
+  if (m.includes('smartphone') || m.includes('mdm') || m.includes('celular')) {
+    const sm = STATE.smartphones || [];
+    const problemas = sm.filter(s => s.status !== 'uso').length;
+    return { resposta: `MDM: **${sm.length}** smartphones cadastrados. **${problemas}** com status anormal.${ctx.alertas.length ? ' ⚠️ ' + ctx.alertas[0] : ''}`, acoes: [{ label:'Ver MDM', action:'goPage:mdm' }] };
+  }
+  if (m.includes('alerta') || m.includes('crítico') || m.includes('urgente')) {
+    const alertas = ctx.alertas.length ? ctx.alertas.join('\n\u2022 ') : 'Nenhum alerta crítico no momento';
+    return { resposta: '**Alertas ativos:**\n\u2022 ' + alertas, acoes: [{ label:'Ver Dashboard', action:'goPage:dashboard' }] };
+  }
+  if (m.includes('resumo') || m.includes('relatório') || m.includes('executivo')) {
+    return { resposta: '**Resumo Operacional \u2014 ' + new Date().toLocaleDateString('pt-BR') + '**\n\n\U0001f4ca **' + ctx.totalChamados + '** chamados em aberto\n\U0001f3af SLA: **' + ctx.slaPct + '%**\n\u23f1 MTTR: **' + ctx.mttr + 'h**\n\U0001f4bb Ativos em uso: **' + ctx.ativosEmUso + '**', acoes: [{ label:'Dashboard Executivo', action:'goPage:exec-dashboard' }, { label:'IA & Insights', action:'goPage:ai-dashboard' }] };
+  }
+  return { resposta: `Entendi sua pergunta sobre "${msg}". Para melhores respostas, conecte o Firebase Genkit com a chave da API Gemini. Por enquanto, posso responder sobre chamados, ativos, SLA, MDM e alertas usando os dados locais.`, acoes: [] };
+}
+
+// ─── Chamada ao Genkit Flow ────────────────────────────────────
+async function callGenkitFlow(flowName, input) {
+  const res = await fetch(`${FUNCTIONS_BASE}/${flowName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
+// ─── AI messages DOM ──────────────────────────────────────────
+function addAIMessage(role, text, acoes = []) {
+  const container = document.getElementById('ai-messages');
+  if (!container) return;
+  const isAI = role === 'ai' || role === 'assistant';
+  const div   = document.createElement('div');
+  div.className = `ai-msg ${isAI ? 'ai' : 'user'}`;
+  // Converte markdown básico
+  const html = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code style="background:var(--g100);padding:1px 5px;border-radius:4px;font-family:JetBrains Mono,monospace;font-size:11px">$1</code>')
+    .replace(/\n/g, '<br>');
+  div.innerHTML = `
+    <div class="ai-avatar">${isAI ? '✨' : (CURRENT_USER?.avatar || '👤')}</div>
+    <div>
+      <div class="ai-bubble">${html}</div>
+      ${acoes.length ? `<div class="ai-actions-bar">${acoes.map(a =>
+        `<div class="ai-action-btn" onclick="${parseAIAction(a.action)}">${a.label}</div>`
+      ).join('')}</div>` : ''}
+    </div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function parseAIAction(action) {
+  if (action.startsWith('goPage:'))    return `goPage('${action.split(':')[1]}')`;
+  if (action.startsWith('openModal:')) return `openModal('${action.split(':')[1]}')`;
+  return `console.log('${action}')`;
+}
+
+function addAITyping() {
+  const container = document.getElementById('ai-messages');
+  if (!container) return null;
+  const div = document.createElement('div');
+  div.className = 'ai-msg ai';
+  div.id = 'typing-' + Date.now();
+  div.innerHTML = `<div class="ai-avatar">✨</div><div class="ai-bubble"><div class="ai-typing"><span></span><span></span><span></span></div></div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div.id;
+}
+
+function removeAITyping(id) {
+  document.getElementById(id)?.remove();
+}
+
+// ─── ANÁLISE COMPLETA (Dashboard IA) ──────────────────────────
+async function rodarAnaliseCompleta() {
+  if (_aiAnalyzing) return;
+  _aiAnalyzing = true;
+
+  const btn = document.querySelector('button[onclick="rodarAnaliseCompleta()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="animation:spin .7s linear infinite;margin-right:4px"><path d="M8 1v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 12v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".3"/><path d="M1 8h3" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".3"/><path d="M12 8h3" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".6"/></svg> Analisando...'; }
+
+  const chamados    = STATE.chamados || [];
+  const ativos      = STATE.ativos   || [];
+  const smartphones = STATE.smartphones || [];
+
+  const kpis = {
+    totalChamados:   chamados.length,
+    abertos:         chamados.filter(c => !['fechado','concluido'].includes(c.status)).length,
+    slaPct:          calcSLAPct(chamados),
+    mttrHoras:       calcMTTRGlobal(chamados),
+    totalAtivos:     ativos.length,
+    ativosObsoletos: 2,  // estimado
+    mdmCompliance:   smartphones.length ? Math.round(smartphones.filter(s=>s.status==='uso').length/smartphones.length*100) : 80,
+    valorParque:     729000,
+    garantiasVenc:   2,
+  };
+
+  const topCats = Object.entries(
+    chamados.reduce((acc, c) => { acc[c.categoria||'Outros'] = (acc[c.categoria||'Outros']||0)+1; return acc; }, {})
+  ).sort(([,a],[,b]) => b-a).slice(0,5).map(([cat,count]) => ({ cat, count }));
+
+  const alertas = [
+    ...smartphones.filter(s => s.status === 'extraviado').map(s => `Smartphone extraviado: ${s.pat}`),
+    ...ativos.filter(a => a.status === 'terceirizada').map(a => `Ativo na terceirizada: ${a.pat}`),
+    ...(kpis.slaPct < 95 ? [`SLA abaixo da meta: ${kpis.slaPct}%`] : []),
+  ];
+
+  try {
+    const insights = await callGenkitFlow('gerarInsightsExecutivos', {
+      periodo: 'últimos 30 dias', kpis, topCategorias: topCats, alertasAtivos: alertas,
+    });
+    renderAIInsights(insights);
+  } catch {
+    // Fallback local
+    renderAIInsights(gerarInsightsLocais(kpis, alertas));
+  }
+
+  // Triagem de chamados abertos
+  await triagemAutoDisplay(chamados.filter(c => !c.triageStatus && !['fechado','concluido'].includes(c.status)).slice(0,5));
+
+  if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:4px"><path d="M8 1v3M8 12v3M1 8h3M12 8h3M3.05 3.05l2.12 2.12M10.83 10.83l2.12 2.12M3.05 12.95l2.12-2.12M10.83 5.17l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Analisar Novamente'; }
+  _aiAnalyzing = false;
+}
+
+function renderAIInsights(data) {
+  if (!data) return;
+  const score = data.scoreOperacional || 75;
+  // Score ring animation
+  const arc = document.getElementById('ai-score-arc');
+  const num = document.getElementById('ai-score-num');
+  const lbl = document.getElementById('ai-score-label');
+  if (arc) { setTimeout(() => { arc.style.strokeDashoffset = 327 - (327 * score / 100); }, 100); }
+  if (num) num.textContent = score;
+  if (lbl) lbl.textContent = score >= 80 ? '✅ Operação Saudável' : score >= 60 ? '⚠️ Atenção Necessária' : '🚨 Situação Crítica';
+  const resumoEl = document.getElementById('ai-resumo-exec');
+  if (resumoEl) resumoEl.innerHTML = `<p style="color:var(--g700);line-height:1.7">${(data.resumoExecutivo||'').replace(/\n/g,'<br>')}</p>`;
+
+  // Insights grid
+  const grid = document.getElementById('ai-insights-grid');
+  const insightCount = document.getElementById('ai-insights-count');
+  if (grid && data.insights?.length) {
+    if (insightCount) insightCount.textContent = `${data.insights.length} insights`;
+    grid.innerHTML = data.insights.map(ins => `
+      <div class="ai-insight-card ${ins.impacto}">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:700;color:var(--g800)">${ins.titulo}</div>
+          <span class="badge ${ins.impacto==='alto'?'badge-danger':ins.impacto==='medio'?'badge-warning':'badge-success'}">${ins.impacto}</span>
+        </div>
+        <p style="font-size:12.5px;color:var(--g600);margin:0 0 8px;line-height:1.55">${ins.desc}</p>
+        <div style="font-size:11.5px;color:var(--accent);font-weight:600">→ ${ins.acao}</div>
+      </div>`).join('');
+  }
+
+  // Riscos
+  const riscosEl = document.getElementById('ai-riscos-list');
+  if (riscosEl && data.riscos?.length) {
+    riscosEl.innerHTML = data.riscos.map(r => `
+      <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--g100);font-size:12.5px">
+        <span style="background:${r.nivel==='critico'?'var(--danger)':r.nivel==='alto'?'#EA580C':r.nivel==='medio'?'var(--warning)':'var(--success)'};color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;height:fit-content;white-space:nowrap;flex-shrink:0">${r.nivel.toUpperCase()}</span>
+        <div><div style="font-weight:600;color:var(--g800);margin-bottom:2px">${r.risco}</div><div style="color:var(--g500);font-size:11.5px">${r.mitigacao}</div></div>
+      </div>`).join('');
+  }
+
+  // Recomendações
+  const recsEl = document.getElementById('ai-recomendacoes');
+  if (recsEl && data.recomendacoes?.length) {
+    recsEl.innerHTML = data.recomendacoes.map((r,i) => `
+      <div style="display:flex;gap:10px;padding:8px;background:var(--g50);border-radius:8px;font-size:13px">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${i+1}</span>
+        <span style="color:var(--g700)">${r}</span>
+      </div>`).join('');
+  }
+
+  // Anomalias (detectadas localmente)
+  renderAnomalias();
+}
+
+// ─── Triagem automática display ────────────────────────────────
+async function triagemAutoDisplay(chamados) {
+  const tbody = document.getElementById('ai-triage-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = chamados.map(c => `
+    <tr id="triage-row-${c.id}">
+      <td class="td-mono" style="color:var(--accent)">${c.id}</td>
+      <td style="max-width:200px;font-size:12px">${c.desc?.slice(0,50)||'—'}...</td>
+      <td><div class="ai-typing"><span></span><span></span><span></span></div></td>
+      <td><div class="ai-typing"><span></span><span></span><span></span></div></td>
+      <td>—</td><td>—</td><td>—</td>
+      <td><button class="btn btn-ghost btn-xs">⏳</button></td>
+    </tr>`).join('');
+
+  for (const c of chamados) {
+    try {
+      let result;
+      try {
+        result = await callGenkitFlow('analisarChamado', {
+          titulo: c.desc?.slice(0,80) || 'Chamado',
+          desc:   c.desc || '',
+          categoria: c.categoria,
+          area:   c.area,
+        });
+      } catch {
+        result = {
+          prioridade: c.prioridade || 'media',
+          categoriaAI: c.categoria || 'Infraestrutura',
+          subcategoriaAI: 'Demais solicitações',
+          tipo: c.tipo || 'incidente',
+          tempoEstimado: '2 horas',
+          confianca: 40,
+          _offline: true,
+        };
+      }
+
+      const row = document.getElementById(`triage-row-${c.id}`);
+      if (!row) continue;
+      const priColor = { urgente:'danger','muito-alta':'danger',alta:'orange',media:'warning',baixa:'success' }[result.prioridade] || 'warning';
+      row.innerHTML = `
+        <td class="td-mono" style="color:var(--accent)">${c.id}</td>
+        <td style="max-width:200px;font-size:12px">${c.desc?.slice(0,50)||'—'}...</td>
+        <td><span class="badge badge-${priColor}">${result.prioridade}</span>${result._offline?'<span class="badge" style="font-size:9px;margin-left:3px;background:#EDE9FE;color:#6D28D9">offline</span>':''}</td>
+        <td style="font-size:11.5px">${result.categoriaAI}<br><span style="color:var(--g400)">${result.subcategoriaAI}</span></td>
+        <td><span class="tag">${result.tipo}</span></td>
+        <td style="font-size:12px">${result.tempoEstimado||'—'}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:4px">
+            <div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden">
+              <div style="background:${result.confianca>=70?'var(--success)':result.confianca>=50?'var(--warning)':'var(--danger)'};width:${result.confianca}%;height:100%"></div>
+            </div>
+            <span style="font-size:10.5px;color:var(--g500)">${result.confianca}%</span>
+          </div>
+        </td>
+        <td><button class="btn btn-primary btn-xs" onclick="aplicarTriagem('${c.id}', ${JSON.stringify(JSON.stringify(result)).slice(1,-1)})">✓ Aplicar</button></td>`;
+    } catch (e) { console.warn('[AI] triage error:', e.message); }
+  }
+}
+
+async function triagemLote() {
+  const chamados = (STATE.chamados||[]).filter(c => !['fechado','concluido'].includes(c.status)).slice(0,10);
+  if (!chamados.length) return showToast('Nenhum chamado aberto para triar','warning');
+  showToast(`⚡ Triando ${chamados.length} chamados com IA...`,'info');
+  goPage('ai-dashboard');
+  setTimeout(() => triagemAutoDisplay(chamados), 300);
+}
+
+function aplicarTriagem(chamadoId, resultStr) {
+  try {
+    const result = typeof resultStr === 'string' ? JSON.parse(resultStr) : resultStr;
+    const idx = (STATE.chamados||[]).findIndex(c => c.id === chamadoId);
+    if (idx >= 0) {
+      STATE.chamados[idx] = { ...STATE.chamados[idx], ...result, triageStatus:'concluida' };
+    }
+    showToast(`✓ Triagem IA aplicada ao chamado ${chamadoId}`);
+  } catch (e) { showToast('Erro ao aplicar triagem','danger'); }
+}
+
+// ─── Detectar anomalias (offline) ─────────────────────────────
+function renderAnomalias() {
+  const el = document.getElementById('ai-anomalias-list');
+  if (!el) return;
+  const chamados    = STATE.chamados    || [];
+  const smartphones = STATE.smartphones || [];
+  const anomalias   = [];
+
+  // Verifica volume por área
+  const porArea = chamados.reduce((acc,c) => { acc[c.area]=(acc[c.area]||0)+1; return acc; }, {});
+  const topArea = Object.entries(porArea).sort(([,a],[,b])=>b-a)[0];
+  if (topArea && topArea[1] > 3) {
+    anomalias.push({ nivel:'medio', desc:`${topArea[0]} concentra ${topArea[1]} chamados (${Math.round(topArea[1]/chamados.length*100)}% do total)`, sugestao:'Investigar causa raiz' });
+  }
+  // Smartphones com problema
+  const smProb = smartphones.filter(s => s.status !== 'uso');
+  if (smProb.length) {
+    anomalias.push({ nivel:'alto', desc:`${smProb.length} smartphone(s) com status anormal: ${smProb.map(s=>s.pat).join(', ')}`, sugestao:'Acionar MDM Admin' });
+  }
+  // SLA baixo
+  if (calcSLAPct(chamados) < 85) {
+    anomalias.push({ nivel:'critico', desc:`SLA abaixo de 85% — risco de penalidade contratual`, sugestao:'Priorizar chamados urgentes' });
+  }
+  if (!anomalias.length) {
+    anomalias.push({ nivel:'baixo', desc:'Nenhuma anomalia crítica detectada no momento', sugestao:'Manter monitoramento' });
+  }
+
+  el.innerHTML = anomalias.map(a => `
+    <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--g100);font-size:12.5px">
+      <span style="background:${a.nivel==='critico'?'var(--danger)':a.nivel==='alto'?'#EA580C':'var(--warning)'};color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;height:fit-content;flex-shrink:0">${a.nivel.toUpperCase()}</span>
+      <div><div style="font-weight:600;color:var(--g800);margin-bottom:2px">${a.desc}</div><div style="color:var(--g500);font-size:11.5px">→ ${a.sugestao}</div></div>
+    </div>`).join('');
+}
+
+// ─── Insights fallback local ───────────────────────────────────
+function gerarInsightsLocais(kpis, alertas) {
+  const insights = [];
+  const riscos   = [];
+  const recs     = [];
+
+  if (kpis.slaPct < 95) {
+    insights.push({ titulo:'SLA Abaixo da Meta', desc:`O SLA atual de ${kpis.slaPct}% está abaixo do objetivo de 95%. Chamados urgentes precisam de atenção imediata.`, impacto:'alto', acao:'Priorizar triagem dos chamados em aberto' });
+    riscos.push({ risco:`SLA em ${kpis.slaPct}% (meta: 95%)`, nivel:'alto', mitigacao:'Aumentar equipe de atendimento ou revisar processos de triagem' });
+    recs.push(`Implementar triagem automática de prioridade para reduzir MTTR`);
+  }
+  if (kpis.mttrHoras > 8) {
+    insights.push({ titulo:'MTTR Acima do Limite', desc:`Tempo médio de resolução de ${kpis.mttrHoras}h supera a meta de 8h. Investigar gargalos no processo.`, impacto:'medio', acao:'Mapear etapas que mais consomem tempo na resolução' });
+    recs.push(`Criar base de conhecimento com soluções para os top 10 problemas mais recorrentes`);
+  }
+  if (kpis.mdmCompliance < 90) {
+    insights.push({ titulo:'MDM Compliance Crítico', desc:`${kpis.mdmCompliance}% dos dispositivos em conformidade. Risco de violação de política de segurança.`, impacto:'alto', acao:'Executar verificação MDM em todos os dispositivos' });
+    riscos.push({ risco:`Compliance MDM em ${kpis.mdmCompliance}%`, nivel:'alto', mitigacao:'Forçar atualização de perfil MDM em todos os dispositivos não conformes' });
+  }
+  if (kpis.garantiasVenc > 0) {
+    insights.push({ titulo:`${kpis.garantiasVenc} Garantia(s) Vencendo`, desc:`Equipamentos com garantia próxima do vencimento representam risco financeiro se houver falha.`, impacto:'medio', acao:'Acionar processo de renovação ou substituição' });
+  }
+  insights.push({ titulo:'Custo de Parque Estimado', desc:`O parque de TI tem valor estimado de R$ ${kpis.valorParque.toLocaleString('pt-BR')}. ${kpis.ativosObsoletos} ativos obsoletos representam risco operacional.`, impacto:'baixo', acao:'Planejar ciclo de renovação para os próximos 12 meses' });
+  recs.push(`Automatizar alertas de SLA via Cloud Functions para notificação proativa`);
+  recs.push(`Implementar self-service portal para solicitações de baixa complexidade`);
+
+  const score = Math.max(10, Math.min(100,
+    (kpis.slaPct * 0.4) + (kpis.mdmCompliance * 0.3) +
+    (kpis.mttrHoras <= 8 ? 30 : Math.max(0, 30 - (kpis.mttrHoras - 8) * 3))
+  ));
+
+  return {
+    resumoExecutivo: `Análise do período: ${kpis.abertos} chamados em aberto de ${kpis.totalChamados} total. SLA em ${kpis.slaPct}% (${kpis.slaPct >= 95 ? 'dentro da meta' : 'abaixo da meta de 95%'}). MTTR de ${kpis.mttrHoras}h. ${alertas.length > 0 ? `⚠️ ${alertas.length} alerta(s) ativo(s).` : 'Sem alertas críticos.'}`,
+    insights, riscos, recomendacoes: recs, scoreOperacional: Math.round(score),
+  };
+}
+
+// ─── renderAIDashboard ─────────────────────────────────────────
+function renderAIDashboard() {
+  // Dispara análise automática na primeira vez
+  const scoreEl = document.getElementById('ai-score-num');
+  if (scoreEl && scoreEl.textContent === '—') {
+    setTimeout(rodarAnaliseCompleta, 400);
+  }
+  renderAnomalias();
+}
+
+// ─── AI triage badge no modal de chamado ──────────────────────
+function mostrarSugestaoAIchamado(titulo, desc) {
+  const container = document.getElementById('ai-triage-suggestion');
+  if (!container) return;
+  container.style.display = '';
+  container.innerHTML = '<div class="ai-triage-badge"><div class="ai-typing" style="margin:0"><span></span><span></span><span></span></div> Analisando com IA...</div>';
+  callGenkitFlow('analisarChamado', { titulo, desc }).then(result => {
+    container.innerHTML = `
+      <div class="ai-triage-badge" style="flex-direction:column;align-items:start;gap:6px;padding:10px;border-radius:8px;background:linear-gradient(135deg,rgba(37,99,235,.05),rgba(124,58,237,.05))">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--accent)">✨ Sugestão da IA (Gemini)</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <span style="font-size:11.5px">📊 Prioridade: <strong>${result.prioridade}</strong></span>
+          <span style="font-size:11.5px">🏷️ ${result.categoriaAI}</span>
+          <span style="font-size:11.5px">⏱ ${result.tempoEstimado}</span>
+          <span style="font-size:11.5px;color:var(--g500)">${result.confianca}% confiança</span>
+        </div>
+        <div style="font-size:12px;color:var(--g600)">${result.resumo}</div>
+        <button class="btn btn-secondary btn-xs" onclick="aplicarSugestaoAI(${JSON.stringify(JSON.stringify(result))})">✓ Aplicar sugestão</button>
+      </div>`;
+  }).catch(() => { container.style.display='none'; });
+}
+
+function aplicarSugestaoAI(resultStr) {
+  try {
+    const r = JSON.parse(resultStr);
+    const prioEl = document.getElementById('ch-prioridade');
+    const catEl  = document.getElementById('ch-categoria');
+    if (prioEl) { prioEl.value = r.prioridade; atualizarPrioridadeColor?.(); }
+    if (catEl)  { catEl.value  = r.categoriaAI || catEl.value; atualizarSubcategoria?.(); }
+    showToast('✓ Sugestão da IA aplicada ao chamado');
+  } catch {}
+}
+
+// ============================================================
+// MUDANÇAS ITIL — RFC / CAB / IMPLEMENTAÇÃO / REVISÃO
+// ============================================================
+
+const STATUS_MUDANCA = {
+  'rascunho':       { label:'Rascunho',        css:'',                    cor:'#94A3B8' },
+  'pendente-cab':   { label:'Pendente CAB',     css:'badge-warning',       cor:'#D97706' },
+  'aprovada':       { label:'Aprovada',         css:'badge-success',       cor:'#059669' },
+  'recusada':       { label:'Recusada',         css:'badge-danger',        cor:'#DC2626' },
+  'implementando':  { label:'Implementando',    css:'badge-info',          cor:'#2563EB' },
+  'concluida':      { label:'Concluída',        css:'badge-success',       cor:'#059669' },
+  'cancelada':      { label:'Cancelada',        css:'',                    cor:'#94A3B8' },
+  'revisao':        { label:'Em Revisão (PIR)', css:'badge-violet',        cor:'#7C3AED' },
+};
+
+const RISCO_CSS = {
+  critico:'badge-danger', alto:'badge-orange', medio:'badge-warning', baixo:'badge-success',
+};
+
+STATE.mudancas = [
+  {
+    id:'RFC-001', tipo:'normal', categoria:'Infraestrutura de Rede',
+    titulo:'Atualização de Firmware — FortiGate 100F (FW-EDGE-01)',
+    desc:'Atualizar o FortiGate de FortiOS 7.4.3 para 7.6.1 para corrigir CVEs críticas de segurança.',
+    justificativa:'Vulnerabilidade CVE-2024-21762 identificada pelo time de segurança. Risco de comprometimento do firewall perimetral.',
+    responsavel:'Carlos Souza', area:'Infraestrutura de rede — todos os usuários',
+    dataImpl:'2026-05-17T02:00', duracao:'2 horas', janela:'Sábado 00h–06h',
+    risco:'critico', impactoUsers:'total', downtime:'sim',
+    analiseRisco:'Durante a atualização, todo o acesso à internet e VPN ficará indisponível por até 2 horas.',
+    sistemas:'FW-EDGE-01, SW-CORE-01 (dependente), todos os usuários com acesso à internet',
+    criterios:'Ping ao gateway externo funcionando, VPN acessível, acesso à internet normalizado.',
+    passos:'1. Backup running-config\n2. Notificar usuários (D-1)\n3. Download firmware 7.6.1\n4. Aplicar no horário da janela\n5. Testar conectividade\n6. Monitorar por 30 min',
+    rollback:'1. Restaurar backup FortiOS 7.4.3\n2. Notificar gestores\n3. Abrir chamado de incidente',
+    tempoRollback:'45 minutos', respRollback:'Carlos Souza', backupFeito:'nao',
+    cabData:'2026-05-16T14:00', cabMembros:'João Martins, Diretoria TI, Seg. da Informação',
+    impactoNegocio:'Interrupção total do acesso à internet por até 2h no sábado de madrugada. Impacto mínimo no negócio.',
+    aprovGest:true, aprovNeg:true, aprovSeg:true,
+    status:'aprovada', prioridade:'critica',
+    createdAt: new Date(2026,4,10), createdBy:'Carlos Souza',
+    historicoStatus:[
+      {status:'rascunho',    data:'10/05/2026', autor:'Carlos Souza', obs:'RFC criada'},
+      {status:'pendente-cab',data:'11/05/2026', autor:'Carlos Souza', obs:'Submetida ao CAB'},
+      {status:'aprovada',    data:'13/05/2026', autor:'João Martins',  obs:'Aprovada pelo CAB. Implementar no sábado 17/05'},
+    ]
+  },
+  {
+    id:'RFC-002', tipo:'emergencial', categoria:'Software / Aplicação',
+    titulo:'Correção emergencial — Siscom fora do ar (produção)',
+    desc:'O Siscom parou de responder às 09h. Necessário restaurar serviço com urgência.',
+    justificativa:'Sistema crítico de operação comercial inoperante. Impacto financeiro direto.',
+    responsavel:'Ana Lima', area:'Sistema Siscom — todos os usuários',
+    dataImpl:'2026-05-11T10:00', duracao:'3 horas', janela:'Emergencial — qualquer horário',
+    risco:'alto', impactoUsers:'total', downtime:'sim',
+    analiseRisco:'Restauração de backup pode causar perda de transações das últimas 2h.',
+    sistemas:'Servidor APP-SISCOM-01, Banco de Dados DB-SISCOM',
+    criterios:'Siscom respondendo a requisições HTTP 200 em todos os módulos.',
+    passos:'1. Analisar logs de erro\n2. Reiniciar serviços\n3. Se necessário, restaurar último backup\n4. Testar todos os módulos\n5. Comunicar conclusão',
+    rollback:'1. Restaurar snapshot VM de ontem às 23h\n2. Avisar usuários',
+    tempoRollback:'1 hora', respRollback:'Ana Lima', backupFeito:'sim',
+    cabData:'', cabMembros:'CAB pós-implementação',
+    impactoNegocio:'Sistema de operação parado — impacto financeiro imediato.',
+    aprovGest:true, aprovNeg:false, aprovSeg:false,
+    status:'concluida', prioridade:'critica',
+    createdAt: new Date(2026,4,11), createdBy:'Ana Lima',
+    historicoStatus:[
+      {status:'rascunho',     data:'11/05/2026 09:15', autor:'Ana Lima',    obs:'RFC emergencial criada'},
+      {status:'aprovada',     data:'11/05/2026 09:20', autor:'João Martins', obs:'Aprovação emergencial verbal'},
+      {status:'implementando',data:'11/05/2026 10:00', autor:'Ana Lima',    obs:'Implementação iniciada'},
+      {status:'concluida',    data:'11/05/2026 13:00', autor:'Ana Lima',    obs:'Siscom restaurado com sucesso'},
+    ]
+  },
+  {
+    id:'RFC-003', tipo:'padrao', categoria:'Active Directory',
+    titulo:'Criação de contas de usuário — integração de novos colaboradores',
+    desc:'Processo padrão de onboarding: criação de contas AD, e-mail e permissões de grupo.',
+    justificativa:'Processo recorrente. Pré-aprovado como mudança padrão.',
+    responsavel:'Carlos Souza', area:'Active Directory, Exchange',
+    dataImpl:'2026-05-14T09:00', duracao:'30 minutos', janela:'Horário comercial (com risco)',
+    risco:'baixo', impactoUsers:'nenhum', downtime:'nao',
+    analiseRisco:'Sem risco de impacto. Criação de novas contas não afeta contas existentes.',
+    sistemas:'Active Directory, Exchange Online, Microsoft 365',
+    criterios:'Contas criadas, e-mails funcionando, acesso aos sistemas autorizados.',
+    passos:'1. Criar conta AD\n2. Configurar e-mail\n3. Adicionar nos grupos corretos\n4. Enviar credenciais ao colaborador',
+    rollback:'1. Desabilitar conta AD\n2. Notificar RH',
+    tempoRollback:'5 minutos', respRollback:'Carlos Souza', backupFeito:'nao',
+    cabData:'', cabMembros:'Pré-aprovado — sem necessidade de CAB',
+    impactoNegocio:'Sem impacto. Criação de novos acessos.',
+    aprovGest:true, aprovNeg:true, aprovSeg:false,
+    status:'implementando', prioridade:'baixa',
+    createdAt: new Date(2026,4,12), createdBy:'Carlos Souza',
+    historicoStatus:[
+      {status:'aprovada',     data:'12/05/2026', autor:'Sistema', obs:'Mudança padrão — aprovação automática'},
+      {status:'implementando',data:'14/05/2026', autor:'Carlos Souza', obs:'Implementação iniciada'},
+    ]
+  },
+];
+
+let _itilCurrentTab = 'todos';
+
+function renderMudancasITIL(tab) {
+  if (tab) _itilCurrentTab = tab;
+  const q  = (document.getElementById('itil-search')?.value || '').toLowerCase();
+  const fr = document.getElementById('itil-filter-risco')?.value || '';
+  const ft = document.getElementById('itil-filter-tipo')?.value  || '';
+
+  let list = STATE.mudancas || [];
+  if (_itilCurrentTab !== 'todos') list = list.filter(m => m.status === _itilCurrentTab || m.tipo === _itilCurrentTab);
+  if (q)  list = list.filter(m => m.titulo.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || m.responsavel.toLowerCase().includes(q));
+  if (fr) list = list.filter(m => m.risco === fr);
+  if (ft) list = list.filter(m => m.tipo === ft);
+
+  const all = STATE.mudancas || [];
+  sv('itil-total', all.length);
+  sv('itil-aprov', all.filter(m => m.status === 'aprovada').length);
+  sv('itil-impl',  all.filter(m => m.status === 'implementando').length);
+  sv('itil-cab',   all.filter(m => m.status === 'pendente-cab').length);
+  sv('itil-emerg', all.filter(m => m.tipo === 'emergencial').length);
+  nbUpdate('nb-mudancas', all.filter(m => ['pendente-cab','implementando'].includes(m.status)).length);
+
+  const tbody = document.getElementById('itil-body');
+  if (!tbody) return;
+  tbody.innerHTML = list.map(m => {
+    const st  = STATUS_MUDANCA[m.status] || { label: m.status, css: '' };
+    const tipoLabel = { normal:'Normal', emergencial:'Emergencial', padrao:'Padrão' }[m.tipo] || m.tipo;
+    const tipoCss   = { normal:'badge-info', emergencial:'badge-danger', padrao:'badge-success' }[m.tipo] || '';
+    const priColor  = { critica:'danger', alta:'orange', media:'warning', baixa:'success' }[m.prioridade] || 'gray';
+    return `<tr onclick="abrirMudanca('${m.id}')" style="cursor:pointer">
+      <td class="td-mono" style="color:var(--accent);font-weight:700">${m.id}</td>
+      <td style="max-width:280px">
+        <div style="font-weight:600;font-size:13px">${m.titulo}</div>
+        <div style="font-size:11px;color:var(--g400)">${m.categoria}</div>
+      </td>
+      <td><span class="badge ${tipoCss}">${tipoLabel}</span></td>
+      <td><span class="badge ${RISCO_CSS[m.risco]||''}">${m.risco}</span></td>
+      <td style="font-size:12.5px">${m.responsavel}</td>
+      <td class="td-mono" style="font-size:11.5px">${m.dataImpl ? new Date(m.dataImpl).toLocaleDateString('pt-BR') : '—'}</td>
+      <td style="font-size:11.5px">${m.cabData ? new Date(m.cabData).toLocaleDateString('pt-BR') : m.tipo==='padrao' ? 'Pré-aprovado' : '—'}</td>
+      <td><span class="badge ${st.css}">${st.label}</span></td>
+      <td><div class="flex gap-4" onclick="event.stopPropagation()">
+        <button class="btn btn-secondary btn-xs" onclick="abrirMudanca('${m.id}')">Ver</button>
+        <button class="btn btn-ghost btn-xs" onclick="mudarStatusRFC('${m.id}')">↗</button>
+      </div></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--g400)">Nenhuma RFC encontrada</td></tr>';
+}
+
+function abrirMudanca(id) {
+  const m = (STATE.mudancas||[]).find(x => x.id === id);
+  if (!m) return;
+
+  const st       = STATUS_MUDANCA[m.status] || { label: m.status, css:'', cor:'#94A3B8' };
+  const tipoLabel= { normal:'Normal', emergencial:'🚨 Emergencial', padrao:'✅ Padrão' }[m.tipo] || m.tipo;
+  const riscoCss = RISCO_CSS[m.risco] || '';
+  const downtime = m.downtime === 'sim';
+  const modalId  = 'modal-ver-rfc-' + id;
+
+  // Build historicoStatus HTML — no template literals
+  const historicoHTML = (m.historicoStatus||[]).map(function(h) {
+    const hs = STATUS_MUDANCA[h.status] || { label: h.status, cor: '#94A3B8' };
+    return '<div class="tl-item">'
+      + '<div class="tl-dot" style="background:' + hs.cor + '"></div>'
+      + '<div class="tl-title">' + (hs.label||h.status) + '</div>'
+      + '<div class="tl-desc">'  + (h.obs||'')  + '</div>'
+      + '<div class="tl-time">'  + (h.data||'') + ' &middot; ' + (h.autor||'') + '</div>'
+      + '</div>';
+  }).join('');
+
+  // Build action buttons using data attributes (avoids quote escaping inside onclick)
+  const acaoBtns = [
+    m.status === 'aprovada'      ? ['btn-primary',   'implementando', '▶ Iniciar Implementação']   : null,
+    m.status === 'implementando' ? ['btn-success',   'concluida',     '✓ Concluir Mudança']        : null,
+    m.status === 'implementando' ? ['btn-danger',    'cancelada',     '⚠ Acionar Rollback']        : null,
+    m.status === 'pendente-cab'  ? ['btn-success',   'aprovada',      '✓ Aprovar no CAB']          : null,
+    m.status === 'pendente-cab'  ? ['btn-danger',    'recusada',      '✕ Recusar']                 : null,
+    m.status === 'concluida'     ? ['btn-secondary', 'revisao',       '📋 Abrir PIR']              : null,
+  ].filter(Boolean);
+
+  const acoesHTML = acaoBtns.map(function(a) {
+    return '<button class="btn ' + a[0] + '" data-rfc-id="' + id + '" data-rfc-status="' + a[1] + '">' + a[2] + '</button>';
+  }).join(' ')
+  + ' <button class="btn btn-ghost" data-close-modal="' + modalId + '">Fechar</button>';
+
+  // Remove previous modal if exists
+  document.getElementById(modalId)?.remove();
+
+  const div = document.createElement('div');
+  div.className = 'modal-overlay open';
+  div.id = modalId;
+
+  // Build HTML with string concatenation — zero nested template literals
+  div.innerHTML = ''
+    + '<div class="modal modal-xl">'
+    + '<div class="modal-header" style="background:linear-gradient(135deg,var(--brand),#111E35)">'
+    +   '<div>'
+    +     '<div style="font-size:12px;color:rgba(255,255,255,.5);margin-bottom:2px">' + tipoLabel + ' &middot; ' + m.categoria + '</div>'
+    +     '<h3 style="color:#fff;font-size:16px">' + m.id + ' — ' + m.titulo + '</h3>'
+    +   '</div>'
+    +   '<div style="margin-left:auto;display:flex;align-items:center;gap:10px">'
+    +     '<span class="badge ' + st.css + '" style="font-size:12px">' + st.label + '</span>'
+    +     '<button class="close-btn" style="color:rgba(255,255,255,.7)" data-close-modal="' + modalId + '">✕</button>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="modal-body">'
+    +   '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px;padding:14px;background:var(--g50);border-radius:var(--r);border:1px solid var(--g200)">'
+    +     '<div><div style="font-size:10px;color:var(--g400);font-weight:700;text-transform:uppercase;margin-bottom:3px">Risco</div>'
+    +       '<span class="badge ' + riscoCss + '">' + m.risco + '</span></div>'
+    +     '<div><div style="font-size:10px;color:var(--g400);font-weight:700;text-transform:uppercase;margin-bottom:3px">Responsável</div>'
+    +       '<div style="font-weight:600;font-size:13px">' + m.responsavel + '</div></div>'
+    +     '<div><div style="font-size:10px;color:var(--g400);font-weight:700;text-transform:uppercase;margin-bottom:3px">Impl. em</div>'
+    +       '<div style="font-weight:600;font-size:13px">' + (m.dataImpl ? new Date(m.dataImpl).toLocaleString('pt-BR') : '—') + '</div></div>'
+    +     '<div><div style="font-size:10px;color:var(--g400);font-weight:700;text-transform:uppercase;margin-bottom:3px">Duração</div>'
+    +       '<div style="font-weight:600;font-size:13px">' + (m.duracao||'—') + '</div></div>'
+    +     '<div><div style="font-size:10px;color:var(--g400);font-weight:700;text-transform:uppercase;margin-bottom:3px">Downtime?</div>'
+    +       '<div style="font-weight:600;font-size:13px;color:' + (downtime ? 'var(--danger)' : 'var(--success)') + '">'
+    +         (downtime ? '⚠️ SIM' : '✅ Não') + '</div></div>'
+    +   '</div>'
+    +   '<div class="grid-2" style="gap:16px">'
+    +     '<div>'
+    +       '<div class="form-group"><label class="form-label">Descrição</label>'
+    +         '<div style="font-size:13px;color:var(--g700);line-height:1.6;padding:10px;background:var(--g50);border-radius:8px">' + (m.desc||'—') + '</div></div>'
+    +       '<div class="form-group"><label class="form-label">Justificativa</label>'
+    +         '<div style="font-size:13px;color:var(--g700);line-height:1.6;padding:10px;background:var(--g50);border-radius:8px">' + (m.justificativa||'—') + '</div></div>'
+    +       '<div class="form-group"><label class="form-label">Análise de Risco</label>'
+    +         '<div style="font-size:13px;color:var(--g700);padding:10px;background:var(--g50);border-radius:8px">' + (m.analiseRisco||'—') + '</div></div>'
+    +       '<div class="form-group"><label class="form-label">Sistemas Impactados</label>'
+    +         '<div style="font-size:13px;color:var(--g700);padding:10px;background:var(--g50);border-radius:8px">' + (m.sistemas||'—') + '</div></div>'
+    +     '</div>'
+    +     '<div>'
+    +       '<div class="form-group"><label class="form-label">Plano de Implementação</label>'
+    +         '<div style="font-size:13px;color:var(--g700);white-space:pre-line;padding:10px;background:var(--g50);border-radius:8px;line-height:1.7">' + (m.passos||'—') + '</div></div>'
+    +       '<div class="form-group"><label class="form-label" style="color:var(--danger)">Plano de Rollback</label>'
+    +         '<div style="font-size:13px;color:var(--g700);white-space:pre-line;padding:10px;background:rgba(239,68,68,.04);border:1px solid rgba(239,68,68,.15);border-radius:8px;line-height:1.7">'
+    +           (m.rollback||'—')
+    +           '<br><br><span style="font-size:11px;color:var(--g400)">Tempo: ' + (m.tempoRollback||'—') + ' &middot; Resp: ' + (m.respRollback||'—') + '</span>'
+    +         '</div></div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div class="divider"></div>'
+    +   '<h4 style="font-size:13px;font-weight:700;margin-bottom:12px">📅 Histórico da RFC</h4>'
+    +   '<div class="timeline">' + historicoHTML + '</div>'
+    +   '<div class="divider"></div>'
+    +   '<div class="flex gap-8 flex-wrap">' + acoesHTML + '</div>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(div);
+
+  // Wire buttons using event delegation (no inline onclick)
+  div.addEventListener('click', function(e) {
+    const closeBtn = e.target.closest('[data-close-modal]');
+    if (closeBtn) { document.getElementById(closeBtn.dataset.closeModal)?.remove(); return; }
+    const actionBtn = e.target.closest('[data-rfc-id]');
+    if (actionBtn) { updateStatusRFC(actionBtn.dataset.rfcId, actionBtn.dataset.rfcStatus); }
+  });
+}
+
+
+function updateStatusRFC(id, novoStatus) {
+  const m = (STATE.mudancas||[]).find(x => x.id === id);
+  if (!m) return;
+  const obs = prompt(`Observação para "${STATUS_MUDANCA[novoStatus]?.label || novoStatus}":`) || '';
+  m.status = novoStatus;
+  m.historicoStatus = m.historicoStatus || [];
+  m.historicoStatus.push({ status: novoStatus, data: new Date().toLocaleString('pt-BR'), autor: CURRENT_USER?.nome || 'Usuário', obs });
+  document.querySelectorAll('[id^="modal-ver-rfc-"]').forEach(el => el.remove());
+  renderMudancasITIL();
+  showToast(`✓ RFC ${id} → ${STATUS_MUDANCA[novoStatus]?.label || novoStatus}`);
+}
+
+function mudarStatusRFC(id) { abrirMudanca(id); }
+
+function salvarRFC(status = 'rascunho') {
+  const titulo = document.getElementById('rfc-titulo')?.value?.trim();
+  if (!titulo) return showToast('Título da RFC é obrigatório', 'danger');
+  const id = 'RFC-' + String((STATE.mudancas||[]).length + 1).padStart(3, '0');
+  const nova = {
+    id, status,
+    tipo:         document.getElementById('rfc-tipo')?.value || 'normal',
+    categoria:    document.getElementById('rfc-categoria')?.value || '—',
+    prioridade:   document.getElementById('rfc-prioridade')?.value || 'media',
+    titulo,
+    desc:         document.getElementById('rfc-desc')?.value || '',
+    justificativa:document.getElementById('rfc-justificativa')?.value || '',
+    responsavel:  document.getElementById('rfc-responsavel')?.value || CURRENT_USER?.nome || '—',
+    area:         document.getElementById('rfc-area')?.value || '',
+    dataImpl:     document.getElementById('rfc-data-impl')?.value || '',
+    duracao:      document.getElementById('rfc-duracao')?.value || '',
+    janela:       document.getElementById('rfc-janela')?.value || '',
+    risco:        document.getElementById('rfc-risco')?.value || 'medio',
+    impactoUsers: document.getElementById('rfc-impacto-users')?.value || 'minimo',
+    downtime:     document.querySelector('input[name="rfc-downtime"]:checked')?.value || 'nao',
+    analiseRisco: document.getElementById('rfc-analise-risco')?.value || '',
+    sistemas:     document.getElementById('rfc-sistemas')?.value || '',
+    criterios:    document.getElementById('rfc-criterios')?.value || '',
+    passos:       document.getElementById('rfc-passos')?.value || '',
+    rollback:     document.getElementById('rfc-rollback')?.value || '',
+    tempoRollback:document.getElementById('rfc-tempo-rollback')?.value || '',
+    respRollback: document.getElementById('rfc-resp-rollback')?.value || '',
+    backupFeito:  document.querySelector('input[name="rfc-backup"]:checked')?.value || 'nao',
+    cabData:      document.getElementById('rfc-cab-data')?.value || '',
+    cabMembros:   document.getElementById('rfc-cab-membros')?.value || '',
+    impactoNegocio: document.getElementById('rfc-impacto-negocio')?.value || '',
+    aprovGest:    document.getElementById('rfc-aprov-gest')?.checked || false,
+    aprovNeg:     document.getElementById('rfc-aprov-neg')?.checked || false,
+    aprovSeg:     document.getElementById('rfc-aprov-seg')?.checked || false,
+    obsCAB:       document.getElementById('rfc-obs-cab')?.value || '',
+    createdAt:    new Date(),
+    createdBy:    CURRENT_USER?.nome || '—',
+    historicoStatus:[{ status, data: new Date().toLocaleString('pt-BR'), autor: CURRENT_USER?.nome || '—', obs: status === 'rascunho' ? 'RFC criada' : 'Submetida ao CAB' }],
+  };
+  if (!STATE.mudancas) STATE.mudancas = [];
+  STATE.mudancas.unshift(nova);
+  // TODO: fsAdd('mudancas', nova, STATE.mudancas)
+  closeModal('modal-nova-mudanca');
+  renderMudancasITIL();
+  showToast(`✓ ${id} ${status === 'rascunho' ? 'salva como rascunho' : 'submetida ao CAB'}`);
+}
+
+// Wire RFC tabs
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-rfc-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      tab.closest('.tabs')?.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      ['geral','impacto','plano','rollback','cab'].forEach(id => {
+        const el = document.getElementById('rfc-tab-' + id);
+        if (el) el.style.display = id === tab.dataset.rfcTab ? '' : 'none';
+      });
+    });
+  });
+  document.querySelectorAll('[data-itil-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      tab.closest('.tabs')?.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      renderMudancasITIL(tab.dataset.itilTab);
     });
   });
 });

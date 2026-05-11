@@ -1,7 +1,5 @@
 {
   "indexes": [
-
-    // ── CHAMADOS ──────────────────────────────────────────────
     {
       "collectionGroup": "chamados",
       "queryScope": "COLLECTION",
@@ -46,22 +44,20 @@
         { "fieldPath": "createdAt",  "order": "DESCENDING" }
       ]
     },
-
-    // ── ATIVOS ────────────────────────────────────────────────
     {
       "collectionGroup": "ativos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "area",      "order": "ASCENDING" },
-        { "fieldPath": "status",    "order": "ASCENDING" }
+        { "fieldPath": "area",   "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     },
     {
       "collectionGroup": "ativos",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status",    "order": "ASCENDING" },
-        { "fieldPath": "garantia",  "order": "ASCENDING" }
+        { "fieldPath": "status",   "order": "ASCENDING" },
+        { "fieldPath": "garantia", "order": "ASCENDING" }
       ]
     },
     {
@@ -73,8 +69,6 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
-
-    // ── APROVAÇÕES ────────────────────────────────────────────
     {
       "collectionGroup": "aprovacoes",
       "queryScope": "COLLECTION",
@@ -83,14 +77,12 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
-
-    // ── SMARTPHONES ───────────────────────────────────────────
     {
       "collectionGroup": "smartphones",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status",    "order": "ASCENDING" },
-        { "fieldPath": "empSetor",  "order": "ASCENDING" }
+        { "fieldPath": "status",   "order": "ASCENDING" },
+        { "fieldPath": "empSetor", "order": "ASCENDING" }
       ]
     },
     {
@@ -101,8 +93,6 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
-
-    // ── MDM ACTIONS ───────────────────────────────────────────
     {
       "collectionGroup": "mdm_actions",
       "queryScope": "COLLECTION",
@@ -119,36 +109,30 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
-
-    // ── SWITCHES ──────────────────────────────────────────────
     {
       "collectionGroup": "switches",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status",    "order": "ASCENDING" },
-        { "fieldPath": "local",     "order": "ASCENDING" }
-      ]
-    },
-
-    // ── MOBILIÁRIO ────────────────────────────────────────────
-    {
-      "collectionGroup": "mobiliario",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "tipo",      "order": "ASCENDING" },
-        { "fieldPath": "status",    "order": "ASCENDING" }
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "local",  "order": "ASCENDING" }
       ]
     },
     {
       "collectionGroup": "mobiliario",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "setor",     "order": "ASCENDING" },
-        { "fieldPath": "status",    "order": "ASCENDING" }
+        { "fieldPath": "tipo",   "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     },
-
-    // ── AUDIT LOGS ────────────────────────────────────────────
+    {
+      "collectionGroup": "mobiliario",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "setor",  "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
     {
       "collectionGroup": "audit_logs",
       "queryScope": "COLLECTION",
@@ -161,8 +145,8 @@
       "collectionGroup": "audit_logs",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "resourceId",   "order": "ASCENDING" },
-        { "fieldPath": "createdAt",    "order": "DESCENDING" }
+        { "fieldPath": "resourceId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt",  "order": "DESCENDING" }
       ]
     },
     {
@@ -174,8 +158,6 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
-
-    // ── NOTIFICAÇÕES ──────────────────────────────────────────
     {
       "collectionGroup": "items",
       "queryScope": "COLLECTION_GROUP",
@@ -184,11 +166,8 @@
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     }
-
   ],
-
   "fieldOverrides": [
-    // Desativa índice automático em campos com alta cardinalidade
     {
       "collectionGroup": "audit_logs",
       "fieldPath": "details",
