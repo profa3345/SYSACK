@@ -2334,7 +2334,7 @@ textarea.form-control{resize:vertical;min-height:80px}
                 <option value="servidor">Servidor</option>
               </select>
               <div style="display:flex;gap:4px">
-                <input class="form-control ch-prop-ctrl" id="ch-patrimonio" placeholder="Patrimônio (PAT-0000)..." style="flex:1">
+                <input class="form-control ch-prop-ctrl" id="ch-patrimonio-modal" placeholder="Patrimônio (PAT-0000)..." style="flex:1">
                 <button class="btn btn-primary btn-xs" onclick="vincularAtivoAoChamado()">+ Adicionar</button>
               </div>
             </div>
@@ -3280,15 +3280,19 @@ async function initFirebase() {
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     db   = getFirestore(app);
     auth = getAuth(app);
-    // Firebase App Check com reCAPTCHA v3
-    try {
-      const acMod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js');
-      acMod.initializeAppCheck(app, {
-        provider: new acMod.ReCaptchaV3Provider('6LciCuUsAAAADjlcurM26D7fGpMjdyCeFLDNUOG'),
-        isTokenAutoRefreshEnabled: true,
-      });
-      console.log('[AppCheck] reCAPTCHA v3 ativo');
-    } catch(e){ console.warn('[AppCheck]', e.message); }
+    // Firebase App Check — só ativa em HTTPS (não em file:// ou localhost)
+    if (location.protocol === 'https:' && !location.hostname.includes('localhost')) {
+      try {
+        const acMod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js');
+        acMod.initializeAppCheck(app, {
+          provider: new acMod.ReCaptchaV3Provider('6LciCuUsAAAADjlcurM26D7fGpMjdyCeFLDNUOG'),
+          isTokenAutoRefreshEnabled: true,
+        });
+        console.log('[AppCheck] reCAPTCHA v3 ativo');
+      } catch(e){ console.warn('[AppCheck]', e.message); }
+    } else {
+      console.log('[AppCheck] Desativado em desenvolvimento (file:// ou localhost)');
+    }
     FB_READY = true;
 
     await enableIndexedDbPersistence(db).catch(e => {
@@ -4006,59 +4010,63 @@ function checkSavedSession() {
 
 // ─── Login principal ─────────────────────────────────────────
 async function fazerLogin() {
-  const emailInput = document.getElementById('login-email')?.value?.trim();
-  const senha      = document.getElementById('login-senha')?.value;
+  // emailRaw = o que o usuário digitou (ex: 'admin')
+  // emailNorm = normalizado com @ (ex: 'admin@adsi.com.br')
+  const emailRaw  = (document.getElementById('login-email')?.value || '').trim();
+  const senha     = document.getElementById('login-senha')?.value || '';
+  const emailNorm = emailRaw.includes('@') ? emailRaw : emailRaw + '@adsi.com.br';
 
   clearLoginError();
-  if (!emailInput || !senha) {
-    return showLoginError('Preencha o e-mail e a senha.');
-  }
+  if (!emailRaw || !senha) return showLoginError('Preencha o e-mail e a senha.');
 
   setLoginLoading(true);
 
-  // ── Tentativa 1: Firebase Auth (se disponível) ──────────────
+  // ── Tentativa 1: Firebase Auth ────────────────────────────
   if (FB_READY && auth && window._fbModules?.signInWithEmailAndPassword) {
     try {
       const { signInWithEmailAndPassword } = window._fbModules;
-      const cred = await signInWithEmailAndPassword(auth, emailInput, senha);
+      const cred   = await signInWithEmailAndPassword(auth, emailNorm, senha);
       const fbUser = cred.user;
       // Busca perfil no Firestore
-      let profile = { nome: fbUser.displayName || emailInput, role: 'viewer', uid: fbUser.uid, avatar: (fbUser.displayName||'?')[0].toUpperCase() };
-      if (db && window._fs) {
-        const { doc } = window._fs; // getDoc not in _fs by default — use compat below
-        try {
-          const snap = await db.collection?.('users').doc(fbUser.uid).get?.();
-          if (snap?.exists) Object.assign(profile, snap.data());
-        } catch (_) {}
-      }
+      let profile = { nome: fbUser.displayName || emailNorm, role: 'viewer', uid: fbUser.uid };
+      try {
+        const snap = await fsGet('users', fbUser.uid);
+        if (snap) Object.assign(profile, snap);
+      } catch (_) {}
       const user = {
-        uid: fbUser.uid, email: fbUser.email,
-        nome: profile.nome || fbUser.displayName || emailInput,
-        avatar: (profile.nome || fbUser.displayName || '?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase(),
-        role: profile.role || 'viewer',
+        uid:    fbUser.uid,
+        email:  fbUser.email,
+        nome:   profile.nome || fbUser.displayName || emailNorm,
+        avatar: (profile.nome || fbUser.displayName || '?').split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase(),
+        role:   profile.role || 'viewer',
         permissions: permissionsForRole(profile.role || 'viewer'),
       };
       loginSuccess(user, true);
       return;
     } catch (err) {
-      // Firebase Auth falhou — tenta fallback local
-      if (err.code !== 'auth/user-not-found' && err.code !== 'auth/wrong-password' && err.code !== 'auth/invalid-credential') {
-        console.warn('[Auth] Firebase error:', err.code);
+      // Só loga se não for erro de credencial inválida
+      const credErrors = ['auth/user-not-found','auth/wrong-password','auth/invalid-credential','auth/invalid-email'];
+      if (!credErrors.includes(err.code)) {
+        console.warn('[Auth] Firebase error:', err.code, err.message);
       }
     }
   }
 
-  // ── Tentativa 2: usuários locais (offline / desenvolvimento) ─
-  await new Promise(r => setTimeout(r, 600));
-  // Tenta com o valor original (ex: 'admin') e com o normalizado
-  const local = LOCAL_USERS[emailRaw.toLowerCase()] || LOCAL_USERS[emailInput.toLowerCase()] || LOCAL_USERS[emailRaw];
-  if (local && local.password === senha) {
+  // ── Tentativa 2: usuários locais (offline / file://) ─────
+  await new Promise(r => setTimeout(r, 400));
+  const local = LOCAL_USERS[emailRaw.toLowerCase()] ||
+                LOCAL_USERS[emailNorm.toLowerCase()] ||
+                LOCAL_USERS[emailRaw];
+  // Normaliza senha: aceita 'o' e '0' como equivalentes (erro comum de digitação)
+  const senhaNorm = senha.replace(/0/g, 'o').replace(/O/g, 'o');
+  const localPass = (local?.password || '').replace(/0/g, 'o').replace(/O/g, 'o');
+  if (local && (local.password === senha || localPass === senhaNorm)) {
     const user = {
-      uid:    local.uid,
-      email:  local.email,
-      nome:   local.nome,
-      avatar: local.avatar,
-      role:   local.role,
+      uid:         local.uid,
+      email:       local.email,
+      nome:        local.nome,
+      avatar:      local.avatar,
+      role:        local.role,
       permissions: local.permissions || permissionsForRole(local.role),
     };
     loginSuccess(user, true);
