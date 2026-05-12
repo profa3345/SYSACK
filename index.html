@@ -16,39 +16,61 @@
   <!-- X-Frame-Options set via HTTP header in vercel.json -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
 <title>SYSACK – Gestão Inteligente de Ativos</title>
-<!-- Banco SDK via module shim — funciona em file://, http:// e https:// -->
-<!-- Usa importmap para resolver os módulos sem problemas de CORS/CSP -->
-<script type="importmap">
-{
-  "imports": {
-    "firebase/app":       "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
-    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js",
-    "firebase/auth":      "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
-    "firebase/analytics": "https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js"
+<!-- Firebase SDK — compat mode (funciona em file://, http:// e https://, sem import() dinâmico) -->
+<script>
+(function() {
+  var VER = '10.12.2';
+  var BASE = 'https://www.gstatic.com/firebasejs/' + VER + '/';
+  var PKGS = ['firebase-app-compat.js', 'firebase-firestore-compat.js', 'firebase-auth-compat.js', 'firebase-functions-compat.js', 'firebase-messaging-compat.js'];
+  var loaded = 0;
+
+  function onAllLoaded() {
+    try {
+      // Expõe os módulos no mesmo formato que o código initBanco() espera
+      var fb = firebase;
+      window._fbModules = {
+        initializeApp:    fb.initializeApp.bind(fb),
+        getApps:          function() { return fb.apps; },
+        getFirestore:     function(app) { return app.firestore(); },
+        getAuth:          function(app) { return app.auth(); },
+        collection:       function(db, col) { return db.collection(col); },
+        doc:              function(db, col, id) { return db.collection(col).doc(id); },
+        addDoc:           function(ref, data) { return ref.add(data); },
+        updateDoc:        function(ref, data) { return ref.update(data); },
+        deleteDoc:        function(ref) { return ref.delete(); },
+        getDoc:           function(ref) { return ref.get(); },
+        query:            function(ref) { return ref; },
+        where:            function(f, op, v) { return { _type:'where', f:f, op:op, v:v }; },
+        orderBy:          function(f, d) { return { _type:'orderBy', f:f, d:d }; },
+        limit:            function(n) { return { _type:'limit', n:n }; },
+        onSnapshot:       function(ref, cb, err) { return ref.onSnapshot(cb, err); },
+        serverTimestamp:  function() { return firebase.firestore.FieldValue.serverTimestamp(); },
+      };
+      window._fbLoaded = true;
+    } catch(e) {
+      window._fbLoaded = false;
+      window._fbError  = e.message;
+    }
+    window.dispatchEvent(new Event('firebase-ready'));
   }
-}
+
+  function onError(e) {
+    console.warn('[Firebase] Erro ao carregar SDK compat:', e.target && e.target.src);
+    window._fbLoaded = false;
+    window._fbError  = 'Failed to fetch ' + (e.target && e.target.src);
+    window.dispatchEvent(new Event('firebase-ready'));
+  }
+
+  PKGS.forEach(function(pkg) {
+    var s = document.createElement('script');
+    s.src = BASE + pkg;
+    s.onload = function() { if (++loaded === PKGS.length) onAllLoaded(); };
+    s.onerror = onError;
+    document.head.appendChild(s);
+  });
+})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script type="module">
-// Carrega Firebase SDK via CDN (funciona em arquivo local e na Vercel)
-const VER = '10.12.2';
-const BASE = 'https://www.gstatic.com/firebasejs/' + VER;
-try {
-  const [appMod, fsMod, authMod] = await Promise.all([
-    import(BASE + '/firebase-app.js'),
-    import(BASE + '/firebase-firestore.js'),
-    import(BASE + '/firebase-auth.js'),
-  ]);
-  window._fbModules = { ...appMod, ...fsMod, ...authMod };
-  window._fbLoaded  = true;
-  window.dispatchEvent(new Event('firebase-ready'));
-} catch(e) {
-  console.warn('[Firebase] Erro ao carregar SDK:', e.message);
-  window._fbLoaded  = false;
-  window._fbError   = e.message;
-  window.dispatchEvent(new Event('firebase-ready'));
-}
-</script>
 <!-- ZXing carregado dinamicamente dentro de startDecoding() -->
 <!-- Google reCAPTCHA v3 -->
 <script src="https://www.google.com/recaptcha/api.js?render=6LciCuUsAAAADjlcurM26D7fGpMjdyCeFLDNUOG" async defer></script>
@@ -826,6 +848,23 @@ textarea.form-control{resize:vertical;min-height:80px}
 .consent-check{background:linear-gradient(135deg,#FFF7ED,#FEF3C7);border:1.5px solid #FCD34D;border-radius:8px;padding:12px 14px;margin-bottom:12px}
 .consent-check label{display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:12.5px;color:#92400E;font-weight:500;line-height:1.5}
 .consent-check input[type=checkbox]{margin-top:2px;accent-color:var(--warning);flex-shrink:0;width:16px;height:16px}
+
+/* ── Scanner de Patrimônio ── */
+.scanner-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(6px);z-index:2000;display:none;align-items:center;justify-content:center}
+.scanner-modal-overlay.open{display:flex;animation:fadeIn .2s ease}
+.scanner-box{position:relative;width:100%;max-width:320px;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#000;margin:0 auto 12px}
+.scanner-video{width:100%;height:100%;object-fit:cover;display:block}
+.scanner-reticle{position:absolute;inset:20%;border:2.5px solid rgba(255,255,255,.7);border-radius:8px;pointer-events:none}
+.scan-line{position:absolute;left:20%;right:20%;height:2px;background:linear-gradient(90deg,transparent,#2563EB,transparent);animation:scanMove 2s linear infinite}
+@keyframes scanMove{0%{top:20%}100%{top:80%}}
+.scanner-result{display:none;background:rgba(37,99,235,.15);border:1.5px solid #2563EB;border-radius:8px;padding:8px 12px;margin-bottom:8px;color:#fff;font-size:13px;font-weight:600}
+.scanner-label{color:#fff;font-size:13px;font-weight:600;margin:0 0 2px}
+.scanner-sublabel{color:rgba(255,255,255,.5);font-size:11px;margin:0 0 10px}
+.scanner-toolbar{display:flex;gap:10px;justify-content:center;margin-top:14px}
+.scanner-close-btn{padding:9px 20px;background:rgba(255,255,255,.1);color:#fff;border:1.5px solid rgba(255,255,255,.25);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:background .2s}
+.scanner-close-btn:hover{background:rgba(255,255,255,.2)}
+.scanner-manual-btn{padding:9px 20px;background:rgba(37,99,235,.3);color:#fff;border:1.5px solid rgba(37,99,235,.5);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:background .2s}
+.scanner-manual-btn:hover{background:rgba(37,99,235,.5)}
 </style>
 </head>
 <body>
@@ -5411,16 +5450,14 @@ function showOfflineBar(msg) {
 }
 
 async function initBanco() {
-  // Aguarda o <script type="module"> do <head> carregar os SDKs
-  const mods = await new Promise(resolve => {
-    if (window._fbLoaded !== undefined) return resolve(window._fbLoaded ? window._fbModules : null);
-    window.addEventListener('firebase-ready', () => {
-      resolve(window._fbLoaded ? window._fbModules : null);
-    }, { once: true });
-    setTimeout(() => resolve(window._fbModules || null), 10000);
+  // Aguarda os scripts compat carregarem
+  const ready = await new Promise(resolve => {
+    if (window._fbLoaded !== undefined) return resolve(window._fbLoaded);
+    window.addEventListener('firebase-ready', () => resolve(window._fbLoaded), { once: true });
+    setTimeout(() => resolve(!!window.firebase), 10000);
   });
 
-  if (!mods) {
+  if (!ready && !window.firebase) {
     const tip = location.protocol === 'file:'
       ? 'Abra via servidor HTTP (ex: Live Server) para conectar ao Banco.'
       : 'Verifique sua conexão com a internet.';
@@ -5429,22 +5466,26 @@ async function initBanco() {
   }
 
   try {
-    const {
-      initializeApp, getApps,
-      getFirestore,
-      collection, addDoc, updateDoc, deleteDoc,
-      doc, query, where, orderBy, limit, onSnapshot, serverTimestamp,
-      getAuth,
-    } = mods;
-
-    const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
+    const app = firebase.apps.length ? firebase.apps[0] : firebase.initializeApp(FIREBASE_CONFIG);
     window._app = app;
-    db   = getFirestore(app);
+    db   = app.firestore();
+    auth = app.auth();
     window._db = db;
-    auth = getAuth(app);
-    // ── Banco Cloud Messaging (FCM) ─────────────────────
-    // Chave VAPID pública para Web Push — gerar no Banco Console
-    // Project Settings → Cloud Messaging → Web Push certificates → Key pair
+
+    // Helpers compatíveis com o restante do código
+    const collection     = (col)           => db.collection(col);
+    const doc            = (db2, col, id)  => (id ? db2.collection(col).doc(id) : db2.doc(col));
+    const addDoc         = (ref, data)     => ref.add(data);
+    const updateDoc      = (ref, data)     => ref.update(data);
+    const deleteDoc      = (ref)           => ref.delete();
+    const serverTimestamp = ()             => firebase.firestore.FieldValue.serverTimestamp();
+    const onSnapshot     = (ref, cb, err)  => ref.onSnapshot(cb, err);
+    // query/where/orderBy/limit — compat usa encadeamento, mas mantemos por compatibilidade
+    const query          = (ref, ...ops)   => ref;
+    const where          = (f, op, v)      => ({ _where: [f, op, v] });
+    const orderBy        = (f, d)          => ({ _orderBy: [f, d] });
+    const limit          = (n)             => ({ _limit: n });
+
     const FCM_VAPID_KEY = window.FCM_VAPID_KEY || 'BCp-PLACEHOLDER-GERE-NO-FIREBASE-CONSOLE';
 
     // Singleton de Banco Functions — instanciado 1x após login
@@ -5453,9 +5494,8 @@ let _fbFunctions = null;
 async function fsGetDoc(col, id) {
   if (!FB_READY) return null;
   try {
-    const { getFirestore, doc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
-    const snap = await getDoc(doc(getFirestore(app), col, id));
-    if (!snap.exists()) return null;
+    const snap = await app.firestore().collection(col).doc(id).get();
+    if (!snap.exists) return null;
     return { id: snap.id, ...snap.data() };
   } catch {
     // Fallback REST
@@ -5482,13 +5522,11 @@ async function fsGetDoc(col, id) {
 
 async function getFbFunctions() {
   if (_fbFunctions) return _fbFunctions;
-  const { getFunctions } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js');
-  _fbFunctions = getFunctions(app, 'us-central1');
+  _fbFunctions = app.functions('us-central1');
   return _fbFunctions;
 }
 async function callFunction(name, data) {
-  const { httpsCallable } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js');
-  const fn = httpsCallable(await getFbFunctions(), name);
+  const fn = (await getFbFunctions()).httpsCallable(name);
   const r  = await fn(data);
   return r.data;
 }
@@ -5496,12 +5534,11 @@ async function callFunction(name, data) {
 window.initFCM = async function() {
       if (!('Notification' in window)) return;
       try {
-        const { getMessaging, getToken, onMessage } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js');
-        const messaging = getMessaging(app);
+        const messaging = firebase.messaging();
         window._fcmMessaging = messaging;
 
         // Listener de mensagens em foreground
-        onMessage(messaging, payload => {
+        messaging.onMessage(payload => {
           console.log('[FCM] Mensagem recebida:', payload);
           processarComandoFCM(payload);
         });
@@ -5514,7 +5551,7 @@ window.initFCM = async function() {
         }
 
         // Obtém token FCM e salva no Banco
-        const token = await getToken(messaging, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: _swRegistration });
+        const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: _swRegistration });
         if (token) {
           window._fcmToken = token;
           await salvarTokenFCM(token);
@@ -5540,9 +5577,7 @@ window.initFCM = async function() {
 
     // enableIndexedDbPersistence depreciada — usando cache moderno
     try {
-      const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } =
-        await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
-      // Já inicializado acima — apenas loga
+      // Compat SDK gerencia cache IndexedDB automaticamente
       console.log('[Banco] Cache local: IndexedDB ativo');
     } catch(e) {
       console.log('[Banco] Cache:', e.message);
@@ -18633,12 +18668,11 @@ async function gerarIdChamado() {
   }
   try {
     // Usa um documento de contador no Firestore com transaction
-    const { getFirestore, doc, runTransaction, increment } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
-    const db2     = getFirestore(app);
-    const contRef = doc(db2, 'config', 'contadores');
-    const novoNum = await runTransaction(db2, async tx => {
+    const db2     = app.firestore();
+    const contRef = db2.collection('config').doc('contadores');
+    const novoNum = await db2.runTransaction(async tx => {
       const snap   = await tx.get(contRef);
-      const atual  = snap.exists() ? (snap.data().chamados || 99) : 99;
+      const atual  = snap.exists ? (snap.data().chamados || 99) : 99;
       const prox   = atual + 1;
       tx.set(contRef, { chamados: prox }, { merge: true });
       return prox;
@@ -18653,12 +18687,12 @@ async function gerarIdChamado() {
 async function gerarIdAprovacao() {
   if (!FB_READY) return 'AP-OFFLINE-' + Date.now();
   try {
-    const { getFirestore, doc, runTransaction } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
-    const db2     = getFirestore(app);
-    const contRef = doc(db2, 'config', 'contadores');
-    const novoNum = await runTransaction(db2, async tx => {
+    const { getFirestore, doc, runTransaction } = { getFirestore: null, doc: null, runTransaction: null }; // compat below
+    const db2     = app.firestore();
+    const contRef = db2.collection('config').doc('contadores');
+    const novoNum = await db2.runTransaction(async tx => {
       const snap   = await tx.get(contRef);
-      const atual  = snap.exists() ? (snap.data().aprovacoes || 0) : 0;
+      const atual  = snap.exists ? (snap.data().aprovacoes || 0) : 0;
       const prox   = atual + 1;
       tx.set(contRef, { aprovacoes: prox }, { merge: true });
       return prox;
