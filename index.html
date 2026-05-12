@@ -5555,8 +5555,8 @@ window.initFCM = async function() {
 
     document.getElementById('fb-offline-bar')?.remove();
     console.log('[Banco] ✓ Conectado — sysack-829e2');
-    showToast('🗄️ Banco de Dados conectado — sincronização em banco de dados conectado', 'success');
-    startFirestoreListeners();
+    showToast('🗄️ Banco de Dados conectado', 'success');
+    // Listeners iniciados em loginSuccess() após autenticação
 
   } catch (err) {
     console.warn('[Banco] Erro:', err.message || err);
@@ -6797,6 +6797,16 @@ function loginSuccess(user, showWelcome = true) {
     showToast(`${saud}, ${user.nome.split(' ')[0]}! 👋 Bem-vindo ao SYSACK.`, 'success');
   }
   auditLog('LOGIN', 'auth', user.uid, 'user', { nome: user.nome, role: user.role });
+
+  // Inicia listeners do Firestore APÓS o usuário estar autenticado
+  // Garante que request.auth != null nas Firestore Rules
+  if (FB_READY && db) {
+    setTimeout(() => {
+      startFirestoreListeners();
+      verificarConfigSeguranca();
+      document.dispatchEvent(new Event('sysack-login'));
+    }, 500); // pequeno delay para garantir que o token JWT foi propagado
+  }
 }
 
 // ─── Logout ──────────────────────────────────────────────────
