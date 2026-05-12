@@ -7076,7 +7076,7 @@ function adicionarAtor(tipo) {
 }
 
 function removerAtor(tipo, val) {
-  if (!SESSION_USER || ![""admin"", ""gestor"", ""tecnico""].includes(SESSION_USER.role)) {
+  if (!SESSION_USER || !["admin", "gestor", "tecnico"].includes(SESSION_USER.role)) {
     showToast('⛔ Acesso restrito: remover ator.', 'error');
     return;
   }
@@ -17561,7 +17561,7 @@ function patAbrirDetalhe(id) {
         ['Conta do Imobilizado',      contaAt  + ' — ' + (PLANO_CONTAS_PADRAO.find(c=>c.conta===contaAt)?.nome||'')],
         ['Conta de Depreciação',      contaDep + ' — ' + (PLANO_CONTAS_PADRAO.find(c=>c.conta===contaDep)?.nome||'')],
         ['Centro de Custo',           p.centroCusto||'CC-001'],
-        ['Valor de Aquisição',        'R$ '+parseFloat(p.valorAquisicao||0).toLocaleString('pt-BR',{minimumFractionDigits:2)})],
+        ['Valor de Aquisição',        'R$ '+parseFloat(p.valorAquisicao||0).toLocaleString('pt-BR',{minimumFractionDigits:2})],
         ['Data de Aquisição',         p.dataAquisicao ? new Date(p.dataAquisicao+'T12:00:00').toLocaleDateString('pt-BR') : '—'],
         ['Taxa de Depreciação',       getTaxaDepreciacao(p.categoria||'outro')+'% ao ano'],
         ['Vida Útil',                 dep.vidaUtilAnos+' anos'],
@@ -17573,7 +17573,7 @@ function patAbrirDetalhe(id) {
       ].map(([l,v]) => `<div style="padding:8px 0;border-bottom:1px solid var(--g100)">
         <div style="font-size:11px;font-weight:700;color:var(--g400);text-transform:uppercase">${escapeHtml(l)}</div>
         <div style="font-size:13px;color:var(--g900);margin-top:2px">${escapeHtml(String(v))}</div>
-      </div>`).join('')}
+      </div>`).join(''))}
     </div>`;
 
   // Aba HISTÓRICO
@@ -17665,7 +17665,7 @@ function patExportarRelatorio(formato) {
   const totalAq  = lista.reduce((s, p) => s + parseFloat(p.valorAquisicao||0), 0);
   const totalAt  = lista.reduce((s, p) => s + calcularDepreciacao(p).valorAtual, 0);
   linhas.push('');
-  linhas.push(`"TOTAL (${lista.length} itens)";"";"";"";"";"";"";"";"";"";"";"";"";"${totalAq.toFixed(2).replace('.',',')}";"";"";"${totalAt.toFixed(2).replace('.',',')}"`);
+  linhas.push(`"TOTAL (${lista.length} itens)";";";";";";";";";";";";";"${totalAq.toFixed(2).replace('.',',')}";";";"${totalAt.toFixed(2).replace('.',',')}"`);
 
   const hoje  = new Date().toISOString().split('T')[0];
   const titulo = `"SYSACK — Relatório de Patrimônio CESAN"\n"Data: ${hoje} · Filtros aplicados: ${Object.entries(f).filter(([,v])=>v).map(([k,v])=>k+'='+v).join(', ')||'Nenhum'}"\n\n`;
@@ -19653,7 +19653,7 @@ async function toggleGrupoAlerta(id, ativoAtual) {
 }
 
 async function excluirGrupoAlerta(id) {
-  if (!SESSION_USER || ![""admin"", ""gestor""].includes(SESSION_USER.role)) {
+  if (!SESSION_USER || !["admin", "gestor"].includes(SESSION_USER.role)) {
     showToast('⛔ Acesso restrito: excluir grupo de alerta.', 'error');
     return;
   }
