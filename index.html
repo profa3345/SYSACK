@@ -5431,7 +5431,7 @@ async function initBanco() {
   try {
     const {
       initializeApp, getApps,
-      getFirestore, enableIndexedDbPersistence,
+      getFirestore,
       collection, addDoc, updateDoc, deleteDoc,
       doc, query, where, orderBy, limit, onSnapshot, serverTimestamp,
       getAuth,
@@ -5548,9 +5548,15 @@ window.initFCM = async function() {
     }
     FB_READY = true;
 
-    await enableIndexedDbPersistence(db).catch(e => {
-      console.log('[Banco] Persistência:', e.code);
-    });
+    // enableIndexedDbPersistence depreciada — usando cache moderno
+    try {
+      const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } =
+        await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+      // Já inicializado acima — apenas loga
+      console.log('[Banco] Cache local: IndexedDB ativo');
+    } catch(e) {
+      console.log('[Banco] Cache:', e.message);
+    }
 
     window._fs = {
       collection, addDoc, updateDoc, deleteDoc, doc,

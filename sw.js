@@ -52,6 +52,41 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
+
+// Cache de recursos estáticos (sem fontes externas para evitar CSP)
+const CACHE_NAME = 'sysack-v3';
+const STATIC_CACHE = ['/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+
+self.addEventListener('install', event => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_CACHE).catch(() => {}))
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', event => {
+  const url = event.request.url;
+  // Não intercepta Firebase, APIs externas ou fontes (deixa o browser decidir)
+  if (url.includes('googleapis.com') || url.includes('firebaseio.com') ||
+      url.includes('cloudfunctions.net') || url.includes('gstatic.com') ||
+      url.includes('fonts.') || url.includes('recaptcha') ||
+      url.includes('identitytoolkit') || !url.startsWith(self.location.origin)) {
+    return; // passa direto sem cache
+  }
+  // Cache first para recursos estáticos próprios
+  event.respondWith(
+    caches.match(event.request).then(cached => cached || fetch(event.request))
+  );
+});
+
 // Mensagens do app
 self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
