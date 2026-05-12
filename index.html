@@ -2,33 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval'
-      https://www.gstatic.com
-      https://www.google.com
-      https://apis.google.com
-      https://cdn.jsdelivr.net
-      https://unpkg.com;
-    style-src 'self' 'unsafe-inline'
-      https://fonts.googleapis.com;
-    font-src 'self'
-      https://fonts.gstatic.com;
-    connect-src 'self'
-      https://*.googleapis.com
-      https://*.firebaseio.com
-      https://*.cloudfunctions.net
-      https://generativelanguage.googleapis.com
-      https://identitytoolkit.googleapis.com
-      https://www.google.com
-      https://www.gstatic.com
-      https://cdn.jsdelivr.net
-      https://unpkg.com;
-    img-src 'self' data: blob: https:;
-    media-src 'self' blob:;
-    worker-src blob: https://www.gstatic.com;
-    frame-src https://www.google.com;
-  ">
+  <!-- CSP via HTTP header in vercel.json -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <!-- PWA -->
   <link rel="manifest" href="/manifest.json">
@@ -39,7 +13,7 @@
   <meta name="apple-mobile-web-app-title" content="SYSACK">
   <link rel="apple-touch-icon" href="/icon-192.png">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
+  <!-- X-Frame-Options set via HTTP header in vercel.json -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
 <title>SYSACK – Gestão Inteligente de Ativos</title>
 <!-- Banco SDK via module shim — funciona em file://, http:// e https:// -->
@@ -5471,7 +5445,7 @@ async function initBanco() {
     // ── Banco Cloud Messaging (FCM) ─────────────────────
     // Chave VAPID pública para Web Push — gerar no Banco Console
     // Project Settings → Cloud Messaging → Web Push certificates → Key pair
-    const FCM_VAPID_KEY = cfg?.fcmVapidKey || 'BCp-PLACEHOLDER-GERE-NO-FIREBASE-CONSOLE';
+    const FCM_VAPID_KEY = window.FCM_VAPID_KEY || 'BCp-PLACEHOLDER-GERE-NO-FIREBASE-CONSOLE';
 
     // Singleton de Banco Functions — instanciado 1x após login
 let _fbFunctions = null;
