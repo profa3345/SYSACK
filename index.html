@@ -20,10 +20,13 @@
       https://*.cloudfunctions.net
       https://generativelanguage.googleapis.com
       https://identitytoolkit.googleapis.com
-      https://www.google.com;
+      https://www.google.com
+      https://www.gstatic.com
+      https://cdn.jsdelivr.net
+      https://unpkg.com;
     img-src 'self' data: blob: https:;
     media-src 'self' blob:;
-    worker-src blob:;
+    worker-src blob: https://www.gstatic.com;
     frame-src https://www.google.com;
   ">
   <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -53,17 +56,20 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script type="module">
-// Carrega os módulos e expõe globalmente ANTES do resto do JS
+// Carrega Firebase SDK via CDN (funciona em arquivo local e na Vercel)
+const VER = '10.12.2';
+const BASE = 'https://www.gstatic.com/firebasejs/' + VER;
 try {
   const [appMod, fsMod, authMod] = await Promise.all([
-    import('firebase/app'),
-    import('firebase/firestore'),
-    import('firebase/auth'),
+    import(BASE + '/firebase-app.js'),
+    import(BASE + '/firebase-firestore.js'),
+    import(BASE + '/firebase-auth.js'),
   ]);
   window._fbModules = { ...appMod, ...fsMod, ...authMod };
   window._fbLoaded  = true;
   window.dispatchEvent(new Event('firebase-ready'));
 } catch(e) {
+  console.warn('[Firebase] Erro ao carregar SDK:', e.message);
   window._fbLoaded  = false;
   window._fbError   = e.message;
   window.dispatchEvent(new Event('firebase-ready'));
@@ -5451,14 +5457,16 @@ async function initBanco() {
   try {
     const {
       initializeApp, getApps,
-      getBanco, enableIndexedDbPersistence,
+      getFirestore, enableIndexedDbPersistence,
       collection, addDoc, updateDoc, deleteDoc,
       doc, query, where, orderBy, limit, onSnapshot, serverTimestamp,
       getAuth,
     } = mods;
 
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
-    db   = getBanco(app);
+    window._app = app;
+    db   = getFirestore(app);
+    window._db = db;
     auth = getAuth(app);
     // ── Banco Cloud Messaging (FCM) ─────────────────────
     // Chave VAPID pública para Web Push — gerar no Banco Console
@@ -5472,7 +5480,7 @@ async function fsGetDoc(col, id) {
   if (!FB_READY) return null;
   try {
     const { getFirestore, doc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
-    const snap = await getDoc(doc(getBanco(app), col, id));
+    const snap = await getDoc(doc(getFirestore(app), col, id));
     if (!snap.exists()) return null;
     return { id: snap.id, ...snap.data() };
   } catch {
@@ -9714,7 +9722,7 @@ const STATE_AGENTS = { list: [], listener: null };
 function startAgentsListener() {
   if (!FB_READY || STATE_AGENTS.listener) return;
   try {
-    const { getBanco, collection, onSnapshot, query, orderBy } =
+    const { getFirestore, collection, onSnapshot, query, orderBy } =
       window._fsModule || {};
     // Fallback: usa polling se módulo não disponível
     if (!onSnapshot) {
@@ -9723,7 +9731,7 @@ function startAgentsListener() {
       return;
     }
     STATE_AGENTS.listener = onSnapshot(
-      query(collection(getBanco(), 'agents'), orderBy('lastSeen', 'desc')),
+      query(collection(getFirestore(window._app || getApps()[0]), 'agents'), orderBy('lastSeen', 'desc')),
       snap => {
         STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
