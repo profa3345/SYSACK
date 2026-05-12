@@ -519,11 +519,11 @@ textarea.form-control{resize:vertical;min-height:80px}
 .radio-opt input{accent-color:var(--accent)}.radio-opt.checked{border-color:var(--accent);background:var(--accent-l);color:var(--accent)}
 .modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex;animation:fadeIn .2s ease}
-.modal{background:#fff;border-radius:14px;width:680px;max-width:95vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shl);animation:fadeUp .25s cubic-bezier(.4,0,.2,1)}
+.modal{background:#fff;border-radius:14px;width:680px;max-width:95vw;height:auto;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shl);animation:fadeUp .25s cubic-bezier(.4,0,.2,1)}
 .modal-lg{width:900px}.modal-xl{width:1100px}.modal-sm{width:480px}
 .modal-header{padding:16px 20px;border-bottom:1px solid var(--g200);display:flex;align-items:center;gap:10px;flex-shrink:0}
 .modal-header h3{font-size:15px;font-weight:700;flex:1;color:var(--g900)}
-.modal-body{padding:20px;overflow-y:auto;flex:1}
+.modal-body{padding:20px;overflow-y:auto;flex:1;min-height:0}
 .modal-footer{padding:13px 20px;border-top:1px solid var(--g200);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0}
 .close-btn{background:none;border:none;cursor:pointer;color:var(--g400);padding:4px;border-radius:5px;display:flex;align-items:center;transition:all .15s;font-size:18px}
 .close-btn:hover{background:var(--g100);color:var(--g700)}
@@ -6734,8 +6734,8 @@ async function fazerLogin() {
     } catch (err) {
       // Só loga se não for erro de credencial inválida
       const credErrors = ['auth/user-not-found','auth/wrong-password','auth/invalid-credential','auth/invalid-email'];
-      if (!credErrors.includes(err.code)) {
-        console.warn('[Auth] Banco error:', err.code, err.message);
+      if (!credErrors.includes(err?.code)) {
+        console.warn('[Auth] Banco error:', err?.code, err?.message);
       }
     }
   }
