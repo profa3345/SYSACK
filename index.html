@@ -6694,10 +6694,9 @@ async function fazerLogin() {
   setLoginLoading(true);
 
   // ── Tentativa 1: Banco Auth ────────────────────────────
-  if (FB_READY && auth && window._fbModules?.signInWithEmailAndPassword) {
+  if (FB_READY && auth) {
     try {
-      const { signInWithEmailAndPassword } = window._fbModules;
-      const cred   = await signInWithEmailAndPassword(auth, emailNorm, senha);
+      const cred   = await auth.signInWithEmailAndPassword(emailNorm, senha);
       const fbUser = cred.user;
 
       // 1. Tenta custom claims (token JWT — mais seguro, não pode ser alterado pelo cliente)
@@ -6854,9 +6853,9 @@ async function esqueciSenha() {
   if (!emailRaw) { showLoginError('Digite seu e-mail ou usuário no campo acima.'); return; }
   // Normaliza antes de enviar ao Banco
   const email = emailRaw.includes('@') ? emailRaw : emailRaw + '@adsi.com.br';
-  if (FB_READY && auth && window._fbModules?.sendPasswordResetEmail) {
+  if (FB_READY && auth) {
     try {
-      await window._fbModules.sendPasswordResetEmail(auth, email);
+      await auth.sendPasswordResetEmail(email);
       clearLoginError();
       showToast(`✉️ E-mail de recuperação enviado para ${email}`, 'success');
     } catch (err) {
