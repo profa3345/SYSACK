@@ -519,7 +519,7 @@ textarea.form-control{resize:vertical;min-height:80px}
 .radio-opt input{accent-color:var(--accent)}.radio-opt.checked{border-color:var(--accent);background:var(--accent-l);color:var(--accent)}
 .modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex;animation:fadeIn .2s ease}
-.modal{background:#fff;border-radius:14px;width:680px;max-width:95vw;height:auto;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shl);animation:fadeUp .25s cubic-bezier(.4,0,.2,1)}
+.modal{background:#fff;border-radius:14px;width:680px;max-width:95vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shl);animation:fadeUp .25s cubic-bezier(.4,0,.2,1)}
 .modal-lg{width:900px}.modal-xl{width:1100px}.modal-sm{width:480px}
 .modal-header{padding:16px 20px;border-bottom:1px solid var(--g200);display:flex;align-items:center;gap:10px;flex-shrink:0}
 .modal-header h3{font-size:15px;font-weight:700;flex:1;color:var(--g900)}
@@ -739,6 +739,7 @@ textarea.form-control{resize:vertical;min-height:80px}
   .modal-overlay{align-items:flex-end}
   .modal{
     border-radius:16px 16px 0 0 !important;
+    height:92vh;
     max-height:92vh;
     margin:0;
     width:100% !important;
