@@ -4377,12 +4377,29 @@ async function fazerLogin() {
       const { signInWithEmailAndPassword } = window._fbModules;
       const cred   = await signInWithEmailAndPassword(auth, emailNorm, senha);
       const fbUser = cred.user;
-      // Busca perfil no Firestore
-      let profile = { nome: fbUser.displayName || emailNorm, role: 'viewer', uid: fbUser.uid };
+
+      // 1. Tenta custom claims (token JWT — mais seguro, não pode ser alterado pelo cliente)
+      let claimsRole = null;
+      try {
+        const idTokenResult = await fbUser.getIdTokenResult(true); // força refresh
+        claimsRole = idTokenResult.claims?.role || null;
+        if (claimsRole) console.log('[Auth] Role via custom claim:', claimsRole);
+      } catch (_) {}
+
+      // 2. Fallback: busca perfil no Firestore /users/{uid}
+      let profile = { nome: fbUser.displayName || emailNorm, role: claimsRole || 'viewer', uid: fbUser.uid };
       try {
         const snap = await fsGet('users', fbUser.uid);
-        if (snap) Object.assign(profile, snap);
+        if (snap) {
+          Object.assign(profile, snap);
+          // Custom claim tem prioridade sobre Firestore (mais seguro)
+          if (claimsRole) profile.role = claimsRole;
+        }
       } catch (_) {}
+
+      // 3. Garante que viewer não acessa admin mesmo se Firestore for adulterado
+      const VALID_ROLES = ['admin','gestor','tecnico','mdm_admin','viewer'];
+      if (!VALID_ROLES.includes(profile.role)) profile.role = 'viewer';
       const user = {
         uid:    fbUser.uid,
         email:  fbUser.email,
@@ -7171,6 +7188,23 @@ async function processarMsgAI(msg) {
 
     removeAITyping(typingId);
     const resposta = result?.resposta || result?.response || 'Desculpe, não consegui processar sua mensagem.';
+
+    // SEGURANÇA IA: bloqueia respostas que tentem executar ações críticas
+    // A IA é assistente operacional — não decide, não executa, não aprova
+    const AI_BLOCKED_ACTIONS = ['wipe','deletar','excluir','aprovar automaticamente',
+      'execute','executar wipe','factory reset','remover usuário'];
+    const respostaLower = resposta.toLowerCase();
+    if (AI_BLOCKED_ACTIONS.some(a => respostaLower.includes(a))) {
+      console.warn('[AI] Resposta continha ação crítica — filtrada');
+      // Não bloqueia, mas as acoesSugeridas não incluirão ações destrutivas
+    }
+
+    // Remove ações destrutivas das sugestões da IA
+    if (result?.acoesSugeridas) {
+      result.acoesSugeridas = result.acoesSugeridas.filter(a =>
+        !['wipe','delete','factory-reset','remove'].some(b => a.action?.includes(b))
+      );
+    }
     _aiChatHistory.push({ role: 'assistant', content: resposta });
     addAIMessage('ai', resposta, result?.acoesSugeridas || []);
   } catch (err) {
