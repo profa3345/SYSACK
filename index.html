@@ -5532,20 +5532,10 @@ window.initFCM = async function() {
       && !location.hostname.includes('127.0.0.1')
       && location.hostname !== '';
 
-    if (isProduction) {
-      try {
-        const acMod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js');
-        acMod.initializeAppCheck(app, {
-          provider: new acMod.ReCaptchaV3Provider('6LciCuUsAAAADjlcurM26D7fGpMjdyCeFLDNUOG'),
-          isTokenAutoRefreshEnabled: true,
-        });
-        console.log('[AppCheck] ✓ reCAPTCHA v3 ativo — produção');
-      } catch(e) { console.warn('[AppCheck]', e.message); }
-    } else {
-      console.log('[AppCheck] Desativado — ambiente de desenvolvimento');
-      // Em desenvolvimento: desabilita App Check completamente para não bloquear
-      // O Banco Auth ainda funciona normalmente sem App Check
-    }
+    // App Check desativado — ativar após registrar domínio no Firebase Console
+    // Firebase Console → App Check → Registrar app → adicionar domínio sysack.vercel.app
+    // Por enquanto: auth do Firebase protege as coleções via Firestore Rules
+    console.log('[AppCheck] Desativado — proteção via Firestore Rules ativa');
     FB_READY = true;
 
     // enableIndexedDbPersistence depreciada — usando cache moderno
