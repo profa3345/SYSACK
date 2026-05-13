@@ -5645,11 +5645,12 @@ window.initFCM = async function() {
     console.log('[Banco] ✓ Conectado — sysack-829e2');
     showToast('🗄️ Banco de Dados conectado', 'success');
 
-    // ── Inicia listeners automaticamente se usuário já estiver logado ──
-    // Resolve o problema de sessão salva que restaura antes do Firebase
-    if (SESSION_USER && !window._listenersAtivos) {
-      console.log('[Banco] Usuário já logado — iniciando listeners automaticamente');
-      setTimeout(startFirestoreListeners, 100);
+    // ── Inicia listeners SEMPRE após Firebase conectar ─────────────
+    // As regras do Firestore permitem leitura pública (allow read: true)
+    // Não precisa esperar login — dados carregam imediatamente
+    if (!window._listenersAtivos) {
+      console.log('[Banco] Iniciando listeners Firestore...');
+      setTimeout(startFirestoreListeners, 200);
     }
 
   } catch (err) {
