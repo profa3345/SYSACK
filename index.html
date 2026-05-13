@@ -20450,23 +20450,23 @@ async function abrirDashboardIA() {
 // Analisa histórico de chamados e alertas do ativo
 // ════════════════════════════════════════════════════════════
 
-async function analisarAtivoPorIA(pat) {
-  const ativo = [...(STATE.ativos||[]),...(STATE.patrimonios||[])].find(a => a.pat === pat);
-  if (!ativo) return;
-
+async async function analisarAtivoPorIA(pat) {
+  // Busca o ativo — pode estar em ativos (discovery) ou patrimonios
+  const ativo = [...(STATE.ativos||[]),...(STATE.patrimonios||[])].find(a => a.pat === pat || a.id === pat) || { pat };
   const chamadosDoAtivo = (STATE.chamados||[]).filter(c => c.pat === pat);
   const idade = ativo.dataAquisicao
     ? Math.round((Date.now() - new Date(ativo.dataAquisicao+'T12:00:00').getTime()) / (365.25*86400000) * 10) / 10
     : null;
 
+  // Cria modal
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px';
   const modal = document.createElement('div');
-  modal.style.cssText = 'background:#fff;border-radius:12px;max-width:500px;width:100%;padding:24px';
+  modal.style.cssText = 'background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px;max-height:80vh;overflow-y:auto';
   modal.innerHTML = `
-    <h3 style="margin:0 0 4px;font-size:16px">🤖 Análise IA — ${escapeHtml(ativo.desc||pat)}</h3>
+    <h3 style="margin:0 0 4px;font-size:16px">🤖 Análise IA — ${escapeHtml(ativo.desc||ativo.hostname||pat)}</h3>
     <p style="color:var(--g400);font-size:12px;margin:0 0 16px">PAT: ${pat} · Idade: ${idade||'?'} anos · Chamados: ${chamadosDoAtivo.length}</p>
-    <div id="ia-ativo-res" style="text-align:center;padding:20px">🤖 Analisando...</div>
+    <div id="ia-ativo-res" style="text-align:center;padding:20px;color:var(--g500)">🤖 Analisando com Gemini...</div>
     <div style="display:flex;justify-content:flex-end;margin-top:14px">
       <button onclick="this.closest('[style*=z-index:10001]').remove()" class="btn btn-ghost">Fechar</button>
     </div>`;
@@ -20475,30 +20475,43 @@ async function analisarAtivoPorIA(pat) {
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
 
   try {
-    const r = await callFunction('triageChamado', {
-      titulo:    `Análise preditiva do ativo ${pat}`,
-      desc:      `Ativo: ${ativo.desc||''}. Idade: ${idade||'?'} anos. Total de chamados: ${chamadosDoAtivo.length}. Tipo: ${ativo.tipo||''}. Status: ${ativo.status||'ativo'}. Fabricante: ${ativo.fab||''}`,
-      categoria: 'hardware',
-      area:      ativo.area || '',
+    // Chama Cloud Function analisarAtivo (chave Gemini fica segura no backend)
+    const resultado = await callFunction('analisarAtivo', {
+      pat:       pat,
+      desc:      ativo.desc      || ativo.hostname || '',
+      tipo:      ativo.tipo      || '',
+      area:      ativo.area      || '',
+      resp:      ativo.resp      || '',
+      status:    ativo.status    || '',
+      ip:        ativo.ip        || '',
+      hostname:  ativo.hostname  || '',
+      lastSeen:  ativo.lastSeen  || '',
+      uptimeH:   ativo.uptimeH   || null,
+      latencyMs: ativo.latencyMs || null,
     });
 
     const res = document.getElementById('ia-ativo-res');
     if (!res) return;
-    res.innerHTML = `
-      <div style="text-align:left">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-          <span style="font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;background:${r.prioridade==='critica'?'#FEE2E2':r.prioridade==='alta'?'#FEF3C7':'#F0FDF4'};color:${r.prioridade==='critica'?'#991B1B':r.prioridade==='alta'?'#92400E':'#166534'}">
-            Risco: ${(r.prioridade||'baixo').toUpperCase()}
-          </span>
-          <span style="font-size:11px;color:var(--g400)">Confiança: ${Math.round((r.confianca||0)*100)}%</span>
-        </div>
-        <div style="font-size:13px;color:var(--g700);margin-bottom:10px"><strong>Análise:</strong> ${escapeHtml(r.resumo||'—')}</div>
-        ${r.solucaoSugerida ? `<div style="background:var(--g50);border-radius:8px;padding:10px;font-size:12.5px;color:var(--g600)"><strong>Recomendação:</strong> ${escapeHtml(r.solucaoSugerida)}</div>` : ''}
-        <div style="font-size:11.5px;color:var(--g400);margin-top:8px">Tempo estimado para ação: ${escapeHtml(r.tempoEstimado||'—')}</div>
+
+    // Renderiza resultado em markdown simples
+    const texto = resultado.analise || 'Sem análise disponível';
+    const html2 = texto
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/^(\d+\. .+)$/gm, '<div style="margin:4px 0">$1</div>')
+      .replace(/^- (.+)$/gm, '<div style="margin:2px 0;padding-left:12px">• $1</div>')
+      .replace(/\n/g, '<br>');
+
+    res.innerHTML = `<div style="text-align:left;font-size:13px;line-height:1.6;color:var(--g700)">${html2}</div>
+      <div style="margin-top:12px;font-size:11px;color:var(--g400);border-top:1px solid var(--g100);padding-top:8px">
+        Gerado por Gemini · ${new Date(resultado.geradoEm||Date.now()).toLocaleString('pt-BR')}
       </div>`;
+
   } catch (e) {
     const res = document.getElementById('ia-ativo-res');
-    if (res) res.innerHTML = `<div style="color:var(--danger)">Erro: Configure GOOGLE_GENAI_API_KEY</div>`;
+    if (res) res.innerHTML = `<div style="color:var(--danger);font-size:13px">
+      ❌ Erro na análise: ${escapeHtml(e.message||'Tente novamente')}
+    </div>`;
+    console.error('[IA] analisarAtivo:', e);
   }
 }
 
