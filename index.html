@@ -5589,6 +5589,7 @@ async function callFunction(name, data) {
   const r  = await fn(data);
   return r.data;
 }
+window.callFunction = callFunction; // expõe globalmente
 
 window.initFCM = async function() {
       if (!('Notification' in window)) return;
@@ -20475,7 +20476,7 @@ async function analisarAtivoPorIA(pat) {
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
 
   try {
-    // Chama Cloud Function analisarAtivo (chave Gemini fica segura no backend)
+    // Chama Cloud Function analisarAtivo (chave Gemini segura no backend)
     const resultado = await callFunction('analisarAtivo', {
       pat:       pat,
       desc:      ativo.desc      || ativo.hostname || '',
