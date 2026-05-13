@@ -1553,13 +1553,13 @@ textarea.form-control{resize:vertical;min-height:80px}
         </div>
       </div>
       <div class="tabs" id="ativos-tabs">
-        <div class="tab active" onclick="filtrarAtivosPorTipo('')">Todos</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('computador,workstation,notebook,desktop')">Computadores</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('notebook')">Notebooks</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('monitor')">Monitores</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('switch,router,ap,firewall')">Rede</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('servidor,server-linux')">Servidores</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('printer,impressora,ups,camera')">Outros</div>
+        <div class="tab active" onclick="filtrarAtivosPorTipo('',this)">Todos</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('computador,workstation,notebook,desktop',this)">Computadores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('notebook',this)">Notebooks</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('monitor',this)">Monitores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('switch,router,ap,firewall',this)">Rede</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('servidor,server-linux',this)">Servidores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('printer,impressora,ups,camera',this)">Outros</div>
       </div>
       <div class="card">
         <div class="card-header">
@@ -6274,11 +6274,12 @@ function renderChamados(filter='abertos') {
 // Filtro de tipo ativo para as abas
 let _ativoFiltroTipo = '';
 
-function filtrarAtivosPorTipo(tipos) {
+function filtrarAtivosPorTipo(tipos, el) {
   _ativoFiltroTipo = tipos;
   // Atualiza tab ativa
   document.querySelectorAll('#ativos-tabs .tab').forEach(t => t.classList.remove('active'));
-  event?.target?.classList.add('active');
+  if (el) el.classList.add('active');
+  else if (event?.currentTarget) event.currentTarget.classList.add('active');
   renderAtivos();
 }
 
@@ -20461,6 +20462,8 @@ async function analisarAtivoPorIA(pat) {
 
   // Cria modal
   const overlay = document.createElement('div');
+  const overlayId = 'ia-overlay-' + Date.now();
+  overlay.id = overlayId;
   overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px';
   const modal = document.createElement('div');
   modal.style.cssText = 'background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px;max-height:80vh;overflow-y:auto';
@@ -20469,7 +20472,7 @@ async function analisarAtivoPorIA(pat) {
     <p style="color:var(--g400);font-size:12px;margin:0 0 16px">PAT: ${pat} · Idade: ${idade||'?'} anos · Chamados: ${chamadosDoAtivo.length}</p>
     <div id="ia-ativo-res" style="text-align:center;padding:20px;color:var(--g500)">🤖 Analisando com Gemini...</div>
     <div style="display:flex;justify-content:flex-end;margin-top:14px">
-      <button onclick="this.closest('[style*=z-index:10001]').remove()" class="btn btn-ghost">Fechar</button>
+      <button onclick="document.getElementById('${overlayId}').remove()" class="btn btn-ghost">Fechar</button>
     </div>`;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
