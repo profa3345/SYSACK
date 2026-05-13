@@ -415,8 +415,7 @@ window.dispatchEvent(new Event('firebase-ready'));
 
 /* ── Responsividade Mobile ───────────────────────────────── */
 @media (max-width: 768px) {
-  .sidebar { transform: translateX(-100%); transition: transform .25s ease; position: fixed; z-index: 200; height: 100vh; }
-  .sidebar.sb-mobile-open { transform: translateX(0); }
+    .sidebar.sb-mobile-open { transform: translateX(0); }
   .main-content, main { margin-left: 0 !important; }
   .stats-grid { grid-template-columns: repeat(2,1fr) !important; }
   .form-row.c2, .form-row.c3 { grid-template-columns: 1fr !important; }
@@ -1009,11 +1008,11 @@ var FB_CFG = {
 
 var db, auth, _appReady = false;
 
-// ── Firebase init ────────────────────────────────────────────
+// ── Firebase init (poll until SDK ready) ────────────────────
 function tryInit(){
   try{
-    if(typeof firebase === 'undefined') return false;
-    if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(FB_CFG);
+    if(typeof firebase==='undefined') return false;
+    if(!firebase.apps||!firebase.apps.length) firebase.initializeApp(FB_CFG);
     db   = firebase.firestore();
     auth = firebase.auth();
     window.db   = db;
@@ -1022,77 +1021,73 @@ function tryInit(){
     return true;
   }catch(e){ return false; }
 }
-if(!tryInit()){
-  var _fi=0, _fiv=setInterval(function(){ if(tryInit()||++_fi>100) clearInterval(_fiv); },100);
-}
+var _fi=0, _fiv=setInterval(function(){ if(tryInit()||++_fi>150) clearInterval(_fiv); },80);
 
-// ── Auth listener ────────────────────────────────────────────
+// ── Auth state ───────────────────────────────────────────────
 function setupAuth(){
   auth.onAuthStateChanged(function(user){
-    var lp  = document.getElementById('login-page');
-    var sb  = document.querySelector('.sidebar');
-    var mn  = document.querySelector('.main');
-    var ov  = document.getElementById('sidebar-overlay');
+    var lp = document.getElementById('login-page');
+    var mn = document.querySelector('.main');
+    var sb = document.querySelector('.sidebar');
     if(user){
+      // Hide login, show app
       if(lp) lp.style.display = 'none';
-      if(sb) sb.style.display = '';
-      if(mn) mn.style.display = '';
+      if(mn) mn.removeAttribute('style');
+      if(sb) sb.removeAttribute('style');
       updateBadge(user);
-      var el = document.getElementById('login-firebase-status');
-      if(el) el.textContent = '';
+      var st = document.getElementById('login-firebase-status');
+      if(st) st.textContent = '';
       if(!_appReady){ _appReady=true; initApp(); }
     } else {
+      // Show login, hide app
       if(lp) lp.style.display = '';
-      if(sb) sb.style.display = 'none';
       if(mn) mn.style.display = 'none';
-      if(ov) ov.style.display = 'none';
-      var el2 = document.getElementById('login-firebase-status');
-      if(el2) el2.textContent = 'Conectado ao Firebase \u2022 Aguardando login';
+      if(sb) sb.style.display = 'none';
+      var st2 = document.getElementById('login-firebase-status');
+      if(st2) st2.textContent = 'Conectado ao Firebase \u2022 Aguardando login';
     }
   });
 }
 
 function updateBadge(user){
-  var nm = document.querySelector('.u-name');
-  var av = document.querySelector('.u-avatar');
-  var n  = user.displayName || user.email || 'User';
-  if(nm) nm.textContent = n;
-  if(av) av.textContent = n.slice(0,2).toUpperCase();
+  var nm=document.querySelector('.u-name');
+  var av=document.querySelector('.u-avatar');
+  var n=user.displayName||user.email||'User';
+  if(nm) nm.textContent=n;
+  if(av) av.textContent=n.slice(0,2).toUpperCase();
 }
 
 // ── LOGIN ────────────────────────────────────────────────────
 window.fazerLogin = function(){
-  var em = document.getElementById('login-email');
-  var pw = document.getElementById('login-senha');
-  var bt = document.getElementById('login-btn');
-  var er = document.getElementById('login-error-box');
+  var em=document.getElementById('login-email');
+  var pw=document.getElementById('login-senha');
+  var bt=document.getElementById('login-btn');
+  var er=document.getElementById('login-error-box');
   if(!em||!pw) return;
-  var email = em.value.trim();
-  var pass  = pw.value;
-  if(!email||!pass){
-    showErr(er, '\u26A0\uFE0F Preencha e-mail e senha.');
-    return;
-  }
-  if(!auth){ showErr(er, '\u26A0\uFE0F Firebase carregando, aguarde...'); return; }
+  var email=em.value.trim(), pass=pw.value;
+  if(!email||!pass){ showErr(er,'\u26A0\uFE0F Preencha e-mail e senha.'); return; }
+  if(!auth){ showErr(er,'\u26A0\uFE0F Firebase carregando, aguarde...'); return; }
   if(bt){ bt.disabled=true; bt.classList.add('loading'); }
   if(er) er.style.display='none';
-  if(email.indexOf('@')<0) email += '@cesan.com.br';
-  auth.signInWithEmailAndPassword(email, pass).catch(function(e){
+  if(email.indexOf('@')<0) email+='@cesan.com.br';
+  auth.signInWithEmailAndPassword(email,pass).catch(function(e){
     if(bt){ bt.disabled=false; bt.classList.remove('loading'); }
-    var msg = '\uD83D\uDD12 Usu\u00E1rio ou senha incorretos.';
+    var msg='\uD83D\uDD12 Usu\u00E1rio ou senha incorretos.';
     if(e.code==='auth/network-request-failed') msg='\u26A0\uFE0F Sem conex\u00E3o.';
-    if(e.code==='auth/too-many-requests')      msg='\u26A0\uFE0F Muitas tentativas.';
-    showErr(er, msg);
+    if(e.code==='auth/too-many-requests')      msg='\u26A0\uFE0F Muitas tentativas. Aguarde.';
+    showErr(er,msg);
   });
 };
-function showErr(el, msg){ if(el){ el.textContent=msg; el.style.display='block'; } }
+function showErr(el,msg){ if(el){ el.textContent=msg; el.style.display='block'; } }
 
 // ── PAGE NAVIGATION ──────────────────────────────────────────
-// Defined on window so all hook chains always reference window.goPage
 window.goPage = function(pageId){
-  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
-  var t = document.getElementById('page-'+pageId);
+  document.querySelectorAll('.page').forEach(function(p){
+    p.classList.remove('active');
+  });
+  var t=document.getElementById('page-'+pageId);
   if(t) t.classList.add('active');
+  // Sync nav highlights in both navs
   document.querySelectorAll('[data-page]').forEach(function(a){
     a.classList.toggle('active', a.getAttribute('data-page')===pageId);
   });
@@ -1101,65 +1096,54 @@ window.goPage = function(pageId){
 
 // ── SIDEBAR ──────────────────────────────────────────────────
 window.toggleSidebar = function(){
-  var sb = document.querySelector('.sidebar');
-  var ov = document.getElementById('sidebar-overlay');
-  if(sb) sb.classList.toggle('open');
-  if(ov){ ov.style.display = sb.classList.contains('open') ? '' : 'none'; }
+  var sb=document.querySelector('.sidebar');
+  var ov=document.getElementById('sidebar-overlay');
+  if(!sb) return;
+  var isOpen=sb.classList.contains('open');
+  sb.classList.toggle('open',!isOpen);
+  if(ov) ov.classList.toggle('active',!isOpen);
 };
 window.closeSidebar = function(){
-  var sb = document.querySelector('.sidebar');
-  var ov = document.getElementById('sidebar-overlay');
+  var sb=document.querySelector('.sidebar');
+  var ov=document.getElementById('sidebar-overlay');
   if(sb) sb.classList.remove('open');
-  if(ov) ov.style.display = 'none';
+  if(ov) ov.classList.remove('active');
 };
 window.toggleSbGroup = function(id){
-  var el   = document.getElementById(id);
-  var chev = document.getElementById('chev-'+id);
+  var el=document.getElementById(id);
+  var ch=document.getElementById('chev-'+id);
   if(!el) return;
-  var open = el.style.display !== 'none';
-  el.style.display = open ? 'none' : '';
-  if(chev) chev.style.transform = open ? 'rotate(-90deg)' : '';
+  var open=el.style.display!=='none';
+  el.style.display=open?'none':'';
+  if(ch) ch.style.transform=open?'rotate(-90deg)':'';
 };
 
-// ── MODAL ────────────────────────────────────────────────────
+// ── MODAL / TOAST ────────────────────────────────────────────
 window.openModal  = function(id){ var m=document.getElementById(id); if(m) m.style.display='flex'; };
 window.closeModal = function(id){ var m=document.getElementById(id); if(m) m.style.display='none'; };
-
-// ── TOAST ────────────────────────────────────────────────────
-window.mostrarToast = function(msg, type){
-  var bg = type==='error'?'#EF4444':type==='warning'?'#F59E0B':type==='success'?'#10B981':'#2563EB';
-  var t  = document.createElement('div');
-  t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;background:'+bg+
+window.mostrarToast = function(msg,type){
+  var bg=type==='error'?'#EF4444':type==='warning'?'#F59E0B':type==='success'?'#10B981':'#2563EB';
+  var t=document.createElement('div');
+  t.style.cssText='position:fixed;bottom:24px;right:24px;z-index:99999;background:'+bg+
     ';color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;'+
     'box-shadow:0 4px 20px rgba(0,0,0,.25);max-width:320px';
-  t.textContent = msg;
+  t.textContent=msg;
   document.body.appendChild(t);
-  setTimeout(function(){ t.remove(); }, 3500);
+  setTimeout(function(){ t.remove(); },3500);
 };
 
-// ── APP INIT (runs once after login) ─────────────────────────
+// ── APP INIT ─────────────────────────────────────────────────
 function initApp(){
-  // Re-wire nav-i clicks (belt-and-suspenders alongside onclick attrs)
-  document.querySelectorAll('.nav-i[data-page]').forEach(function(a){
-    a.onclick = function(e){ e.preventDefault(); window.goPage(a.getAttribute('data-page')); };
-  });
-  // Navigate: respect pat mode
-  var patOn = localStorage.getItem('sysack_pat_mode') === '1';
-  window.goPage(patOn ? 'pat-dashboard' : 'dashboard');
+  var patOn=localStorage.getItem('sysack_pat_mode')==='1';
+  window.goPage(patOn?'pat-dashboard':'dashboard');
 }
 
-// ── DOM READY: hide app, wire up nav ────────────────────────
+// ── HIDE APP UNTIL AUTH RESOLVES ─────────────────────────────
+// Only hide main on DOMContentLoaded; sidebar stays visible (CSS controls it on desktop)
 document.addEventListener('DOMContentLoaded', function(){
-  var sb = document.querySelector('.sidebar');
-  var mn = document.querySelector('.main');
-  if(sb) sb.style.display = 'none';
-  if(mn) mn.style.display = 'none';
-  document.querySelectorAll('.nav-i[data-page]').forEach(function(a){
-    a.addEventListener('click', function(e){
-      e.preventDefault();
-      window.goPage(a.getAttribute('data-page'));
-    });
-  });
+  var mn=document.querySelector('.main');
+  if(mn) mn.style.display='none';
+  // Login page starts visible (default in HTML)
 });
 
 })();
