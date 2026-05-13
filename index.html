@@ -20450,7 +20450,7 @@ async function abrirDashboardIA() {
 // Analisa histórico de chamados e alertas do ativo
 // ════════════════════════════════════════════════════════════
 
-async async function analisarAtivoPorIA(pat) {
+async function analisarAtivoPorIA(pat) {
   // Busca o ativo — pode estar em ativos (discovery) ou patrimonios
   const ativo = [...(STATE.ativos||[]),...(STATE.patrimonios||[])].find(a => a.pat === pat || a.id === pat) || { pat };
   const chamadosDoAtivo = (STATE.chamados||[]).filter(c => c.pat === pat);
