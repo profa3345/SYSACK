@@ -993,6 +993,218 @@ textarea.form-control{resize:vertical;min-height:80px}
   </div>
 </div>
 
+<script>
+(function(){
+'use strict';
+
+// ── Firebase config ──────────────────────────────────────────
+var FB_CONFIG = {
+  apiKey: "AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww",
+  authDomain: "sysack-829e2.firebaseapp.com",
+  projectId: "sysack-829e2",
+  storageBucket: "sysack-829e2.appspot.com",
+  messagingSenderId: "584742093748",
+  appId: "1:584742093748:web:sysack"
+};
+
+// ── Firebase init (wait for SDK to be ready) ─────────────────
+var db, auth;
+function initFirebase(){
+  try {
+    if(typeof firebase === 'undefined') return false;
+    if(!firebase.apps || !firebase.apps.length){
+      firebase.initializeApp(FB_CONFIG);
+    }
+    db   = firebase.firestore();
+    auth = firebase.auth();
+    window.db   = db;
+    window.auth = auth;
+    setupAuthListener();
+    return true;
+  } catch(e){ return false; }
+}
+
+// Try immediately, then poll until SDK loads
+if(!initFirebase()){
+  var _fbTries = 0;
+  var _fbIv = setInterval(function(){
+    if(initFirebase() || ++_fbTries > 100) clearInterval(_fbIv);
+  }, 100);
+}
+
+// ── Auth listener ────────────────────────────────────────────
+var _appReady = false;
+function setupAuthListener(){
+  if(!auth) return;
+  auth.onAuthStateChanged(function(user){
+    var loginPage = document.getElementById('login-page');
+    var appWrap   = document.getElementById('app-wrapper') ||
+                    document.querySelector('.sidebar');
+    var mainEl    = document.querySelector('.main');
+    if(user){
+      if(loginPage)  loginPage.style.display  = 'none';
+      if(appWrap)    appWrap.style.display     = '';
+      if(mainEl)     mainEl.style.display      = '';
+      updateUserBadge(user);
+      if(!_appReady){ _appReady = true; initApp(); }
+    } else {
+      if(loginPage)  loginPage.style.display   = '';
+      if(appWrap)    appWrap.style.display      = 'none';
+      if(mainEl)     mainEl.style.display       = 'none';
+      updateLoginStatus('Conectado ao Firebase \u2022 Aguardando login');
+    }
+  });
+}
+
+function updateLoginStatus(msg){
+  var el = document.getElementById('login-firebase-status');
+  if(el) el.textContent = msg;
+}
+
+function updateUserBadge(user){
+  var nameEl = document.querySelector('.u-name');
+  var roleEl = document.querySelector('.u-role');
+  var avatEl = document.querySelector('.u-avatar');
+  if(nameEl) nameEl.textContent = user.displayName || user.email || 'Usu\u00E1rio';
+  if(avatEl){
+    var n = user.displayName || user.email || 'U';
+    avatEl.textContent = n.slice(0,2).toUpperCase();
+  }
+}
+
+// ── LOGIN ────────────────────────────────────────────────────
+window.fazerLogin = function fazerLogin(){
+  var emailEl  = document.getElementById('login-email');
+  var senhaEl  = document.getElementById('login-senha');
+  var btnEl    = document.getElementById('login-btn');
+  var errEl    = document.getElementById('login-error-box');
+  if(!emailEl || !senhaEl) return;
+  var email = emailEl.value.trim();
+  var senha = senhaEl.value;
+  if(!email || !senha){
+    if(errEl){ errEl.textContent = '\u26A0\uFE0F Preencha e-mail e senha.'; errEl.style.display='block'; }
+    return;
+  }
+  if(!auth){
+    if(errEl){ errEl.textContent = '\u26A0\uFE0F Firebase ainda carregando, aguarde...'; errEl.style.display='block'; }
+    return;
+  }
+  if(btnEl){ btnEl.disabled = true; btnEl.classList.add('loading'); }
+  if(errEl) errEl.style.display = 'none';
+  // Add @cesan.com.br if no @ present
+  if(email.indexOf('@') < 0) email = email + '@cesan.com.br';
+  auth.signInWithEmailAndPassword(email, senha)
+    .catch(function(e){
+      if(btnEl){ btnEl.disabled = false; btnEl.classList.remove('loading'); }
+      var msg = '\uD83D\uDD12 Usu\u00E1rio ou senha incorretos.';
+      if(e.code === 'auth/network-request-failed')
+        msg = '\u26A0\uFE0F Sem conex\u00E3o. Verifique a rede.';
+      if(e.code === 'auth/too-many-requests')
+        msg = '\u26A0\uFE0F Muitas tentativas. Aguarde alguns minutos.';
+      if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; }
+    });
+};
+
+// ── PAGE NAVIGATION ──────────────────────────────────────────
+window.goPage = function goPage(pageId){
+  document.querySelectorAll('.page').forEach(function(p){
+    p.classList.remove('active');
+  });
+  var target = document.getElementById('page-' + pageId);
+  if(target) target.classList.add('active');
+  // Update nav active state
+  document.querySelectorAll('.nav-i[data-page], .nav-p[data-page]').forEach(function(a){
+    a.classList.toggle('active', a.getAttribute('data-page') === pageId);
+  });
+  // Close mobile sidebar
+  closeSidebar();
+};
+
+// ── SIDEBAR ──────────────────────────────────────────────────
+window.toggleSidebar = function(){
+  var sb = document.querySelector('.sidebar');
+  var ov = document.getElementById('sidebar-overlay');
+  if(sb){ sb.classList.toggle('open'); }
+  if(ov){ ov.classList.toggle('active'); }
+};
+window.closeSidebar = function(){
+  var sb = document.querySelector('.sidebar');
+  var ov = document.getElementById('sidebar-overlay');
+  if(sb) sb.classList.remove('open');
+  if(ov) ov.classList.remove('active');
+};
+window.toggleSbGroup = function(id){
+  var el  = document.getElementById(id);
+  var chev = document.getElementById('chev-' + id);
+  if(!el) return;
+  var open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : '';
+  if(chev) chev.style.transform = open ? 'rotate(-90deg)' : '';
+};
+
+// ── MODAL ────────────────────────────────────────────────────
+window.openModal = function(id){
+  var m = document.getElementById(id);
+  if(m) m.style.display = 'flex';
+};
+window.closeModal = function(id){
+  var m = document.getElementById(id);
+  if(m) m.style.display = 'none';
+};
+
+// ── TOAST ────────────────────────────────────────────────────
+window.mostrarToast = function(msg, type){
+  var t = document.createElement('div');
+  var bg = type === 'error' ? '#EF4444'
+         : type === 'warning' ? '#F59E0B'
+         : type === 'success' ? '#10B981'
+         : '#2563EB';
+  t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;'
+    + 'background:' + bg + ';color:#fff;padding:12px 20px;border-radius:10px;'
+    + 'font-size:13px;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,.25);'
+    + 'max-width:320px;animation:fadeInUp .25s ease';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ t.remove(); }, 3500);
+};
+
+// ── APP INIT (after login) ───────────────────────────────────
+function initApp(){
+  // Show dashboard by default (or pat-dashboard if pat mode is on)
+  var patMode = localStorage.getItem('sysack_pat_mode') === '1';
+  goPage(patMode ? 'pat-dashboard' : 'dashboard');
+  // Wire up nav clicks for any nav-i that has data-page
+  document.querySelectorAll('.nav-i[data-page]').forEach(function(a){
+    if(!a.onclick){
+      a.onclick = function(){ goPage(a.getAttribute('data-page')); };
+    }
+  });
+  updateLoginStatus('');
+}
+
+// ── WIRE UP nav-i clicks on DOMContentLoaded ─────────────────
+document.addEventListener('DOMContentLoaded', function(){
+  // Hide main app until auth resolves
+  var sb   = document.querySelector('.sidebar');
+  var main = document.querySelector('.main');
+  if(sb)   sb.style.display   = 'none';
+  if(main) main.style.display = 'none';
+  // Wire nav clicks
+  document.querySelectorAll('.nav-i[data-page]').forEach(function(a){
+    a.addEventListener('click', function(){ goPage(a.getAttribute('data-page')); });
+  });
+  // Add fadeInUp keyframe if missing
+  if(!document.querySelector('#toast-style')){
+    var s = document.createElement('style');
+    s.id = 'toast-style';
+    s.textContent = '@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}';
+    document.head.appendChild(s);
+  }
+});
+
+})();
+</script>
+
 <aside class="sidebar">
   <div class="sb-logo">
     <div class="logo-mark">
