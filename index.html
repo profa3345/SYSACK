@@ -5992,79 +5992,74 @@ async function fsDelete(col, docId) {
 // ── FIRESTORE REAL-TIME LISTENERS ────────────────────────────
 function startFirestoreListeners() {
   if (!db || !FB_READY) return;
+  if (window._listenersAtivos) return; // evita dupla chamada
+  window._listenersAtivos = true;
 
-  const col      = (name) => db.collection(name);
-  const fromSnap = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-  // ── Normaliza campos do discover.js para o formato padrão ────
-  function normalizarAtivo(d) {
+  function norm(d) {
     return {
       ...d,
-      pat:    d.pat        || d.patrimonio || d.ip || '',
-      desc:   d.desc       || d.hostname   || d.ip || '',
-      tipo:   d.tipo       || 'workstation',
-      area:   d.area       || '',
-      resp:   d.resp       || d.responsavel || '',
-      status: d.status     || (d.reachable ? 'ativo' : 'offline'),
-      loc:    d.area       || '',
-      fonte:  d.fonte      || 'Discovery',
+      pat:    d.pat    || d.patrimonio || d.ip || '',
+      desc:   d.desc   || d.hostname   || d.ip || '',
+      tipo:   d.tipo   || 'workstation',
+      area:   d.area   || '',
+      resp:   d.resp   || d.responsavel || '',
+      status: d.status || (d.reachable ? 'ativo' : 'offline'),
+      fonte:  d.fonte  || 'Discovery',
     };
   }
 
-  // ── Listener 1: ativos (discover.js — workstations/servidores) ─
-  col('ativos').onSnapshot(snap => {
-    STATE._assetsDisc = fromSnap(snap).map(normalizarAtivo);
-    STATE.ativos = [...(STATE._assetsDisc || []), ...(STATE._assetsSw || [])];
+  // ativos
+  db.collection('ativos').onSnapshot(function(snap) {
+    STATE._assetsDisc = snap2arr(snap).map(norm);
+    STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
-    if (document.getElementById('page-ativos')?.classList.contains('active')) renderAtivos();
-    console.log(`[Banco] ativos: ${STATE._assetsDisc.length}`);
-  }, e => console.error('[Banco] ativos:', e));
+    console.log('[Banco] ativos:', STATE._assetsDisc.length);
+  }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
-  // ── Listener 2: switches (discover.js — equipamentos de rede) ─
-  col('switches').onSnapshot(snap => {
-    STATE._assetsSw = fromSnap(snap).map(normalizarAtivo);
+  // switches
+  db.collection('switches').onSnapshot(function(snap) {
+    STATE._assetsSw = snap2arr(snap).map(norm);
     STATE.switches  = STATE._assetsSw;
-    STATE.ativos = [...(STATE._assetsDisc || []), ...(STATE._assetsSw || [])];
+    STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
-    if (document.getElementById('page-switches')?.classList.contains('active')) renderSwitches();
-    console.log(`[Banco] switches: ${STATE._assetsSw.length}`);
-  }, e => console.error('[Banco] switches:', e));
+    console.log('[Banco] switches:', STATE._assetsSw.length);
+  }, function(e){ console.error('[Banco] switches erro:', e.message); });
 
-  // ── Listener 3: empregados (agent.js — SQL Server) ────────────
-  col('empregados').onSnapshot(snap => {
-    STATE.empregados = fromSnap(snap);
+  // empregados
+  db.collection('empregados').onSnapshot(function(snap) {
+    STATE.empregados = snap2arr(snap);
     nbUpdate('nb-emp', STATE.empregados.length);
-    if (document.getElementById('page-empregados')?.classList.contains('active')) renderEmpregados?.();
-    console.log(`[Banco] empregados: ${STATE.empregados.length}`);
-  }, e => console.error('[Banco] empregados:', e));
+    console.log('[Banco] empregados:', STATE.empregados.length);
+  }, function(e){ console.error('[Banco] empregados erro:', e.message); });
 
-  // ── Listener 4: chamados ──────────────────────────────────────
-  col('chamados').orderBy('createdAt','desc').limit(200).onSnapshot(snap => {
-    STATE.chamados = fromSnap(snap);
+  // chamados
+  db.collection('chamados').onSnapshot(function(snap) {
+    STATE.chamados = snap2arr(snap);
     renderDashboard();
-    console.log(`[Banco] chamados: ${STATE.chamados.length}`);
-  }, e => console.error('[Banco] chamados:', e));
+    console.log('[Banco] chamados:', STATE.chamados.length);
+  }, function(e){ console.error('[Banco] chamados erro:', e.message); });
 
-  // ── Listener 5: aprovações pendentes ─────────────────────────
-  col('aprovacoes').where('status','==','pendente').onSnapshot(snap => {
-    STATE.aprovacoes = fromSnap(snap);
+  // aprovacoes
+  db.collection('aprovacoes').onSnapshot(function(snap) {
+    STATE.aprovacoes = snap2arr(snap).filter(function(a){ return a.status === 'pendente'; });
     nbUpdate('nb-aprov', STATE.aprovacoes.length);
-    if (document.getElementById('page-aprovacoes')?.classList.contains('active')) renderAprovacoes();
-  }, e => console.error('[Banco] aprovacoes:', e));
+  }, function(e){ console.error('[Banco] aprovacoes erro:', e.message); });
 
-  // ── Listener 6: smartphones ───────────────────────────────────
-  col('smartphones').onSnapshot(snap => {
-    STATE.smartphones = fromSnap(snap);
-    if (document.getElementById('page-mdm')?.classList.contains('active')) renderMDM();
-  }, e => console.error('[Banco] smartphones:', e));
+  // smartphones
+  db.collection('smartphones').onSnapshot(function(snap) {
+    STATE.smartphones = snap2arr(snap);
+  }, function(e){ console.error('[Banco] smartphones erro:', e.message); });
 
-  // ── Listener 7: mobiliário ────────────────────────────────────
-  col('mobiliario').onSnapshot(snap => {
-    STATE.mobiliario = fromSnap(snap);
-    if (document.getElementById('page-mobiliario')?.classList.contains('active')) renderMobiliario?.();
-  }, e => console.error('[Banco] mobiliario:', e));
+  // mobiliario
+  db.collection('mobiliario').onSnapshot(function(snap) {
+    STATE.mobiliario = snap2arr(snap);
+  }, function(e){ console.error('[Banco] mobiliario erro:', e.message); });
+
+  console.log('[Banco] Listeners iniciados');
 }
 
 // ── FIRESTORE WRITE HELPERS ───────────────────────────────────
