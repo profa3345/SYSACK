@@ -5990,9 +5990,12 @@ async function fsDelete(col, docId) {
 
 // ── FIRESTORE REAL-TIME LISTENERS ────────────────────────────
 function startFirestoreListeners() {
-  if (!db || !FB_READY || !window._fs) return;
-  const { collection, onSnapshot } = window._fs;
+  if (!db || !FB_READY) return;
 
+  // Usa db.collection() diretamente (SDK compat)
+  // A wrapper col('col') do window._fs não funciona com 2 argumentos
+  const col      = (name) => db.collection(name);
+  const onSnap   = (ref, cb, err) => ref.onSnapshot(cb, err);
   const toDate   = v => v?.toDate?.() || (v instanceof Date ? v : null);
   const fromSnap = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
@@ -6045,8 +6048,8 @@ function startFirestoreListeners() {
   }
 
   // ── Listener 1: assets (dados GLPI) ──────────────────────────
-  onSnapshot(
-    collection(db,'assets'),
+  onSnap(
+    col('assets'),
     snap => {
       STATE._assetsGlpi = fromSnap(snap).map(d => normalizarAsset(d,'glpi'));
       mergeAtivos();
@@ -6055,8 +6058,8 @@ function startFirestoreListeners() {
   );
 
   // ── Listener 2: ativos (discover.js — workstations) ──────────
-  onSnapshot(
-    collection(db,'ativos'),
+  onSnap(
+    col('ativos'),
     snap => {
       STATE._assetsDisc = fromSnap(snap).map(d => normalizarAsset(d,'discover'));
       mergeAtivos();
@@ -6065,8 +6068,8 @@ function startFirestoreListeners() {
   );
 
   // ── Listener 3: switches (discover.js — equipamentos de rede) ─
-  onSnapshot(
-    collection(db,'switches'),
+  onSnap(
+    col('switches'),
     snap => {
       STATE._assetsSw = fromSnap(snap).map(d => normalizarAsset(d,'discover'));
       mergeAtivos();
@@ -6077,8 +6080,8 @@ function startFirestoreListeners() {
   );
 
   // ── Listener 4: empregados (agent.js sincroniza do SQL Server) ─
-  onSnapshot(
-    collection(db,'empregados'),
+  onSnap(
+    col('empregados'),
     snap => {
       STATE.empregados = fromSnap(snap);
       nbUpdate('nb-emp', STATE.empregados.length);
@@ -6088,8 +6091,8 @@ function startFirestoreListeners() {
   );
 
   // ── Listener 5: chamados ──────────────────────────────────────
-  onSnapshot(
-    db.collection('chamados').orderBy('createdAt','desc').limit(200),
+  onSnap(
+    col('chamados').orderBy('createdAt','desc').limit(200),
     snap => {
       STATE.chamados = fromSnap(snap);
       renderDashboard();
@@ -6098,8 +6101,8 @@ function startFirestoreListeners() {
   );
 
   // ── Listener 6: aprovações pendentes ─────────────────────────
-  onSnapshot(
-    db.collection('aprovacoes').where('status','==','pendente'),
+  onSnap(
+    col('aprovacoes').where('status','==','pendente'),
     snap => {
       STATE.aprovacoes = fromSnap(snap);
       nbUpdate('nb-aprov', STATE.aprovacoes.length);
@@ -6108,8 +6111,8 @@ function startFirestoreListeners() {
   );
 
   // ── Listener 7: smartphones ───────────────────────────────────
-  onSnapshot(
-    collection(db,'smartphones'),
+  onSnap(
+    col('smartphones'),
     snap => {
       STATE.smartphones = fromSnap(snap);
       if (document.getElementById('page-mdm')?.classList.contains('active')) renderMDM();
@@ -6117,8 +6120,8 @@ function startFirestoreListeners() {
   );
 
   // ── Listener 8: mobiliário ────────────────────────────────────
-  onSnapshot(
-    collection(db,'mobiliario'),
+  onSnap(
+    col('mobiliario'),
     snap => {
       STATE.mobiliario = fromSnap(snap);
       if (document.getElementById('page-mobiliario')?.classList.contains('active')) renderMobiliario?.();
@@ -6134,7 +6137,7 @@ window.auditLog = function(action, module, resourceId, resourceType, details = {
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
   if (FB_READY && db && window._fs) {
     const { collection, addDoc, serverTimestamp } = window._fs;
-    addDoc(collection(db,'audit_logs'), {
+    addDoc(col('audit_logs'), {
       userId: CURRENT_USER.uid, userName: CURRENT_USER.nome,
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
