@@ -5992,28 +5992,12 @@ async function fsDelete(col, docId) {
 function startFirestoreListeners() {
   if (!db || !FB_READY) return;
 
-  // Usa db.collection() diretamente (SDK compat)
-  // A wrapper col('col') do window._fs não funciona com 2 argumentos
   const col      = (name) => db.collection(name);
-  const onSnap   = (ref, cb, err) => ref.onSnapshot(cb, err);
-  const toDate   = v => v?.toDate?.() || (v instanceof Date ? v : null);
   const fromSnap = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-  // ── Normaliza campos de cada fonte para o formato padrão do renderAtivos ──
-  function normalizarAsset(d, fonte) {
-    if (fonte === 'glpi') return {
-      ...d,
-      pat:    d.patrimonio || d.pat || '',
-      desc:   d.descricao  || d.desc || d.nome || '',
-      tipo:   d.tipo       || d.categoria || 'ativo',
-      area:   d.area       || d.setor || '',
-      resp:   d.responsavel|| d.resp || '',
-      status: d.status === 'manut' ? 'manutencao' : (d.status || 'ativo'),
-      loc:    d.local      || d.localizacao || '',
-      sala:   d.sala       || '',
-      fonte:  'GLPI',
-    };
-    return { // discover / sysack-client
+  // ── Normaliza campos do discover.js para o formato padrão ────
+  function normalizarAtivo(d) {
+    return {
       ...d,
       pat:    d.pat        || d.patrimonio || d.ip || '',
       desc:   d.desc       || d.hostname   || d.ip || '',
@@ -6026,107 +6010,60 @@ function startFirestoreListeners() {
     };
   }
 
-  // ── Merge: GLPI + ativos (discover) + switches ────────────────
-  function mergeAtivos() {
-    const glpi  = STATE._assetsGlpi || [];
-    const disc  = STATE._assetsDisc || [];
-    const sw    = STATE._assetsSw   || [];
-    const patsGlpi = new Set(glpi.map(a => a.pat).filter(Boolean));
-    STATE.ativos = [
-      ...glpi,
-      ...disc.filter(d => !d.pat || !patsGlpi.has(d.pat)),
-      ...sw.filter(s => !s.pat  || !patsGlpi.has(s.pat)),
-    ].sort((a,b) => {
-      const ta = a.createdAt ? new Date(a.createdAt?.toDate?.() || a.createdAt).getTime() : 0;
-      const tb = b.createdAt ? new Date(b.createdAt?.toDate?.() || b.createdAt).getTime() : 0;
-      return tb - ta;
-    });
+  // ── Listener 1: ativos (discover.js — workstations/servidores) ─
+  col('ativos').onSnapshot(snap => {
+    STATE._assetsDisc = fromSnap(snap).map(normalizarAtivo);
+    STATE.ativos = [...(STATE._assetsDisc || []), ...(STATE._assetsSw || [])];
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
     if (document.getElementById('page-ativos')?.classList.contains('active')) renderAtivos();
-    console.log(`[Banco] ativos merged: GLPI=${glpi.length} discovery=${disc.length} switches=${sw.length} total=${STATE.ativos.length}`);
-  }
+    console.log(`[Banco] ativos: ${STATE._assetsDisc.length}`);
+  }, e => console.error('[Banco] ativos:', e));
 
-  // ── Listener 1: assets (dados GLPI) ──────────────────────────
-  onSnap(
-    col('assets'),
-    snap => {
-      STATE._assetsGlpi = fromSnap(snap).map(d => normalizarAsset(d,'glpi'));
-      mergeAtivos();
-      console.log(`[Banco] assets (GLPI): ${STATE._assetsGlpi.length}`);
-    }, e => console.error('[Banco] assets:', e)
-  );
+  // ── Listener 2: switches (discover.js — equipamentos de rede) ─
+  col('switches').onSnapshot(snap => {
+    STATE._assetsSw = fromSnap(snap).map(normalizarAtivo);
+    STATE.switches  = STATE._assetsSw;
+    STATE.ativos = [...(STATE._assetsDisc || []), ...(STATE._assetsSw || [])];
+    renderDashboard();
+    nbUpdate('nb-ativos', STATE.ativos.length);
+    if (document.getElementById('page-switches')?.classList.contains('active')) renderSwitches();
+    console.log(`[Banco] switches: ${STATE._assetsSw.length}`);
+  }, e => console.error('[Banco] switches:', e));
 
-  // ── Listener 2: ativos (discover.js — workstations) ──────────
-  onSnap(
-    col('ativos'),
-    snap => {
-      STATE._assetsDisc = fromSnap(snap).map(d => normalizarAsset(d,'discover'));
-      mergeAtivos();
-      console.log(`[Banco] ativos (discovery): ${STATE._assetsDisc.length}`);
-    }, e => console.error('[Banco] ativos:', e)
-  );
+  // ── Listener 3: empregados (agent.js — SQL Server) ────────────
+  col('empregados').onSnapshot(snap => {
+    STATE.empregados = fromSnap(snap);
+    nbUpdate('nb-emp', STATE.empregados.length);
+    if (document.getElementById('page-empregados')?.classList.contains('active')) renderEmpregados?.();
+    console.log(`[Banco] empregados: ${STATE.empregados.length}`);
+  }, e => console.error('[Banco] empregados:', e));
 
-  // ── Listener 3: switches (discover.js — equipamentos de rede) ─
-  onSnap(
-    col('switches'),
-    snap => {
-      STATE._assetsSw = fromSnap(snap).map(d => normalizarAsset(d,'discover'));
-      mergeAtivos();
-      STATE.switches = STATE._assetsSw;
-      console.log(`[Banco] switches: ${STATE._assetsSw.length}`);
-      if (document.getElementById('page-switches')?.classList.contains('active')) renderSwitches();
-    }, e => console.error('[Banco] switches:', e)
-  );
+  // ── Listener 4: chamados ──────────────────────────────────────
+  col('chamados').orderBy('createdAt','desc').limit(200).onSnapshot(snap => {
+    STATE.chamados = fromSnap(snap);
+    renderDashboard();
+    console.log(`[Banco] chamados: ${STATE.chamados.length}`);
+  }, e => console.error('[Banco] chamados:', e));
 
-  // ── Listener 4: empregados (agent.js sincroniza do SQL Server) ─
-  onSnap(
-    col('empregados'),
-    snap => {
-      STATE.empregados = fromSnap(snap);
-      nbUpdate('nb-emp', STATE.empregados.length);
-      console.log(`[Banco] empregados: ${STATE.empregados.length}`);
-      if (document.getElementById('page-empregados')?.classList.contains('active')) renderEmpregados?.();
-    }, e => console.error('[Banco] empregados:', e)
-  );
+  // ── Listener 5: aprovações pendentes ─────────────────────────
+  col('aprovacoes').where('status','==','pendente').onSnapshot(snap => {
+    STATE.aprovacoes = fromSnap(snap);
+    nbUpdate('nb-aprov', STATE.aprovacoes.length);
+    if (document.getElementById('page-aprovacoes')?.classList.contains('active')) renderAprovacoes();
+  }, e => console.error('[Banco] aprovacoes:', e));
 
-  // ── Listener 5: chamados ──────────────────────────────────────
-  onSnap(
-    col('chamados').orderBy('createdAt','desc').limit(200),
-    snap => {
-      STATE.chamados = fromSnap(snap);
-      renderDashboard();
-      console.log(`[Banco] chamados: ${STATE.chamados.length}`);
-    }, e => console.error('[Banco] chamados:', e)
-  );
+  // ── Listener 6: smartphones ───────────────────────────────────
+  col('smartphones').onSnapshot(snap => {
+    STATE.smartphones = fromSnap(snap);
+    if (document.getElementById('page-mdm')?.classList.contains('active')) renderMDM();
+  }, e => console.error('[Banco] smartphones:', e));
 
-  // ── Listener 6: aprovações pendentes ─────────────────────────
-  onSnap(
-    col('aprovacoes').where('status','==','pendente'),
-    snap => {
-      STATE.aprovacoes = fromSnap(snap);
-      nbUpdate('nb-aprov', STATE.aprovacoes.length);
-      if (document.getElementById('page-aprovacoes')?.classList.contains('active')) renderAprovacoes();
-    }, e => console.error('[Banco] aprovacoes:', e)
-  );
-
-  // ── Listener 7: smartphones ───────────────────────────────────
-  onSnap(
-    col('smartphones'),
-    snap => {
-      STATE.smartphones = fromSnap(snap);
-      if (document.getElementById('page-mdm')?.classList.contains('active')) renderMDM();
-    }, e => console.error('[Banco] smartphones:', e)
-  );
-
-  // ── Listener 8: mobiliário ────────────────────────────────────
-  onSnap(
-    col('mobiliario'),
-    snap => {
-      STATE.mobiliario = fromSnap(snap);
-      if (document.getElementById('page-mobiliario')?.classList.contains('active')) renderMobiliario?.();
-    }, e => console.error('[Banco] mobiliario:', e)
-  );
+  // ── Listener 7: mobiliário ────────────────────────────────────
+  col('mobiliario').onSnapshot(snap => {
+    STATE.mobiliario = fromSnap(snap);
+    if (document.getElementById('page-mobiliario')?.classList.contains('active')) renderMobiliario?.();
+  }, e => console.error('[Banco] mobiliario:', e));
 }
 
 // ── FIRESTORE WRITE HELPERS ───────────────────────────────────
