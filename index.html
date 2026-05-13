@@ -1552,9 +1552,14 @@ textarea.form-control{resize:vertical;min-height:80px}
           </button>
         </div>
       </div>
-      <div class="tabs">
-        <div class="tab active">Todos</div><div class="tab">Computadores</div><div class="tab">Notebooks</div>
-        <div class="tab">Monitores</div><div class="tab">Rede</div><div class="tab">Servidores</div><div class="tab">Outros</div>
+      <div class="tabs" id="ativos-tabs">
+        <div class="tab active" onclick="filtrarAtivosPorTipo('')">Todos</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('computador,workstation,notebook,desktop')">Computadores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('notebook')">Notebooks</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('monitor')">Monitores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('switch,router,ap,firewall')">Rede</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('servidor,server-linux')">Servidores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('printer,impressora,ups,camera')">Outros</div>
       </div>
       <div class="card">
         <div class="card-header">
@@ -6265,21 +6270,54 @@ function renderChamados(filter='abertos') {
 // ============================================================
 // ATIVOS
 // ============================================================
+// Filtro de tipo ativo para as abas
+let _ativoFiltroTipo = '';
+
+function filtrarAtivosPorTipo(tipos) {
+  _ativoFiltroTipo = tipos;
+  // Atualiza tab ativa
+  document.querySelectorAll('#ativos-tabs .tab').forEach(t => t.classList.remove('active'));
+  event?.target?.classList.add('active');
+  renderAtivos();
+}
+
 function renderAtivos() {
-  document.getElementById('ativos-body').innerHTML = STATE.ativos.map(a => `
+  const q      = (document.getElementById('pat-search')?.value || '').toLowerCase();
+  const fSt    = document.getElementById('pat-filter-status')?.value || '';
+  const tipos  = _ativoFiltroTipo ? _ativoFiltroTipo.split(',') : [];
+
+  const lista = STATE.ativos.filter(a => {
+    // Filtro por aba (tipo)
+    if (tipos.length > 0) {
+      const t = (a.tipo || '').toLowerCase();
+      if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
+    }
+    // Filtro por status
+    if (fSt && a.status !== fSt) return false;
+    // Busca texto
+    if (q && !`${a.pat} ${a.desc} ${a.area} ${a.resp||''} ${a.ip||''}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  document.getElementById('ativos-body').innerHTML = lista.map(a => `
     <tr>
-      <td class="td-mono fw-700" style="color:var(--accent)">${a.pat}</td>
-      <td style="font-weight:500">${a.desc}</td>
-      <td><span class="tag">${a.tipo}</span></td>
-      <td>${a.area}</td>
+      <td class="td-mono fw-700" style="color:var(--accent)">${a.pat||a.ip||'—'}</td>
+      <td style="font-weight:500">${a.desc||'—'}</td>
+      <td><span class="tag">${a.tipo||'—'}</span></td>
+      <td>${a.area||'—'}</td>
       <td>${a.resp||'—'}</td>
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.sala||a.loc||a.area||''}">
         ${a.sala ? `<div style="font-size:12px;font-weight:600;color:var(--g800)">${a.sala}</div><div style="font-size:11px;color:var(--g400)">${a.loc||''}</div>` : a.loc||'—'}
       </td>
-      <td><div class="flex gap-6"><button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat}')">📜</button><button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat,desc:a.desc||''})})" title="QR Code">📱</button><button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat}')" title="Análise IA">🤖</button><button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button></div></td>
-    </tr>`).join('') || `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo cadastrado</td></tr>`;
-  nbUpdate('nb-ativos', STATE.ativos.length);
+      <td><div class="flex gap-6">
+        <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')">📜</button>
+        <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
+        <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
+        <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
+      </div></td>
+    </tr>`).join('') || `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo — ${tipos.length?'tipo: '+_ativoFiltroTipo:'cadastrado'}</td></tr>`;
+  nbUpdate('nb-ativos', lista.length);
 }
 
 // ============================================================
