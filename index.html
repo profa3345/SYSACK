@@ -5991,85 +5991,137 @@ async function fsDelete(col, docId) {
 // ── FIRESTORE REAL-TIME LISTENERS ────────────────────────────
 function startFirestoreListeners() {
   if (!db || !FB_READY || !window._fs) return;
-  const { collection, query, where, orderBy, limit, onSnapshot } = window._fs;
+  const { collection, onSnapshot } = window._fs;
 
-  const toDate = v => v?.toDate?.() || (v instanceof Date ? v : new Date());
-  const fromSnap = (snap, extra = {}) => snap.docs.map(d => ({
-    id: d.id, ...d.data(),
-    ...Object.fromEntries(Object.entries(extra).map(([k,fn]) => [k, fn(d.data()[k])])),
-  }));
+  const toDate   = v => v?.toDate?.() || (v instanceof Date ? v : null);
+  const fromSnap = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-  // Chamados
+  // ── Normaliza campos de cada fonte para o formato padrão do renderAtivos ──
+  function normalizarAsset(d, fonte) {
+    if (fonte === 'glpi') return {
+      ...d,
+      pat:    d.patrimonio || d.pat || '',
+      desc:   d.descricao  || d.desc || d.nome || '',
+      tipo:   d.tipo       || d.categoria || 'ativo',
+      area:   d.area       || d.setor || '',
+      resp:   d.responsavel|| d.resp || '',
+      status: d.status === 'manut' ? 'manutencao' : (d.status || 'ativo'),
+      loc:    d.local      || d.localizacao || '',
+      sala:   d.sala       || '',
+      fonte:  'GLPI',
+    };
+    return { // discover / sysack-client
+      ...d,
+      pat:    d.pat        || d.patrimonio || d.ip || '',
+      desc:   d.desc       || d.hostname   || d.ip || '',
+      tipo:   d.tipo       || 'workstation',
+      area:   d.area       || '',
+      resp:   d.resp       || d.responsavel || '',
+      status: d.status     || (d.reachable ? 'ativo' : 'offline'),
+      loc:    d.area       || '',
+      fonte:  d.fonte      || 'Discovery',
+    };
+  }
+
+  // ── Merge: GLPI + ativos (discover) + switches ────────────────
+  function mergeAtivos() {
+    const glpi  = STATE._assetsGlpi || [];
+    const disc  = STATE._assetsDisc || [];
+    const sw    = STATE._assetsSw   || [];
+    const patsGlpi = new Set(glpi.map(a => a.pat).filter(Boolean));
+    STATE.ativos = [
+      ...glpi,
+      ...disc.filter(d => !d.pat || !patsGlpi.has(d.pat)),
+      ...sw.filter(s => !s.pat  || !patsGlpi.has(s.pat)),
+    ].sort((a,b) => {
+      const ta = a.createdAt ? new Date(a.createdAt?.toDate?.() || a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt?.toDate?.() || b.createdAt).getTime() : 0;
+      return tb - ta;
+    });
+    renderDashboard();
+    nbUpdate('nb-ativos', STATE.ativos.length);
+    if (document.getElementById('page-ativos')?.classList.contains('active')) renderAtivos();
+    console.log(`[Banco] ativos merged: GLPI=${glpi.length} discovery=${disc.length} switches=${sw.length} total=${STATE.ativos.length}`);
+  }
+
+  // ── Listener 1: assets (dados GLPI) ──────────────────────────
   onSnapshot(
-    query(collection(db,'chamados'), orderBy('createdAt','desc'), limit(200)),
+    collection(db,'assets'),
     snap => {
-      const data = fromSnap(snap, { createdAt: toDate, updatedAt: toDate });
-      if (data.length) { STATE.chamados = data; renderDashboard(); }
-      console.log(`[Banco] chamados: ${data.length}`);
-    }, e => console.error('[Banco] chamados:', e)
+      STATE._assetsGlpi = fromSnap(snap).map(d => normalizarAsset(d,'glpi'));
+      mergeAtivos();
+      console.log(`[Banco] assets (GLPI): ${STATE._assetsGlpi.length}`);
+    }, e => console.error('[Banco] assets:', e)
   );
 
-  // Ativos (sem orderBy para incluir docs do discovery sem createdAt)
+  // ── Listener 2: ativos (discover.js — workstations) ──────────
   onSnapshot(
     collection(db,'ativos'),
     snap => {
-      const data = fromSnap(snap, { createdAt: toDate });
-      // Ordena client-side: docs com createdAt primeiro, depois por lastSeen
-      data.sort((a,b) => {
-        const ta = a.createdAt?.getTime?.() || new Date(a.lastSeen||a.descobertoEm||0).getTime();
-        const tb = b.createdAt?.getTime?.() || new Date(b.lastSeen||b.descobertoEm||0).getTime();
-        return tb - ta;
-      });
-      STATE.ativos = data;
-      renderDashboard();
-      console.log(`[Banco] ativos: ${data.length} (inclui discovery)`);
+      STATE._assetsDisc = fromSnap(snap).map(d => normalizarAsset(d,'discover'));
+      mergeAtivos();
+      console.log(`[Banco] ativos (discovery): ${STATE._assetsDisc.length}`);
     }, e => console.error('[Banco] ativos:', e)
   );
 
-  // Switches/Roteadores (discovery.js salva aqui)
+  // ── Listener 3: switches (discover.js — equipamentos de rede) ─
   onSnapshot(
     collection(db,'switches'),
     snap => {
-      const data = fromSnap(snap, { createdAt: toDate });
-      STATE.switches = data;
-      console.log(`[Banco] switches: ${data.length}`);
+      STATE._assetsSw = fromSnap(snap).map(d => normalizarAsset(d,'discover'));
+      mergeAtivos();
+      STATE.switches = STATE._assetsSw;
+      console.log(`[Banco] switches: ${STATE._assetsSw.length}`);
       if (document.getElementById('page-switches')?.classList.contains('active')) renderSwitches();
     }, e => console.error('[Banco] switches:', e)
   );
 
-  // Aprovações pendentes
+  // ── Listener 4: empregados (agent.js sincroniza do SQL Server) ─
   onSnapshot(
-    query(collection(db,'aprovacoes'), where('status','==','pendente')),
+    collection(db,'empregados'),
     snap => {
-      const pend = fromSnap(snap, { data: toDate });
-      const ids  = pend.map(a => a.id);
-      STATE.aprovacoes = [];
-      nbUpdate('nb-aprov', pend.length);
+      STATE.empregados = fromSnap(snap);
+      nbUpdate('nb-emp', STATE.empregados.length);
+      console.log(`[Banco] empregados: ${STATE.empregados.length}`);
+      if (document.getElementById('page-empregados')?.classList.contains('active')) renderEmpregados?.();
+    }, e => console.error('[Banco] empregados:', e)
+  );
+
+  // ── Listener 5: chamados ──────────────────────────────────────
+  onSnapshot(
+    db.collection('chamados').orderBy('createdAt','desc').limit(200),
+    snap => {
+      STATE.chamados = fromSnap(snap);
+      renderDashboard();
+      console.log(`[Banco] chamados: ${STATE.chamados.length}`);
+    }, e => console.error('[Banco] chamados:', e)
+  );
+
+  // ── Listener 6: aprovações pendentes ─────────────────────────
+  onSnapshot(
+    db.collection('aprovacoes').where('status','==','pendente'),
+    snap => {
+      STATE.aprovacoes = fromSnap(snap);
+      nbUpdate('nb-aprov', STATE.aprovacoes.length);
       if (document.getElementById('page-aprovacoes')?.classList.contains('active')) renderAprovacoes();
     }, e => console.error('[Banco] aprovacoes:', e)
   );
 
-  // Smartphones
+  // ── Listener 7: smartphones ───────────────────────────────────
   onSnapshot(
     collection(db,'smartphones'),
     snap => {
-      const data = fromSnap(snap, { createdAt: toDate });
-      if (data.length) {
-        STATE.smartphones = data;
-        if (document.getElementById('page-mdm')?.classList.contains('active')) renderMDM();
-      }
+      STATE.smartphones = fromSnap(snap);
+      if (document.getElementById('page-mdm')?.classList.contains('active')) renderMDM();
     }, e => console.error('[Banco] smartphones:', e)
   );
 
-  // Mobiliário
+  // ── Listener 8: mobiliário ────────────────────────────────────
   onSnapshot(
     collection(db,'mobiliario'),
     snap => {
-      const data = fromSnap(snap, { createdAt: toDate });
-      if (data.length) {
-        STATE.mobiliario = data;
-        if (document.getElementById('page-mobiliario')?.classList.contains('active')) renderMobiliario();
-      }
+      STATE.mobiliario = fromSnap(snap);
+      if (document.getElementById('page-mobiliario')?.classList.contains('active')) renderMobiliario?.();
     }, e => console.error('[Banco] mobiliario:', e)
   );
 }
@@ -6723,33 +6775,60 @@ async function salvarChamado() {
 // Em produção: use APENAS Banco Auth + Banco /users
 // Fallback local para dev/offline — em produção usa Banco Auth exclusivamente
 // A senha abaixo é apenas para teste local em file:// — não é usada em produção
+// Fallback local — usado quando Firebase Auth não está acessível (ex: rede corporativa)
+// Senhas armazenadas como SHA-256. Para gerar: sha256('suasenha')
+function _sha256(str) {
+  // SHA-256 simplificado via SubtleCrypto (async) — usado só no fallback
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
+    .then(b => Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join(''));
+}
+
 const LOCAL_USERS = {
-  'admin': {
-    email:    'admin@adsi.com.br',
-    // SENHA REMOVIDA — autenticação exclusivamente via Firebase Auth
-    // Em produção: use console.firebase.google.com para gerenciar usuários
-    nome:     'Administrador',
-    avatar:   'AD',
+  // ── Usuários CESAN (fallback quando Firebase Auth não acessível) ──
+  'ana.penha': {
+    email:    'ana.penha@cesan.com.br',
+    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    nome:     'Ana Penha',
+    avatar:   'AP',
     role:     'admin',
-    uid:      'local_admin_001',
-    permissions: {
-      canApprove: true, canDeleteAssets: true,
-      canWipeDevice: true, canGeolocate: true,
-      canViewAudit: true, canExecDashboard: true,
-    }
+    uid:      'dYFZy11fXnNhX1THHIPE096y',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
   },
-  'admin@adsi.com.br': {
-    email:    'admin@adsi.com.br',
-    // senha: use Firebase Auth,
-    nome:     'Administrador',
+  'ana.penha@cesan.com.br': {
+    email:    'ana.penha@cesan.com.br',
+    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    nome:     'Ana Penha',
+    avatar:   'AP',
+    role:     'admin',
+    uid:      'dYFZy11fXnNhX1THHIPE096y',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+  'apaula': {
+    email:    'apaulalimaster@gmail.com',
+    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    nome:     'Ana Paula',
+    avatar:   'AP',
+    role:     'admin',
+    uid:      'YnSK3dR44tgbLcOweMga1R6',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+  'apaulalimaster@gmail.com': {
+    email:    'apaulalimaster@gmail.com',
+    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    nome:     'Ana Paula',
+    avatar:   'AP',
+    role:     'admin',
+    uid:      'YnSK3dR44tgbLcOweMga1R6',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+  'admin': {
+    email:    'admin@cesan.com.br',
+    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    nome:     'Administrador SYSACK',
     avatar:   'AD',
     role:     'admin',
     uid:      'local_admin_001',
-    permissions: {
-      canApprove: true, canDeleteAssets: true,
-      canWipeDevice: true, canGeolocate: true,
-      canViewAudit: true, canExecDashboard: true,
-    }
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
   },
 };
 
@@ -6827,22 +6906,33 @@ async function fazerLogin() {
     } catch (err) {
       // Só loga se não for erro de credencial inválida
       const credErrors = ['auth/user-not-found','auth/wrong-password','auth/invalid-credential','auth/invalid-email'];
-      if (!credErrors.includes(err?.code)) {
+      if (err?.code && !credErrors.includes(err.code)) {
         console.warn('[Auth] Banco error:', err?.code, err?.message);
       }
     }
   }
 
-  // ── Tentativa 2: locais apenas em file:// ─────
-  if (IS_PRODUCTION) { setLoginLoading(false); showLoginError('Credenciais inválidas.'); return; }
-  await new Promise(r => setTimeout(r, 400));
+  // ── Tentativa 2: fallback local (usado quando Firebase Auth não está acessível) ──
+  // Habilitado em produção quando Firebase Auth falhar por rede corporativa
+  await new Promise(r => setTimeout(r, 200));
   const local = LOCAL_USERS[emailRaw.toLowerCase()] ||
                 LOCAL_USERS[emailNorm.toLowerCase()] ||
                 LOCAL_USERS[emailRaw];
-  // Normaliza senha: aceita 'o' e '0' como equivalentes (erro comum de digitação)
-  const senhaNorm = senha.replace(/0/g, 'o').replace(/O/g, 'o');
-  const localPass = (local?.password || '').replace(/0/g, 'o').replace(/O/g, 'o');
-  if (local && (local.password === senha || localPass === senhaNorm)) {
+  // Valida senha via SHA-256 (async) ou senha plain text legado
+  let senhaOk = false;
+  if (local) {
+    if (local._hash) {
+      try {
+        const hash = await _sha256(senha);
+        senhaOk = (hash === local._hash);
+      } catch { senhaOk = false; }
+    } else if (local.password) {
+      const senhaNorm = senha.replace(/0/g, 'o').replace(/O/g, 'o');
+      const localPass = local.password.replace(/0/g, 'o').replace(/O/g, 'o');
+      senhaOk = (local.password === senha || localPass === senhaNorm);
+    }
+  }
+  if (local && senhaOk) {
     const user = {
       uid:         local.uid,
       email:       local.email,
