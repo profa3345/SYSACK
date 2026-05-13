@@ -908,6 +908,7 @@ textarea.form-control{resize:vertical;min-height:80px}
 .pnav-sep{border:none;border-top:1px solid rgba(255,255,255,.07);margin:5px 12px}
 .pnav-card{margin:10px 10px 0;background:rgba(37,99,235,.1);border:1px solid rgba(37,99,235,.22);border-radius:10px;padding:10px 12px}
 
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -1348,6 +1349,10 @@ document.addEventListener('DOMContentLoaded', function(){
     <a class="nav-p" data-page="baixas-patrimoniais" onclick="goPage('baixas-patrimoniais')">
       <svg viewBox="0 0 16 16" fill="none"><path d="M3 3h10M3 6h7M3 9h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 10l2 2 2-2M12 12V8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Baixas
+    </a>
+    <a class="nav-p" data-page="disponiveis" onclick="goPage('disponiveis')">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4M7 12l-4-4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Dispon&#237;veis p/ Transfer.
     </a>
 
     <hr class="pnav-sep">
@@ -1901,22 +1906,278 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
     </div>
 
+    
+    <!-- =============================================
+         MOVIMENTAÇÕES — FLUXO INTEGRAÇÃO SAP
+    ============================================= -->
     <div class="page" id="page-movimentacoes">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
         <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Movimenta&#231;&#245;es</h2>
-          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Transfer&#234;ncias e movimenta&#231;&#245;es de bens patrimoniais</p>
+          <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Movimentações Patrimoniais</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Fluxo seguro: SYSACK &rarr; Aprovação &rarr; Fila &rarr; SAP via RFC/BAPI &rarr; Confirmação</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="abrirModalMov()" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer">+ Nova Movimentação</button>
+          <button onclick="abrirModalMov('transfer')" style="background:#F0FDF4;color:#059669;border:1px solid #BBF7D0;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer">🔄 Disponíveis</button>
         </div>
       </div>
-      <div style="background:#fff;border:1px solid var(--g200);border-radius:14px;padding:48px;text-align:center;color:var(--g400)">
-        <div style="font-size:40px;margin-bottom:16px">&#8596;&#65039;</div>
-        <div style="font-weight:700;font-size:15px;color:var(--g700);margin-bottom:8px">M&#243;dulo Movimenta&#231;&#245;es</div>
-        <div style="font-size:13px;margin-bottom:20px">Registre transfer&#234;ncias de bens entre setores, respons&#225;veis e localiza&#231;&#245;es.</div>
-        <button onclick="goPage('bens-patrimoniais')" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer">Ver Bens Patrimoniais</button>
+
+      <!-- Fluxo de Status SAP -->
+      <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:16px 20px;margin-bottom:20px">
+        <div style="font-size:11px;font-weight:800;color:#64748B;text-transform:uppercase;letter-spacing:.07em;margin-bottom:12px">Fluxo de Integração SAP</div>
+        <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;overflow-x:auto">
+          <div style="display:flex;flex-direction:column;align-items:center;min-width:90px;padding:0 6px">
+            <div style="width:36px;height:36px;background:#F1F5F9;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:5px">📝</div>
+            <div style="font-size:10px;font-weight:700;color:#475569;text-align:center">Pendente</div>
+            <div style="font-size:9px;color:#94A3B8;text-align:center;margin-top:1px">aguarda aprovação</div>
+          </div>
+          <div style="color:#CBD5E1;font-size:16px;padding:0 2px">›</div>
+          <div style="display:flex;flex-direction:column;align-items:center;min-width:90px;padding:0 6px">
+            <div style="width:36px;height:36px;background:#DCFCE7;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:5px">✅</div>
+            <div style="font-size:10px;font-weight:700;color:#166534;text-align:center">Aprovada</div>
+            <div style="font-size:9px;color:#94A3B8;text-align:center;margin-top:1px">patrimônio/contab.</div>
+          </div>
+          <div style="color:#CBD5E1;font-size:16px;padding:0 2px">›</div>
+          <div style="display:flex;flex-direction:column;align-items:center;min-width:90px;padding:0 6px">
+            <div style="width:36px;height:36px;background:#DBEAFE;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:5px">📤</div>
+            <div style="font-size:10px;font-weight:700;color:#1E40AF;text-align:center">Enviada ao SAP</div>
+            <div style="font-size:9px;color:#94A3B8;text-align:center;margin-top:1px">via RFC/BAPI</div>
+          </div>
+          <div style="color:#CBD5E1;font-size:16px;padding:0 2px">›</div>
+          <div style="display:flex;flex-direction:column;align-items:center;min-width:90px;padding:0 6px">
+            <div style="width:36px;height:36px;background:#F0FDF4;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:5px">🏦</div>
+            <div style="font-size:10px;font-weight:700;color:#059669;text-align:center">Confirmada SAP</div>
+            <div style="font-size:9px;color:#94A3B8;text-align:center;margin-top:1px">retorno gravado</div>
+          </div>
+          <div style="color:#CBD5E1;font-size:16px;padding:0 2px">·</div>
+          <div style="display:flex;flex-direction:column;align-items:center;min-width:90px;padding:0 6px;opacity:.7">
+            <div style="width:36px;height:36px;background:#FEE2E2;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:5px">⚠️</div>
+            <div style="font-size:10px;font-weight:700;color:#DC2626;text-align:center">Erro Integração</div>
+            <div style="font-size:9px;color:#94A3B8;text-align:center;margin-top:1px">reprocessar</div>
+          </div>
+          <div style="color:#CBD5E1;font-size:16px;padding:0 2px">·</div>
+          <div style="display:flex;flex-direction:column;align-items:center;min-width:90px;padding:0 6px;opacity:.7">
+            <div style="width:36px;height:36px;background:#FEF3C7;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:5px">🚫</div>
+            <div style="font-size:10px;font-weight:700;color:#92400E;text-align:center">Rejeitada</div>
+            <div style="font-size:9px;color:#94A3B8;text-align:center;margin-top:1px">motivo registrado</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:20px">
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #64748B">
+          <div style="font-size:22px;font-weight:800;color:#374151" id="mov-pendente">—</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Pendentes</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #059669">
+          <div style="font-size:22px;font-weight:800;color:#059669" id="mov-aprovada">—</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Aprovadas</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #2563EB">
+          <div style="font-size:22px;font-weight:800;color:#2563EB" id="mov-enviada-sap">—</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Enviadas SAP</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #10B981">
+          <div style="font-size:22px;font-weight:800;color:#10B981" id="mov-confirmada-sap">—</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Confirmadas SAP</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #DC2626">
+          <div style="font-size:22px;font-weight:800;color:#DC2626" id="mov-erro">—</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Erro Integração</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #D97706">
+          <div style="font-size:22px;font-weight:800;color:#D97706" id="mov-rejeitada">—</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Rejeitadas</div>
+        </div>
+      </div>
+
+      <!-- Filtros -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <select id="mov-fil-status" onchange="filtrarMovimentacoes()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff">
+          <option value="">Todos os status</option>
+          <option value="pendente">📝 Pendente</option>
+          <option value="aprovada">✅ Aprovada</option>
+          <option value="enviada_sap">📤 Enviada ao SAP</option>
+          <option value="confirmada_sap">🏦 Confirmada SAP</option>
+          <option value="erro_integracao">⚠️ Erro de Integração</option>
+          <option value="rejeitada">🚫 Rejeitada</option>
+        </select>
+        <input id="mov-busca" oninput="filtrarMovimentacoes()" placeholder="Buscar por patrimônio, origem, destino..." style="flex:1;min-width:200px;border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px">
+        <button onclick="carregarMovimentacoes()" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">↻ Atualizar</button>
+      </div>
+
+      <!-- Tabela -->
+      <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden">
+        <div class="table-wrap" style="max-height:55vh;overflow-y:auto">
+          <table>
+            <thead style="position:sticky;top:0;background:#F8FAFC;z-index:1">
+              <tr>
+                <th>Data</th>
+                <th>Nº PAT</th>
+                <th>Descrição</th>
+                <th>Origem</th>
+                <th>Destino</th>
+                <th>Resp. Anterior</th>
+                <th>Novo Resp.</th>
+                <th>Solicitante</th>
+                <th>Aprovador</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="mov-tbody">
+              <!-- DEMO ROWS -->
+              <tr data-status="confirmada_sap">
+                <td style="font-size:12px;white-space:nowrap">13/05/2026</td>
+                <td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">TI-003921</td>
+                <td style="font-size:12px">Notebook Dell Latitude 5420</td>
+                <td style="font-size:12px">A-DSI</td>
+                <td style="font-size:12px">A-GTI</td>
+                <td style="font-size:12px">Ana Lima</td>
+                <td style="font-size:12px;font-weight:600">Carlos Mendes</td>
+                <td style="font-size:11px;color:#64748B">João M.</td>
+                <td style="font-size:11px;color:#64748B">Maria P.</td>
+                <td><span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700;white-space:nowrap">🏦 Confirmada SAP</span></td>
+                <td><button onclick="abrirDetalheMovimentacao('TI-003921')" style="background:#EFF6FF;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:#2563EB;font-weight:600">Ver</button></td>
+              </tr>
+              <tr data-status="enviada_sap">
+                <td style="font-size:12px;white-space:nowrap">12/05/2026</td>
+                <td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">ADM-001332</td>
+                <td style="font-size:12px">Mesa Executiva</td>
+                <td style="font-size:12px">Estoque</td>
+                <td style="font-size:12px">Administrativo</td>
+                <td style="font-size:12px">—</td>
+                <td style="font-size:12px;font-weight:600">Roberto Lima</td>
+                <td style="font-size:11px;color:#64748B">Pedro S.</td>
+                <td style="font-size:11px;color:#64748B">Lucia A.</td>
+                <td><span style="background:#DBEAFE;color:#1E40AF;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700;white-space:nowrap">📤 Enviada SAP</span></td>
+                <td><button onclick="abrirDetalheMovimentacao('ADM-001332')" style="background:#EFF6FF;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:#2563EB;font-weight:600">Ver</button></td>
+              </tr>
+              <tr data-status="pendente">
+                <td style="font-size:12px;white-space:nowrap">13/05/2026</td>
+                <td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">TI-007744</td>
+                <td style="font-size:12px">Lenovo ThinkPad E14</td>
+                <td style="font-size:12px">Diretoria</td>
+                <td style="font-size:12px">TI - Suporte</td>
+                <td style="font-size:12px">Roberto Lima</td>
+                <td style="font-size:12px;font-weight:600">Pedro Santos</td>
+                <td style="font-size:11px;color:#64748B">Ana P.</td>
+                <td style="font-size:11px;color:#DC2626;font-weight:600">Aguardando</td>
+                <td><span style="background:#F1F5F9;color:#475569;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700;white-space:nowrap">📝 Pendente</span></td>
+                <td>
+                  <div style="display:flex;gap:4px">
+                    <button style="background:#DCFCE7;color:#166534;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:700">✓ Aprovar</button>
+                    <button style="background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:700">✗</button>
+                  </div>
+                </td>
+              </tr>
+              <tr data-status="erro_integracao">
+                <td style="font-size:12px;white-space:nowrap">11/05/2026</td>
+                <td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">TI-009182</td>
+                <td style="font-size:12px">Monitor Samsung 24"</td>
+                <td style="font-size:12px">RH</td>
+                <td style="font-size:12px">Engenharia</td>
+                <td style="font-size:12px">Maria O.</td>
+                <td style="font-size:12px;font-weight:600">Carlos M.</td>
+                <td style="font-size:11px;color:#64748B">João M.</td>
+                <td style="font-size:11px;color:#64748B">Lucia A.</td>
+                <td><span style="background:#FEE2E2;color:#991B1B;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700;white-space:nowrap">⚠️ Erro Integração</span></td>
+                <td>
+                  <div style="display:flex;gap:4px">
+                    <button style="background:#DBEAFE;color:#1E40AF;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:700">↺ Retry</button>
+                    <button onclick="abrirDetalheMovimentacao('TI-009182')" style="background:#EFF6FF;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:#2563EB">Ver</button>
+                  </div>
+                </td>
+              </tr>
+              <tr data-status="aprovada">
+                <td style="font-size:12px;white-space:nowrap">10/05/2026</td>
+                <td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">ADM-004821</td>
+                <td style="font-size:12px">Computador Dell OptiPlex</td>
+                <td style="font-size:12px">Financeiro</td>
+                <td style="font-size:12px">Engenharia</td>
+                <td style="font-size:12px">Carlos M.</td>
+                <td style="font-size:12px;font-weight:600">Maria O.</td>
+                <td style="font-size:11px;color:#64748B">Pedro S.</td>
+                <td style="font-size:11px;color:#64748B">Roberto L.</td>
+                <td><span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700;white-space:nowrap">✅ Aprovada</span></td>
+                <td>
+                  <div style="display:flex;gap:4px">
+                    <button style="background:linear-gradient(135deg,#1E40AF,#2563EB);color:#fff;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:700;white-space:nowrap">📤 Enviar SAP</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Nota arquitetura -->
+      <div style="margin-top:14px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start">
+        <div style="font-size:16px;flex-shrink:0">🔐</div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#1E40AF;margin-bottom:2px">Arquitetura segura de integração</div>
+          <div style="font-size:12px;color:#1E40AF;line-height:1.6">SYSACK não grava direto no SAP pelo browser. O fluxo é: <strong>SYSACK → Aprovação → Fila de Integração → Serviço interno → SAP via RFC/BAPI → Confirmação gravada no SYSACK → Log de auditoria.</strong> Nenhuma senha SAP no frontend. Nenhum usuário comum com acesso amplo ao SAP.</div>
+        </div>
+      </div>
+
+      <!-- Modal Nova Movimentação -->
+      <div id="modal-mov" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;align-items:center;justify-content:center;padding:20px">
+        <div style="background:#fff;border-radius:16px;padding:28px;width:100%;max-width:580px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.3)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+            <div>
+              <h3 style="margin:0;font-size:17px;font-weight:800">Nova Movimentação Patrimonial</h3>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748B">Entrará como <strong>Pendente</strong> até aprovação do Patrimônio/Contabilidade</p>
+            </div>
+            <button onclick="fecharModalMov()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94A3B8;line-height:1">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div style="grid-column:1/-1">
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Nº Patrimônio *</label>
+              <input id="mov-pat-input" placeholder="Ex: TI-003921" style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;font-family:monospace;box-sizing:border-box" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#E2E8F0'">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Área / Setor Origem *</label>
+              <input placeholder="De onde sai o bem" style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;box-sizing:border-box" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#E2E8F0'">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Área / Setor Destino *</label>
+              <input placeholder="Para onde vai o bem" style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;box-sizing:border-box" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#E2E8F0'">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Responsável Anterior</label>
+              <input placeholder="Nome atual do responsável" style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;box-sizing:border-box" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#E2E8F0'">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Novo Responsável *</label>
+              <input placeholder="Nome do novo responsável" style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;box-sizing:border-box" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#E2E8F0'">
+            </div>
+            <div style="grid-column:1/-1">
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Motivo da Movimentação *</label>
+              <textarea rows="2" placeholder="Descreva o motivo..." style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;resize:vertical;box-sizing:border-box" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#E2E8F0'"></textarea>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Data da Movimentação</label>
+              <input type="date" style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;color:#64748B;display:block;margin-bottom:5px">Solicitante</label>
+              <input placeholder="Preenchido automaticamente" style="width:100%;border:1.5px solid #E2E8F0;border-radius:8px;padding:9px 12px;font-size:13px;background:#F8FAFC;box-sizing:border-box" readonly>
+            </div>
+          </div>
+          <!-- Aviso integração -->
+          <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-top:16px;font-size:12px;color:#92400E;display:flex;gap:8px;align-items:flex-start">
+            <span>⚠️</span>
+            <div>Esta movimentação entrará como <strong>Pendente</strong>. Só será enviada ao SAP após aprovação do responsável pelo Patrimônio ou Contabilidade. Nenhuma alteração é feita no SAP sem aprovação.</div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:20px">
+            <button onclick="fecharModalMov()" style="flex:1;background:#F1F5F9;color:#64748B;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:600;cursor:pointer">Cancelar</button>
+            <button onclick="salvarMovimentacao()" style="flex:2;background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">Registrar como Pendente</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- ── stub: baixas-patrimoniais ── -->
     <div class="page" id="page-baixas-patrimoniais">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
         <div>
@@ -2406,7 +2667,12 @@ var _invDocs=[];
 async function carregarInventario(){
   var tbody = document.getElementById('inv-tbody');
   if(!tbody) return;
-  tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--g400)">Carregando...</td></tr>';
+  // Guard: wait for db to be ready
+  if(typeof db === 'undefined' || !db){
+    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:#EA580C">Firebase ainda inicializando. Aguarde 2s e clique em Atualizar.</td></tr>';
+    return;
+  }
+  tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--g400)"><div style="display:inline-block;width:20px;height:20px;border:2px solid #2563EB;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle"></div>Buscando dispositivos no Firebase...</td></tr>';
   try{
     var res = await Promise.allSettled([db.collection('ativos').get(),db.collection('switches').get()]);
     _invDocs=[];
@@ -2528,7 +2794,8 @@ var _p2Loaded={};
         orig.call(this,page);
         if(page==='pat-dashboard'&&!_p2Loaded[page]){_p2Loaded[page]=1;carregarDashboardPat();}
         if(page==='auditoria-pat'){carregarAuditoria();}
-        if(page==='inventario'&&!_p2Loaded[page]){_p2Loaded[page]=1;carregarInventario();}
+        if(page==='movimentacoes'){carregarMovimentacoes();}
+        if(page==='inventario'){carregarInventario();}
       };
       window.goPage._p2Hook=true;clearInterval(iv);
     }
@@ -2538,6 +2805,104 @@ var _p2Loaded={};
 
 })();
 
+
+</script>
+
+<script>
+
+// ── MOVIMENTAÇÕES ────────────────────────────────────────────
+var _movDocs = [];
+window.abrirModalMov = function(type){
+  var m = document.getElementById('modal-mov');
+  if(m){ m.style.display='flex'; }
+};
+window.fecharModalMov = function(){
+  var m = document.getElementById('modal-mov');
+  if(m){ m.style.display='none'; }
+};
+window.salvarMovimentacao = function(){
+  var pat = document.getElementById('mov-pat-input');
+  if(!pat||!pat.value.trim()){
+    if(typeof mostrarToast==='function') mostrarToast('Informe o N\u00BA do patrim\u00F4nio','warning');
+    return;
+  }
+  // Save to Firebase as pendente
+  if(typeof db !== 'undefined' && db){
+    var user = (typeof auth!=='undefined'&&auth.currentUser) ? auth.currentUser.email : 'sistema';
+    db.collection('movimentacoes').add({
+      pat: pat.value.trim(),
+      status: 'pendente',
+      solicitante: user,
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+      sapStatus: 'nao_enviado'
+    }).then(function(){
+      if(typeof mostrarToast==='function') mostrarToast('Movimenta\u00E7\u00E3o registrada como Pendente!','success');
+      fecharModalMov();
+      carregarMovimentacoes();
+    }).catch(function(e){
+      if(typeof mostrarToast==='function') mostrarToast('Erro: '+e.message,'error');
+    });
+  } else {
+    if(typeof mostrarToast==='function') mostrarToast('Demo: movimenta\u00E7\u00E3o seria registrada como Pendente','info');
+    fecharModalMov();
+  }
+};
+
+async function carregarMovimentacoes(){
+  var tbody = document.getElementById('mov-tbody');
+  if(!tbody) return;
+  if(typeof db==='undefined'||!db) return;
+  try{
+    var snap = await db.collection('movimentacoes').orderBy('criadoEm','desc').limit(50).get();
+    var docs = snap.docs.map(function(d){ return Object.assign({_id:d.id},d.data()); });
+    _movDocs = docs;
+    // Update KPIs
+    var STATUS_MAP = {pendente:'mov-pendente',aprovada:'mov-aprovada',enviada_sap:'mov-enviada-sap',confirmada_sap:'mov-confirmada-sap',erro_integracao:'mov-erro',rejeitada:'mov-rejeitada'};
+    Object.keys(STATUS_MAP).forEach(function(st){
+      var el = document.getElementById(STATUS_MAP[st]);
+      if(el) el.textContent = docs.filter(function(d){return d.status===st;}).length;
+    });
+    if(docs.length){
+      var STATUS_LABELS={pendente:'<span style="background:#F1F5F9;color:#475569;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700">\uD83D\uDCDD Pendente</span>',aprovada:'<span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700">\u2705 Aprovada</span>',enviada_sap:'<span style="background:#DBEAFE;color:#1E40AF;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700">\uD83D\uDCE4 Enviada SAP</span>',confirmada_sap:'<span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700">\uD83C\uDFE6 Confirmada SAP</span>',erro_integracao:'<span style="background:#FEE2E2;color:#991B1B;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700">\u26A0\uFE0F Erro</span>',rejeitada:'<span style="background:#FEF3C7;color:#92400E;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700">\uD83D\uDEAB Rejeitada</span>'};
+      tbody.innerHTML = docs.map(function(d){
+        var dt = d.criadoEm ? new Date(d.criadoEm.seconds*1000).toLocaleDateString('pt-BR') : '--';
+        return '<tr data-status="'+(d.status||'pendente')+'">'
+          +'<td style="font-size:12px">'+dt+'</td>'
+          +'<td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">'+(d.pat||'--')+'</td>'
+          +'<td style="font-size:12px">'+(d.descricao||'--')+'</td>'
+          +'<td style="font-size:12px">'+(d.origem||'--')+'</td>'
+          +'<td style="font-size:12px">'+(d.destino||'--')+'</td>'
+          +'<td style="font-size:12px">'+(d.respAnterior||'--')+'</td>'
+          +'<td style="font-size:12px;font-weight:600">'+(d.novoResp||'--')+'</td>'
+          +'<td style="font-size:11px;color:#64748B">'+(d.solicitante||'--')+'</td>'
+          +'<td style="font-size:11px;color:#64748B">'+(d.aprovador||'<span style=\"color:#DC2626\">Aguard.</span>')+'</td>'
+          +'<td>'+(STATUS_LABELS[d.status||'pendente']||d.status)+'</td>'
+          +'<td><button onclick=\"abrirDetalheMovimentacao(\''+(d._id||d.pat)+'\')\" style=\"background:#EFF6FF;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:#2563EB\">Ver</button></td>'
+          +'</tr>';
+      }).join('');
+    }
+  }catch(e){ console.warn('carregarMovimentacoes:',e); }
+}
+
+window.filtrarMovimentacoes = function(){
+  var status = document.getElementById('mov-fil-status') ? document.getElementById('mov-fil-status').value : '';
+  var busca  = (document.getElementById('mov-busca') ? document.getElementById('mov-busca').value : '').toLowerCase();
+  document.querySelectorAll('#mov-tbody tr[data-status]').forEach(function(r){
+    var st  = r.getAttribute('data-status');
+    var txt = r.textContent.toLowerCase();
+    r.style.display = (!status||st===status)&&(!busca||txt.includes(busca)) ? '' : 'none';
+  });
+};
+
+window.abrirDetalheMovimentacao = function(id){
+  if(typeof mostrarToast==='function') mostrarToast('Abrindo detalhe: '+id,'info');
+};
+
+// Close modal-mov on overlay click
+document.addEventListener('DOMContentLoaded',function(){
+  var m = document.getElementById('modal-mov');
+  if(m) m.addEventListener('click',function(e){ if(e.target===m) fecharModalMov(); });
+});
 
 </script>
 
