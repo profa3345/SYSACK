@@ -6996,15 +6996,33 @@ function loginSuccess(user, showWelcome = true) {
   auditLog('LOGIN', 'auth', user.uid, 'user', { nome: user.nome, role: user.role });
 
   // Inicia listeners do Firestore APÓS o usuário estar autenticado
-  // Garante que request.auth != null nas Firestore Rules
+  function _iniciarListeners() {
+    startFirestoreListeners();
+    verificarConfigSeguranca?.();
+    iniciarWatcherIP?.();
+    iniciarWatcherAlertasIA?.();
+    document.dispatchEvent(new Event('sysack-login'));
+  }
+
   if (FB_READY && db) {
-    setTimeout(() => {
-      startFirestoreListeners();
-      verificarConfigSeguranca();
-      iniciarWatcherIP();
-      iniciarWatcherAlertasIA();
-      document.dispatchEvent(new Event('sysack-login'));
-    }, 500); // pequeno delay para garantir que o token JWT foi propagado
+    // Firebase já pronto — inicia listeners imediatamente
+    setTimeout(_iniciarListeners, 300);
+  } else {
+    // Firebase ainda inicializando — aguarda e tenta de novo
+    console.log('[Banco] Aguardando Firebase para iniciar listeners...');
+    const _maxTentativas = 20;
+    let _tentativa = 0;
+    const _intervalo = setInterval(() => {
+      _tentativa++;
+      if (FB_READY && db) {
+        clearInterval(_intervalo);
+        console.log(`[Banco] Firebase pronto após ${_tentativa} tentativas — iniciando listeners`);
+        _iniciarListeners();
+      } else if (_tentativa >= _maxTentativas) {
+        clearInterval(_intervalo);
+        console.warn('[Banco] Timeout aguardando Firebase — listeners não iniciados');
+      }
+    }, 300);
   }
 }
 
@@ -7930,26 +7948,31 @@ document.addEventListener('DOMContentLoaded', () => {
   initSeedData();
   initTheme();
 
-  // ── Verifica sessão salva ou exibe login ──
-  if (!checkSavedSession()) {
-    // Mostra login — app fica oculto até autenticar
-    // (o login-page já está visível por padrão)
-    document.getElementById('login-email')?.focus();
-  }
-
   renderDashboard();
   renderNotificacoes();
 
-  // Banco — atualiza status no login
+  // ── Inicia Banco PRIMEIRO, depois verifica sessão ─────────────
+  // CRÍTICO: initBanco deve completar antes de checkSavedSession
+  // Caso contrário FB_READY=false quando loginSuccess tenta iniciar
+  // os listeners do Firestore e os dados nunca aparecem
   initBanco().then(() => {
     const st = document.getElementById('login-firebase-status');
     if (st) st.textContent = FB_READY
       ? '🗄️ Banco de Dados conectado'
       : '📡 Modo offline — dados locais';
+
+    // APENAS AGORA verifica sessão salva — FB_READY já é true
+    if (!checkSavedSession()) {
+      document.getElementById('login-email')?.focus();
+    }
   }).catch(e => {
     const st = document.getElementById('login-firebase-status');
     if (st) st.textContent = '📡 Sem conexão com Banco';
     console.warn('[Banco] init:', e);
+    // Mesmo sem Banco, tenta restaurar sessão
+    if (!checkSavedSession()) {
+      document.getElementById('login-email')?.focus();
+    }
   });
 
   // Nav
