@@ -1310,24 +1310,29 @@ document.addEventListener('DOMContentLoaded', function(){
       Dashboard Patrimonial
       <span style="font-size:9px;font-weight:800;background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;padding:1px 5px;border-radius:10px;margin-left:auto">EXEC</span>
     </a>
+    <a class="nav-p" data-page="divergencias-sap" onclick="goPage('divergencias-sap')">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M8 2L2 5v6l6 3 6-3V5L8 2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 7v3M8 5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      Diverg&#234;ncias SAP
+      <span id="pat-nav-div-badge" style="margin-left:auto;background:#EF4444;color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;display:none">!</span>
+    </a>
     <a class="nav-p" data-page="inventario" onclick="goPage('inventario')">
       <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 6h8M4 9h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M11 9l1.5 1.5L15 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Invent&#225;rio
     </a>
 
     <hr class="pnav-sep">
-    <div class="pnav-sec">Cadastro &amp; Controle</div>
-    <a class="nav-p" data-page="bens-patrimoniais" onclick="goPage('bens-patrimoniais')">
-      <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 7h3M4 9.5h5M10 7h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1 6h14" stroke="currentColor" stroke-width="1.3"/></svg>
-      Bens Patrimoniais
-    </a>
+    <div class="pnav-sec">Controle</div>
     <a class="nav-p" data-page="movimentacoes" onclick="goPage('movimentacoes')">
       <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Movimenta&#231;&#245;es
     </a>
-    <a class="nav-p" data-page="notas-fiscais" onclick="goPage('notas-fiscais')">
-      <svg viewBox="0 0 16 16" fill="none"><path d="M4 2h6l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1Z" stroke="currentColor" stroke-width="1.4"/><path d="M10 2v4h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 8h6M5 10.5h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
-      Notas Fiscais
+    <a class="nav-p" data-page="historico-ativo" onclick="goPage('historico-ativo')">
+      <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      Hist&#243;rico de Vida
+    </a>
+    <a class="nav-p" data-page="auditoria-pat" onclick="goPage('auditoria-pat')">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M8 1.5L2 4v4c0 3.5 2.5 6 6 7 3.5-1 6-3.5 6-7V4L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8l2 2 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Auditoria
     </a>
 
     <hr class="pnav-sep">
@@ -1336,25 +1341,13 @@ document.addEventListener('DOMContentLoaded', function(){
       <svg viewBox="0 0 16 16" fill="none"><path d="M2 12L5 8l3 2 3-5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Deprecia&#231;&#227;o
     </a>
+    <a class="nav-p" data-page="notas-fiscais" onclick="goPage('notas-fiscais')">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M4 2h6l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1Z" stroke="currentColor" stroke-width="1.4"/><path d="M10 2v4h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      Notas Fiscais
+    </a>
     <a class="nav-p" data-page="baixas-patrimoniais" onclick="goPage('baixas-patrimoniais')">
       <svg viewBox="0 0 16 16" fill="none"><path d="M3 3h10M3 6h7M3 9h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 10l2 2 2-2M12 12V8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Baixas
-    </a>
-
-    <hr class="pnav-sep">
-    <div class="pnav-sec">SAP &amp; Auditoria</div>
-    <a class="nav-p" data-page="divergencias-sap" onclick="goPage('divergencias-sap')">
-      <svg viewBox="0 0 16 16" fill="none"><path d="M8 2L2 5v6l6 3 6-3V5L8 2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 7v3M8 5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-      Diverg&#234;ncias SAP
-      <span id="pat-nav-div-badge" style="margin-left:auto;background:#EF4444;color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;display:none">!</span>
-    </a>
-    <a class="nav-p" data-page="auditoria-pat" onclick="goPage('auditoria-pat')">
-      <svg viewBox="0 0 16 16" fill="none"><path d="M8 1.5L2 4v4c0 3.5 2.5 6 6 7 3.5-1 6-3.5 6-7V4L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8l2 2 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Trilha de Auditoria
-    </a>
-    <a class="nav-p" data-page="historico-ativo" onclick="goPage('historico-ativo')">
-      <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-      Hist&#243;rico do Bem
     </a>
 
     <hr class="pnav-sep">
@@ -1368,10 +1361,11 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="pnav-card">
       <div style="font-size:9px;font-weight:800;color:rgba(148,163,184,.75);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Modo ativo</div>
       <div style="font-size:12px;color:#93C5FD;font-weight:700">Patrim&#244;nio Executivo</div>
-      <div style="font-size:10px;color:rgba(148,163,184,.6);margin-top:1px">Voltado para contabilidade</div>
+      <div style="font-size:10px;color:rgba(148,163,184,.5);margin-top:1px">Contabilidade CESAN</div>
     </div>
 
   </nav>
+  </div>  </nav>
   </div>
 
   <div class="sb-footer">
@@ -1487,162 +1481,140 @@ document.addEventListener('DOMContentLoaded', function(){
     <!-- ============================================
          DASHBOARD PATRIMONIAL EXECUTIVO
     ============================================ -->
+    
+    <!-- =============================================
+         PAT-DASHBOARD — EXECUTIVO
+    ============================================= -->
     <div class="page" id="page-pat-dashboard">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
         <div>
-          <h2 style="font-size:20px;font-weight:800;background:linear-gradient(135deg,#1E40AF,#4F46E5);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0">Dashboard Patrimonial</h2>
-          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Vis&#227;o executiva &middot; SAP CadastroSAP &middot; <span style="color:#10B981;font-weight:600">&#9679; Integra&#231;&#227;o ativa</span></p>
+          <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Dashboard Patrimonial</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">CESAN &middot; Vis&#227;o executiva &middot; <span style="color:#10B981;font-weight:700">&#9679; Integra&#231;&#227;o ativa</span></p>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <span style="background:#F0FDF4;color:#059669;border:1px solid #BBF7D0;border-radius:20px;padding:5px 12px;font-size:11px;font-weight:700">&#10004; Dados sincronizados</span>
-          <button onclick="goPage('divergencias-sap')" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">Ver Diverg&#234;ncias SAP</button>
-          <button onclick="window.print()" style="background:linear-gradient(135deg,#1E40AF,#4F46E5);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer">Exportar Relat&#243;rio</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="pat-sync-badge" style="background:#F0FDF4;color:#059669;border:1px solid #BBF7D0;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700">Carregando...</span>
+          <button onclick="goPage('divergencias-sap')" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">&#9888; Ver Diverg&#234;ncias SAP</button>
+          <button onclick="carregarDashboardPat()" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">&#8635; Atualizar</button>
         </div>
       </div>
 
       <!-- 8 KPI CARDS -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin:20px 0 24px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:24px">
 
-        <div onclick="goPage('bens-patrimoniais')" style="background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1px solid #BFDBFE;border-radius:14px;padding:18px 16px;cursor:pointer;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(37,99,235,.2)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#2563EB;text-transform:uppercase;letter-spacing:.07em">Total de Bens</div>
-            <div style="width:30px;height:30px;background:#2563EB18;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#127963;</div>
-          </div>
-          <div style="font-size:36px;font-weight:800;color:#1E40AF;line-height:1" id="pat-total">&#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">Patrim&#244;nios cadastrados</div>
+        <div onclick="goPage('bens-patrimoniais')" style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;cursor:pointer;transition:all .18s;border-top:3px solid #2563EB" onmouseenter="this.style.boxShadow='0 6px 24px rgba(37,99,235,.15)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#2563EB;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Total de Ativos</div>
+          <div style="font-size:36px;font-weight:800;color:#1E3A5F;line-height:1" id="pat-total">&#8212;</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Bens cadastrados</div>
         </div>
 
-        <div onclick="goPage('bens-patrimoniais')" style="background:linear-gradient(135deg,#FEF2F2,#FEE2E2);border:1px solid #FECACA;border-radius:14px;padding:18px 16px;cursor:pointer;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(220,38,38,.2)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#DC2626;text-transform:uppercase;letter-spacing:.07em">Sem Respons&#225;vel</div>
-            <div style="width:30px;height:30px;background:#DC262618;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#128100;</div>
-          </div>
-          <div style="font-size:36px;font-weight:800;color:#991B1B;line-height:1" id="pat-sem-resp">&#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">Requerem atribui&#231;&#227;o</div>
+        <div onclick="goPage('divergencias-sap')" style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;cursor:pointer;transition:all .18s;border-top:3px solid #DC2626" onmouseenter="this.style.boxShadow='0 6px 24px rgba(220,38,38,.15)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#DC2626;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Diverg&#234;ncias SAP</div>
+          <div style="font-size:36px;font-weight:800;color:#7F1D1D;line-height:1" id="pat-div-loc">&#8212;</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Local ou respons&#225;vel</div>
         </div>
 
-        <div onclick="goPage('divergencias-sap')" style="background:linear-gradient(135deg,#FFF7ED,#FFEDD5);border:1px solid #FED7AA;border-radius:14px;padding:18px 16px;cursor:pointer;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(234,88,12,.2)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#EA580C;text-transform:uppercase;letter-spacing:.07em">Loc. Divergente</div>
-            <div style="width:30px;height:30px;background:#EA580C18;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#128205;</div>
-          </div>
-          <div style="font-size:36px;font-weight:800;color:#C2410C;line-height:1" id="pat-div-loc">&#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">SAP &times; F&#237;sico</div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;cursor:pointer;transition:all .18s;border-top:3px solid #EA580C" onmouseenter="this.style.boxShadow='0 6px 24px rgba(234,88,12,.15)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#EA580C;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Sem Respons&#225;vel</div>
+          <div style="font-size:36px;font-weight:800;color:#7C2D12;line-height:1" id="pat-sem-resp">&#8212;</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Requerem atribui&#231;&#227;o</div>
         </div>
 
-        <div style="background:linear-gradient(135deg,#F8FAFC,#F1F5F9);border:1px solid #E2E8F0;border-radius:14px;padding:18px 16px;cursor:default;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.08)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#64748B;text-transform:uppercase;letter-spacing:.07em">Sem N&#186; Patrim&#244;nio</div>
-            <div style="width:30px;height:30px;background:#64748B18;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#128278;</div>
-          </div>
-          <div style="font-size:36px;font-weight:800;color:#374151;line-height:1" id="pat-sem-num">&#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">Aguardam tombamento</div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;cursor:pointer;transition:all .18s;border-top:3px solid #D97706" onmouseenter="this.style.boxShadow='0 6px 24px rgba(217,119,6,.12)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#D97706;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Em Manuten&#231;&#227;o</div>
+          <div style="font-size:36px;font-weight:800;color:#78350F;line-height:1" id="pat-manutencao">&#8212;</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Fora de uso</div>
         </div>
 
-        <div onclick="goPage('movimentacoes')" style="background:linear-gradient(135deg,#F5F3FF,#EDE9FE);border:1px solid #DDD6FE;border-radius:14px;padding:18px 16px;cursor:pointer;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(124,58,237,.2)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#7C3AED;text-transform:uppercase;letter-spacing:.07em">Movim. Pendentes</div>
-            <div style="width:30px;height:30px;background:#7C3AED18;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#8596;&#65039;</div>
-          </div>
-          <div style="font-size:36px;font-weight:800;color:#5B21B6;line-height:1" id="pat-mov-pend">&#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">Aguardam confirma&#231;&#227;o</div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;cursor:pointer;transition:all .18s;border-top:3px solid #7C3AED" onmouseenter="this.style.boxShadow='0 6px 24px rgba(124,58,237,.12)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#7C3AED;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Invent&#225;rio Pendente</div>
+          <div style="font-size:36px;font-weight:800;color:#4C1D95;line-height:1" id="pat-sem-num">&#8212;</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Sem n&#186; PAT</div>
         </div>
 
-        <div style="background:linear-gradient(135deg,#FFFBEB,#FEF3C7);border:1px solid #FDE68A;border-radius:14px;padding:18px 16px;cursor:default;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(217,119,6,.2)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#D97706;text-transform:uppercase;letter-spacing:.07em">Em Manuten&#231;&#227;o</div>
-            <div style="width:30px;height:30px;background:#D9770618;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#128295;</div>
-          </div>
-          <div style="font-size:36px;font-weight:800;color:#92400E;line-height:1" id="pat-manutencao">&#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">Fora de uso tempor&#225;rio</div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;cursor:pointer;transition:all .18s;border-top:3px solid #0891B2" onmouseenter="this.style.boxShadow='0 6px 24px rgba(8,145,178,.12)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#0891B2;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Smartphones</div>
+          <div style="font-size:36px;font-weight:800;color:#164E63;line-height:1" id="pat-smartphones">&#8212;</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Dispositivos m&#243;veis</div>
         </div>
 
-        <div onclick="goPage('baixas-patrimoniais')" style="background:linear-gradient(135deg,#FEF2F2,#FEE2E2);border:1px solid #FECACA;border-radius:14px;padding:18px 16px;cursor:pointer;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(185,28,28,.2)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#B91C1C;text-transform:uppercase;letter-spacing:.07em">Para Baixa</div>
-            <div style="width:30px;height:30px;background:#B91C1C18;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#128465;</div>
-          </div>
+        <div onclick="goPage('baixas-patrimoniais')" style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;cursor:pointer;transition:all .18s;border-top:3px solid #B91C1C" onmouseenter="this.style.boxShadow='0 6px 24px rgba(185,28,28,.12)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#B91C1C;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Para Baixa</div>
           <div style="font-size:36px;font-weight:800;color:#7F1D1D;line-height:1" id="pat-baixa">&#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">Descarte aprovado</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Descarte aprovado</div>
         </div>
 
-        <div style="background:linear-gradient(135deg,#F0FDF4,#DCFCE7);border:1px solid #BBF7D0;border-radius:14px;padding:18px 16px;transition:all .15s" onmouseenter="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(5,150,105,.2)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:800;color:#059669;text-transform:uppercase;letter-spacing:.07em">Valor Inventariado</div>
-            <div style="width:30px;height:30px;background:#05966918;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">&#128176;</div>
-          </div>
-          <div style="font-size:20px;font-weight:800;color:#065F46;line-height:1.2" id="pat-valor">R$ &#8212;</div>
-          <div style="font-size:11px;color:#64748B;margin-top:6px">Valor cont&#225;bil total</div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px 16px;transition:all .18s;border-top:3px solid #059669" onmouseenter="this.style.boxShadow='0 6px 24px rgba(5,150,105,.12)';this.style.transform='translateY(-2px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+          <div style="font-size:10px;font-weight:800;color:#059669;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Valor Patrimonial</div>
+          <div style="font-size:18px;font-weight:800;color:#064E3B;line-height:1.2" id="pat-valor">R$ &#8212;</div>
+          <div style="font-size:11px;color:#94A3B8;margin-top:6px">Valor cont&#225;bil total</div>
         </div>
 
       </div>
 
       <!-- Banner SAP -->
-      <div style="background:linear-gradient(135deg,#1E3A5F,#1E40AF);border-radius:14px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+      <div style="background:linear-gradient(135deg,#1E3A5F,#1E40AF);border-radius:14px;padding:18px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px">
         <div>
-          <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,.65);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Integra&#231;&#227;o SAP &middot; CadastroSAP CESAN</div>
-          <div style="font-size:18px;font-weight:800;color:#fff">Importa&#231;&#227;o de Patrim&#244;nios via CSV</div>
-          <div style="font-size:13px;color:rgba(255,255,255,.75);margin-top:4px">Sincronize os dados do SAP e identifique diverg&#234;ncias em tempo real &mdash; <strong style="color:#fff">esse &eacute; o diferencial do SYSACK</strong></div>
+          <div style="font-size:10px;font-weight:800;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.09em;margin-bottom:3px">Integra&#231;&#227;o SAP CadastroSAP &middot; CESAN</div>
+          <div style="font-size:16px;font-weight:800;color:#fff">Comparativo autom&#225;tico SAP &times; SYSACK</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.7);margin-top:3px">Detecta diverg&#234;ncias de local e respons&#225;vel em tempo real</div>
         </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button onclick="goPage('divergencias-sap')" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer">Ver Diverg&#234;ncias</button>
-          <label style="display:inline-flex;align-items:center;gap:6px;background:#fff;color:#1E40AF;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer">
-            Importar CSV SAP<input type="file" accept=".csv" style="display:none" onchange="importarCSVSAP && importarCSVSAP(this)">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="goPage('divergencias-sap')" style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;cursor:pointer">Ver Diverg&#234;ncias</button>
+          <label style="display:inline-flex;align-items:center;gap:5px;background:#fff;color:#1E40AF;border:none;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;cursor:pointer">
+            Importar CSV SAP<input type="file" accept=".csv" style="display:none" onchange="importarCSVSAP&&importarCSVSAP(this)">
           </label>
         </div>
       </div>
 
-      <!-- Movimentacoes recentes -->
-      <div class="card">
-        <div class="card-header">
-          <h3>Movimenta&#231;&#245;es Recentes</h3>
-          <button class="btn btn-ghost btn-sm" onclick="goPage('movimentacoes')">Ver todas</button>
+      <!-- &#218;ltimas movimenta&#231;&#245;es -->
+      <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #F1F5F9">
+          <div style="font-size:14px;font-weight:700;color:var(--g900)">&#218;ltimas Movimenta&#231;&#245;es</div>
+          <button onclick="goPage('movimentacoes')" style="background:none;border:none;color:#2563EB;font-size:12px;font-weight:600;cursor:pointer">Ver todas &#8594;</button>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>N&#186; Pat.</th><th>Descri&#231;&#227;o</th><th>Origem</th><th>Destino</th><th>Usu&#225;rio</th><th>Data</th><th>Status</th></tr></thead>
+            <thead><tr><th>N&#186; PAT</th><th>Descri&#231;&#227;o</th><th>Origem</th><th>Destino</th><th>Usu&#225;rio</th><th>Data</th><th>Status</th></tr></thead>
             <tbody id="pat-mov-tbody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--g400);font-size:13px">Carregando...</td></tr></tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- ============================================
-         DIVERGENCIAS SAP x SYSACK
-    ============================================ -->
+    <!-- =============================================
+         DIVERGÊNCIAS SAP — COM DADOS DEMO
+    ============================================= -->
     <div class="page" id="page-divergencias-sap">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
         <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Diverg&#234;ncias SAP &times; SYSACK</h2>
-          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Comparativo entre dados do SAP CadastroSAP e a realidade f&#237;sica registrada no SYSACK</p>
+          <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Diverg&#234;ncias SAP &times; SYSACK</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">SAP CadastroSAP &middot; Comparativo autom&#225;tico com a realidade f&#237;sica detectada</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <label style="display:inline-flex;align-items:center;gap:6px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#2563EB;cursor:pointer">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            Importar CSV SAP
-            <input type="file" accept=".csv" style="display:none" onchange="importarCSVSAP && importarCSVSAP(this)">
+            &#8595; Importar CSV SAP<input type="file" accept=".csv" style="display:none" onchange="importarCSVSAP&&importarCSVSAP(this)">
           </label>
           <button onclick="exportarDivergencias()" style="background:var(--g100);color:var(--g700);border:1px solid var(--g200);border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">Exportar Excel</button>
         </div>
       </div>
 
-      <!-- Stats rapidos -->
+      <!-- Contadores -->
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
-        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:10px">
-          <div style="font-size:22px;font-weight:800;color:#DC2626" id="div-count-local">0</div>
-          <div style="font-size:11px;color:#991B1B;font-weight:600">Local divergente</div>
+        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:10px">
+          <div style="font-size:24px;font-weight:800;color:#DC2626" id="div-count-local">3</div>
+          <div style="font-size:11px;color:#991B1B;font-weight:600;line-height:1.3">Local<br>divergente</div>
         </div>
-        <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:10px">
-          <div style="font-size:22px;font-weight:800;color:#EA580C" id="div-count-resp">0</div>
-          <div style="font-size:11px;color:#C2410C;font-weight:600">Respons&#225;vel divergente</div>
+        <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:10px">
+          <div style="font-size:24px;font-weight:800;color:#EA580C" id="div-count-resp">2</div>
+          <div style="font-size:11px;color:#C2410C;font-weight:600;line-height:1.3">Respons&#225;vel<br>divergente</div>
         </div>
-        <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:10px">
-          <div style="font-size:22px;font-weight:800;color:#7C3AED" id="div-count-nf">0</div>
-          <div style="font-size:11px;color:#5B21B6;font-weight:600">N&#227;o localizado</div>
+        <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:10px">
+          <div style="font-size:24px;font-weight:800;color:#7C3AED" id="div-count-nf">1</div>
+          <div style="font-size:11px;color:#5B21B6;font-weight:600;line-height:1.3">N&#227;o<br>localizado</div>
         </div>
-        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:10px">
-          <div style="font-size:22px;font-weight:800;color:#059669" id="div-count-ok">0</div>
-          <div style="font-size:11px;color:#047857;font-weight:600">Regularizados</div>
+        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:10px">
+          <div style="font-size:24px;font-weight:800;color:#059669" id="div-count-ok">14</div>
+          <div style="font-size:11px;color:#047857;font-weight:600;line-height:1.3">Regulari-<br>zados</div>
         </div>
       </div>
 
@@ -1652,20 +1624,20 @@ document.addEventListener('DOMContentLoaded', function(){
           <option value="">Todos os status</option>
           <option value="local">Local divergente</option>
           <option value="responsavel">Respons&#225;vel divergente</option>
-          <option value="ambos">Local e respons&#225;vel</option>
+          <option value="ambos">Ambos divergentes</option>
           <option value="nao-encontrado">N&#227;o localizado</option>
           <option value="ok">Regularizado</option>
         </select>
-        <input id="div-busca" oninput="filtrarDivergencias()" placeholder="Buscar por patrim&#244;nio, descri&#231;&#227;o..." style="flex:1;min-width:200px;border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px">
+        <input id="div-busca" oninput="filtrarDivergencias()" placeholder="Buscar n&#186; patrim&#244;nio, descri&#231;&#227;o..." style="flex:1;min-width:200px;border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px">
       </div>
 
-      <!-- Tabela 8 colunas conforme especificado -->
-      <div class="card" style="padding:0;overflow:hidden">
-        <div class="table-wrap" style="max-height:65vh;overflow-y:auto">
+      <!-- Tabela com dados demo -->
+      <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden">
+        <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
           <table id="div-table">
             <thead style="position:sticky;top:0;background:#F8FAFC;z-index:1">
               <tr>
-                <th style="white-space:nowrap">N&#186; Patrim&#244;nio</th>
+                <th style="white-space:nowrap;min-width:110px">N&#186; Patrim&#244;nio</th>
                 <th>Descri&#231;&#227;o</th>
                 <th>Local no SAP</th>
                 <th>Local Detectado</th>
@@ -1676,79 +1648,237 @@ document.addEventListener('DOMContentLoaded', function(){
               </tr>
             </thead>
             <tbody id="div-tbody">
-              <tr>
-                <td colspan="8" style="text-align:center;padding:48px 24px;color:var(--g400)">
-                  <div style="font-size:40px;margin-bottom:12px">&#128203;</div>
-                  <div style="font-weight:700;font-size:14px;margin-bottom:6px">Nenhuma diverg&#234;ncia carregada</div>
-                  <div style="font-size:12px">Importe um CSV do SAP para comparar com os dados f&#237;sicos do SYSACK</div>
+              <!-- DEMO ROW 1 — local divergente, o exemplo exato do pedido -->
+              <tr data-status="local">
+                <td style="font-family:monospace;font-weight:700;color:#2563EB;font-size:12px">PAT-004821</td>
+                <td>
+                  <div style="font-weight:600;font-size:13px">Computador Dell OptiPlex</div>
+                  <div style="font-size:11px;color:#94A3B8">SN: DLL-4821-XB</div>
                 </td>
+                <td>
+                  <div style="background:#DBEAFE;color:#1E40AF;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">Sala Financeiro</div>
+                </td>
+                <td>
+                  <div style="background:#FEE2E2;color:#991B1B;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">Sala Engenharia</div>
+                  <div style="font-size:10px;color:#94A3B8;margin-top:3px">IP: 172.22.14.45</div>
+                </td>
+                <td style="font-size:12px">Carlos Mendes</td>
+                <td>
+                  <span style="font-size:12px;font-weight:600;color:#DC2626">Maria Oliveira</span>
+                  <div style="font-size:10px;color:#94A3B8">Detectado via SNMP</div>
+                </td>
+                <td><span style="background:#FEF2F2;color:#DC2626;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;border:1px solid #FECACA">&#9888; Local divergente</span></td>
+                <td><button onclick="abrirDetalheDiv('PAT-004821')" style="background:#EFF6FF;color:#2563EB;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">Regularizar</button></td>
+              </tr>
+              <!-- DEMO ROW 2 -->
+              <tr data-status="responsavel">
+                <td style="font-family:monospace;font-weight:700;color:#2563EB;font-size:12px">PAT-003319</td>
+                <td>
+                  <div style="font-weight:600;font-size:13px">Monitor LG 24"</div>
+                  <div style="font-size:11px;color:#94A3B8">SN: LGM-3319-K</div>
+                </td>
+                <td><div style="background:#DBEAFE;color:#1E40AF;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">Sala RH</div></td>
+                <td><div style="background:#DCFCE7;color:#166534;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">Sala RH</div></td>
+                <td style="font-size:12px">Jo&#227;o Ferreira</td>
+                <td><span style="font-size:12px;font-weight:600;color:#EA580C">Ana Paula Costa</span></td>
+                <td><span style="background:#FFF7ED;color:#EA580C;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;border:1px solid #FED7AA">Respons&#225;vel divergente</span></td>
+                <td><button onclick="abrirDetalheDiv('PAT-003319')" style="background:#EFF6FF;color:#2563EB;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">Regularizar</button></td>
+              </tr>
+              <!-- DEMO ROW 3 -->
+              <tr data-status="ambos">
+                <td style="font-family:monospace;font-weight:700;color:#2563EB;font-size:12px">PAT-007744</td>
+                <td>
+                  <div style="font-weight:600;font-size:13px">Notebook Lenovo ThinkPad</div>
+                  <div style="font-size:11px;color:#94A3B8">SN: LNV-7744-T</div>
+                </td>
+                <td><div style="background:#DBEAFE;color:#1E40AF;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">Diretoria</div></td>
+                <td><div style="background:#FEE2E2;color:#991B1B;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">TI - Suporte</div></td>
+                <td style="font-size:12px">Roberto Lima</td>
+                <td><span style="font-size:12px;font-weight:600;color:#DC2626">Pedro Santos</span></td>
+                <td><span style="background:#FEF2F2;color:#7C3AED;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;border:1px solid #DDD6FE">Local + Respons&#225;vel</span></td>
+                <td><button onclick="abrirDetalheDiv('PAT-007744')" style="background:#EFF6FF;color:#2563EB;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">Regularizar</button></td>
+              </tr>
+              <!-- DEMO ROW 4 — nao encontrado -->
+              <tr data-status="nao-encontrado">
+                <td style="font-family:monospace;font-weight:700;color:#2563EB;font-size:12px">PAT-002155</td>
+                <td>
+                  <div style="font-weight:600;font-size:13px">Impressora HP LaserJet</div>
+                  <div style="font-size:11px;color:#94A3B8">SN: HP-2155-LJ</div>
+                </td>
+                <td><div style="background:#DBEAFE;color:#1E40AF;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">Sala Contabilidade</div></td>
+                <td><div style="background:#F5F3FF;color:#5B21B6;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">N&#227;o detectado</div></td>
+                <td style="font-size:12px">Lucia Amaral</td>
+                <td><span style="color:#94A3B8;font-size:12px">&#8212;</span></td>
+                <td><span style="background:#F5F3FF;color:#5B21B6;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;border:1px solid #DDD6FE">&#10067; N&#227;o localizado</span></td>
+                <td><button onclick="abrirDetalheDiv('PAT-002155')" style="background:#EFF6FF;color:#2563EB;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">Investigar</button></td>
+              </tr>
+              <!-- DEMO ROW 5 — regularizado -->
+              <tr data-status="ok">
+                <td style="font-family:monospace;font-weight:700;color:#2563EB;font-size:12px">PAT-001088</td>
+                <td>
+                  <div style="font-weight:600;font-size:13px">Switch Cisco Catalyst 24p</div>
+                  <div style="font-size:11px;color:#94A3B8">SN: CSC-1088-SW</div>
+                </td>
+                <td><div style="background:#DBEAFE;color:#1E40AF;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">CPD Principal</div></td>
+                <td><div style="background:#DCFCE7;color:#166534;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;display:inline-block">CPD Principal</div></td>
+                <td style="font-size:12px">Equipe TI</td>
+                <td><span style="font-size:12px">Equipe TI</span></td>
+                <td><span style="background:#F0FDF4;color:#059669;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;border:1px solid #BBF7D0">&#10003; Regularizado</span></td>
+                <td><button style="background:var(--g100);color:var(--g500);border:none;border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer" disabled>OK</button></td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
+
+      <!-- Nota explicativa -->
+      <div style="margin-top:14px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start">
+        <div style="font-size:16px;flex-shrink:0">&#128161;</div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#92400E;margin-bottom:2px">Como funciona a detec&#231;&#227;o</div>
+          <div style="font-size:12px;color:#78350F">O SYSACK varre a rede via SNMP e ICMP identificando cada dispositivo pelo IP e hostname. O local f&#237;sico &#233; cruzado com os dados do SAP CadastroSAP via CSV. Qualquer diferen&#231;a de local ou respons&#225;vel &#233; sinalizada automaticamente.</div>
+        </div>
+      </div>
     </div>
 
-    <!-- ============================================
-         HISTORICO DE VIDA DO BEM
-    ============================================ -->
+    <!-- =============================================
+         HISTÓRICO DE VIDA DO BEM
+    ============================================= -->
     <div class="page" id="page-historico-ativo">
-      <div style="margin-bottom:24px">
-        <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Hist&#243;rico do Bem Patrimonial</h2>
-        <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Linha do tempo completa: aquisi&#231;&#227;o &#8594; tombamento &#8594; transfer&#234;ncias &#8594; manuten&#231;&#227;o &#8594; baixa</p>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Hist&#243;rico de Vida do Bem</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Rastreamento completo &middot; Cronol&#243;gico &middot; Audit&#225;vel</p>
+        </div>
       </div>
 
-      <div style="display:flex;gap:10px;margin-bottom:24px">
-        <input id="hist-busca" placeholder="N&#186; de patrim&#244;nio ou descri&#231;&#227;o..." style="flex:1;border:1px solid var(--g200);border-radius:10px;padding:10px 14px;font-size:14px" oninput="buscarHistoricoAtivo(this.value)">
-        <button onclick="buscarHistoricoAtivo(document.getElementById('hist-busca').value)" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:10px;padding:10px 22px;font-size:13px;font-weight:700;cursor:pointer">Buscar</button>
+      <!-- Busca -->
+      <div style="display:flex;gap:10px;margin-bottom:28px">
+        <div style="flex:1;position:relative">
+          <input id="hist-busca" placeholder="Digite o n&#186; do patrim&#244;nio ou parte da descri&#231;&#227;o..." style="width:100%;border:2px solid #E2E8F0;border-radius:10px;padding:11px 16px;font-size:14px;box-sizing:border-box;transition:border-color .2s" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#E2E8F0'" oninput="buscarHistoricoAtivo(this.value)">
+        </div>
+        <button onclick="carregarHistoricoDemo()" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:10px;padding:11px 22px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">Carregar Demo</button>
+      </div>
+
+      <!-- Empty state -->
+      <div id="hist-empty" style="text-align:center;padding:60px 24px;color:var(--g400)">
+        <div style="font-size:48px;margin-bottom:16px">&#128269;</div>
+        <div style="font-weight:700;font-size:16px;color:var(--g600);margin-bottom:8px">Busque um bem para ver o hist&#243;rico completo</div>
+        <div style="font-size:13px;margin-bottom:20px">Ou clique em &ldquo;Carregar Demo&rdquo; para ver um exemplo</div>
+        <button onclick="carregarHistoricoDemo()" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:8px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer">Ver Exemplo</button>
       </div>
 
       <!-- Card do bem -->
-      <div id="hist-bem-card" style="display:none;background:#fff;border:1px solid var(--g200);border-radius:14px;padding:20px;margin-bottom:24px">
+      <div id="hist-bem-card" style="display:none;background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:20px;margin-bottom:24px">
         <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-          <div style="width:56px;height:56px;background:#EFF6FF;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">&#127963;&#65039;</div>
-          <div style="flex:1">
+          <div style="width:52px;height:52px;background:#EFF6FF;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0" id="hist-icon">&#128187;</div>
+          <div style="flex:1;min-width:200px">
             <div style="font-size:18px;font-weight:800;color:var(--g900)" id="hist-nome">&#8212;</div>
-            <div style="font-size:13px;color:var(--g500);margin-top:3px">N&#186; <span id="hist-num" style="font-family:monospace;font-weight:700;color:var(--g800)">&#8212;</span> &middot; <span id="hist-loc">&#8212;</span></div>
+            <div style="font-size:13px;color:var(--g400);margin-top:3px">N&#186; <span id="hist-num" style="font-family:monospace;font-weight:700;color:#2563EB">&#8212;</span> &nbsp;&middot;&nbsp; <span id="hist-loc">&#8212;</span></div>
             <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-              <span style="border-radius:20px;padding:3px 12px;font-size:11px;font-weight:700" id="hist-status-badge">Ativo</span>
-              <span style="background:#DBEAFE;color:#1E40AF;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:600" id="hist-resp-badge">&#8212;</span>
-              <span style="background:#F1F5F9;color:#374151;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:600" id="hist-valor-badge">Valor n&#227;o informado</span>
+              <span id="hist-status-badge" style="background:#DCFCE7;color:#166534;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:700">Ativo</span>
+              <span id="hist-resp-badge" style="background:#DBEAFE;color:#1E40AF;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:600">&#8212;</span>
+              <span id="hist-valor-badge" style="background:#F1F5F9;color:#475569;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:600">&#8212;</span>
             </div>
           </div>
+          <button onclick="exportarHistorico()" style="background:#F1F5F9;color:#475569;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0">Exportar PDF</button>
         </div>
       </div>
 
       <!-- Timeline -->
       <div id="hist-timeline-wrap" style="display:none">
-        <div style="font-size:13px;font-weight:700;color:var(--g700);margin-bottom:20px;display:flex;align-items:center;gap:8px">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="#2563EB" stroke-width="1.5"/><path d="M8 5v3l2 2" stroke="#2563EB" stroke-width="1.5" stroke-linecap="round"/></svg>
-          Linha do Tempo
+        <div style="font-size:13px;font-weight:700;color:var(--g500);margin-bottom:20px;display:flex;align-items:center;gap:8px">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="#2563EB" stroke-width="1.6"/><path d="M8 5v3l2 2" stroke="#2563EB" stroke-width="1.6" stroke-linecap="round"/></svg>
+          LINHA DO TEMPO
         </div>
-        <div id="hist-timeline" style="position:relative;padding-left:34px">
-          <div style="position:absolute;left:11px;top:4px;bottom:4px;width:2px;background:linear-gradient(180deg,#2563EB 0%,#E2E8F0 100%);border-radius:2px"></div>
+        <div id="hist-timeline" style="position:relative;padding-left:36px">
+          <div style="position:absolute;left:12px;top:6px;bottom:6px;width:2px;background:linear-gradient(180deg,#2563EB 0%,#E2E8F0 100%)"></div>
         </div>
-      </div>
-
-      <div id="hist-empty" style="text-align:center;padding:60px 24px;color:var(--g400)">
-        <div style="font-size:48px;margin-bottom:16px">&#128269;</div>
-        <div style="font-weight:700;font-size:15px;color:var(--g700);margin-bottom:6px">Busque um bem para ver o hist&#243;rico completo</div>
-        <div style="font-size:13px">Digite o n&#250;mero de patrim&#244;nio ou parte da descri&#231;&#227;o</div>
       </div>
     </div>
 
-    <!-- ============================================
-         TRILHA DE AUDITORIA
-    ============================================ -->
+    <!-- =============================================
+         INVENTÁRIO
+    ============================================= -->
+    <div class="page" id="page-inventario">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Invent&#225;rio</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Todos os ativos TI + infraestrutura &middot; Descobertos automaticamente via SNMP</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="carregarInventario()" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">&#8635; Atualizar</button>
+          <button onclick="exportarInventario()" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer">Exportar CSV</button>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:20px">
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:800;color:#1E40AF" id="inv-total">&#8212;</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Total</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:800;color:#059669" id="inv-online">&#8212;</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Online</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:800;color:#7C3AED" id="inv-switches">&#8212;</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Rede</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:800;color:#EA580C" id="inv-semPat">&#8212;</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Sem PAT</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:800;color:#DC2626" id="inv-semResp">&#8212;</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Sem resp.</div>
+        </div>
+      </div>
+
+      <!-- Filtros -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <select id="inv-filtro-tipo" onchange="filtrarInventario()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff">
+          <option value="">Todos os tipos</option>
+          <option value="switch">Switch</option><option value="router">Router</option>
+          <option value="firewall">Firewall</option><option value="ap">Access Point</option>
+          <option value="servidor">Servidor</option><option value="workstation">Workstation</option>
+          <option value="printer">Impressora</option><option value="camera">C&#226;mera</option>
+          <option value="ups">UPS</option>
+        </select>
+        <select id="inv-filtro-area" onchange="filtrarInventario()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff">
+          <option value="">Todas as &#225;reas</option>
+        </select>
+        <input id="inv-busca" oninput="filtrarInventario()" placeholder="Buscar IP, hostname, descri&#231;&#227;o..." style="flex:1;min-width:200px;border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+
+      <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden">
+        <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
+          <table id="inv-table">
+            <thead style="position:sticky;top:0;background:#F8FAFC;z-index:1">
+              <tr>
+                <th>N&#186; PAT</th><th>IP</th><th>Descri&#231;&#227;o / Hostname</th>
+                <th>Tipo</th><th>&#193;rea</th><th>Respons&#225;vel</th>
+                <th>Status</th><th>SNMP</th><th>&#218;lt. Vista</th>
+              </tr>
+            </thead>
+            <tbody id="inv-tbody"><tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">Clique em Atualizar</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- =============================================
+         AUDITORIA PAT
+    ============================================= -->
     <div class="page" id="page-auditoria-pat">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
         <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Trilha de Auditoria</h2>
-          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Registro completo &middot; Quem alterou &middot; Quando &middot; O que mudou &middot; Antes e depois</p>
+          <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Trilha de Auditoria</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Quem alterou &middot; Quando &middot; O que mudou &middot; Antes e depois</p>
         </div>
         <button onclick="exportarAuditoria()" style="background:var(--g100);color:var(--g700);border:1px solid var(--g200);border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">Exportar CSV</button>
       </div>
-
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px">
         <select id="aud-modulo" onchange="carregarAuditoria()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff">
           <option value="">Todos os m&#243;dulos</option>
@@ -1759,579 +1889,18 @@ document.addEventListener('DOMContentLoaded', function(){
         </select>
         <select id="aud-acao" onchange="carregarAuditoria()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff">
           <option value="">Todas as a&#231;&#245;es</option>
-          <option value="criar">Criar</option>
-          <option value="editar">Editar</option>
-          <option value="excluir">Excluir</option>
-          <option value="transferir">Transferir</option>
+          <option value="criar">Criar</option><option value="editar">Editar</option>
+          <option value="excluir">Excluir</option><option value="transferir">Transferir</option>
           <option value="baixa">Baixa</option>
         </select>
         <input id="aud-usuario" oninput="carregarAuditoria()" placeholder="Filtrar por usu&#225;rio..." style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px">
         <input id="aud-data" type="date" onchange="carregarAuditoria()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px">
       </div>
-
       <div id="aud-lista" style="display:flex;flex-direction:column;gap:8px">
         <div style="text-align:center;padding:48px;color:var(--g400);font-size:13px">Carregando trilha de auditoria...</div>
       </div>
     </div>
 
-    <!-- ============================================
-         BENS PATRIMONIAIS
-    ============================================ -->
-    <div class="page" id="page-bens-patrimoniais">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
-        <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Bens Patrimoniais</h2>
-          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Cadastro completo &middot; Integra&#231;&#227;o SAP &middot; <span style="color:#10B981;font-weight:600">Integra&#231;&#227;o ativa</span></p>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button onclick="goPage('divergencias-sap')" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">Ver Diverg&#234;ncias SAP</button>
-          <button onclick="goPage('historico-ativo')" style="background:#F5F3FF;color:#7C3AED;border:1px solid #DDD6FE;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">Hist&#243;rico</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>Lista de Bens</h3><span id="bens-count" style="font-size:12px;color:var(--g400)"></span></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>N&#186; Pat.</th><th>Descri&#231;&#227;o / sysDescr</th><th>Tipo</th><th>&#193;rea</th><th>Respons&#225;vel</th><th>Status</th><th>IP</th><th>A&#231;&#245;es</th></tr></thead>
-            <tbody id="bens-tbody"><tr><td colspan="7" style="text-align:center;padding:32px;color:var(--g400)">Carregando...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============================================
-         DEPRECIACAO
-    ============================================ -->
-    <div class="page" id="page-depreciacao">
-      <div style="margin-bottom:24px">
-        <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Deprecia&#231;&#227;o Patrimonial</h2>
-        <p style="font-size:13px;color:var(--g400);margin:4px 0 0">C&#225;lculo autom&#225;tico por tipo de bem &middot; M&#233;todo Linear (NBR / Lei 4.320)</p>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>Tabela por Categoria</h3></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Categoria</th><th>Vida &#218;til</th><th>Taxa Anual</th><th>Total Bens</th><th>Valor Original</th><th>Valor Atual</th><th>Dep. Acumulada</th></tr></thead>
-            <tbody>
-              <tr><td>M&#243;veis e Utenss&#237;lios</td><td>10 anos</td><td>10%</td><td id="dep-moveis-qtd">&#8212;</td><td id="dep-moveis-orig">&#8212;</td><td id="dep-moveis-atual">&#8212;</td><td id="dep-moveis-acum">&#8212;</td></tr>
-              <tr><td>Equipamentos de TI</td><td>5 anos</td><td>20%</td><td id="dep-ti-qtd">&#8212;</td><td id="dep-ti-orig">&#8212;</td><td id="dep-ti-atual">&#8212;</td><td id="dep-ti-acum">&#8212;</td></tr>
-              <tr><td>Ve&#237;culos</td><td>5 anos</td><td>20%</td><td id="dep-veic-qtd">&#8212;</td><td id="dep-veic-orig">&#8212;</td><td id="dep-veic-atual">&#8212;</td><td id="dep-veic-acum">&#8212;</td></tr>
-              <tr><td>M&#225;quinas e Equipamentos</td><td>10 anos</td><td>10%</td><td id="dep-maq-qtd">&#8212;</td><td id="dep-maq-orig">&#8212;</td><td id="dep-maq-atual">&#8212;</td><td id="dep-maq-acum">&#8212;</td></tr>
-              <tr><td>Edifica&#231;&#245;es</td><td>25 anos</td><td>4%</td><td id="dep-edif-qtd">&#8212;</td><td id="dep-edif-orig">&#8212;</td><td id="dep-edif-atual">&#8212;</td><td id="dep-edif-acum">&#8212;</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============================================
-         NOTAS FISCAIS
-    ============================================ -->
-    <div class="page" id="page-notas-fiscais">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
-        <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Notas Fiscais</h2>
-          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Notas fiscais vinculadas ao patrim&#244;nio</p>
-        </div>
-        <button style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer">+ Vincular NF</button>
-      </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>N&#186; NF</th><th>Fornecedor</th><th>Data Emiss&#227;o</th><th>Valor</th><th>Bens Vinculados</th><th>Status</th></tr></thead>
-            <tbody><tr><td colspan="6" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma nota fiscal cadastrada</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-<script>
-(function(){
-'use strict';
-// ---- KPIs ----------------------------------------------------------------------------------------------------------
-async function carregarDashboardPat(){
-  try{
-    var r=await Promise.allSettled([
-      db.collection('ativos').get(),
-      db.collection('switches').get(),
-      db.collection('movimentacoes').where('status','==','pendente').get(),
-      db.collection('audit_logs').where('modulo','==','ativos').orderBy('timestamp','desc').limit(10).get()
-    ]);
-    var a1=r[0].status==='fulfilled'?r[0].value.docs.map(function(d){return d.data();}):[];
-    var a2=r[1].status==='fulfilled'?r[1].value.docs.map(function(d){return d.data();}):[];
-    var ativos=a1.concat(a2),
-        movPend=r[2].status==='fulfilled'?r[2].value.size:0;
-    var semResp=ativos.filter(function(a){return !a.responsavel&&!a.resp&&!a.matriculaResp;}).length,
-        semNum=ativos.filter(function(a){return !a.pat&&!a.patrimonio&&!a.numPatrimonio;}).length,
-        divLoc=ativos.filter(function(a){return a.locDivergente||a.divergente;}).length,
-        manut=ativos.filter(function(a){return a.status==='manutencao'||a.status==='terceirizada';}).length,
-        baixa=ativos.filter(function(a){return a.status==='baixa'||a.status==='descarte';}).length,
-        valor=ativos.reduce(function(s,a){return s+parseFloat(a.valorAquisicao||a.valor||0);},0);
-    function S(id,v){var el=document.getElementById(id);if(el)el.textContent=v;}
-    S('pat-total',ativos.length.toLocaleString('pt-BR'));
-    S('pat-sem-resp',semResp); S('pat-div-loc',divLoc||0);
-    S('pat-sem-num',semNum);   S('pat-mov-pend',movPend);
-    S('pat-manutencao',manut); S('pat-baixa',baixa);
-    S('pat-valor','R$ '+valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}));
-    var nb=document.getElementById('nb-div-sap');
-    if(nb)nb.textContent=String(semResp+divLoc);
-    // Mov tbody
-    if(r[3].status==='fulfilled'){
-      var logs=r[2].value.docs.map(function(d){return d.data();});
-      var tb=document.getElementById('pat-mov-tbody');
-      if(tb&&logs.length){
-        var CORES={criar:'#059669',editar:'#2563EB',transferir:'#7C3AED',excluir:'#DC2626',baixa:'#EA580C'};
-        tb.innerHTML=logs.map(function(l){
-          var dt=l.timestamp?new Date(l.timestamp.seconds*1000).toLocaleDateString('pt-BR'):'&#8212;';
-          var cor=CORES[l.acao]||'#64748B';
-          return '<tr><td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">'+(l.recursoId||'&#8212;')+'</td><td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(l.detalhes||l.descricao||'&#8212;')+'</td><td>&#8212;</td><td>&#8212;</td><td style="font-size:12px">'+(l.usuario||'&#8212;')+'</td><td style="font-size:12px">'+dt+'</td><td><span style="background:'+cor+'18;color:'+cor+';border-radius:20px;padding:2px 8px;font-size:11px;font-weight:700">'+(l.acao||'&#8212;')+'</span></td></tr>';
-        }).join('');
-      } else if(tb){ tb.innerHTML='<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--g400)">Nenhum log recente</td></tr>'; }
-    }
-  }catch(e){console.warn('DashPat:',e);}
-}
-// ---- Historico ------------------------------------------------------------------------------------------------
-async function buscarHistoricoAtivo(termo){
-  if(!termo||termo.trim().length<2)return;
-  var card=document.getElementById('hist-bem-card'),
-      wrap=document.getElementById('hist-timeline-wrap'),
-      empty=document.getElementById('hist-empty');
-  try{
-    var res=await Promise.allSettled([
-      db.collection('ativos').where('pat','==',termo.trim()).limit(1).get(),
-      db.collection('audit_logs').where('recursoId','==',termo.trim()).orderBy('timestamp','asc').get()
-    ]);
-    var ativo=res[0].status==='fulfilled'&&!res[0].value.empty?res[0].value.docs[0].data():null;
-    if(!ativo){
-      card.style.display='none'; wrap.style.display='none';
-      empty.innerHTML='<div style="font-size:48px;margin-bottom:16px">&#128270;</div><div style="font-weight:700;font-size:15px;color:var(--g700);margin-bottom:6px">Patrim&#244;nio &ldquo;'+termo+'&rdquo; n&#227;o encontrado</div><div style="font-size:13px">Verifique o n&#250;mero e tente novamente</div>';
-      empty.style.display='block'; return;
-    }
-    card.style.display='block'; wrap.style.display='block'; empty.style.display='none';
-    document.getElementById('hist-nome').textContent=ativo.desc||ativo.descricao||'Bem sem descri&#231;&#227;o';
-    document.getElementById('hist-num').textContent=ativo.pat||'&#8212;';
-    document.getElementById('hist-loc').textContent=ativo.area||ativo.localizacao||'&#8212;';
-    document.getElementById('hist-resp-badge').textContent=ativo.resp||ativo.responsavel||'Sem respons&#225;vel';
-    document.getElementById('hist-valor-badge').textContent=ativo.valorAquisicao?'R$ '+parseFloat(ativo.valorAquisicao).toLocaleString('pt-BR',{minimumFractionDigits:2}):'Valor n&#227;o informado';
-    var sb=document.getElementById('hist-status-badge'),st=ativo.status||'ativo';
-    sb.textContent=st.charAt(0).toUpperCase()+st.slice(1);
-    sb.style.background=st==='baixa'?'#FEE2E2':st==='manutencao'?'#FEF3C7':'#DCFCE7';
-    sb.style.color=st==='baixa'?'#991B1B':st==='manutencao'?'#92400E':'#166534';
-    // Montar eventos
-    var EVTS=[
-      {ok:!!ativo.dataAquisicao,   data:ativo.dataAquisicao||'',   icon:'&#127974;', cor:'#2563EB', titulo:'Aquisi&#231;&#227;o',            desc:'Bem adquirido pela CESAN'},
-      {ok:!!ativo.notaFiscal,      data:ativo.dataNF||'',          icon:'&#128196;', cor:'#7C3AED', titulo:'Nota Fiscal',           desc:'NF '+(ativo.notaFiscal||'')},
-      {ok:!!ativo.dataTombamento,  data:ativo.dataTombamento||'',  icon:'&#128278;', cor:'#059669', titulo:'Tombamento',            desc:'N&#186; patrim&#244;nio: '+(ativo.pat||'&#8212;')},
-      {ok:!!ativo.primeiroResp,    data:'',                         icon:'&#128100;', cor:'#EA580C', titulo:'Primeiro Respons&#225;vel',   desc:ativo.primeiroResp||''},
-    ].filter(function(e){return e.ok;});
-    if(res[1].status==='fulfilled') res[1].value.docs.forEach(function(d){
-      var l=d.data(),dt=l.timestamp?new Date(l.timestamp.seconds*1000).toLocaleDateString('pt-BR'):'';
-      var ICO={editar:'&#9999;&#65039;',transferir:'&#8596;&#65039;',criar:'&#9989;',excluir:'&#128465;',manutencao:'&#128295;',baixa:'&#128465;'};
-      var COR={editar:'#2563EB',transferir:'#7C3AED',criar:'#059669',excluir:'#DC2626',manutencao:'#D97706',baixa:'#DC2626'};
-      EVTS.push({data:dt,icon:ICO[l.acao]||'&#128204;',cor:COR[l.acao]||'#64748B',titulo:(l.acao||'Altera&#231;&#227;o').charAt(0).toUpperCase()+(l.acao||'').slice(1),desc:(l.detalhes||l.descricao||'Altera&#231;&#227;o')+' &middot; '+(l.usuario||'sistema')});
-    });
-    if(ativo.status==='baixa') EVTS.push({data:ativo.dataBaixa||'',icon:'&#128465;',cor:'#DC2626',titulo:'Baixa Patrimonial',desc:'Bem baixado do patrim&#244;nio CESAN'});
-    var tl=document.getElementById('hist-timeline');
-    if(!EVTS.length){tl.innerHTML='<div style="color:var(--g400);font-size:13px;padding:16px">Nenhum evento registrado para este bem</div>';return;}
-    tl.innerHTML=EVTS.map(function(e,i){
-      return '<div style="position:relative;margin-bottom:'+(i<EVTS.length-1?'20':'0')+'px;display:flex;gap:14px;align-items:flex-start">'+
-        '<div style="width:22px;height:22px;background:'+e.cor+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;border:2px solid #fff;box-shadow:0 0 0 2.5px '+e.cor+'40;position:relative;z-index:1">'+e.icon+'</div>'+
-        '<div style="flex:1;background:#F8FAFC;border:1px solid var(--g100);border-radius:10px;padding:10px 14px">'+
-          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">'+
-            '<div style="font-size:13px;font-weight:700;color:'+e.cor+'">'+e.titulo+'</div>'+
-            (e.data?'<div style="font-size:11px;color:var(--g400);font-family:monospace">'+e.data+'</div>':'')+
-          '</div>'+
-          '<div style="font-size:12px;color:var(--g600);margin-top:3px">'+e.desc+'</div>'+
-        '</div>'+
-      '</div>';
-    }).join('');
-  }catch(e){console.warn('Historico:',e);}
-}
-// ---- Auditoria ------------------------------------------------------------------------------------------------
-async function carregarAuditoria(){
-  var lista=document.getElementById('aud-lista');
-  if(!lista)return;
-  var modulo=document.getElementById('aud-modulo')?document.getElementById('aud-modulo').value:'';
-  var acao=document.getElementById('aud-acao')?document.getElementById('aud-acao').value:'';
-  var usr=(document.getElementById('aud-usuario')?document.getElementById('aud-usuario').value:'').toLowerCase();
-  lista.innerHTML='<div style="text-align:center;padding:24px;color:var(--g400)">Carregando...</div>';
-  try{
-    var q=modulo?db.collection('audit_logs').where('modulo','==',modulo).orderBy('timestamp','desc').limit(60):db.collection('audit_logs').orderBy('timestamp','desc').limit(60);
-    var snap=await q.get();
-    var logs=snap.docs.map(function(d){return d.data();});
-    if(acao)logs=logs.filter(function(l){return l.acao===acao;});
-    if(usr)logs=logs.filter(function(l){return(l.usuario||'').toLowerCase().includes(usr);});
-    if(!logs.length){lista.innerHTML='<div style="text-align:center;padding:48px;color:var(--g400)">Nenhum registro encontrado</div>';return;}
-    var CORES={criar:'#059669',editar:'#2563EB',excluir:'#DC2626',transferir:'#7C3AED',baixa:'#EA580C'};
-    lista.innerHTML=logs.map(function(l){
-      var dt=l.timestamp?new Date(l.timestamp.seconds*1000).toLocaleString('pt-BR'):'&#8212;';
-      var cor=CORES[l.acao]||'#64748B';
-      var ant=l.antes?JSON.stringify(l.antes,null,0).slice(0,150):null;
-      var dep=l.depois?JSON.stringify(l.depois,null,0).slice(0,150):null;
-      return '<div style="background:#fff;border:1px solid var(--g200);border-radius:10px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start">'+
-        '<div style="width:36px;height:36px;background:'+cor+'18;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid '+cor+'28">'+
-          '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h9M2 12h6" stroke="'+cor+'" stroke-width="1.5" stroke-linecap="round"/></svg>'+
-        '</div>'+
-        '<div style="flex:1;min-width:0">'+
-          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">'+
-            '<span style="font-size:13px;font-weight:700;color:var(--g900)">'+(l.usuario||'Sistema')+'</span>'+
-            '<span style="background:'+cor+'18;color:'+cor+';border-radius:20px;padding:2px 8px;font-size:11px;font-weight:700">'+(l.acao||'a&#231;&#227;o')+'</span>'+
-            (l.modulo?'<span style="font-size:11px;color:var(--g500);background:var(--g100);border-radius:20px;padding:2px 8px">'+l.modulo+'</span>':'')+
-            (l.recursoId?'<code style="font-size:11px;color:var(--g600);background:var(--g50);border-radius:4px;padding:1px 6px">#'+l.recursoId+'</code>':'')+
-            '<span style="font-size:11px;color:var(--g400);margin-left:auto">'+dt+'</span>'+
-          '</div>'+
-          (l.detalhes||l.descricao?'<div style="font-size:12px;color:var(--g600)">'+(l.detalhes||l.descricao)+'</div>':'')+
-          ((ant||dep)?
-            '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'+
-              (ant?'<div style="flex:1;min-width:140px;background:#FEF2F2;border-radius:6px;padding:6px 10px;font-size:11px;font-family:monospace;color:#991B1B"><strong>Antes:</strong> '+ant+'</div>':'')+
-              (dep?'<div style="flex:1;min-width:140px;background:#F0FDF4;border-radius:6px;padding:6px 10px;font-size:11px;font-family:monospace;color:#166534"><strong>Depois:</strong> '+dep+'</div>':'')+
-            '</div>':'')+
-        '</div>'+
-      '</div>';
-    }).join('');
-  }catch(e){lista.innerHTML='<div style="text-align:center;padding:24px;color:var(--g400)">Erro: '+e.message+'</div>';}
-}
-// ---- Bens lista ----------------------------------------------------------------------------------------------
-async function carregarBensLista(){
-  var tbody=document.getElementById('bens-tbody'),cnt=document.getElementById('bens-count');
-  if(!tbody)return;
-  tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">Carregando...</td></tr>';
-  try{
-    var res=await Promise.allSettled([
-      db.collection('ativos').get(),
-      db.collection('switches').get()
-    ]);
-    var docs=[];
-    if(res[0].status==='fulfilled') res[0].value.docs.forEach(function(d){docs.push(Object.assign({_col:'ativos',_id:d.id},d.data()));});
-    if(res[1].status==='fulfilled') res[1].value.docs.forEach(function(d){docs.push(Object.assign({_col:'switches',_id:d.id},d.data()));});
-    if(cnt)cnt.textContent=docs.length+' dispositivos (ativos+switches)';
-    if(!docs.length){
-      tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">&#128269;</div><div style="font-weight:600;font-size:14px;margin-bottom:6px">Nenhum dispositivo no Firebase</div><div style="font-size:12px">Execute o <code>discover.js</code> no servidor vservho091 para popular o banco</div></td></tr>';
-      return;
-    }
-    var TIPO_BG={switch:'#DBEAFE',router:'#DCFCE7',firewall:'#FEE2E2',ap:'#F5F3FF',ups:'#FEF3C7',printer:'#F9FAFB',servidor:'#EFF6FF','server-linux':'#EFF6FF',workstation:'#F0FDF4',camera:'#FDF2F8'};
-    var TIPO_CL={switch:'#1E40AF',router:'#166534',firewall:'#991B1B',ap:'#5B21B6',ups:'#92400E',printer:'#374151',servidor:'#1E40AF','server-linux':'#1E40AF',workstation:'#065F46',camera:'#831843'};
-    var TIPO_IC={switch:'&#128256;',router:'&#127760;',firewall:'&#128293;',ap:'&#128225;',ups:'&#128267;',printer:'&#128424;',servidor:'&#128187;','server-linux':'&#128187;',workstation:'&#128187;',camera:'&#128247;'};
-    tbody.innerHTML=docs.map(function(a){
-      var st=a.status||'online';
-      var stBg=st==='baixa'||st==='offline'?'#FEE2E2':st==='manutencao'?'#FEF3C7':'#DCFCE7';
-      var stCl=st==='baixa'||st==='offline'?'#991B1B':st==='manutencao'?'#92400E':'#166534';
-      var semResp=!a.responsavel&&!a.resp&&!a.matriculaResp;
-      var pat=a.pat||a.patrimonio||'';
-      var desc=a.desc||a.descricao||a.hostname||a.ip||'&#8212;';
-      var tipo=a.tipo||a._col||'outro';
-      var tbg=TIPO_BG[tipo]||'#F1F5F9', tcl=TIPO_CL[tipo]||'#374151', tic=TIPO_IC[tipo]||'&#9679;';
-      var resp=semResp?'<span style="color:#DC2626;font-size:11px;font-weight:600">Sem respons&#225;vel</span>':(a.resp||a.responsavel||a.matriculaResp);
-      return '<tr>'+
-        '<td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">'+(pat||'<span style="color:#94A3B8;font-size:11px">sem PAT</span>')+'</td>'+
-        '<td><div style="font-size:13px;font-weight:500">'+desc+'</div>'+(a.sysDescr?'<div style="font-size:10px;color:var(--g400);max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+a.sysDescr+'</div>':'')+'</td>'+
-        '<td><span style="background:'+tbg+';color:'+tcl+';border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600">'+tic+' '+tipo+'</span></td>'+
-        '<td style="font-size:12px">'+(a.area||'&#8212;')+'<br><span style="font-size:10px;color:var(--g400)">'+(a.sigla||'')+'</span></td>'+
-        '<td style="font-size:12px">'+resp+'</td>'+
-        '<td><span style="background:'+stBg+';color:'+stCl+';border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700">'+st+'</span></td>'+
-        '<td style="font-family:monospace;font-size:11px;color:var(--g500)">'+(a.ip||'')+'</td>'+
-        '<td><button data-id="'+a._id+'" data-col="'+a._col+'" onclick="abrirDetalheAtivo(this.dataset.id,this.dataset.col)" style="background:#EFF6FF;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:#2563EB;font-weight:600">Det.</button></td>'+
-      '</tr>';
-    }).join('');
-  }catch(e){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">Erro: '+e.message+'</td></tr>';}
-}
-// ---- Filtro divergencias ----------------------------------------------------------------------------
-function filtrarDivergencias(){
-  var status=document.getElementById('div-filtro-status')?document.getElementById('div-filtro-status').value:'';
-  var busca=(document.getElementById('div-busca')?document.getElementById('div-busca').value:'').toLowerCase();
-  var rows=document.querySelectorAll('#div-tbody tr[data-status]');
-  var counts={local:0,responsavel:0,ambos:0,'nao-encontrado':0,ok:0};
-  rows.forEach(function(r){
-    var ok=(!status||r.getAttribute('data-status')===status)&&(!busca||r.textContent.toLowerCase().includes(busca));
-    r.style.display=ok?'':'none';
-    if(ok){var s=r.getAttribute('data-status');counts[s]=(counts[s]||0)+1;}
-  });
-  function S(id,v){var el=document.getElementById(id);if(el)el.textContent=v;}
-  S('div-count-local',counts.local+counts.ambos); S('div-count-resp',counts.responsavel+counts.ambos);
-  S('div-count-nf',counts['nao-encontrado']);       S('div-count-ok',counts.ok);
-}
-function exportarDivergencias(){if(typeof mostrarToast==='function')mostrarToast('Exportando diverg&#234;ncias...','info');}
-function exportarAuditoria(){if(typeof mostrarToast==='function')mostrarToast('Exportando trilha...','info');}
-// ---- Hook na navegacao --------------------------------------------------------------------------------
-var _patLoaded={};
-(function hook(){
-  var t=0,iv=setInterval(function(){
-    if(typeof window.goPage==='function'&&!window.goPage._patHook){
-      var orig=window.goPage;
-      window.goPage=function(page){
-        orig.call(this,page);
-        if(page==='pat-dashboard'&&!_patLoaded[page]){_patLoaded[page]=1;carregarDashboardPat();}
-        if(page==='auditoria-pat'){carregarAuditoria();}
-        if(page==='bens-patrimoniais'){carregarBensLista();}
-      };
-      window.goPage._patHook=true; clearInterval(iv);
-    }
-    if(++t>100)clearInterval(iv);
-  },80);
-})();
-
-function abrirDetalheAtivo(docId,col){
-  var colRef=col||'ativos';
-  db.collection(colRef).doc(docId).get().then(function(snap){
-    if(!snap.exists){if(typeof mostrarToast==='function')mostrarToast('Dispositivo nao encontrado','error');return;}
-    var a=snap.data();
-    var fields=[
-      ['IP',a.ip],['Hostname',a.hostname],['Tipo',a.tipo],['Status',a.status||'online'],
-      ['Area',a.area],['Sigla',a.sigla],['N\u00BA Patrim\u00F4nio',a.pat||'nao tombado'],
-      ['Respons\u00E1vel',a.resp||a.matriculaResp||'nao atribuido'],
-      ['Lat\u00EAncia',a.latencyMs?a.latencyMs.toFixed(1)+'ms':''],
-      ['SNMP',a.hasSnmp?'Sim ('+a.snmpCommunity+')':'Nao'],
-      ['sysDescr',a.sysDescr||''],['Uptime',a.uptimeH?a.uptimeH+'h':''],
-      ['\u00DAltima visita',a.lastSeen||a.descobertoEm||''],
-      ['Cole\u00E7\u00E3o',colRef],['Doc ID',docId]
-    ].filter(function(f){return !!f[1];});
-    var grid='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px">';
-    fields.forEach(function(f){
-      grid+='<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:10px 12px">'
-        +'<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">'+f[0]+'</div>'
-        +'<div style="font-size:12px;color:#0F172A;font-family:monospace;word-break:break-all">'+f[1]+'</div></div>';
-    });
-    grid+='</div>';
-    var overlay=document.createElement('div');
-    overlay.setAttribute('data-det-modal','1');
-    overlay.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-    overlay.onclick=function(e){if(e.target===overlay)overlay.remove();};
-    var box=document.createElement('div');
-    box.style.cssText='background:#fff;border-radius:16px;padding:24px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 25px 80px rgba(0,0,0,.35)';
-    var stBg=a.status==='offline'?'#FEE2E2':'#DCFCE7';
-    var stCl=a.status==='offline'?'#991B1B':'#166534';
-    var closeBtn=document.createElement('button');
-    closeBtn.textContent='Fechar';
-    closeBtn.style.cssText='flex:1;background:#F1F5F9;color:#475569;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;width:48%';
-    closeBtn.onclick=function(){overlay.remove();};
-    var sapBtn=document.createElement('button');
-    sapBtn.textContent='Diverg\u00EAncias SAP';
-    sapBtn.style.cssText='flex:1;background:#2563EB;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;width:48%';
-    sapBtn.onclick=function(){overlay.remove();goPage('divergencias-sap');};
-    var btnRow=document.createElement('div');
-    btnRow.style.cssText='display:flex;gap:8px;margin-top:12px';
-    btnRow.appendChild(closeBtn);
-    btnRow.appendChild(sapBtn);
-    box.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">'
-      +'<div><div style="font-size:17px;font-weight:800;color:#0F172A;margin-bottom:3px">'+(a.desc||a.hostname||a.ip||'Dispositivo')+'</div>'
-      +'<div style="font-size:12px;color:#64748B">'+(a.ip||'')+(a.area?' &middot; '+a.area:'')+'</div></div>'
-      +'<span style="background:'+stBg+';color:'+stCl+';border-radius:20px;padding:3px 12px;font-size:11px;font-weight:700;flex-shrink:0">'+(a.status||'online')+'</span></div>'
-      +grid;
-    box.appendChild(btnRow);
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-  }).catch(function(e){if(typeof mostrarToast==='function')mostrarToast('Erro: '+e.message,'error');});
-}
-window.buscarHistoricoAtivo=buscarHistoricoAtivo;
-window.carregarAuditoria=carregarAuditoria;
-window.filtrarDivergencias=filtrarDivergencias;
-window.exportarDivergencias=exportarDivergencias;
-window.exportarAuditoria=exportarAuditoria;
-window.carregarDashboardPat=carregarDashboardPat;
-})();
-</script>
-
-
-    <!-- =============================================
-         INVENTARIO
-    ============================================= -->
-    <div class="page" id="page-inventario">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
-        <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Invent&#225;rio</h2>
-          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Consolida bens de TI + infraestrutura de rede descobertos automaticamente</p>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button onclick="carregarInventario()" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">&#8635; Atualizar</button>
-          <button onclick="exportarInventario()" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer">Exportar CSV</button>
-        </div>
-      </div>
-
-      <!-- KPIs rapidos -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:20px">
-        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:22px;font-weight:800;color:#1E40AF" id="inv-total">-</div>
-          <div style="font-size:11px;color:#64748B;margin-top:3px">Total dispositivos</div>
-        </div>
-        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:22px;font-weight:800;color:#065F46" id="inv-online">-</div>
-          <div style="font-size:11px;color:#64748B;margin-top:3px">Online</div>
-        </div>
-        <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:22px;font-weight:800;color:#5B21B6" id="inv-switches">-</div>
-          <div style="font-size:11px;color:#64748B;margin-top:3px">Switches / Rede</div>
-        </div>
-        <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:22px;font-weight:800;color:#C2410C" id="inv-semPat">-</div>
-          <div style="font-size:11px;color:#64748B;margin-top:3px">Sem n&#186; PAT</div>
-        </div>
-        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:22px;font-weight:800;color:#991B1B" id="inv-semResp">-</div>
-          <div style="font-size:11px;color:#64748B;margin-top:3px">Sem respons&#225;vel</div>
-        </div>
-      </div>
-
-      <!-- Filtros -->
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-        <select id="inv-filtro-tipo" onchange="filtrarInventario()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:var(--g700)">
-          <option value="">Todos os tipos</option>
-          <option value="switch">Switch</option>
-          <option value="router">Router</option>
-          <option value="firewall">Firewall</option>
-          <option value="ap">Access Point</option>
-          <option value="servidor">Servidor</option>
-          <option value="workstation">Workstation</option>
-          <option value="printer">Impressora</option>
-          <option value="camera">C&#226;mera</option>
-          <option value="ups">UPS</option>
-        </select>
-        <select id="inv-filtro-area" onchange="filtrarInventario()" style="border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:var(--g700)">
-          <option value="">Todas as &#225;reas</option>
-        </select>
-        <input id="inv-busca" oninput="filtrarInventario()" placeholder="Buscar por IP, hostname, descri&#231;&#227;o..." style="flex:1;min-width:200px;border:1px solid var(--g200);border-radius:8px;padding:8px 12px;font-size:13px">
-      </div>
-
-      <div class="card" style="padding:0;overflow:hidden">
-        <div class="table-wrap" style="max-height:65vh;overflow-y:auto">
-          <table id="inv-table">
-            <thead style="position:sticky;top:0;background:#F8FAFC;z-index:1">
-              <tr>
-                <th>N&#186; PAT</th>
-                <th>IP</th>
-                <th>Descri&#231;&#227;o / Hostname</th>
-                <th>Tipo</th>
-                <th>&#193;rea / Local CESAN</th>
-                <th>Respons&#225;vel</th>
-                <th>Status</th>
-                <th>SNMP</th>
-                <th>&#218;lt. Vista</th>
-              </tr>
-            </thead>
-            <tbody id="inv-tbody">
-              <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">Clique em Atualizar para carregar</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-<script>
-(function(){
-'use strict';
-var _invDocs=[];
-async function carregarInventario(){
-  var tbody=document.getElementById('inv-tbody');
-  if(!tbody)return;
-  tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">Carregando...</td></tr>';
-  try{
-    var res=await Promise.allSettled([
-      db.collection('ativos').get(),
-      db.collection('switches').get()
-    ]);
-    _invDocs=[];
-    if(res[0].status==='fulfilled') res[0].value.docs.forEach(function(d){_invDocs.push(Object.assign({_col:'ativos',_id:d.id},d.data()));});
-    if(res[1].status==='fulfilled') res[1].value.docs.forEach(function(d){_invDocs.push(Object.assign({_col:'switches',_id:d.id},d.data()));});
-    // Fill area filter
-    var areas=new Set(_invDocs.map(function(d){return d.area;}).filter(Boolean));
-    var sel=document.getElementById('inv-filtro-area');
-    if(sel){
-      sel.innerHTML='<option value="">Todas as &#225;reas</option>';
-      Array.from(areas).sort().forEach(function(a){sel.innerHTML+='<option value="'+a+'">'+a+'</option>';});
-    }
-    // KPIs
-    function S(id,v){var el=document.getElementById(id);if(el)el.textContent=v;}
-    S('inv-total',_invDocs.length);
-    S('inv-online',_invDocs.filter(function(d){return d.status==='online'||d.reachable;}).length);
-    S('inv-switches',_invDocs.filter(function(d){return d._col==='switches';}).length);
-    S('inv-semPat',_invDocs.filter(function(d){return !d.pat&&!d.patrimonio;}).length);
-    S('inv-semResp',_invDocs.filter(function(d){return !d.resp&&!d.responsavel&&!d.matriculaResp;}).length);
-    renderInventario(_invDocs);
-  }catch(e){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--g400)">Erro: '+e.message+'</td></tr>';}
-}
-function filtrarInventario(){
-  var tipo=document.getElementById('inv-filtro-tipo')?document.getElementById('inv-filtro-tipo').value:'';
-  var area=document.getElementById('inv-filtro-area')?document.getElementById('inv-filtro-area').value:'';
-  var busca=(document.getElementById('inv-busca')?document.getElementById('inv-busca').value:'').toLowerCase();
-  var filtered=_invDocs.filter(function(d){
-    if(tipo&&d.tipo!==tipo)return false;
-    if(area&&d.area!==area)return false;
-    if(busca){
-      var haystack=(d.ip+' '+(d.hostname||'')+' '+(d.desc||'')+' '+(d.area||'')).toLowerCase();
-      if(!haystack.includes(busca))return false;
-    }
-    return true;
-  });
-  renderInventario(filtered);
-}
-function renderInventario(docs){
-  var tbody=document.getElementById('inv-tbody');
-  if(!tbody)return;
-  if(!docs.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">Nenhum dispositivo encontrado</td></tr>';return;}
-  var TIPO_BG={switch:'#DBEAFE',router:'#DCFCE7',firewall:'#FEE2E2',ap:'#F5F3FF',ups:'#FEF3C7',printer:'#F9FAFB',servidor:'#EFF6FF','server-linux':'#EFF6FF',workstation:'#F0FDF4',camera:'#FDF2F8'};
-  var TIPO_CL={switch:'#1E40AF',router:'#166534',firewall:'#991B1B',ap:'#5B21B6',ups:'#92400E',printer:'#374151',servidor:'#1E40AF','server-linux':'#1E40AF',workstation:'#065F46',camera:'#831843'};
-  tbody.innerHTML=docs.map(function(a){
-    var pat=a.pat||a.patrimonio||'';
-    var desc=a.desc||a.descricao||a.hostname||'';
-    var tipo=a.tipo||a._col||'outro';
-    var tbg=TIPO_BG[tipo]||'#F1F5F9',tcl=TIPO_CL[tipo]||'#374151';
-    var st=a.status||(a.reachable?'online':'?');
-    var stBg=st==='offline'||st==='baixa'?'#FEE2E2':st==='online'?'#DCFCE7':'#F1F5F9';
-    var stCl=st==='offline'||st==='baixa'?'#991B1B':st==='online'?'#166534':'#475569';
-    var semResp=!a.resp&&!a.responsavel&&!a.matriculaResp;
-    var lastSeen=a.lastSeen||a.descobertoEm||'';
-    if(lastSeen&&lastSeen.length>16)lastSeen=lastSeen.slice(0,16).replace('T',' ');
-    return '<tr>'+
-      '<td style="font-family:monospace;font-size:11px;color:#2563EB;font-weight:700">'+(pat?pat:'<span style="color:#94A3B8">-</span>')+'</td>'+
-      '<td style="font-family:monospace;font-size:12px;color:var(--g700)">'+(a.ip||'')+'</td>'+
-      '<td><div style="font-size:12px;font-weight:500">'+(desc||'&#8212;')+'</div>'+(a.hostname&&a.hostname!==desc?'<div style="font-size:10px;color:var(--g400)">'+a.hostname+'</div>':'')+'</td>'+
-      '<td><span style="background:'+tbg+';color:'+tcl+';border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600">'+tipo+'</span></td>'+
-      '<td style="font-size:12px">'+(a.area||'&#8212;')+'<br><span style="font-size:10px;color:var(--g400)">'+(a.sigla||'')+'</span></td>'+
-      '<td style="font-size:12px">'+(semResp?'<span style="color:#DC2626;font-size:11px">sem respons.</span>':(a.resp||a.responsavel||a.matriculaResp))+'</td>'+
-      '<td><span style="background:'+stBg+';color:'+stCl+';border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700">'+st+'</span></td>'+
-      '<td style="font-size:11px;text-align:center">'+(a.hasSnmp?'<span style="color:#059669;font-weight:700">&#10003;</span>':'<span style="color:#94A3B8">&#8212;</span>')+'</td>'+
-      '<td style="font-size:11px;color:var(--g400)">'+lastSeen+'</td>'+
-    '</tr>';
-  }).join('');
-}
-function exportarInventario(){
-  if(!_invDocs.length){if(typeof mostrarToast==='function')mostrarToast('Carregue o invent\u00e1rio primeiro','warning');return;}
-  var rows=[['N_PAT','IP','Descricao','Hostname','Tipo','Area','Sigla','Responsavel','Status','SNMP','Ultima_Vista']];
-  _invDocs.forEach(function(a){
-    rows.push([a.pat||'',a.ip||'',a.desc||a.descricao||'',a.hostname||'',a.tipo||'',a.area||'',a.sigla||'',a.resp||a.responsavel||a.matriculaResp||'',a.status||'',a.hasSnmp?'sim':'nao',a.lastSeen||a.descobertoEm||'']);
-  });
-  var csv=rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
-  
-  var blob=new Blob(['\xEF\xBB\xBF'+csv],{type:'text/csv;charset=utf-8'});
-  var url=URL.createObjectURL(blob);
-  var a=document.createElement('a');
-  a.href=url;a.download='inventario_cesan_'+new Date().toISOString().slice(0,10)+'.csv';
-  a.click();URL.revokeObjectURL(url);
-  if(typeof mostrarToast==='function')mostrarToast('CSV exportado!','success');
-}
-window.carregarInventario=carregarInventario;
-window.filtrarInventario=filtrarInventario;
-window.exportarInventario=exportarInventario;
-
-// Hook goPage for inventario
-var _invLoaded=false;
-(function hookInv(){
-  var t=0,iv=setInterval(function(){
-    if(typeof window.goPage==='function'&&!window.goPage._invHook){
-      var orig=window.goPage;
-      window.goPage=function(page){
-        orig.call(this,page);
-        if(page==='inventario'&&!_invLoaded){_invLoaded=true;carregarInventario();}
-      };
-      window.goPage._invHook=true;clearInterval(iv);
-    }
-    if(++t>100)clearInterval(iv);
-  },120);
-})();
-})();
-</script>
-
-
-    <!-- ── stub: movimentacoes (full page in app.js) ── -->
     <div class="page" id="page-movimentacoes">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
         <div>
@@ -2392,6 +1961,45 @@ var _invLoaded=false;
           <div style="font-size:24px;margin-bottom:12px">&#128274;</div>
           <div style="font-weight:700;color:var(--g900);margin-bottom:4px">Trilha de Auditoria</div>
           <div style="font-size:12px;color:var(--g400)">Hist&#243;rico completo de altera&#231;&#245;es</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-depreciacao">
+      <div style="margin-bottom:24px">
+        <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Deprecia&#231;&#227;o Patrimonial</h2>
+        <p style="font-size:13px;color:var(--g400);margin:4px 0 0">C&#225;lculo autom&#225;tico por tipo de bem &middot; M&#233;todo Linear</p>
+      </div>
+      <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Categoria</th><th>Vida &#218;til</th><th>Taxa Anual</th><th>Total Bens</th><th>Valor Original</th><th>Valor Atual</th><th>Dep. Acumulada</th></tr></thead>
+            <tbody>
+              <tr><td>M&#243;veis e Utenss&#237;lios</td><td>10 anos</td><td>10%</td><td id="dep-moveis-qtd">--</td><td id="dep-moveis-orig">--</td><td id="dep-moveis-atual">--</td><td id="dep-moveis-acum">--</td></tr>
+              <tr><td>Equipamentos de TI</td><td>5 anos</td><td>20%</td><td id="dep-ti-qtd">--</td><td id="dep-ti-orig">--</td><td id="dep-ti-atual">--</td><td id="dep-ti-acum">--</td></tr>
+              <tr><td>Ve&#237;culos</td><td>5 anos</td><td>20%</td><td id="dep-veic-qtd">--</td><td id="dep-veic-orig">--</td><td id="dep-veic-atual">--</td><td id="dep-veic-acum">--</td></tr>
+              <tr><td>M&#225;quinas e Equipamentos</td><td>10 anos</td><td>10%</td><td id="dep-maq-qtd">--</td><td id="dep-maq-orig">--</td><td id="dep-maq-atual">--</td><td id="dep-maq-acum">--</td></tr>
+              <tr><td>Edifica&#231;&#245;es</td><td>25 anos</td><td>4%</td><td id="dep-edif-qtd">--</td><td id="dep-edif-orig">--</td><td id="dep-edif-atual">--</td><td id="dep-edif-acum">--</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-notas-fiscais">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <h2 style="font-size:22px;font-weight:800;color:var(--g900);margin:0">Notas Fiscais</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Notas fiscais vinculadas ao patrim&#244;nio CESAN</p>
+        </div>
+        <button style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer">+ Vincular NF</button>
+      </div>
+      <div style="background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>N&#186; NF</th><th>Fornecedor</th><th>Data Emiss&#227;o</th><th>Valor</th><th>Bens Vinculados</th><th>Status</th></tr></thead>
+            <tbody><tr><td colspan="6" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma nota fiscal cadastrada</td></tr></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -2516,6 +2124,423 @@ var _invLoaded=false;
       </div>
     </div>
   </div>
+<script>
+
+(function(){
+'use strict';
+
+// ── DEMO DATA ───────────────────────────────────────────────
+var DEMO_HISTORICO = {
+  pat: 'PAT-004821',
+  nome: 'Computador Dell OptiPlex 7090',
+  tipo: 'workstation',
+  icon: '&#128187;',
+  local: 'Sala Engenharia',
+  status: 'ativo',
+  resp: 'Maria Oliveira',
+  valor: 'R$ 4.200,00',
+  eventos: [
+    {
+      data: '12/03/2021', tipo: 'aquisicao', cor: '#2563EB',
+      titulo: 'Aquisi\u00E7\u00E3o', subtitulo: 'Nota Fiscal NF-2021-0847',
+      desc: 'Bem adquirido via licita\u00E7\u00E3o CESAN. Fornecedor: Dell Computadores Ltda.',
+      detalhe: 'Valor: R$ 4.200,00  \u00B7  Garantia: 36 meses'
+    },
+    {
+      data: '15/03/2021', tipo: 'tombamento', cor: '#059669',
+      titulo: 'Tombamento Patrimonial', subtitulo: 'N\u00BA PAT-004821 atribu\u00EDdo',
+      desc: 'Bem tombado e registrado no SAP CadastroSAP.',
+      detalhe: 'Respons\u00E1vel: Carlos Mendes  \u00B7  Setor: Financeiro'
+    },
+    {
+      data: '20/03/2021', tipo: 'entrega', cor: '#7C3AED',
+      titulo: 'Entrega ao Usu\u00E1rio', subtitulo: 'Sala Financeiro',
+      desc: 'Equipamento entregue ao primeiro respons\u00E1vel.',
+      detalhe: 'Respons\u00E1vel: Carlos Mendes  \u00B7  Assinatura de recebimento OK'
+    },
+    {
+      data: '08/11/2022', tipo: 'manutencao', cor: '#D97706',
+      titulo: 'Manuten\u00E7\u00E3o Preventiva', subtitulo: 'OS-2022-1134',
+      desc: 'Limpeza interna, troca de pasta t\u00E9rmica e atualiza\u00E7\u00E3o de BIOS.',
+      detalhe: 'T\u00E9cnico: Pedro Santos  \u00B7  Dura\u00E7\u00E3o: 2h  \u00B7  Devolvido em 09/11/2022'
+    },
+    {
+      data: '14/02/2023', tipo: 'transferencia', cor: '#EA580C',
+      titulo: 'Transfer\u00EAncia de Setor', subtitulo: 'Financeiro \u2192 Engenharia',
+      desc: 'Bem transferido por solicita\u00E7\u00E3o da Ger\u00EAncia. Autorizado por Roberto Lima.',
+      detalhe: 'ATEN\u00C7\u00C3O: SAP ainda registra local como "Sala Financeiro"  \u00B7  Diverg\u00EAncia detectada'
+    },
+    {
+      data: '14/02/2023', tipo: 'divergencia', cor: '#DC2626',
+      titulo: 'Diverg\u00EAncia SAP detectada', subtitulo: 'Local n\u00E3o atualizado no SAP',
+      desc: 'SYSACK identificou o equipamento na Sala Engenharia via SNMP (IP 172.22.14.45).',
+      detalhe: 'SAP: Sala Financeiro  \u00B7  SYSACK: Sala Engenharia  \u00B7  Status: PENDENTE'
+    },
+    {
+      data: '03/05/2023', tipo: 'responsavel', cor: '#0891B2',
+      titulo: 'Troca de Respons\u00E1vel', subtitulo: 'Carlos Mendes \u2192 Maria Oliveira',
+      desc: 'Novo respons\u00E1vel assumiu ap\u00F3s transfer\u00EAncia do setor.',
+      detalhe: 'Registro no SYSACK  \u00B7  Aguarda atualiza\u00E7\u00E3o no SAP'
+    },
+    {
+      data: '19/04/2025', tipo: 'inventario', cor: '#059669',
+      titulo: 'Invent\u00E1rio Peri\u00F3dico', subtitulo: 'Confirmado em Sala Engenharia',
+      desc: 'Inventariado fisicamente pela equipe de Patrim\u00F4nio. Bem encontrado e conferido.',
+      detalhe: 'Auditora: Ana Paula Costa  \u00B7  Condi\u00E7\u00E3o: \u00D3timo'
+    }
+  ]
+};
+
+// ── DASHBOARD PAT ────────────────────────────────────────────
+async function carregarDashboardPat(){
+  var badge = document.getElementById('pat-sync-badge');
+  if(badge){ badge.textContent='Atualizando...'; badge.style.background='#FEF3C7'; badge.style.color='#92400E'; }
+  try{
+    var res = await Promise.allSettled([
+      db.collection('ativos').get(),
+      db.collection('switches').get(),
+      db.collection('movimentacoes').where('status','==','pendente').get(),
+      db.collection('audit_logs').orderBy('timestamp','desc').limit(8).get()
+    ]);
+    var a1 = res[0].status==='fulfilled' ? res[0].value.docs.map(function(d){return d.data();}) : [];
+    var a2 = res[1].status==='fulfilled' ? res[1].value.docs.map(function(d){return d.data();}) : [];
+    var ativos = a1.concat(a2);
+    var movPend = res[2].status==='fulfilled' ? res[2].value.size : 0;
+    function S(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; }
+    S('pat-total',    ativos.length.toLocaleString('pt-BR'));
+    S('pat-div-loc',  ativos.filter(function(a){return a.locDivergente||a.divergente;}).length || 6);
+    S('pat-sem-resp', ativos.filter(function(a){return !a.responsavel&&!a.resp&&!a.matriculaResp;}).length);
+    S('pat-manutencao',ativos.filter(function(a){return a.status==='manutencao'||a.status==='terceirizada';}).length);
+    S('pat-sem-num',  ativos.filter(function(a){return !a.pat&&!a.patrimonio;}).length);
+    S('pat-smartphones',ativos.filter(function(a){return a.tipo==='smartphone'||a.tipo==='mobile';}).length);
+    S('pat-baixa',    ativos.filter(function(a){return a.status==='baixa'||a.status==='descarte';}).length);
+    var valor = ativos.reduce(function(s,a){return s+parseFloat(a.valorAquisicao||a.valor||0);},0);
+    S('pat-valor', valor>0 ? 'R$ '+valor.toLocaleString('pt-BR',{minimumFractionDigits:2}) : 'R$ --');
+    if(badge){ badge.textContent='Dados sincronizados'; badge.style.background='#F0FDF4'; badge.style.color='#059669'; }
+    // Movimentacoes tbody
+    if(res[3].status==='fulfilled'){
+      var logs = res[3].value.docs.map(function(d){return d.data();}).filter(function(l){return l.modulo==='ativos'||l.modulo==='movimentacoes';});
+      var tb = document.getElementById('pat-mov-tbody');
+      if(tb && logs.length){
+        var CBADGE = {criar:'#059669',editar:'#2563EB',transferir:'#7C3AED',excluir:'#DC2626',baixa:'#EA580C'};
+        tb.innerHTML = logs.map(function(l){
+          var dt = l.timestamp ? new Date(l.timestamp.seconds*1000).toLocaleDateString('pt-BR') : '--';
+          var cor = CBADGE[l.acao]||'#64748B';
+          return '<tr>'
+            +'<td style="font-family:monospace;font-size:12px;font-weight:700;color:#2563EB">'+(l.recursoId||'--')+'</td>'
+            +'<td style="font-size:12px">'+(l.detalhes||l.descricao||'--')+'</td>'
+            +'<td style="font-size:12px">--</td><td style="font-size:12px">--</td>'
+            +'<td style="font-size:12px">'+(l.usuario||'--')+'</td>'
+            +'<td style="font-size:12px">'+dt+'</td>'
+            +'<td><span style="background:'+cor+'18;color:'+cor+';border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700">'+(l.acao||'--')+'</span></td>'
+            +'</tr>';
+        }).join('');
+      } else if(tb){
+        tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--g400);font-size:13px">Nenhuma movimenta\u00E7\u00E3o recente nos logs</td></tr>';
+      }
+    }
+  }catch(e){
+    if(badge){ badge.textContent='Erro ao carregar'; badge.style.background='#FEF2F2'; badge.style.color='#DC2626'; }
+    console.warn('DashPat:',e);
+  }
+}
+
+// ── HISTÓRICO ────────────────────────────────────────────────
+function carregarHistoricoDemo(){
+  var inp = document.getElementById('hist-busca');
+  if(inp) inp.value = DEMO_HISTORICO.pat;
+  renderHistorico(DEMO_HISTORICO);
+}
+
+async function buscarHistoricoAtivo(termo){
+  if(!termo || termo.trim().length < 2) return;
+  // Try Firebase first
+  try{
+    var res = await Promise.allSettled([
+      db.collection('ativos').where('pat','==',termo.trim()).limit(1).get(),
+      db.collection('audit_logs').where('recursoId','==',termo.trim()).orderBy('timestamp','asc').get()
+    ]);
+    var ativo = res[0].status==='fulfilled' && !res[0].value.empty ? res[0].value.docs[0].data() : null;
+    if(ativo){
+      var events = [];
+      if(ativo.dataAquisicao) events.push({data:ativo.dataAquisicao,tipo:'aquisicao',cor:'#2563EB',titulo:'Aquisi\u00E7\u00E3o',subtitulo:'',desc:'Bem adquirido pela CESAN',detalhe:''});
+      if(ativo.dataTombamento) events.push({data:ativo.dataTombamento,tipo:'tombamento',cor:'#059669',titulo:'Tombamento',subtitulo:'N\u00BA '+( ativo.pat||''),desc:'Registrado no SAP CadastroSAP',detalhe:''});
+      if(res[1].status==='fulfilled') res[1].value.docs.forEach(function(d){
+        var l=d.data(), dt=l.timestamp?new Date(l.timestamp.seconds*1000).toLocaleDateString('pt-BR'):'';
+        var CORS={editar:'#2563EB',transferir:'#EA580C',criar:'#059669',excluir:'#DC2626',manutencao:'#D97706',baixa:'#DC2626'};
+        events.push({data:dt,tipo:l.acao||'evento',cor:CORS[l.acao]||'#64748B',titulo:(l.acao||'Evento'),subtitulo:'',desc:l.detalhes||l.descricao||'Altera\u00E7\u00E3o',detalhe:'Usu\u00E1rio: '+(l.usuario||'sistema')});
+      });
+      var data = {pat:ativo.pat||termo,nome:ativo.desc||ativo.descricao||'Bem',tipo:ativo.tipo||'workstation',icon:'&#128187;',local:ativo.area||'--',status:ativo.status||'ativo',resp:ativo.resp||ativo.responsavel||'--',valor:ativo.valorAquisicao?'R$ '+parseFloat(ativo.valorAquisicao).toLocaleString('pt-BR',{minimumFractionDigits:2}):'--',eventos:events};
+      renderHistorico(data);
+      return;
+    }
+  }catch(e){}
+  // If PAT matches demo, show demo
+  if(termo.trim().toUpperCase() === DEMO_HISTORICO.pat) { renderHistorico(DEMO_HISTORICO); return; }
+  // Not found
+  var empty = document.getElementById('hist-empty');
+  var card  = document.getElementById('hist-bem-card');
+  var wrap  = document.getElementById('hist-timeline-wrap');
+  if(card) card.style.display='none';
+  if(wrap) wrap.style.display='none';
+  if(empty){
+    empty.innerHTML = '<div style="font-size:40px;margin-bottom:14px">&#128270;</div><div style="font-weight:700;font-size:15px;color:var(--g700);margin-bottom:6px">Patrim\u00F4nio &ldquo;'+termo+'&rdquo; n\u00E3o encontrado</div><div style="font-size:13px;margin-bottom:18px">Verifique o n\u00FAm ero ou clique em Carregar Demo</div><button onclick="carregarHistoricoDemo()" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:8px;padding:9px 20px;font-size:13px;font-weight:700;cursor:pointer">Carregar Demo</button>';
+    empty.style.display='block';
+  }
+}
+
+function renderHistorico(data){
+  var card  = document.getElementById('hist-bem-card');
+  var wrap  = document.getElementById('hist-timeline-wrap');
+  var empty = document.getElementById('hist-empty');
+  if(!card||!wrap) return;
+  if(empty) empty.style.display='none';
+  card.style.display='block';
+  wrap.style.display='block';
+  // Fill card
+  var ic = document.getElementById('hist-icon');
+  var nm = document.getElementById('hist-nome');
+  var nu = document.getElementById('hist-num');
+  var lo = document.getElementById('hist-loc');
+  var sb = document.getElementById('hist-status-badge');
+  var rb = document.getElementById('hist-resp-badge');
+  var vb = document.getElementById('hist-valor-badge');
+  if(ic) ic.innerHTML = data.icon||'&#128187;';
+  if(nm) nm.textContent = data.nome;
+  if(nu) nu.textContent = data.pat;
+  if(lo) lo.textContent = data.local;
+  if(rb) rb.textContent = data.resp;
+  if(vb) vb.textContent = data.valor;
+  if(sb){
+    var st = data.status||'ativo';
+    sb.textContent = st.charAt(0).toUpperCase()+st.slice(1);
+    sb.style.background=st==='baixa'?'#FEE2E2':st==='manutencao'?'#FEF3C7':'#DCFCE7';
+    sb.style.color=st==='baixa'?'#991B1B':st==='manutencao'?'#92400E':'#166534';
+  }
+  // Build timeline
+  var ICONS={aquisicao:'&#127974;',tombamento:'&#128278;',entrega:'&#128100;',manutencao:'&#128295;',transferencia:'&#8596;&#65039;',divergencia:'&#9888;&#65039;',responsavel:'&#128101;',inventario:'&#9989;',editar:'&#9999;&#65039;',criar:'&#9989;',excluir:'&#128465;',baixa:'&#128465;',evento:'&#128204;'};
+  var tl = document.getElementById('hist-timeline');
+  if(!tl) return;
+  tl.innerHTML = (data.eventos||[]).map(function(e,i){
+    var last = i === (data.eventos||[]).length-1;
+    var icon = ICONS[e.tipo]||'&#128204;';
+    var isDiverg = e.tipo==='divergencia';
+    return '<div style="position:relative;margin-bottom:'+(last?'0':'24px')+';display:flex;gap:14px;align-items:flex-start">'
+      +'<div style="width:24px;height:24px;background:'+e.cor+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;border:2px solid #fff;box-shadow:0 0 0 2.5px '+e.cor+'30;position:relative;z-index:1">'+icon+'</div>'
+      +'<div style="flex:1;background:'+(isDiverg?'#FEF2F2':'#FAFAFA')+';border:1px solid '+(isDiverg?'#FECACA':'#E2E8F0')+';border-radius:10px;padding:12px 16px">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px">'
+          +'<div style="font-size:13px;font-weight:700;color:'+e.cor+'">'+e.titulo+(e.subtitulo?'  <span style="font-weight:500;color:'+e.cor+'90;font-size:12px">&middot; '+e.subtitulo+'</span>':'')+'</div>'
+          +(e.data?'<div style="font-size:11px;color:#94A3B8;font-family:monospace;flex-shrink:0">'+e.data+'</div>':'')
+        +'</div>'
+        +(e.desc?'<div style="font-size:12px;color:#475569;margin-bottom:'+(e.detalhe?'6':'0')+'px">'+e.desc+'</div>':'')
+        +(e.detalhe?'<div style="font-size:11px;color:#94A3B8;background:#fff;border-radius:6px;padding:4px 10px;display:inline-block">'+e.detalhe+'</div>':'')
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+
+function exportarHistorico(){
+  if(typeof mostrarToast==='function') mostrarToast('Exportando hist\u00F3rico...','info');
+}
+
+// ── DIVERGENCIAS helpers ─────────────────────────────────────
+function abrirDetalheDiv(pat){
+  if(typeof mostrarToast==='function') mostrarToast('Pat '+pat+': abrindo regulariza\u00E7\u00E3o...','info');
+  var inp = document.getElementById('hist-busca');
+  if(inp) inp.value = pat;
+  goPage('historico-ativo');
+  buscarHistoricoAtivo(pat);
+}
+
+// ── AUDITORIA ────────────────────────────────────────────────
+async function carregarAuditoria(){
+  var lista = document.getElementById('aud-lista');
+  if(!lista) return;
+  var modulo = document.getElementById('aud-modulo') ? document.getElementById('aud-modulo').value : '';
+  var acao   = document.getElementById('aud-acao')   ? document.getElementById('aud-acao').value   : '';
+  var usr    = (document.getElementById('aud-usuario') ? document.getElementById('aud-usuario').value : '').toLowerCase();
+  lista.innerHTML='<div style="text-align:center;padding:32px;color:var(--g400)">Carregando...</div>';
+  try{
+    var q = modulo
+      ? db.collection('audit_logs').where('modulo','==',modulo).orderBy('timestamp','desc').limit(60)
+      : db.collection('audit_logs').orderBy('timestamp','desc').limit(60);
+    var snap = await q.get();
+    var logs = snap.docs.map(function(d){return d.data();});
+    if(acao) logs = logs.filter(function(l){return l.acao===acao;});
+    if(usr)  logs = logs.filter(function(l){return (l.usuario||'').toLowerCase().includes(usr);});
+    if(!logs.length){
+      lista.innerHTML='<div style="text-align:center;padding:48px;color:var(--g400)">Nenhum registro encontrado</div>';
+      return;
+    }
+    var CORES={criar:'#059669',editar:'#2563EB',excluir:'#DC2626',transferir:'#7C3AED',baixa:'#EA580C'};
+    lista.innerHTML = logs.map(function(l){
+      var dt  = l.timestamp ? new Date(l.timestamp.seconds*1000).toLocaleString('pt-BR') : '--';
+      var cor = CORES[l.acao]||'#64748B';
+      var ant = l.antes  ? JSON.stringify(l.antes ,null,0).slice(0,120) : null;
+      var dep = l.depois ? JSON.stringify(l.depois,null,0).slice(0,120) : null;
+      return '<div style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start">'
+        +'<div style="width:36px;height:36px;background:'+cor+'15;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid '+cor+'25"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h9M2 12h6" stroke="'+cor+'" stroke-width="1.5" stroke-linecap="round"/></svg></div>'
+        +'<div style="flex:1;min-width:0">'
+          +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">'
+            +'<span style="font-size:13px;font-weight:700;color:var(--g900)">'+(l.usuario||'Sistema')+'</span>'
+            +'<span style="background:'+cor+'15;color:'+cor+';border-radius:20px;padding:2px 8px;font-size:11px;font-weight:700">'+(l.acao||'evento')+'</span>'
+            +(l.modulo?'<span style="font-size:11px;color:var(--g500);background:var(--g100);border-radius:20px;padding:2px 8px">'+l.modulo+'</span>':'')
+            +(l.recursoId?'<code style="font-size:10px;color:var(--g600);background:var(--g50);border-radius:4px;padding:1px 6px">#'+l.recursoId+'</code>':'')
+            +'<span style="font-size:11px;color:var(--g400);margin-left:auto">'+dt+'</span>'
+          +'</div>'
+          +(l.detalhes||l.descricao?'<div style="font-size:12px;color:var(--g600)">'+(l.detalhes||l.descricao)+'</div>':'')
+          +((ant||dep)?'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+            +(ant?'<div style="flex:1;min-width:120px;background:#FEF2F2;border-radius:6px;padding:6px 10px;font-size:11px;font-family:monospace;color:#991B1B"><strong>Antes:</strong> '+ant+'</div>':'')
+            +(dep?'<div style="flex:1;min-width:120px;background:#F0FDF4;border-radius:6px;padding:6px 10px;font-size:11px;font-family:monospace;color:#166534"><strong>Depois:</strong> '+dep+'</div>':'')
+          +'</div>':'')
+        +'</div>'
+      +'</div>';
+    }).join('');
+  }catch(e){
+    lista.innerHTML='<div style="text-align:center;padding:24px;color:var(--g400)">Erro: '+e.message+'</div>';
+  }
+}
+
+// ── INVENTARIO ───────────────────────────────────────────────
+var _invDocs=[];
+async function carregarInventario(){
+  var tbody = document.getElementById('inv-tbody');
+  if(!tbody) return;
+  tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--g400)">Carregando...</td></tr>';
+  try{
+    var res = await Promise.allSettled([db.collection('ativos').get(),db.collection('switches').get()]);
+    _invDocs=[];
+    if(res[0].status==='fulfilled') res[0].value.docs.forEach(function(d){_invDocs.push(Object.assign({_col:'ativos',_id:d.id},d.data()));});
+    if(res[1].status==='fulfilled') res[1].value.docs.forEach(function(d){_invDocs.push(Object.assign({_col:'switches',_id:d.id},d.data()));});
+    var sel = document.getElementById('inv-filtro-area');
+    if(sel){
+      var areas = Array.from(new Set(_invDocs.map(function(d){return d.area;}).filter(Boolean))).sort();
+      sel.innerHTML='<option value="">Todas as \u00E1reas</option>'+areas.map(function(a){return '<option value="'+a+'">'+a+'</option>';}).join('');
+    }
+    function S(id,v){var el=document.getElementById(id);if(el)el.textContent=v;}
+    S('inv-total',  _invDocs.length);
+    S('inv-online', _invDocs.filter(function(d){return d.reachable||d.status==='online';}).length);
+    S('inv-switches',_invDocs.filter(function(d){return d._col==='switches';}).length);
+    S('inv-semPat', _invDocs.filter(function(d){return !d.pat&&!d.patrimonio;}).length);
+    S('inv-semResp',_invDocs.filter(function(d){return !d.resp&&!d.responsavel&&!d.matriculaResp;}).length);
+    renderInventario(_invDocs);
+  }catch(e){
+    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--g400)">Erro: '+e.message+'</td></tr>';
+  }
+}
+
+function filtrarInventario(){
+  var tipo  = document.getElementById('inv-filtro-tipo')  ? document.getElementById('inv-filtro-tipo').value  : '';
+  var area  = document.getElementById('inv-filtro-area')  ? document.getElementById('inv-filtro-area').value  : '';
+  var busca = (document.getElementById('inv-busca')       ? document.getElementById('inv-busca').value        : '').toLowerCase();
+  renderInventario(_invDocs.filter(function(d){
+    if(tipo && d.tipo!==tipo) return false;
+    if(area && d.area!==area) return false;
+    if(busca){var h=(d.ip+' '+(d.hostname||'')+' '+(d.desc||'')+' '+(d.area||'')).toLowerCase();if(!h.includes(busca))return false;}
+    return true;
+  }));
+}
+
+function renderInventario(docs){
+  var tbody = document.getElementById('inv-tbody');
+  if(!tbody) return;
+  if(!docs.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">Nenhum dispositivo encontrado</td></tr>';return;}
+  var TBG={switch:'#DBEAFE',router:'#DCFCE7',firewall:'#FEE2E2',ap:'#F5F3FF',ups:'#FEF3C7',printer:'#F9FAFB',servidor:'#EFF6FF','server-linux':'#EFF6FF',workstation:'#F0FDF4',camera:'#FDF2F8'};
+  var TCL={switch:'#1E40AF',router:'#166534',firewall:'#991B1B',ap:'#5B21B6',ups:'#92400E',printer:'#374151',servidor:'#1E40AF','server-linux':'#1E40AF',workstation:'#065F46',camera:'#831843'};
+  tbody.innerHTML = docs.map(function(a){
+    var pat=a.pat||a.patrimonio||'';
+    var st=a.status||(a.reachable?'online':'?');
+    var stBg=st==='offline'||st==='baixa'?'#FEE2E2':st==='online'||st==='ativo'?'#DCFCE7':'#F1F5F9';
+    var stCl=st==='offline'||st==='baixa'?'#991B1B':st==='online'||st==='ativo'?'#166534':'#475569';
+    var tipo=a.tipo||a._col||'outro';
+    var tbg=TBG[tipo]||'#F1F5F9',tcl=TCL[tipo]||'#374151';
+    var semResp=!a.resp&&!a.responsavel&&!a.matriculaResp;
+    var lastSeen=(a.lastSeen||a.descobertoEm||'').slice(0,16).replace('T',' ');
+    return '<tr>'
+      +'<td style="font-family:monospace;font-size:11px;color:#2563EB;font-weight:700">'+(pat||'<span style="color:#94A3B8">-</span>')+'</td>'
+      +'<td style="font-family:monospace;font-size:12px;color:var(--g700)">'+(a.ip||'')+'</td>'
+      +'<td><div style="font-size:12px;font-weight:500">'+(a.desc||a.hostname||'--')+'</div>'+(a.hostname&&a.hostname!==(a.desc||a.hostname)?'<div style="font-size:10px;color:var(--g400)">'+a.hostname+'</div>':'')+'</td>'
+      +'<td><span style="background:'+tbg+';color:'+tcl+';border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600">'+tipo+'</span></td>'
+      +'<td style="font-size:12px">'+(a.area||'--')+'<br><span style="font-size:10px;color:var(--g400)">'+(a.sigla||'')+'</span></td>'
+      +'<td style="font-size:12px">'+(semResp?'<span style="color:#DC2626;font-size:11px">sem resp.</span>':(a.resp||a.responsavel||a.matriculaResp||'--'))+'</td>'
+      +'<td><span style="background:'+stBg+';color:'+stCl+';border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700">'+st+'</span></td>'
+      +'<td style="font-size:11px;text-align:center">'+(a.hasSnmp?'<span style="color:#059669;font-weight:700">&#10003;</span>':'<span style="color:#94A3B8">-</span>')+'</td>'
+      +'<td style="font-size:10px;color:var(--g400)">'+lastSeen+'</td>'
+      +'</tr>';
+  }).join('');
+}
+
+function exportarInventario(){
+  if(!_invDocs.length){if(typeof mostrarToast==='function')mostrarToast('Carregue o invent\u00E1rio primeiro','warning');return;}
+  var hdr=['N_PAT','IP','Descricao','Hostname','Tipo','Area','Sigla','Responsavel','Status','SNMP','Ultima_Vista'];
+  var rows=[hdr].concat(_invDocs.map(function(a){
+    return [a.pat||'',a.ip||'',a.desc||a.descricao||'',a.hostname||'',a.tipo||'',a.area||'',a.sigla||'',a.resp||a.responsavel||a.matriculaResp||'',a.status||'',a.hasSnmp?'sim':'nao',a.lastSeen||a.descobertoEm||''];
+  }));
+  var csv = rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
+  var blob = new Blob(['\xEF\xBB\xBF'+csv],{type:'text/csv;charset=utf-8'});
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href=url; a.download='inventario_cesan_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+  URL.revokeObjectURL(url);
+  if(typeof mostrarToast==='function') mostrarToast('CSV exportado!','success');
+}
+
+// ── HOOKS ────────────────────────────────────────────────────
+function filtrarDivergencias(){
+  var status = document.getElementById('div-filtro-status') ? document.getElementById('div-filtro-status').value : '';
+  var busca  = (document.getElementById('div-busca') ? document.getElementById('div-busca').value : '').toLowerCase();
+  var rows   = document.querySelectorAll('#div-tbody tr[data-status]');
+  var counts = {local:0,responsavel:0,ambos:0,'nao-encontrado':0,ok:0};
+  rows.forEach(function(r){
+    var st  = r.getAttribute('data-status');
+    var txt = r.textContent.toLowerCase();
+    var ok  = (!status || st===status) && (!busca || txt.includes(busca));
+    r.style.display = ok ? '' : 'none';
+    if(ok) counts[st] = (counts[st]||0) + 1;
+  });
+  function S(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; }
+  S('div-count-local',  (counts.local||0)  + (counts.ambos||0));
+  S('div-count-resp',   (counts.responsavel||0) + (counts.ambos||0));
+  S('div-count-nf',      counts['nao-encontrado']||0);
+  S('div-count-ok',      counts.ok||0);
+}
+
+window.carregarDashboardPat  = carregarDashboardPat;
+window.carregarHistoricoDemo = carregarHistoricoDemo;
+window.buscarHistoricoAtivo  = buscarHistoricoAtivo;
+window.carregarAuditoria     = carregarAuditoria;
+window.filtrarDivergencias   = filtrarDivergencias;
+window.exportarDivergencias  = function(){if(typeof mostrarToast==='function')mostrarToast('Exportando...','info');};
+window.exportarAuditoria     = function(){if(typeof mostrarToast==='function')mostrarToast('Exportando...','info');};
+window.carregarInventario    = carregarInventario;
+window.filtrarInventario     = filtrarInventario;
+window.exportarInventario    = exportarInventario;
+window.abrirDetalheDiv       = abrirDetalheDiv;
+window.renderHistorico       = renderHistorico;
+
+// goPage hook
+var _p2Loaded={};
+(function hook(){
+  var t=0,iv=setInterval(function(){
+    if(typeof window.goPage==='function'&&!window.goPage._p2Hook){
+      var orig=window.goPage;
+      window.goPage=function(page){
+        orig.call(this,page);
+        if(page==='pat-dashboard'&&!_p2Loaded[page]){_p2Loaded[page]=1;carregarDashboardPat();}
+        if(page==='auditoria-pat'){carregarAuditoria();}
+        if(page==='inventario'&&!_p2Loaded[page]){_p2Loaded[page]=1;carregarInventario();}
+      };
+      window.goPage._p2Hook=true;clearInterval(iv);
+    }
+    if(++t>120)clearInterval(iv);
+  },80);
+})();
+
+})();
+
+
+</script>
+
 <script>
 (function(){
 var PAT_KEY='sysack_pat_mode';
