@@ -994,148 +994,127 @@ textarea.form-control{resize:vertical;min-height:80px}
 </div>
 
 <script>
+
 (function(){
 'use strict';
 
-// ── Firebase config ──────────────────────────────────────────
-var FB_CONFIG = {
-  apiKey: "AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww",
-  authDomain: "sysack-829e2.firebaseapp.com",
-  projectId: "sysack-829e2",
-  storageBucket: "sysack-829e2.appspot.com",
+var FB_CFG = {
+  apiKey:            "AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww",
+  authDomain:        "sysack-829e2.firebaseapp.com",
+  projectId:         "sysack-829e2",
+  storageBucket:     "sysack-829e2.appspot.com",
   messagingSenderId: "584742093748",
-  appId: "1:584742093748:web:sysack"
+  appId:             "1:584742093748:web:sysack"
 };
 
-// ── Firebase init (wait for SDK to be ready) ─────────────────
-var db, auth;
-function initFirebase(){
-  try {
+var db, auth, _appReady = false;
+
+// ── Firebase init ────────────────────────────────────────────
+function tryInit(){
+  try{
     if(typeof firebase === 'undefined') return false;
-    if(!firebase.apps || !firebase.apps.length){
-      firebase.initializeApp(FB_CONFIG);
-    }
+    if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(FB_CFG);
     db   = firebase.firestore();
     auth = firebase.auth();
     window.db   = db;
     window.auth = auth;
-    setupAuthListener();
+    setupAuth();
     return true;
-  } catch(e){ return false; }
+  }catch(e){ return false; }
 }
-
-// Try immediately, then poll until SDK loads
-if(!initFirebase()){
-  var _fbTries = 0;
-  var _fbIv = setInterval(function(){
-    if(initFirebase() || ++_fbTries > 100) clearInterval(_fbIv);
-  }, 100);
+if(!tryInit()){
+  var _fi=0, _fiv=setInterval(function(){ if(tryInit()||++_fi>100) clearInterval(_fiv); },100);
 }
 
 // ── Auth listener ────────────────────────────────────────────
-var _appReady = false;
-function setupAuthListener(){
-  if(!auth) return;
+function setupAuth(){
   auth.onAuthStateChanged(function(user){
-    var loginPage = document.getElementById('login-page');
-    var appWrap   = document.getElementById('app-wrapper') ||
-                    document.querySelector('.sidebar');
-    var mainEl    = document.querySelector('.main');
+    var lp  = document.getElementById('login-page');
+    var sb  = document.querySelector('.sidebar');
+    var mn  = document.querySelector('.main');
+    var ov  = document.getElementById('sidebar-overlay');
     if(user){
-      if(loginPage)  loginPage.style.display  = 'none';
-      if(appWrap)    appWrap.style.display     = '';
-      if(mainEl)     mainEl.style.display      = '';
-      updateUserBadge(user);
-      if(!_appReady){ _appReady = true; initApp(); }
+      if(lp) lp.style.display = 'none';
+      if(sb) sb.style.display = '';
+      if(mn) mn.style.display = '';
+      updateBadge(user);
+      var el = document.getElementById('login-firebase-status');
+      if(el) el.textContent = '';
+      if(!_appReady){ _appReady=true; initApp(); }
     } else {
-      if(loginPage)  loginPage.style.display   = '';
-      if(appWrap)    appWrap.style.display      = 'none';
-      if(mainEl)     mainEl.style.display       = 'none';
-      updateLoginStatus('Conectado ao Firebase \u2022 Aguardando login');
+      if(lp) lp.style.display = '';
+      if(sb) sb.style.display = 'none';
+      if(mn) mn.style.display = 'none';
+      if(ov) ov.style.display = 'none';
+      var el2 = document.getElementById('login-firebase-status');
+      if(el2) el2.textContent = 'Conectado ao Firebase \u2022 Aguardando login';
     }
   });
 }
 
-function updateLoginStatus(msg){
-  var el = document.getElementById('login-firebase-status');
-  if(el) el.textContent = msg;
-}
-
-function updateUserBadge(user){
-  var nameEl = document.querySelector('.u-name');
-  var roleEl = document.querySelector('.u-role');
-  var avatEl = document.querySelector('.u-avatar');
-  if(nameEl) nameEl.textContent = user.displayName || user.email || 'Usu\u00E1rio';
-  if(avatEl){
-    var n = user.displayName || user.email || 'U';
-    avatEl.textContent = n.slice(0,2).toUpperCase();
-  }
+function updateBadge(user){
+  var nm = document.querySelector('.u-name');
+  var av = document.querySelector('.u-avatar');
+  var n  = user.displayName || user.email || 'User';
+  if(nm) nm.textContent = n;
+  if(av) av.textContent = n.slice(0,2).toUpperCase();
 }
 
 // ── LOGIN ────────────────────────────────────────────────────
-window.fazerLogin = function fazerLogin(){
-  var emailEl  = document.getElementById('login-email');
-  var senhaEl  = document.getElementById('login-senha');
-  var btnEl    = document.getElementById('login-btn');
-  var errEl    = document.getElementById('login-error-box');
-  if(!emailEl || !senhaEl) return;
-  var email = emailEl.value.trim();
-  var senha = senhaEl.value;
-  if(!email || !senha){
-    if(errEl){ errEl.textContent = '\u26A0\uFE0F Preencha e-mail e senha.'; errEl.style.display='block'; }
+window.fazerLogin = function(){
+  var em = document.getElementById('login-email');
+  var pw = document.getElementById('login-senha');
+  var bt = document.getElementById('login-btn');
+  var er = document.getElementById('login-error-box');
+  if(!em||!pw) return;
+  var email = em.value.trim();
+  var pass  = pw.value;
+  if(!email||!pass){
+    showErr(er, '\u26A0\uFE0F Preencha e-mail e senha.');
     return;
   }
-  if(!auth){
-    if(errEl){ errEl.textContent = '\u26A0\uFE0F Firebase ainda carregando, aguarde...'; errEl.style.display='block'; }
-    return;
-  }
-  if(btnEl){ btnEl.disabled = true; btnEl.classList.add('loading'); }
-  if(errEl) errEl.style.display = 'none';
-  // Add @cesan.com.br if no @ present
-  if(email.indexOf('@') < 0) email = email + '@cesan.com.br';
-  auth.signInWithEmailAndPassword(email, senha)
-    .catch(function(e){
-      if(btnEl){ btnEl.disabled = false; btnEl.classList.remove('loading'); }
-      var msg = '\uD83D\uDD12 Usu\u00E1rio ou senha incorretos.';
-      if(e.code === 'auth/network-request-failed')
-        msg = '\u26A0\uFE0F Sem conex\u00E3o. Verifique a rede.';
-      if(e.code === 'auth/too-many-requests')
-        msg = '\u26A0\uFE0F Muitas tentativas. Aguarde alguns minutos.';
-      if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; }
-    });
+  if(!auth){ showErr(er, '\u26A0\uFE0F Firebase carregando, aguarde...'); return; }
+  if(bt){ bt.disabled=true; bt.classList.add('loading'); }
+  if(er) er.style.display='none';
+  if(email.indexOf('@')<0) email += '@cesan.com.br';
+  auth.signInWithEmailAndPassword(email, pass).catch(function(e){
+    if(bt){ bt.disabled=false; bt.classList.remove('loading'); }
+    var msg = '\uD83D\uDD12 Usu\u00E1rio ou senha incorretos.';
+    if(e.code==='auth/network-request-failed') msg='\u26A0\uFE0F Sem conex\u00E3o.';
+    if(e.code==='auth/too-many-requests')      msg='\u26A0\uFE0F Muitas tentativas.';
+    showErr(er, msg);
+  });
 };
+function showErr(el, msg){ if(el){ el.textContent=msg; el.style.display='block'; } }
 
 // ── PAGE NAVIGATION ──────────────────────────────────────────
-window.goPage = function goPage(pageId){
-  document.querySelectorAll('.page').forEach(function(p){
-    p.classList.remove('active');
+// Defined on window so all hook chains always reference window.goPage
+window.goPage = function(pageId){
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  var t = document.getElementById('page-'+pageId);
+  if(t) t.classList.add('active');
+  document.querySelectorAll('[data-page]').forEach(function(a){
+    a.classList.toggle('active', a.getAttribute('data-page')===pageId);
   });
-  var target = document.getElementById('page-' + pageId);
-  if(target) target.classList.add('active');
-  // Update nav active state
-  document.querySelectorAll('.nav-i[data-page], .nav-p[data-page]').forEach(function(a){
-    a.classList.toggle('active', a.getAttribute('data-page') === pageId);
-  });
-  // Close mobile sidebar
-  closeSidebar();
+  window.closeSidebar();
 };
 
 // ── SIDEBAR ──────────────────────────────────────────────────
 window.toggleSidebar = function(){
   var sb = document.querySelector('.sidebar');
   var ov = document.getElementById('sidebar-overlay');
-  if(sb){ sb.classList.toggle('open'); }
-  if(ov){ ov.classList.toggle('active'); }
+  if(sb) sb.classList.toggle('open');
+  if(ov){ ov.style.display = sb.classList.contains('open') ? '' : 'none'; }
 };
 window.closeSidebar = function(){
   var sb = document.querySelector('.sidebar');
   var ov = document.getElementById('sidebar-overlay');
   if(sb) sb.classList.remove('open');
-  if(ov) ov.classList.remove('active');
+  if(ov) ov.style.display = 'none';
 };
 window.toggleSbGroup = function(id){
-  var el  = document.getElementById(id);
-  var chev = document.getElementById('chev-' + id);
+  var el   = document.getElementById(id);
+  var chev = document.getElementById('chev-'+id);
   if(!el) return;
   var open = el.style.display !== 'none';
   el.style.display = open ? 'none' : '';
@@ -1143,66 +1122,48 @@ window.toggleSbGroup = function(id){
 };
 
 // ── MODAL ────────────────────────────────────────────────────
-window.openModal = function(id){
-  var m = document.getElementById(id);
-  if(m) m.style.display = 'flex';
-};
-window.closeModal = function(id){
-  var m = document.getElementById(id);
-  if(m) m.style.display = 'none';
-};
+window.openModal  = function(id){ var m=document.getElementById(id); if(m) m.style.display='flex'; };
+window.closeModal = function(id){ var m=document.getElementById(id); if(m) m.style.display='none'; };
 
 // ── TOAST ────────────────────────────────────────────────────
 window.mostrarToast = function(msg, type){
-  var t = document.createElement('div');
-  var bg = type === 'error' ? '#EF4444'
-         : type === 'warning' ? '#F59E0B'
-         : type === 'success' ? '#10B981'
-         : '#2563EB';
-  t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;'
-    + 'background:' + bg + ';color:#fff;padding:12px 20px;border-radius:10px;'
-    + 'font-size:13px;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,.25);'
-    + 'max-width:320px;animation:fadeInUp .25s ease';
+  var bg = type==='error'?'#EF4444':type==='warning'?'#F59E0B':type==='success'?'#10B981':'#2563EB';
+  var t  = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;background:'+bg+
+    ';color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;'+
+    'box-shadow:0 4px 20px rgba(0,0,0,.25);max-width:320px';
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(function(){ t.remove(); }, 3500);
 };
 
-// ── APP INIT (after login) ───────────────────────────────────
+// ── APP INIT (runs once after login) ─────────────────────────
 function initApp(){
-  // Show dashboard by default (or pat-dashboard if pat mode is on)
-  var patMode = localStorage.getItem('sysack_pat_mode') === '1';
-  goPage(patMode ? 'pat-dashboard' : 'dashboard');
-  // Wire up nav clicks for any nav-i that has data-page
+  // Re-wire nav-i clicks (belt-and-suspenders alongside onclick attrs)
   document.querySelectorAll('.nav-i[data-page]').forEach(function(a){
-    if(!a.onclick){
-      a.onclick = function(){ goPage(a.getAttribute('data-page')); };
-    }
+    a.onclick = function(e){ e.preventDefault(); window.goPage(a.getAttribute('data-page')); };
   });
-  updateLoginStatus('');
+  // Navigate: respect pat mode
+  var patOn = localStorage.getItem('sysack_pat_mode') === '1';
+  window.goPage(patOn ? 'pat-dashboard' : 'dashboard');
 }
 
-// ── WIRE UP nav-i clicks on DOMContentLoaded ─────────────────
+// ── DOM READY: hide app, wire up nav ────────────────────────
 document.addEventListener('DOMContentLoaded', function(){
-  // Hide main app until auth resolves
-  var sb   = document.querySelector('.sidebar');
-  var main = document.querySelector('.main');
-  if(sb)   sb.style.display   = 'none';
-  if(main) main.style.display = 'none';
-  // Wire nav clicks
+  var sb = document.querySelector('.sidebar');
+  var mn = document.querySelector('.main');
+  if(sb) sb.style.display = 'none';
+  if(mn) mn.style.display = 'none';
   document.querySelectorAll('.nav-i[data-page]').forEach(function(a){
-    a.addEventListener('click', function(){ goPage(a.getAttribute('data-page')); });
+    a.addEventListener('click', function(e){
+      e.preventDefault();
+      window.goPage(a.getAttribute('data-page'));
+    });
   });
-  // Add fadeInUp keyframe if missing
-  if(!document.querySelector('#toast-style')){
-    var s = document.createElement('style');
-    s.id = 'toast-style';
-    s.textContent = '@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}';
-    document.head.appendChild(s);
-  }
 });
 
 })();
+
 </script>
 
 <aside class="sidebar">
@@ -2385,6 +2346,71 @@ var _invLoaded=false;
 })();
 </script>
 
+
+    <!-- ── stub: movimentacoes (full page in app.js) ── -->
+    <div class="page" id="page-movimentacoes">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Movimenta&#231;&#245;es</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Transfer&#234;ncias e movimenta&#231;&#245;es de bens patrimoniais</p>
+        </div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--g200);border-radius:14px;padding:48px;text-align:center;color:var(--g400)">
+        <div style="font-size:40px;margin-bottom:16px">&#8596;&#65039;</div>
+        <div style="font-weight:700;font-size:15px;color:var(--g700);margin-bottom:8px">M&#243;dulo Movimenta&#231;&#245;es</div>
+        <div style="font-size:13px;margin-bottom:20px">Registre transfer&#234;ncias de bens entre setores, respons&#225;veis e localiza&#231;&#245;es.</div>
+        <button onclick="goPage('bens-patrimoniais')" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer">Ver Bens Patrimoniais</button>
+      </div>
+    </div>
+
+    <!-- ── stub: baixas-patrimoniais ── -->
+    <div class="page" id="page-baixas-patrimoniais">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Baixas Patrimoniais</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Descarte e desincorpora&#231;&#227;o de bens</p>
+        </div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--g200);border-radius:14px;padding:48px;text-align:center;color:var(--g400)">
+        <div style="font-size:40px;margin-bottom:16px">&#128465;</div>
+        <div style="font-weight:700;font-size:15px;color:var(--g700);margin-bottom:8px">M&#243;dulo Baixas</div>
+        <div style="font-size:13px;margin-bottom:20px">Registre baixas por obsolesc&#234;ncia, perda, dano irrepar&#225;vel ou aliena&#231;&#227;o.</div>
+        <button onclick="goPage('bens-patrimoniais')" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer">Ver Bens Patrimoniais</button>
+      </div>
+    </div>
+
+    <!-- ── stub: relatorios ── -->
+    <div class="page" id="page-relatorios">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900);margin:0">Relat&#243;rios</h2>
+          <p style="font-size:13px;color:var(--g400);margin:4px 0 0">Relat&#243;rios gerenciais e exporta&#231;&#245;es</p>
+        </div>
+        <button onclick="goPage('inventario')" style="background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer">Exportar Invent&#225;rio CSV</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">
+        <div onclick="goPage('pat-dashboard')" style="background:#fff;border:1px solid var(--g200);border-radius:14px;padding:24px;cursor:pointer;transition:all .15s" onmouseenter="this.style.borderColor='#2563EB'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:12px">&#128202;</div>
+          <div style="font-weight:700;color:var(--g900);margin-bottom:4px">Dashboard Executivo</div>
+          <div style="font-size:12px;color:var(--g400)">KPIs e vis&#227;o geral do patrim&#244;nio</div>
+        </div>
+        <div onclick="goPage('divergencias-sap')" style="background:#fff;border:1px solid var(--g200);border-radius:14px;padding:24px;cursor:pointer;transition:all .15s" onmouseenter="this.style.borderColor='#DC2626'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:12px">&#128203;</div>
+          <div style="font-weight:700;color:var(--g900);margin-bottom:4px">Diverg&#234;ncias SAP</div>
+          <div style="font-size:12px;color:var(--g400)">Comparativo SAP x realidade f&#237;sica</div>
+        </div>
+        <div onclick="goPage('inventario');setTimeout(function(){var b=document.querySelector('[onclick*=exportarInventario]');if(b)b.click();},500)" style="background:#fff;border:1px solid var(--g200);border-radius:14px;padding:24px;cursor:pointer;transition:all .15s" onmouseenter="this.style.borderColor='#059669'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:12px">&#128196;</div>
+          <div style="font-weight:700;color:var(--g900);margin-bottom:4px">Exportar Invent&#225;rio</div>
+          <div style="font-size:12px;color:var(--g400)">CSV com todos os dispositivos</div>
+        </div>
+        <div onclick="goPage('auditoria-pat')" style="background:#fff;border:1px solid var(--g200);border-radius:14px;padding:24px;cursor:pointer;transition:all .15s" onmouseenter="this.style.borderColor='#7C3AED'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:12px">&#128274;</div>
+          <div style="font-weight:700;color:var(--g900);margin-bottom:4px">Trilha de Auditoria</div>
+          <div style="font-size:12px;color:var(--g400)">Hist&#243;rico completo de altera&#231;&#245;es</div>
+        </div>
+      </div>
+    </div>
     <!-- AI & INSIGHTS DASHBOARD -->
     <div class="page" id="page-ai-dashboard">
 
