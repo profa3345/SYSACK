@@ -5644,7 +5644,13 @@ window.initFCM = async function() {
     document.getElementById('fb-offline-bar')?.remove();
     console.log('[Banco] ✓ Conectado — sysack-829e2');
     showToast('🗄️ Banco de Dados conectado', 'success');
-    // Listeners iniciados em loginSuccess() após autenticação
+
+    // ── Inicia listeners automaticamente se usuário já estiver logado ──
+    // Resolve o problema de sessão salva que restaura antes do Firebase
+    if (SESSION_USER && !window._listenersAtivos) {
+      console.log('[Banco] Usuário já logado — iniciando listeners automaticamente');
+      setTimeout(startFirestoreListeners, 100);
+    }
 
   } catch (err) {
     console.warn('[Banco] Erro:', err.message || err);
