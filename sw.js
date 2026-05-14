@@ -1,5 +1,5 @@
-// sw.js — SYSACK Service Worker v4
-// Corrigido: network-first para JS/CSS após modularização
+// sw.js — SYSACK Service Worker v5
+// Fix: req.clone() em todos os fetch + Firebase Messaging isolado
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
@@ -51,12 +51,11 @@ self.addEventListener('notificationclick', event => {
 });
 
 // ── Cache ─────────────────────────────────────────────────────────
-// v4: mudou para network-first em JS/CSS para suportar modularização.
-// Cache-first apenas para imagens e fontes (raramente mudam).
-
-const CACHE_VER    = 'sysack-v4';   // ← incrementado para forçar limpeza do v3
+const CACHE_VER    = 'sysack-v5';
 const STATIC_CACHE = CACHE_VER + '-static';
 
+// URLs que NUNCA devem ser interceptadas pelo SW
+// gstatic.com cobre o firebase-messaging-compat.js — evita conflito de Response.clone()
 const NO_CACHE_PATTERNS = [
   /firestore\.googleapis\.com/,
   /identitytoolkit/,
@@ -70,13 +69,14 @@ const NO_CACHE_PATTERNS = [
   /firebaseio\.com/,
 ];
 
-// Apenas HTML e manifest no precache — JS/CSS são buscados da rede
 const PRECACHE_URLS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(STATIC_CACHE)
-      .then(cache => Promise.allSettled(PRECACHE_URLS.map(u => cache.add(u).catch(() => {}))))
+      .then(cache => Promise.allSettled(
+        PRECACHE_URLS.map(u => cache.add(u).catch(() => {}))
+      ))
       .then(() => self.skipWaiting())
   );
 });
@@ -97,60 +97,64 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
+  const req = event.request;
 
-  const url = event.request.url;
+  // Só intercepta GET
+  if (req.method !== 'GET') return;
 
+  const url = req.url;
+
+  // Nunca intercepta extensões Chrome
   if (url.startsWith('chrome-extension://')) return;
+
+  // Nunca intercepta requisições externas (fora da origem)
   if (!url.startsWith(self.location.origin)) return;
+
+  // Nunca intercepta padrões Firebase / Google
   if (NO_CACHE_PATTERNS.some(p => p.test(url))) return;
 
-  // HTML: network-first, fallback para cache se offline
+  // ── HTML: network-first, fallback cache se offline ──
   if (url.endsWith('.html') || url.endsWith('/') || url === self.location.origin) {
     event.respondWith(
-      fetch(event.request)
-        .then(r => {
-          if (r.ok) {
-            const clone = r.clone();
-            caches.open(STATIC_CACHE).then(c => c.put(event.request, clone));
+      fetch(req.clone())
+        .then(res => {
+          if (res && res.ok) {
+            caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
           }
-          return r;
+          return res;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(req))
     );
     return;
   }
 
-  // JS e CSS: network-first (crítico após modularização — nunca servir do cache sem tentar rede)
+  // ── JS e CSS: network-first (crítico após modularização) ──
   if (/\.(js|css)(\?.*)?$/.test(url)) {
     event.respondWith(
-      fetch(event.request)
-        .then(r => {
-          if (r.ok) {
-            const clone = r.clone();
-            caches.open(STATIC_CACHE).then(c => c.put(event.request, clone));
+      fetch(req.clone())
+        .then(res => {
+          if (res && res.ok) {
+            caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
           }
-          return r;
+          return res;
         })
-        .catch(() => {
-          // Offline: tenta servir do cache como último recurso
-          return caches.match(event.request);
-        })
+        .catch(() => caches.match(req))
     );
     return;
   }
 
-  // Imagens e fontes locais: cache-first (raramente mudam)
+  // ── Imagens e fontes locais: cache-first ──
   if (/\.(png|jpg|jpeg|svg|ico|woff2?)(\?.*)?$/.test(url)) {
     event.respondWith(
-      caches.match(event.request)
-        .then(cached => cached || fetch(event.request).then(r => {
-          if (r.ok) {
-            const clone = r.clone();
-            caches.open(STATIC_CACHE).then(c => c.put(event.request, clone));
+      caches.match(req).then(cached => {
+        if (cached) return cached;
+        return fetch(req.clone()).then(res => {
+          if (res && res.ok) {
+            caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
           }
-          return r;
-        }))
+          return res;
+        });
+      })
     );
     return;
   }
