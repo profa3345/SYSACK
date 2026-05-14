@@ -713,142 +713,46 @@ function startFirestoreListeners() {
   const snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
   function norm(d) {
-    // ── hostname: múltiplos nomes possíveis vindos do discovery/SNMP ──
-    const hostname = d.hostname || d.host || d.name || d.sysName || d.nome || '';
-
-    // ── desc: descrição legível do equipamento ─────────────────────
-    const desc = d.desc || d.descricao || d.description
-      || hostname
-      || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0, 80) : '')
-      || '';
-
-    // ── tipo: normaliza variações de capitalização e nomes ─────────
-    const tipoRaw = (d.tipo || d.type || d.deviceType || '').toLowerCase().trim();
-    const tipoNorm = {
-      'switch': 'switch', 'switches': 'switch',
-      'router': 'router', 'roteador': 'router', 'roteadores': 'router',
-      'firewall': 'firewall',
-      'ap': 'ap', 'access point': 'ap', 'accesspoint': 'ap', 'wireless': 'ap',
-      'server': 'servidor', 'servidor': 'servidor', 'server-linux': 'servidor',
-      'workstation': 'workstation', 'desktop': 'workstation', 'computador': 'workstation',
-      'notebook': 'notebook', 'laptop': 'notebook',
-      'printer': 'impressora', 'impressora': 'impressora',
-      'ups': 'nobreak', 'nobreak': 'nobreak',
-      'camera': 'camera', 'dvr': 'dvr',
-    }[tipoRaw] || tipoRaw || 'workstation';
-
-    // ── marca e modelo: vindos do sysDescr ou campos diretos ───────
-    let marca = d.marca || d.brand || d.manufacturer || d.vendor || '';
-    let modelo = d.modelo || d.model || d.deviceModel || '';
-    if ((!marca || !modelo) && d.sysDescr) {
-      // Tenta extrair marca do sysDescr (ex: "Cisco IOS..." → "Cisco")
-      const desc1 = d.sysDescr.split('\n')[0];
-      if (!marca) {
-        const marcaMatch = desc1.match(/^(Cisco|HP|Huawei|Juniper|MikroTik|Extreme|Dell|Aruba|Ubiquiti|D-Link|TP-Link|Fortinet|Palo Alto|pfSense|Mikrotik)/i);
-        if (marcaMatch) marca = marcaMatch[1];
-      }
-      if (!modelo) {
-        const modeloMatch = desc1.match(/(?:IOS|RouterOS|EOS|JunOS).*?(\S+Series|\S+\d+\S*)/i);
-        if (modeloMatch) modelo = modeloMatch[1];
-      }
-    }
-
-    // ── local: localidade física (sysLocation do SNMP ou campo salvo) ─
-    const local = d.local || d.location || d.sysLocation || d.localidade || d.sala || '';
-
-    // ── ip: múltiplas possibilidades ───────────────────────────────
-    const ip = d.ip || d.ipAddress || d.ip_address || d.endereco_ip || '';
-
-    // ── status: normaliza para os valores que o frontend espera ────
-    const statusRaw = (d.status || '').toLowerCase();
-    const status = d.reachable === true  ? (statusRaw || 'online')
-                 : d.reachable === false ? 'offline'
-                 : statusRaw || 'offline';
-
-    // ── portas ─────────────────────────────────────────────────────
-    const totalPortas = d.totalPortas || d.portasTotal || d.numPorts || d.ifNumber || 0;
-    const portasUso   = d.portasUso   || d.portsUp    || 0;
-
     return {
       ...d,
-      // Campos normalizados — sobrescrevem os originais com nomes canônicos
-      hostname,
-      desc,
-      tipo:       tipoNorm,
-      marca,
-      modelo,
-      local,
-      ip,
-      status,
-      totalPortas,
-      portasUso,
-      // Campos que o frontend usa diretamente
-      nome:       d.nome  || hostname,
-      pat:        d.pat   || d.patrimonio || '',
-      area:       d.area  || d.lotacao    || '',
-      resp:       d.resp  || d.responsavel || '',
-      uptime:     d.uptime || d.sysUpTime  || null,
-      firmware:   d.firmware || d.version  || d.softwareVersion || null,
-      fonte:      d.fonte || 'Discovery',
+      // pat: NUNCA usa IP como fallback — IP não é número de patrimônio
+      // Máquinas sem PAT vinculado ficam com pat vazio e exibem indicador visual na tabela
+      pat:    d.pat    || d.patrimonio || '',
+      // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
+      desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
+      tipo:   d.tipo   || 'workstation',
+      area:   d.area   || '',
+      resp:   d.resp   || d.responsavel || '',
+      status: d.status || (d.reachable ? 'ativo' : 'offline'),
+      fonte:  d.fonte  || 'Discovery',
     };
   }
 
   // ativos
   db.collection('ativos').onSnapshot(function(snap) {
     STATE._assetsDisc = snap2arr(snap).map(norm);
-    // Re-merge switches: inclui dispositivos de rede que estejam em 'ativos'
-    const TIPOS_REDE = new Set(['switch','router','roteador','firewall','ap','access point']);
-    const swDeAtivos = STATE._assetsDisc.filter(a =>
-      TIPOS_REDE.has((a.tipo || '').toLowerCase())
-    );
-    if (STATE._assetsSw) {
-      STATE.switches = [...STATE._assetsSw, ...swDeAtivos.filter(a =>
-        !STATE._assetsSw.some(s => s.ip === a.ip || s.id === a.id)
-      )];
-    }
-    STATE.ativos = STATE._assetsDisc.concat(STATE._assetsSw||[]);
+    STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
-    console.log('[Banco] ativos:', STATE._assetsDisc.length, '| switches de rede em ativos:', swDeAtivos.length);
+    console.log('[Banco] ativos:', STATE._assetsDisc.length);
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
-    // Inclui também switches/roteadores/firewalls que foram salvos em 'ativos'
-    // pelo discovery (problema de mapeamento de coleção)
-    const TIPOS_REDE = new Set(['switch','router','roteador','firewall','ap','access point']);
-    const swDeAtivos = (STATE._assetsDisc || []).filter(a =>
-      TIPOS_REDE.has((a.tipo || '').toLowerCase())
-    );
-    STATE.switches = [...STATE._assetsSw, ...swDeAtivos.filter(a =>
-      !STATE._assetsSw.some(s => s.ip === a.ip || s.id === a.id)
-    )];
+    STATE.switches  = STATE._assetsSw;
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
-    console.log('[Banco] switches:', STATE.switches.length, '(coleção switches:', STATE._assetsSw.length, '+ ativos tipo rede:', swDeAtivos.length, ')');
+    console.log('[Banco] switches:', STATE._assetsSw.length);
   }, function(e){ console.error('[Banco] switches erro:', e.message); });
 
   // empregados
   db.collection('empregados').onSnapshot(function(snap) {
     STATE.empregados = snap2arr(snap);
-    STATE.empregadosSyncAt = STATE.empregados[0]?.syncAt ? new Date(STATE.empregados[0].syncAt) : null;
     nbUpdate('nb-emp', STATE.empregados.length);
-    nbUpdate('nb-ausentes', STATE.empregados.filter(e => e.emAusencia).length);
-    if (isPageActive('empregados')) {
-      renderEmpregados();
-      if (_empTabAtual === 'organograma') renderOrganograma();
-    }
     console.log('[Banco] empregados:', STATE.empregados.length);
   }, function(e){ console.error('[Banco] empregados erro:', e.message); });
-
-  // organograma_unidades (estrutura hierárquica do AD)
-  db.collection('organograma_unidades').onSnapshot(function(snap) {
-    STATE.organograma_unidades = snap2arr(snap);
-    if (isPageActive('empregados') && _empTabAtual === 'organograma') renderOrganograma();
-    console.log('[Banco] organograma_unidades:', STATE.organograma_unidades.length);
-  }, function(e){ console.error('[Banco] organograma_unidades erro:', e.message); });
 
   // chamados
   db.collection('chamados').onSnapshot(function(snap) {
@@ -2638,10 +2542,26 @@ function populateSelects() {
 // ============================================================
 // MODAL
 // ============================================================
+function popularAreaResponsavel() {
+  const sel = document.getElementById('ativo-area');
+  if (!sel) return;
+  const empregados = STATE.empregados || [];
+  const lotacoes = [...new Set(
+    empregados.map(e => e.lotacao || e.setor || '').filter(l => l && l.trim())
+  )].sort();
+  if (lotacoes.length === 0) return;
+  const valorAtual = sel.value;
+  sel.innerHTML = '<option value="">— Selecione a área —</option>' +
+    lotacoes.map(l => '<option value="' + l + '"' + (l === valorAtual ? ' selected' : '') + '>' + l + '</option>').join('');
+}
+
 function openModal(id) {
   populateSelects();
   const el = document.getElementById(id);
   if (el) el.classList.add('open');
+  if (id === 'modal-novo-ativo') {
+    popularAreaResponsavel();
+  }
   if (id === 'modal-novo-chamado') {
     const now = new Date();
     const iso = now.toISOString().slice(0,16);
@@ -8863,47 +8783,21 @@ function renderSelfService() {
 // EMPREGADOS & AUSÊNCIAS
 // ════════════════════════════════════════════════════════════
 
-// ── Controle de aba ────────────────────────────────────────────
-let _empTabAtual = 'tabela';
-
-function empSetTab(tab) {
-  _empTabAtual = tab;
-  const tabs   = ['tabela', 'organograma'];
-  tabs.forEach(t => {
-    const btn = document.getElementById('emp-tab-' + t);
-    const pan = document.getElementById('emp-panel-' + t);
-    const ativo = t === tab;
-    if (btn) {
-      btn.style.fontWeight   = ativo ? '700' : '500';
-      btn.style.color        = ativo ? 'var(--accent)' : 'var(--g500)';
-      btn.style.borderBottom = ativo ? '2px solid var(--accent)' : '2px solid transparent';
-    }
-    if (pan) pan.style.display = ativo ? '' : 'none';
-  });
-  if (tab === 'tabela')      renderEmpregados();
-  if (tab === 'organograma') renderOrganograma();
-}
-
-function empRefresh() {
-  if (_empTabAtual === 'tabela')      renderEmpregados();
-  if (_empTabAtual === 'organograma') renderOrganograma();
-}
-
 function renderEmpregados() {
-  const tbody = document.getElementById('emp-body');
+  const tbody    = document.getElementById('emp-body');
   if (!tbody) return;
 
-  const q       = (document.getElementById('emp-search')?.value     || '').toLowerCase();
+  const q      = (document.getElementById('emp-search')?.value || '').toLowerCase();
   const fStatus = document.getElementById('emp-filter-status')?.value || '';
   const fSetor  = document.getElementById('emp-filter-setor')?.value  || '';
 
   const empregados = STATE.empregados || [];
 
-  // Popula filtro de lotação com valores únicos do AD
+  // Popula filtro de setor
   const setorSel = document.getElementById('emp-filter-setor');
   if (setorSel && setorSel.options.length <= 1) {
-    const lotacoes = [...new Set(empregados.map(e => e.lotacao || e.setor).filter(Boolean))].sort();
-    lotacoes.forEach(s => {
+    const setores = [...new Set(empregados.map(e => e.setor).filter(Boolean))].sort();
+    setores.forEach(s => {
       const opt = document.createElement('option');
       opt.value = s; opt.textContent = s;
       setorSel.appendChild(opt);
@@ -8911,13 +8805,12 @@ function renderEmpregados() {
   }
 
   // Stats
-  const inativos  = empregados.filter(e => !e.adAtivo);
-  const ausentes  = empregados.filter(e => e.emAusencia);
-  sv('emp-total',       empregados.length);
-  sv('emp-ativos',      empregados.filter(e => e.ativo && !e.emAusencia).length);
-  sv('emp-ausentes',    ausentes.length);
-  sv('emp-suprimidos',  empregados.filter(e => e.suprimirAlertas).length);
-  sv('emp-inativos-ad', inativos.length);
+  const ausentes    = empregados.filter(e => e.emAusencia);
+  const suprimidos  = empregados.filter(e => e.suprimirAlertas);
+  sv('emp-total',      empregados.length);
+  sv('emp-ativos',     empregados.filter(e => e.ativo && !e.emAusencia).length);
+  sv('emp-ausentes',   ausentes.length);
+  sv('emp-suprimidos', suprimidos.length);
   nbUpdate('nb-ausentes', ausentes.length);
 
   // Sync status
@@ -8926,243 +8819,43 @@ function renderEmpregados() {
     syncEl.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:var(--success)"></span> Sync: ' + fmtDatetime(STATE.empregadosSyncAt);
   }
 
-  // Filtros
+  // Filtro
   let lista = empregados;
-  if (q) lista = lista.filter(e =>
-    (e.nome   || '').toLowerCase().includes(q) ||
-    (e.mat    || '').includes(q)               ||
-    (e.login  || '').toLowerCase().includes(q) ||
-    (e.email  || '').toLowerCase().includes(q)
-  );
-  if (fStatus === 'ativo')      lista = lista.filter(e => !e.emAusencia && e.adAtivo !== false);
-  if (fStatus === 'ausente')    lista = lista.filter(e => e.emAusencia);
-  if (fStatus === 'inativo-ad') lista = lista.filter(e => e.adAtivo === false || !e.adAtivo);
-  if (fSetor) lista = lista.filter(e => (e.lotacao || e.setor) === fSetor);
+  if (q)        lista = lista.filter(e => e.nome?.toLowerCase().includes(q) || e.mat?.includes(q));
+  if (fStatus === 'ativo')   lista = lista.filter(e => !e.emAusencia && e.ativo);
+  if (fStatus === 'ausente') lista = lista.filter(e => e.emAusencia);
+  if (fSetor)   lista = lista.filter(e => e.setor === fSetor);
 
   if (!lista.length) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--g400)">
-      ${empregados.length ? 'Nenhum empregado encontrado com esses filtros.' : 'Aguardando sincronização com o Active Directory...'}
-    </td></tr>`;
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">' +
+      (empregados.length ? 'Nenhum empregado encontrado com esses filtros.' : 'Instale o SYSACK Agent no servidor para sincronizar os empregados.') +
+      '</td></tr>';
     return;
   }
 
-  // Badge de status AD
-  function statusADbadge(e) {
-    const s = e.statusAD || (e.adAtivo !== false ? 'ativo' : 'desativado');
-    const map = {
-      'ativo':          '<span class="badge badge-success">Ativo</span>',
-      'desativado':     '<span class="badge" style="background:#FEE2E2;color:#991B1B">Desativado</span>',
-      'bloqueado':      '<span class="badge badge-warning">Bloqueado</span>',
-      'senha_expirada': '<span class="badge" style="background:#FEF3C7;color:#92400E">Senha exp.</span>',
-      'expirado':       '<span class="badge" style="background:#F3E8FF;color:#6B21A8">Expirado</span>',
-    };
-    return map[s] || `<span class="badge">${escapeHtml(s)}</span>`;
-  }
-
   tbody.innerHTML = lista.map(e => {
-    const ausLabel  = e.ausencia || (e.emAusencia ? (e.status || 'Em ausência') : '');
-    const periodo   = e.dataInicioAusencia
-      ? fmtDate(e.dataInicioAusencia) + ' → ' + (e.dataFimAusencia ? fmtDate(e.dataFimAusencia) : 'Indef.')
+    const ausenciaLabel = e.ausencia || (e.emAusencia ? e.status : '');
+    const periodoLabel  = e.dataInicioAusencia
+      ? fmtDate(e.dataInicioAusencia) + ' → ' + (e.dataFimAusencia ? fmtDate(e.dataFimAusencia) : 'Indefinido')
       : '—';
-    const tel = e.telefone || e.ramal || '—';
-
     return '<tr>' +
-      '<td class="td-mono" style="font-size:11px">'    + escapeHtml(e.mat   || '—') + '</td>' +
-      '<td style="font-weight:600;font-size:13px">'    + escapeHtml(e.nome  || '—') + '</td>' +
-      '<td class="td-mono" style="font-size:11px;color:var(--g500)">' + escapeHtml(e.login || '—') + '</td>' +
-      '<td style="font-size:12px">'                    + escapeHtml(e.lotacao || e.setor || '—') + '</td>' +
-      '<td style="font-size:12px;color:var(--g500)">'  + escapeHtml(e.local  || '—') + '</td>' +
-      '<td class="td-mono" style="font-size:11px">'    + escapeHtml(tel) + '</td>' +
-      '<td class="td-mono" style="font-size:11px">'    + escapeHtml(e.ramal  || '—') + '</td>' +
-      '<td>' + statusADbadge(e) + (e.emAusencia ? ' <span class="badge badge-warning" style="font-size:10px">Ausente</span>' : '') + '</td>' +
-      '<td>' + (ausLabel ? `<span class="tag">${escapeHtml(ausLabel)}</span> <span style="font-size:10px;color:var(--g400)">${periodo}</span>` : '—') + '</td>' +
+      '<td class="td-mono" style="font-size:12px">' + e.mat + '</td>' +
+      '<td style="font-weight:600;font-size:13px">' + e.nome + '</td>' +
+      '<td style="font-size:12px">' + (e.setor||'—') + '</td>' +
+      '<td style="font-size:12px;color:var(--g500)">' + (e.cargo||'—') + '</td>' +
+      '<td>' + (e.emAusencia
+        ? '<span class="badge badge-warning">Em Ausência</span>'
+        : e.ativo
+          ? '<span class="badge badge-success">Ativo</span>'
+          : '<span class="badge">Inativo</span>') + '</td>' +
+      '<td>' + (ausenciaLabel ? '<span class="tag">' + ausenciaLabel + '</span>' : '—') + '</td>' +
+      '<td style="font-size:11px;color:var(--g500)">' + periodoLabel + '</td>' +
       '<td>' + (e.suprimirAlertas
         ? '<span style="font-size:11px;color:var(--warning);font-weight:600">🔕 Suprimidos</span>'
         : '<span style="font-size:11px;color:var(--success)">🔔 Ativos</span>') + '</td>' +
       '</tr>';
   }).join('');
 }
-
-// ── Organograma hierárquico ────────────────────────────────────
-function renderOrganograma() {
-  const container = document.getElementById('org-tree-container');
-  if (!container) return;
-
-  const empregados   = STATE.empregados   || [];
-  const unidades     = STATE.organograma_unidades || [];
-  const q            = (document.getElementById('org-search')?.value    || '').toLowerCase();
-  const fDir         = document.getElementById('org-filter-dir')?.value  || '';
-  const showInativos = document.getElementById('org-show-inativos')?.checked || false;
-
-  // Popula filtro de diretoria
-  const dirSel = document.getElementById('org-filter-dir');
-  if (dirSel && dirSel.options.length <= 1) {
-    const dirs = [...new Set(unidades.map(u => u.diretoria).filter(Boolean))].sort();
-    dirs.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d; opt.textContent = d;
-      dirSel.appendChild(opt);
-    });
-  }
-
-  // Filtra empregados ativos (por padrão exclui contas inativas no AD)
-  let emps = empregados;
-  if (!showInativos) emps = emps.filter(e => e.adAtivo !== false);
-  if (q) emps = emps.filter(e =>
-    (e.nome   || '').toLowerCase().includes(q) ||
-    (e.lotacao|| '').toLowerCase().includes(q) ||
-    (e.local  || '').toLowerCase().includes(q)
-  );
-
-  // Indexa empregados por lotação (sigla da unidade)
-  const empsByLotacao = new Map();
-  for (const e of emps) {
-    const sigla = (e.lotacao || e.setor || '').toUpperCase();
-    if (!sigla) continue;
-    if (!empsByLotacao.has(sigla)) empsByLotacao.set(sigla, []);
-    empsByLotacao.get(sigla).push(e);
-  }
-
-  // Empregados sem unidade mapeada
-  const semUnidade = emps.filter(e => {
-    const sigla = (e.lotacao || e.setor || '').toUpperCase();
-    return !sigla || !unidades.find(u => u.sigla === sigla);
-  });
-
-  // Agrupa unidades por diretoria
-  let unidadesFiltradas = unidades;
-  if (fDir) unidadesFiltradas = unidades.filter(u => u.diretoria === fDir);
-  if (q)    unidadesFiltradas = unidades.filter(u =>
-    (u.nome    || '').toLowerCase().includes(q) ||
-    (u.sigla   || '').toLowerCase().includes(q) ||
-    (u.diretoria||'').toLowerCase().includes(q) ||
-    empsByLotacao.has((u.sigla||'').toUpperCase())
-  );
-
-  const porDir = new Map();
-  for (const u of unidadesFiltradas) {
-    const dir = u.diretoria || 'Sem Diretoria';
-    if (!porDir.has(dir)) porDir.set(dir, []);
-    porDir.get(dir).push(u);
-  }
-
-  // Cores por diretoria
-  const COR_DIR = {
-    'PRESIDÊNCIA':                          { bg:'#EFF6FF', border:'#BFDBFE', txt:'#1E40AF' },
-    'DIRETORIA OPERACIONAL':                { bg:'#F0FDF4', border:'#BBF7D0', txt:'#166534' },
-    'DIRETORIA DE ENGENHARIA E MEIO AMBIENTE':{ bg:'#FFFBEB', border:'#FDE68A', txt:'#92400E' },
-    'DIRETORIA ADMINISTRATIVA E COMERCIAL': { bg:'#F5F3FF', border:'#DDD6FE', txt:'#5B21B6' },
-  };
-
-  function corDir(dir) {
-    return COR_DIR[dir] || { bg:'#F8FAFC', border:'#E2E8F0', txt:'#374151' };
-  }
-
-  function cardPessoa(e) {
-    const statusCor = e.emAusencia ? '#F59E0B' : (e.adAtivo !== false ? '#10B981' : '#EF4444');
-    const initials  = (e.nome || '?').split(' ').slice(0,2).map(p => p[0]).join('').toUpperCase();
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border:1px solid var(--g200);border-left:3px solid ${statusCor};border-radius:8px;min-width:220px;max-width:280px">
-      <div style="width:32px;height:32px;border-radius:50%;background:${statusCor}22;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:${statusCor};flex-shrink:0">${escapeHtml(initials)}</div>
-      <div style="min-width:0">
-        <div style="font-weight:600;font-size:12px;color:var(--g900);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(e.nome||'—')}</div>
-        <div style="font-size:10px;color:var(--g400)">${escapeHtml(e.login||'')}${e.ramal?' · ☎ '+escapeHtml(e.ramal):''}</div>
-        ${e.emAusencia ? '<div style="font-size:10px;color:#F59E0B;font-weight:600">Em ausência</div>' : ''}
-      </div>
-    </div>`;
-  }
-
-  if (porDir.size === 0 && empsByLotacao.size === 0) {
-    container.innerHTML = '<div style="text-align:center;padding:48px;color:var(--g400)">Nenhuma unidade encontrada. Sincronize o agente para carregar o organograma.</div>';
-    return;
-  }
-
-  let html = '';
-
-  for (const [dir, units] of [...porDir.entries()].sort()) {
-    const cor      = corDir(dir);
-    const totalDir = units.reduce((s, u) => s + (empsByLotacao.get((u.sigla||'').toUpperCase())?.length || 0), 0);
-
-    html += `<div style="border:1px solid ${cor.border};border-radius:12px;overflow:hidden;margin-bottom:4px">
-      <div style="background:${cor.bg};padding:14px 20px;display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="orgToggleDir(this)">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:16px">🏛️</span>
-          <div>
-            <div style="font-weight:800;font-size:14px;color:${cor.txt}">${escapeHtml(dir)}</div>
-            <div style="font-size:11px;color:${cor.txt}88">${units.length} unidade(s) · ${totalDir} empregado(s)</div>
-          </div>
-        </div>
-        <span style="color:${cor.txt};font-size:18px;transition:transform .2s" class="org-arrow">▾</span>
-      </div>
-      <div class="org-dir-body" style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">`;
-
-    for (const u of units.sort((a,b) => (a.nome||'').localeCompare(b.nome||''))) {
-      const sigla    = (u.sigla || '').toUpperCase();
-      const pessoas  = (empsByLotacao.get(sigla) || []).sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
-      const nPessoas = pessoas.length;
-      const nAusentes = pessoas.filter(p => p.emAusencia).length;
-
-      html += `<div style="border:1px solid var(--g200);border-radius:10px;overflow:hidden">
-        <div style="background:var(--g50);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="orgToggleUnit(this)">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-family:monospace;font-size:11px;font-weight:700;background:${cor.bg};color:${cor.txt};padding:2px 8px;border-radius:20px;border:1px solid ${cor.border}">${escapeHtml(u.sigla||'')}</span>
-            <div>
-              <div style="font-weight:600;font-size:13px;color:var(--g800)">${escapeHtml(u.nome||'')}</div>
-              <div style="font-size:11px;color:var(--g400)">${escapeHtml(u.cargo_tipo||'')} · ${nPessoas} empregado(s)${nAusentes ? ' · <span style="color:#F59E0B">'+nAusentes+' em ausência</span>' : ''}</div>
-            </div>
-          </div>
-          <span style="color:var(--g400);font-size:16px;transition:transform .2s" class="org-arrow">▾</span>
-        </div>
-        <div class="org-unit-body" style="padding:12px 16px">
-          ${nPessoas === 0
-            ? '<div style="font-size:12px;color:var(--g300);padding:8px 0">Nenhum empregado vinculado a esta unidade</div>'
-            : `<div style="display:flex;flex-wrap:wrap;gap:8px">${pessoas.map(cardPessoa).join('')}</div>`
-          }
-        </div>
-      </div>`;
-    }
-
-    html += '</div></div>';
-  }
-
-  // Empregados sem unidade mapeada
-  if (semUnidade.length > 0 && !fDir && !q) {
-    html += `<div style="border:1px solid var(--g200);border-radius:12px;overflow:hidden;opacity:.7">
-      <div style="background:var(--g50);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="orgToggleDir(this)">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:16px">❓</span>
-          <div>
-            <div style="font-weight:700;font-size:13px;color:var(--g600)">Sem unidade mapeada</div>
-            <div style="font-size:11px;color:var(--g400)">${semUnidade.length} empregado(s) com lotação não encontrada no organograma</div>
-          </div>
-        </div>
-        <span style="color:var(--g400);font-size:18px" class="org-arrow">▾</span>
-      </div>
-      <div class="org-dir-body" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:8px">
-        ${semUnidade.slice(0,50).map(cardPessoa).join('')}
-        ${semUnidade.length > 50 ? `<div style="font-size:12px;color:var(--g400);padding:8px">...e mais ${semUnidade.length-50}</div>` : ''}
-      </div>
-    </div>`;
-  }
-
-  container.innerHTML = html;
-}
-
-// Toggle colapso de diretoria / unidade
-function orgToggleDir(header) {
-  const body  = header.nextElementSibling;
-  const arrow = header.querySelector('.org-arrow');
-  const open  = body.style.display !== 'none';
-  body.style.display  = open ? 'none' : '';
-  if (arrow) arrow.style.transform = open ? 'rotate(-90deg)' : '';
-}
-function orgToggleUnit(header) {
-  const body  = header.nextElementSibling;
-  const arrow = header.querySelector('.org-arrow');
-  const open  = body.style.display !== 'none';
-  body.style.display  = open ? 'none' : '';
-  if (arrow) arrow.style.transform = open ? 'rotate(-90deg)' : '';
-}
-
 
 // Listener Banco para empregados
 function listenEmpregados() {
