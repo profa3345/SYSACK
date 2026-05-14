@@ -1,4 +1,4 @@
-// sw.js — SYSACK Service Worker v2
+// sw.js — SYSACK Service Worker v3
 // Offline cache + FCM background messages + auto-update
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
@@ -15,36 +15,35 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// FCM — background messages
+// ── FCM: mensagens em background ─────────────────────────────────
 messaging.onBackgroundMessage(payload => {
   const { notification, data } = payload;
   const tipo = data?.tipo || 'notification';
 
-  // Checkin/localização silenciosos — repassa para aba aberta
-  if (['checkin_request','location_request'].includes(tipo)) {
-    self.clients.matchAll({ type:'window' }).then(clients =>
+  // Comandos silenciosos: repassa para a aba aberta sem exibir notificação
+  if (['checkin_request', 'location_request'].includes(tipo)) {
+    self.clients.matchAll({ type: 'window' }).then(clients =>
       clients.forEach(c => c.postMessage({ type: 'FCM_CMD', tipo, data }))
     );
-    return; // sem notificação visual
+    return;
   }
 
-  // Notificação visual
   self.registration.showNotification(notification?.title || 'SYSACK', {
-    body:    notification?.body || data?.mensagem || '',
-    icon:    '/icon-192.png',
-    badge:   '/icon-192.png',
-    tag:     tipo,
+    body:     notification?.body || data?.mensagem || '',
+    icon:     '/icon-192.png',
+    badge:    '/icon-192.png',
+    tag:      tipo,
     renotify: true,
-    data:    { url: data?.url || '/', tipo },
+    data:     { url: data?.url || '/', tipo },
   });
 });
 
-// Clique na notificação
+// ── Clique na notificação ─────────────────────────────────────────
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const url = event.notification.data?.url || '/';
   event.waitUntil(
-    self.clients.matchAll({ type:'window', includeUncontrolled:true }).then(clients => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       const ex = clients.find(c => c.url.includes(self.location.origin));
       if (ex) { ex.focus(); ex.navigate(url); }
       else self.clients.openWindow(url);
@@ -52,74 +51,84 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
+// ── Cache ─────────────────────────────────────────────────────────
+// CORREÇÃO: havia dois blocos install/activate/fetch conflitantes.
+// Unificados aqui em um único conjunto de listeners com lógica combinada.
 
-// Cache de recursos estáticos (sem fontes externas para evitar CSP)
-const CACHE_NAME = 'sysack-v3';
-const STATIC_CACHE = ['/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const CACHE_VER    = 'sysack-v3';
+const STATIC_CACHE = CACHE_VER + '-static';
+
+// URLs externas que nunca devem ser interceptadas pelo SW
+const NO_CACHE_PATTERNS = [
+  /firestore\.googleapis\.com/,
+  /identitytoolkit/,
+  /cloudfunctions\.net/,
+  /fcm\.googleapis/,
+  /firebase-messaging/,
+  /recaptcha/,
+  /gstatic\.com/,
+  /fonts\./,
+  /googleapis\.com/,
+  /firebaseio\.com/,
+];
+
+const PRECACHE_URLS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', event => {
-  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_CACHE).catch(() => {}))
+    caches.open(STATIC_CACHE)
+      .then(cache => Promise.allSettled(PRECACHE_URLS.map(u => cache.add(u).catch(() => {}))))
+      .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
-});
-
-self.addEventListener('fetch', event => {
-  const url = event.request.url;
-  // Não intercepta Firebase, APIs externas ou fontes (deixa o browser decidir)
-  if (url.includes('googleapis.com') || url.includes('firebaseio.com') ||
-      url.includes('cloudfunctions.net') || url.includes('gstatic.com') ||
-      url.includes('fonts.') || url.includes('recaptcha') ||
-      url.includes('identitytoolkit') || !url.startsWith(self.location.origin)) {
-    return; // passa direto sem cache
-  }
-  // Cache first para recursos estáticos próprios
-  event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request))
-  );
-});
-
-// Mensagens do app
-self.addEventListener('message', event => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
-});
-
-// Cache offline
-const VER    = 'sysack-v2.1-fcm';
-const STATIC = VER + '-static';
-const NO_CACHE = [/firestore\.googleapis\.com/,/identitytoolkit/,/cloudfunctions/,/fcm\.googleapis/,/firebase-messaging/,/recaptcha/];
-
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(STATIC)
-      .then(c => Promise.allSettled(['/','/index.html','/manifest.json'].map(u => c.add(u).catch(()=>{}))))
-      .then(() => self.skipWaiting())
-  );
-});
-
-self.addEventListener('activate', e => {
-  e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k=>k.startsWith('sysack-')&&!k.startsWith(VER)).map(k=>caches.delete(k))))
+      .then(keys => Promise.all(
+        keys
+          .filter(k => k.startsWith('sysack-') && k !== STATIC_CACHE)
+          .map(k => caches.delete(k))
+      ))
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  const url = e.request.url;
-  if (NO_CACHE.some(p=>p.test(url)) || url.startsWith('chrome-extension://')) return;
-  if (url.endsWith('.html') || url.endsWith('/')) {
-    e.respondWith(fetch(e.request).then(r=>{if(r.ok){caches.open(STATIC).then(c=>c.put(e.request,r.clone()));}return r;}).catch(()=>caches.match(e.request)));
-  } else if (/\.(js|css|png|jpg|svg|ico|woff2?)$/.test(url)) {
-    e.respondWith(caches.match(e.request).then(c=>c||fetch(e.request)));
+self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+
+  const url = event.request.url;
+
+  // Nunca intercepta extensões Chrome ou padrões externos
+  if (url.startsWith('chrome-extension://')) return;
+  if (!url.startsWith(self.location.origin)) return;
+  if (NO_CACHE_PATTERNS.some(p => p.test(url))) return;
+
+  // Páginas HTML: network-first (sempre tenta buscar versão atualizada)
+  if (url.endsWith('.html') || url.endsWith('/') || url === self.location.origin) {
+    event.respondWith(
+      fetch(event.request)
+        .then(r => {
+          if (r.ok) {
+            caches.open(STATIC_CACHE).then(c => c.put(event.request, r.clone()));
+          }
+          return r;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
   }
+
+  // Assets estáticos (JS, CSS, imagens, fontes): cache-first
+  if (/\.(js|css|png|jpg|jpeg|svg|ico|woff2?)(\?.*)?$/.test(url)) {
+    event.respondWith(
+      caches.match(event.request).then(cached => cached || fetch(event.request))
+    );
+    return;
+  }
+});
+
+// ── Mensagens do app ──────────────────────────────────────────────
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });

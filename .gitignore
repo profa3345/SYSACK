@@ -1,5 +1,39 @@
+# Dependências
 node_modules/
+
+# Variáveis de ambiente e segredos — NUNCA versionar
 .env
 .env.local
+.env.*.local
+
+# !! CRÍTICO: chave privada da Service Account do Firebase
+# Nunca adicionar ao repositório
+sysack-service-account.json
+service-account.json
+*-service-account.json
+*.serviceAccount.json
+firebase-adminsdk-*.json
+
+# Logs do agente
+logs/
 *.log
+*.log.old
+
+# Configuração local (contém API keys)
+config.json
+
+# Artefatos de build
+dist/
+build/
+.firebase/
+
+# Sistema operacional
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
