@@ -715,26 +715,16 @@ function startFirestoreListeners() {
   function norm(d) {
     return {
       ...d,
-      pat:      d.pat      || d.patrimonio || '',
-      desc:     d.desc     || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      tipo:     d.tipo     || 'workstation',
-      area:     d.area     || d.local      || '',
-      resp:     d.resp     || d.responsavel || '',
-      status:   d.status   || (d.reachable ? 'ativo' : 'offline'),
-      fonte:    d.fonte    || 'Discovery',
-      // Campos de switch/roteador — nunca undefined
-      local:    d.local    || d.area       || d.localizacao || '',
-      marca:    d.marca    || d.fabricante || '',
-      modelo:   d.modelo   || d.model      || '',
-      hostname: d.hostname || d.nome       || '',
-      ip:       d.ip       || d.ipAddress  || '',
-      firmware: d.firmware || '',
-      uptime:   d.uptime   || '',
-      totalPortas: d.totalPortas || 0,
-      portasUso:   d.portasUso   || 0,
-      portasSfp:   d.portasSfp   || 0,
-      vlans:       d.vlans       || [],
-      historico:   d.historico   || [],
+      // pat: NUNCA usa IP como fallback — IP não é número de patrimônio
+      // Máquinas sem PAT vinculado ficam com pat vazio e exibem indicador visual na tabela
+      pat:    d.pat    || d.patrimonio || '',
+      // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
+      desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
+      tipo:   d.tipo   || 'workstation',
+      area:   d.area   || '',
+      resp:   d.resp   || d.responsavel || '',
+      status: d.status || (d.reachable ? 'ativo' : 'offline'),
+      fonte:  d.fonte  || 'Discovery',
     };
   }
 
@@ -1014,7 +1004,7 @@ function renderAtivos() {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Hostname</th><th style="font-size:11px">PAT (Auto)</th>' : ''}
       <th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
-      ${isComp ? '<th style="font-size:11px;width:180px">📊 Métricas</th>' : ''}
+      ${isComp ? '<th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
   }
@@ -1093,13 +1083,7 @@ function hostnameFromAtivo(a) {
 
 
 function updateAtivosTableForComputadores(isComputadores) {
-  const thead = document.querySelector('#page-ativos table thead tr');
-  if (!thead) return;
-  if (isComputadores) {
-    thead.innerHTML = '<th>Hostname</th><th>Patrimônio (Auto)</th><th>Patrimônio</th><th>Descrição</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th><th>Ações</th>';
-  } else {
-    thead.innerHTML = '<th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th><th>Ações</th>';
-  }
+  // Header gerenciado exclusivamente pelo renderAtivos() — não fazer nada aqui
 }
 
 // ============================================================
@@ -2753,8 +2737,9 @@ document.addEventListener('DOMContentLoaded', () => {
           'monitor': 3,
           'switch,router,ap,firewall,access point': 4,
           'servidor,server-linux': 5,
-          'printer,impressora': 6,
-          'ups,camera,rack,storage,appliance,outro': 7,
+          'outro,rack,storage,appliance,ups,camera': 6,
+          'impressora,printer': 6,
+          'software': 6,
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
@@ -8962,7 +8947,7 @@ function renderSwitches(){
       const pct=Math.round((s.portasUso/s.totalPortas)*100)||0;
       const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
       const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#0F172A';
-      return `<div class='sw-card'><div class='sw-card-header'><div style='width:36px;height:36px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>${ico}</div><div style='flex:1;min-width:0'><div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace'>${s.hostname}</div><div style='font-size:10.5px;color:var(--g400)'>${s.marca} ${s.modelo}</div></div>${swStatusHtml(s.status)}</div><div class='sw-card-body'><div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>${s.ip}</span></div><div class='mdm-card-field'><span class='lbl'>Local</span><span class='val'>${s.local}</span></div><div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</span></div><div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>${s.firmware||'—'}</span></div>${s.tipo!=='ap'&&s.tipo!=='firewall'?`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: ${s.portasUso}/${s.totalPortas}</span><span>${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:${pct}%;height:100%;border-radius:4px'></div></div></div>`:''}</div><div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>${renderPortMinimap(s)}</div></div><div class='sw-card-actions'><button class='mdm-action-btn mab-gray' data-swid='${s.id}' data-swact='gerenciar'>⚙️ Gerenciar</button><button class='mdm-action-btn mab-info' data-swid='${s.id}' data-swact='historico'>📜 Histórico</button><button class='mdm-action-btn mab-success' data-swid='${s.id}' data-swact='chamado'>🎫 Chamado</button><button class='mdm-action-btn mab-warning' data-swid='${s.id}' data-swact='ping'>📶 Ping</button><button class='mdm-action-btn mab-dark' data-swid='${s.id}' data-swact='ssh'>🖥️ SSH</button><button class='mdm-action-btn mab-violet' data-swid='${s.id}' data-swact='backup'>💾 Backup</button></div></div>`;
+      return `<div class='sw-card'><div class='sw-card-header'><div style='width:36px;height:36px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>${ico}</div><div style='flex:1;min-width:0'><div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace'>${s.hostname}</div><div style='font-size:10.5px;color:var(--g400)'>${s.marca} ${s.modelo}</div></div>${swStatusHtml(s.status)}</div><div class='sw-card-body'><div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>${s.ip}</span></div><div class='mdm-card-field'><span class='lbl'>Local</span><span class='val'>${s.local}</span></div><div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</span></div><div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>${s.firmware||'—'}</span></div>${s.tipo!=='ap'&&s.tipo!=='firewall'?`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: ${s.portasUso}/${s.totalPortas}</span><span>${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:${pct}%;height:100%;border-radius:4px'></div></div></div>`:''}</div><div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>${renderPortMinimap(s)}</div></div><div class='sw-card-actions'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️ Gerenciar</button><button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('${s.id}')">📜 Histórico</button><button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶 Ping</button><button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','${s.id}')">🖥️ SSH</button><button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','${s.id}')">💾 Backup</button></div></div>`;
     }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
   } else {
     const tbody=document.getElementById('sw-table-body');
@@ -8981,22 +8966,6 @@ function renderPortMinimap(s){
 }
 
 function goSwView(v){currentSwView=v;document.getElementById('sw-view-cards').style.display=v==='cards'?'':'none';document.getElementById('sw-view-table').style.display=v==='table'?'':'none';renderSwitches();}
-
-// Event delegation para botões dos cards de switch
-document.addEventListener('click', function(e) {
-  const btn = e.target.closest('[data-swid][data-swact]');
-  if (!btn) return;
-  const id  = btn.dataset.swid;
-  const act = btn.dataset.swact;
-  switch(act) {
-    case 'gerenciar': abrirGerenciarSwitch(id); break;
-    case 'historico': abrirHistSwitch(id); break;
-    case 'chamado':   openModal('modal-novo-chamado'); break;
-    case 'ping':      swActionDirect('ping', id); break;
-    case 'ssh':       swActionDirect('ssh', id); break;
-    case 'backup':    swActionDirect('backup-config', id); break;
-  }
-});
 
 function abrirGerenciarSwitch(id){
   const sw=(STATE.switches||[]).find(s=>s.id===id);if(!sw) return;
@@ -16387,47 +16356,7 @@ function patMetricasHtml(ativo) {
   </td>`;
 }
 
-// Patch na renderAtivos para injetar coluna de métricas em computadores
-(function patchRenderAtivosMetricas() {
-  const _orig = window.renderAtivos;
-  if (typeof _orig !== 'function') return;
-  window.renderAtivos = function() {
-    _orig();
-    // Verifica se estamos na aba de computadores
-    const isComp = window._ativosFiltroIsComp;
-    if (!isComp) return;
-
-    // Injeta cabeçalho
-    const thead = document.querySelector('#page-ativos table thead tr');
-    if (thead && !thead.querySelector('.col-metricas')) {
-      const th = document.createElement('th');
-      th.className = 'col-metricas';
-      th.innerHTML = '📊 Métricas';
-      th.style.cssText = 'width:180px;font-size:11px';
-      thead.appendChild(th);
-    }
-
-    // Injeta células
-    const ativos = STATE.ativos.filter(a =>
-      ['computador','notebook','desktop','servidor'].some(t=>(a.tipo||'').toLowerCase().includes(t))
-    );
-    const tbody = document.querySelector('#page-ativos tbody');
-    if (!tbody) return;
-    const rows = tbody.querySelectorAll('tr');
-    rows.forEach(row => {
-      if (row.querySelector('.col-metricas-cell')) return;
-      const patCell = row.querySelector('.td-mono');
-      if (!patCell) return;
-      const patVal = patCell.textContent.trim();
-      const ativo  = ativos.find(a => a.pat === patVal || a.ip === patVal);
-      if (!ativo) return;
-      const td = document.createElement('div');
-      td.innerHTML = patMetricasHtml(ativo);
-      const cell = td.firstElementChild;
-      if (cell) { cell.className = 'col-metricas-cell'; row.appendChild(cell); }
-    });
-  };
-})();
+// Métricas integradas diretamente no renderAtivos() — patch removido
 
 // Endpoint de recebimento de métricas do cliente SYSACK Agent
 // O agente POST em /api/metrics (ou via Firebase diretamente)
