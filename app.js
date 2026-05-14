@@ -14428,12 +14428,18 @@ function abrirModalNovoGrupoAlerta(grupoId) {
       </div>`;
   }).join('');
 
-  // HTML atual dos emails
+  // HTML atual dos destinatários (empregados)
   const emailsHtml = (grupo?.emails||[]).map((e, i) => `
-    <div class="ga-email-row" style="display:flex;gap:6px;margin-bottom:6px" data-idx="${i}">
-      <input class="form-control ga-email" placeholder="e-mail" value="${escapeHtml(e.email||'')}" style="margin:0;flex:2">
-      <input class="form-control ga-nome"  placeholder="nome (opcional)" value="${escapeHtml(e.nome||'')}" style="margin:0;flex:1.5">
-      <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 4px">✕</button>
+    <div class="ga-email-row" style="display:flex;gap:6px;margin-bottom:6px;align-items:center" data-idx="${i}">
+      <div style="flex:1.8;position:relative">
+        <input class="form-control ga-nome-emp" placeholder="Nome do empregado"
+          value="${escapeHtml(e.nome||'')}" style="margin:0;width:100%"
+          oninput="gaFiltrarEmpregados(this)"
+          onblur="setTimeout(()=>this.closest('.ga-email-row').querySelector('.ga-emp-dropdown')?.remove(),200)">
+        <div class="ga-emp-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:8px;max-height:200px;overflow-y:auto;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.12)"></div>
+      </div>
+      <input class="form-control ga-email" placeholder="E-mail" value="${escapeHtml(e.email||'')}" style="margin:0;flex:2">
+      <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 6px" title="Remover">✕</button>
     </div>`).join('');
 
   // Unidades (da planilha de redes)
@@ -14459,12 +14465,31 @@ function abrirModalNovoGrupoAlerta(grupoId) {
         </div>
       </div>
 
-      <!-- Destinatários de e-mail -->
+      <!-- Destinatários -->
       <div style="border:1px solid var(--g200);border-radius:10px;padding:16px;margin-bottom:16px">
-        <div style="font-size:13px;font-weight:700;color:var(--g700);margin-bottom:12px">✉️ Destinatários</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:13px;font-weight:700;color:var(--g700)">👥 Destinatários</div>
+          <span style="font-size:11px;color:var(--g400)">Digite nome ou e-mail — busca empregados cadastrados</span>
+        </div>
+
+        <!-- Barra de busca rápida de empregados -->
+        <div style="position:relative;margin-bottom:10px">
+          <input id="ga-busca-emp" class="form-control" placeholder="🔍  Buscar empregado por nome ou matrícula para adicionar rapidamente..."
+            style="margin:0;padding-left:12px"
+            oninput="gaFiltrarBuscaRapida(this)"
+            onblur="setTimeout(()=>document.getElementById('ga-busca-dropdown')?.style&&(document.getElementById('ga-busca-dropdown').style.display='none'),200)">
+          <div id="ga-busca-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:8px;max-height:220px;overflow-y:auto;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.15)"></div>
+        </div>
+
         <div id="ga-emails-container">${emailsHtml || ''}</div>
-        <button onclick="gaAdicionarEmail()" class="btn btn-ghost btn-sm" style="margin-top:4px">+ Adicionar e-mail</button>
-        <p class="form-hint" style="margin-top:8px">Você pode adicionar múltiplos destinatários. Todos receberão os alertas configurados abaixo.</p>
+
+        <button onclick="gaAdicionarEmail()" class="btn btn-ghost btn-sm" style="margin-top:8px">
+          + Adicionar manualmente
+        </button>
+        <p class="form-hint" style="margin-top:8px">
+          Você pode adicionar múltiplos destinatários (sem limite). Use a busca acima para empregados cadastrados
+          ou clique em "+ Adicionar manualmente" para digitar nome e e-mail livremente.
+        </p>
       </div>
 
       <!-- Escopo de monitoramento -->
@@ -14563,18 +14588,105 @@ function gaToggleEscopo(val) {
   if (g) g.style.display = val === 'gerencia' ? '' : 'none';
 }
 
-function gaAdicionarEmail() {
+function gaAdicionarEmail(nome, email) {
   const cont = document.getElementById('ga-emails-container');
   if (!cont) return;
   const row = document.createElement('div');
   row.className = 'ga-email-row';
-  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
   row.innerHTML = `
-    <input class="form-control ga-email" placeholder="e-mail" style="margin:0;flex:2">
-    <input class="form-control ga-nome"  placeholder="nome (opcional)" style="margin:0;flex:1.5">
-    <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 4px">✕</button>`;
+    <div style="flex:1.8;position:relative">
+      <input class="form-control ga-nome-emp" placeholder="Nome do empregado"
+        value="${escapeHtml(nome||'')}" style="margin:0;width:100%"
+        oninput="gaFiltrarEmpregados(this)"
+        onblur="setTimeout(()=>this.closest('.ga-email-row').querySelector('.ga-emp-dropdown')?.remove(),200)">
+      <div class="ga-emp-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:8px;max-height:200px;overflow-y:auto;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.12)"></div>
+    </div>
+    <input class="form-control ga-email" placeholder="E-mail"
+      value="${escapeHtml(email||'')}" style="margin:0;flex:2">
+    <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 6px" title="Remover">✕</button>`;
   cont.appendChild(row);
-  row.querySelector('.ga-email').focus();
+  const input = row.querySelector('.ga-nome-emp');
+  if (!nome) input.focus();
+}
+
+// Filtra empregados no campo inline de cada row
+function gaFiltrarEmpregados(input) {
+  const row = input.closest('.ga-email-row');
+  if (!row) return;
+  let dd = row.querySelector('.ga-emp-dropdown');
+  if (!dd) return;
+  const q = input.value.toLowerCase().trim();
+  if (!q || q.length < 2) { dd.style.display = 'none'; return; }
+
+  const emps = (STATE.empregados || []).filter(e =>
+    e.nome?.toLowerCase().includes(q) || e.mat?.includes(q) || e.email?.toLowerCase().includes(q)
+  ).slice(0, 10);
+
+  if (!emps.length) { dd.style.display = 'none'; return; }
+
+  dd.innerHTML = emps.map(e => `
+    <div onclick="gaSelectEmpregado(this,'${escapeHtml(e.nome||'')}','${escapeHtml(e.email||'')}')"
+      style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;flex-direction:column"
+      onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <span style="font-size:12.5px;font-weight:600;color:var(--g800)">${escapeHtml(e.nome||'—')}</span>
+      <span style="font-size:11px;color:var(--g400)">${escapeHtml(e.email||'sem e-mail')} · Mat. ${escapeHtml(e.mat||'—')}</span>
+    </div>`).join('');
+  dd.style.display = '';
+}
+
+function gaSelectEmpregado(el, nome, email) {
+  const row = el.closest('.ga-email-row') || el.closest('.ga-email-row');
+  // el está dentro do dropdown que está dentro da div relativa dentro do row
+  const rowEl = el.closest('.ga-email-row');
+  if (!rowEl) return;
+  rowEl.querySelector('.ga-nome-emp').value = nome;
+  rowEl.querySelector('.ga-email').value = email;
+  const dd = rowEl.querySelector('.ga-emp-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+// Busca rápida no topo para adicionar empregado com um clique
+function gaFiltrarBuscaRapida(input) {
+  const dd = document.getElementById('ga-busca-dropdown');
+  if (!dd) return;
+  const q = input.value.toLowerCase().trim();
+  if (!q || q.length < 2) { dd.style.display = 'none'; return; }
+
+  const emps = (STATE.empregados || []).filter(e =>
+    e.nome?.toLowerCase().includes(q) || e.mat?.includes(q) || e.email?.toLowerCase().includes(q)
+  ).slice(0, 12);
+
+  if (!emps.length) {
+    dd.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum empregado encontrado</div>';
+    dd.style.display = '';
+    return;
+  }
+
+  dd.innerHTML = emps.map(e => `
+    <div onclick="gaAdicionarEmpregadoRapido('${escapeHtml(e.nome||'')}','${escapeHtml(e.email||'')}',this)"
+      style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;align-items:center;justify-content:space-between;gap:12px"
+      onmouseover="this.style.background='#EFF6FF'" onmouseout="this.style.background=''">
+      <div>
+        <div style="font-size:12.5px;font-weight:600;color:var(--g800)">${escapeHtml(e.nome||'—')}</div>
+        <div style="font-size:11px;color:var(--g400)">${escapeHtml(e.email||'sem e-mail')} · Mat. ${escapeHtml(e.mat||'—')} · ${escapeHtml(e.setor||e.cargo||'')}</div>
+      </div>
+      <span style="font-size:11px;color:var(--accent);font-weight:600;white-space:nowrap">+ Adicionar</span>
+    </div>`).join('');
+  dd.style.display = '';
+}
+
+function gaAdicionarEmpregadoRapido(nome, email, el) {
+  // Verifica se já está na lista
+  const jaAdicionado = [...document.querySelectorAll('.ga-email')].some(i => i.value === email);
+  if (jaAdicionado) { showToast(`${nome} já está na lista`, 'info'); return; }
+  gaAdicionarEmail(nome, email);
+  // Limpa busca
+  const inp = document.getElementById('ga-busca-emp');
+  if (inp) inp.value = '';
+  const dd = document.getElementById('ga-busca-dropdown');
+  if (dd) dd.style.display = 'none';
+  showToast(`${nome} adicionado como destinatário`, 'success', 2000);
 }
 
 async function salvarGrupoAlerta(grupoId, btn) {
@@ -14590,7 +14702,7 @@ async function salvarGrupoAlerta(grupoId, btn) {
   // Coleta e-mails
   const emails = [...document.querySelectorAll('.ga-email-row')].map(row => ({
     email: row.querySelector('.ga-email')?.value?.trim() || '',
-    nome:  row.querySelector('.ga-nome')?.value?.trim()  || '',
+    nome:  (row.querySelector('.ga-nome-emp') || row.querySelector('.ga-nome'))?.value?.trim() || '',
   })).filter(e => e.email && e.email.includes('@'));
 
   if (!emails.length) return showToast('Adicione pelo menos um e-mail válido', 'warning');
