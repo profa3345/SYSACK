@@ -713,18 +713,44 @@ function startFirestoreListeners() {
   const snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
   function norm(d) {
+    // Aliases: discovery/SNMP podem gravar com nomes variados
+    const hostname    = d.hostname   || d.sysName    || d.name      || d.host       || '';
+    const local       = d.local      || d.sysLocation || d.location  || d.localidade || d.sala || '';
+    const marca       = d.marca      || d.brand       || d.manufacturer || (d.sysDescr ? (() => {
+      const s = d.sysDescr.toLowerCase();
+      if (s.includes('aruba'))  return 'Aruba';
+      if (s.includes('cisco'))  return 'Cisco';
+      if (s.includes('hp') || s.includes('hewlett')) return 'HP';
+      if (s.includes('juniper')) return 'Juniper';
+      if (s.includes('dell'))   return 'Dell';
+      return '';
+    })() : '');
+    const modelo      = d.modelo     || d.model       || '';
+    const totalPortas = d.totalPortas || d.portCount   || d.numPorts  || 0;
+    const portasUso   = d.portasUso   || d.portsUp     || d.usedPorts || 0;
+    const uptime      = d.uptime     || '';
+    const firmware    = d.firmware   || d.firmwareVersion || d.swVersion || '';
     return {
       ...d,
+      hostname,
       // pat: NUNCA usa IP como fallback — IP não é número de patrimônio
-      // Máquinas sem PAT vinculado ficam com pat vazio e exibem indicador visual na tabela
       pat:    d.pat    || d.patrimonio || '',
       // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
-      desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
+      desc:   d.desc   || hostname || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
       tipo:   d.tipo   || 'workstation',
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
       status: d.status || (d.reachable ? 'ativo' : 'offline'),
       fonte:  d.fonte  || 'Discovery',
+      // Switch/rede — aliases normalizados
+      local,
+      marca,
+      modelo,
+      totalPortas,
+      portasUso,
+      uptime,
+      firmware,
+      ip:     d.ip     || d.ipAddress  || d.endereco_ip || '',
     };
   }
 
@@ -2542,26 +2568,10 @@ function populateSelects() {
 // ============================================================
 // MODAL
 // ============================================================
-function popularAreaResponsavel() {
-  const sel = document.getElementById('ativo-area');
-  if (!sel) return;
-  const empregados = STATE.empregados || [];
-  const lotacoes = [...new Set(
-    empregados.map(e => e.lotacao || e.setor || '').filter(l => l && l.trim())
-  )].sort();
-  if (lotacoes.length === 0) return;
-  const valorAtual = sel.value;
-  sel.innerHTML = '<option value="">— Selecione a área —</option>' +
-    lotacoes.map(l => '<option value="' + l + '"' + (l === valorAtual ? ' selected' : '') + '>' + l + '</option>').join('');
-}
-
 function openModal(id) {
   populateSelects();
   const el = document.getElementById(id);
   if (el) el.classList.add('open');
-  if (id === 'modal-novo-ativo') {
-    popularAreaResponsavel();
-  }
   if (id === 'modal-novo-chamado') {
     const now = new Date();
     const iso = now.toISOString().slice(0,16);

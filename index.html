@@ -215,6 +215,11 @@ window.dispatchEvent(new Event('firebase-ready'));
       <a class="nav-i nav-sub" data-page="mdm"><svg viewBox="0 0 16 16" fill="none"><rect x="4" y="1" width="8" height="14" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="12" r=".7" fill="currentColor"/></svg>Smartphones / MDM<span class="nav-badge" id="nb-mdm">0</span></a>
       <a class="nav-i nav-sub" data-page="mobiliario"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="10" width="14" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M3 10V6a1 1 0 011-1h8a1 1 0 011 1v4" stroke="currentColor" stroke-width="1.4"/><path d="M4 13v2M12 13v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Mobiliário &amp; Copa</a>
       <a class="nav-i nav-sub" data-page="apps"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Apps structures</a>
+      <a class="nav-i nav-sub" data-page="patrimonio">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 7h3M4 9.5h5M10 7h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1 6h14" stroke="currentColor" stroke-width="1.3"/></svg>
+        Patrimônio
+        <span style="font-size:9px;font-weight:800;background:linear-gradient(135deg,#2563EB,#7C3AED);color:#fff;padding:1px 6px;border-radius:10px;margin-left:auto">NEW</span>
+      </a>
       <a class="nav-i nav-sub" data-page="relatorios"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="4" width="14" height="8" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M4 8h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Global</a>
     </div>
     <!-- ASSISTÊNCIA -->
@@ -1468,7 +1473,6 @@ window.dispatchEvent(new Event('firebase-ready'));
         <button class="rel-tab-btn" onclick="patTab('notas')">📄 Notas Fiscais</button>
         <button class="rel-tab-btn" onclick="patTab('depreciacao')">📉 Depreciação</button>
         <button class="rel-tab-btn" onclick="patTab('baixas')">🗑️ Baixas</button>
-        <button class="rel-tab-btn" onclick="patTab('patmode')" style="margin-left:auto;background:linear-gradient(135deg,rgba(37,99,235,.1),rgba(124,58,237,.1));border-bottom:2px solid transparent">🏛️ Patrimônio Mode</button>
       </div>
 
       <!-- ABA: ATIVOS PATRIMONIAIS -->
@@ -1669,21 +1673,6 @@ window.dispatchEvent(new Event('firebase-ready'));
               <tbody id="pat-baixas-tbody"></tbody>
             </table>
           </div>
-        </div>
-      </div>
-
-      <!-- ABA: PATRIMÔNIO MODE -->
-      <div id="pat-tab-patmode" style="display:none">
-        <div style="display:flex;align-items:center;justify-content:center;padding:60px 20px;flex-direction:column;gap:20px">
-          <div style="font-size:48px">🏛️</div>
-          <div style="font-size:22px;font-weight:800;color:var(--g900)">Patrimônio Mode</div>
-          <p style="font-size:13px;color:var(--g500);text-align:center;max-width:420px">
-            Leitura rápida de patrimônios por câmera ou digitação manual. Ative o modo abaixo para iniciar a varredura patrimonial.
-          </p>
-          <button class="btn btn-primary" style="font-size:15px;padding:12px 32px;border-radius:12px" onclick="togglePatMode()">
-            📷 Ativar Patrimônio Mode
-          </button>
-          <p style="font-size:11px;color:var(--g400)">Você também pode ativar pelo toggle no menu lateral esquerdo</p>
         </div>
       </div>
     </div>
@@ -5021,5 +5010,136 @@ window.dispatchEvent(new Event('firebase-ready'));
 </div>
 
 <script src="app.js"></script>
+
+<!-- ═══ MODAL GERENCIAR SWITCH ════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-gerenciar-switch">
+  <div class="modal" style="max-width:900px;width:95vw">
+    <div class="modal-header">
+      <h3 id="ger-sw-nome" style="font-family:'JetBrains Mono',monospace;font-size:15px">—</h3>
+      <button class="close-btn" onclick="closeModal('modal-gerenciar-switch')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:20px">
+
+      <!-- Status bar -->
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px;padding:12px 16px;background:var(--g50);border-radius:10px;border:1px solid var(--g200)">
+        <div><span style="font-size:11px;color:var(--g500);font-weight:600">STATUS</span><br><span id="ger-sw-status-live"></span></div>
+        <div style="width:1px;height:32px;background:var(--g200)"></div>
+        <div><span style="font-size:11px;color:var(--g500);font-weight:600">IP</span><br><span id="ger-sw-ip-live" style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--accent)">—</span></div>
+        <div style="width:1px;height:32px;background:var(--g200)"></div>
+        <div><span style="font-size:11px;color:var(--g500);font-weight:600">UPTIME</span><br><span id="ger-sw-uptime-live" style="font-size:13px;font-weight:700">—</span></div>
+        <div style="width:1px;height:32px;background:var(--g200)"></div>
+        <div><span style="font-size:11px;color:var(--g500);font-weight:600">PORTAS</span><br><span id="ger-sw-portas-live" style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700">—</span></div>
+        <div style="width:1px;height:32px;background:var(--g200)"></div>
+        <div><span style="font-size:11px;color:var(--g500);font-weight:600">FIRMWARE</span><br><span id="ger-sw-fw-live" style="font-family:'JetBrains Mono',monospace;font-size:11px">—</span></div>
+      </div>
+
+      <!-- Mapa de portas -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">🔌 Mapa de Portas</div>
+        <div id="ger-sw-port-map" style="display:flex;flex-wrap:wrap;gap:3px;padding:12px;background:var(--g900);border-radius:10px"></div>
+        <div style="display:flex;gap:16px;margin-top:8px;font-size:10.5px;color:var(--g500)">
+          <span><span style="display:inline-block;width:10px;height:10px;background:#22C55E;border-radius:2px;margin-right:4px"></span>Em uso</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#374151;border-radius:2px;margin-right:4px"></span>Livre</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#2563EB;border-radius:2px;margin-right:4px"></span>SFP</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#F59E0B;border-radius:2px;margin-right:4px"></span>PoE</span>
+        </div>
+      </div>
+
+      <!-- Ações rápidas -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">⚡ Ações</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="swAction('ping')">📶 Ping</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('ssh')">🖥️ SSH</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('snmp')">📊 SNMP Poll</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('show-interfaces')">🔌 Interfaces</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('show-vlans')">🏷️ VLANs</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('show-mac')">📋 MAC Table</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('show-logs')">📜 Logs</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('backup-config')">💾 Backup</button>
+          <button class="btn btn-secondary btn-sm" onclick="swAction('save-config')">✅ Salvar Config</button>
+          <button class="btn btn-warning btn-sm" onclick="swAction('update-firmware')">⬆️ Firmware</button>
+          <button class="btn btn-danger btn-sm" onclick="swAction('reboot')">⚠️ Reiniciar</button>
+        </div>
+      </div>
+
+      <!-- Grid: VLANs + Log recente -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🏷️ VLANs Configuradas</div>
+          <div class="table-wrap" style="max-height:180px;overflow-y:auto">
+            <table style="font-size:12px">
+              <thead><tr><th>ID</th><th>Nome</th><th>Tipo</th><th>Rede</th></tr></thead>
+              <tbody id="ger-sw-vlans-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📋 Últimas Atividades</div>
+          <div id="ger-sw-log" style="max-height:180px;overflow-y:auto;font-size:12px"></div>
+        </div>
+      </div>
+
+      <!-- Tabela MAC -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🗂️ Tabela MAC (últimas entradas)</div>
+        <div class="table-wrap" style="max-height:140px;overflow-y:auto">
+          <table style="font-size:11.5px">
+            <thead><tr><th>Porta</th><th>MAC</th><th>VLAN</th><th>Tipo</th></tr></thead>
+            <tbody id="ger-sw-mac-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Histórico / timeline -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.05em">🕐 Histórico</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <select class="form-control" style="width:160px;margin:0;font-size:12px" id="sw-hist-tipo">
+            <option value="manutencao">Manutenção</option>
+            <option value="config">Alteração de Config</option>
+            <option value="vlan">VLAN</option>
+            <option value="firmware">Firmware</option>
+            <option value="incidente">Incidente</option>
+            <option value="backup">Backup</option>
+            <option value="obs">Observação</option>
+          </select>
+          <input class="form-control" id="sw-hist-desc" style="margin:0;flex:1;font-size:12px" placeholder="Descreva a ocorrência...">
+          <button class="btn btn-primary btn-sm" onclick="adicionarHistSwitch()">+ Registrar</button>
+        </div>
+        <div id="ger-sw-timeline" style="max-height:200px;overflow-y:auto;font-size:12px"></div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-gerenciar-switch')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL AÇÃO SWITCH (terminal) ══════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-sw-action">
+  <div class="modal" style="max-width:600px;width:95vw">
+    <div class="modal-header">
+      <h3 id="sw-action-title">Ação</h3>
+      <button class="close-btn" onclick="closeModal('modal-sw-action')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:20px">
+      <div id="sw-action-body" style="font-size:12.5px;color:var(--g600);margin-bottom:14px;padding:10px 14px;background:var(--g50);border-radius:8px;font-family:'JetBrains Mono',monospace"></div>
+      <div id="sw-action-motivo-group" style="margin-bottom:14px">
+        <label class="form-label req">Motivo / Justificativa</label>
+        <textarea class="form-control" id="sw-action-motivo" rows="2" placeholder="Descreva o motivo desta ação..."></textarea>
+      </div>
+      <pre id="sw-action-terminal" style="display:none;background:#0F172A;color:#22C55E;padding:16px;border-radius:10px;font-size:12px;font-family:'JetBrains Mono',monospace;max-height:280px;overflow-y:auto;white-space:pre-wrap;margin:0"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-sw-action')">Fechar</button>
+      <button class="btn btn-primary" id="sw-action-confirm" onclick="confirmSwAction()">▶ Executar</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
