@@ -715,8 +715,11 @@ function startFirestoreListeners() {
   function norm(d) {
     return {
       ...d,
-      pat:    d.pat    || d.patrimonio || d.ip || '',
-      desc:   d.desc   || d.hostname   || d.ip || '',
+      // pat: NUNCA usa IP como fallback — IP não é número de patrimônio
+      // Máquinas sem PAT vinculado ficam com pat vazio e exibem indicador visual na tabela
+      pat:    d.pat    || d.patrimonio || '',
+      // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
+      desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
       tipo:   d.tipo   || 'workstation',
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
@@ -1024,8 +1027,16 @@ function renderAtivos() {
         const _pp = extractPatrimonioFromHostname(_hn);
         return '<td style="font-family:monospace;font-size:12px;font-weight:600">' + (_hn||'<span style="color:#94A3B8">—</span>') + '</td><td class="td-mono">' + (_pp.pat ? (_pp.alerta ? '<span style="color:#EF4444;font-weight:700">' + _pp.pat + ' ⚠️</span>' : '<span style="color:#059669;font-weight:700">' + _pp.pat + '</span>') : '<span style="color:#EF4444">N/A ⚠️</span>') + '</td>';
       })() : ''}
-      <td class="td-mono fw-700" style="color:var(--accent)">${a.pat||a.ip||'—'}</td>
-      <td style="font-weight:500">${a.desc||'—'}</td>
+      <td class="td-mono fw-700" style="color:var(--accent)">${
+        a.pat
+          ? a.pat
+          : `<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:10px;font-weight:700;font-family:inherit">Sem PAT</span>`
+      }</td>
+      <td style="font-weight:500">${
+        a.desc && a.desc !== a.ip
+          ? a.desc
+          : (a.hostname && a.hostname !== a.ip ? a.hostname : (a.ip ? `<span style="font-family:monospace;font-size:11px;color:var(--g500)">${a.ip}</span>` : '—'))
+      }</td>
       <td><span class="tag">${a.tipo||'—'}</span></td>
       <td>${a.area||'—'}</td>
       <td>${a.resp||'—'}</td>
@@ -1060,13 +1071,14 @@ function extractPatrimonioFromHostname(hostname) {
 }
 
 function hostnameFromAtivo(a) {
-  // Try agent data first, then hostname field, then derive from desc
-  if (a.hostname) return a.hostname;
-  // Try to find matching agent by IP
+  // Prioridade: campo hostname real > agente local > vazio
+  // NUNCA retorna o IP como hostname — são campos distintos
+  if (a.hostname && a.hostname !== a.ip) return a.hostname;
+  // Tenta encontrar via agente pelo IP
   const agent = (window.STATE_AGENTS && STATE_AGENTS.list || [])
     .find(ag => ag.ip === a.ip || ag.ip === a.ipAddress);
-  if (agent && agent.hostname) return agent.hostname;
-  return null;
+  if (agent && agent.hostname && agent.hostname !== a.ip) return agent.hostname;
+  return null; // sem hostname — exibir '—' na coluna, não o IP
 }
 
 
