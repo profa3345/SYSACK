@@ -1015,7 +1015,25 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
-    if (q && !`${a.pat} ${a.desc} ${a.area} ${a.resp||''} ${a.ip||''}`.toLowerCase().includes(q)) return false;
+    if (q) {
+      // Tenta encontrar nome do empregado vinculado pela matrícula ou login
+      const empMatch = (() => {
+        const emps = STATE.empregados || [];
+        const e = emps.find(e =>
+          (a.resp && (e.mat === a.resp || e.login === a.resp || (e.nome||'').toLowerCase() === (a.resp||'').toLowerCase())) ||
+          (a.matriculaResp && (e.mat === a.matriculaResp || e.login === a.matriculaResp))
+        );
+        return e ? `${e.nome||''} ${e.login||''} ${e.mat||''}` : '';
+      })();
+      const searchStr = [
+        a.pat, a.desc, a.area, a.resp,
+        a.ip, a.hostname, a.sysName, a.name,
+        a.local, a.sala, a.loc,
+        a.lotacao, a.setor,
+        empMatch,
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (!searchStr.includes(q)) return false;
+    }
     return true;
   });
 
@@ -16213,7 +16231,7 @@ function renderMapaRede() {
   }
 
   // Layout: cada subnet é uma coluna
-  const W_COL = 260, H_NODE = 56, PAD = 14, HEADER_H = 72;
+  const W_COL = 220, H_NODE = 52, PAD = 16, HEADER_H = 70;
   const svgW  = subnets.length * (W_COL + 24) + 40;
   const maxNodes = Math.max(...subnets.map(([,s])=>s.switches.length+s.ativos.length));
   const svgH  = HEADER_H + maxNodes * (H_NODE + PAD) + 60;
@@ -16256,7 +16274,7 @@ function renderMapaRede() {
           style="cursor:pointer;filter:drop-shadow(0 2px 6px rgba(0,0,0,.1))"
           onclick="abrirMonitorDetalhe('${node.id}','${node._isSw?'switches':'ativos'}')"/>
         <circle cx="${nx+18}" cy="${ny+H_NODE/2}" r="6" fill="${statusColor}"/>
-        <text x="${nx+30}" y="${ny+18}" font-size="11" font-weight="700" fill="${node._isSw?'#fff':'var(--g900,#111827)'}" font-family="system-ui">${icon} ${escapeHtml((node.hostname||node.desc||node.ip||'—').slice(0,26))}</text>
+        <text x="${nx+30}" y="${ny+18}" font-size="11" font-weight="700" fill="${node._isSw?'#fff':'var(--g900,#111827)'}" font-family="system-ui">${icon} ${escapeHtml((node.hostname||node.desc||node.ip||'—').slice(0,20))}</text>
         <text x="${nx+30}" y="${ny+30}" font-size="9.5" fill="${node._isSw?'rgba(255,255,255,.6)':'var(--g400,#94a3b8)'}" font-family="monospace">${escapeHtml(node.ip||node.ipAddress||'—')}</text>
         ${cpuPct!=null?`<text x="${nx+30}" y="${ny+42}" font-size="9" fill="#60A5FA" font-family="system-ui">CPU:${cpuPct}%${memPct!=null?' MEM:'+memPct+'%':''}</text>`:''}
         ${diskPct!=null?`<text x="${nx+W_COL-8}" y="${ny+42}" font-size="9" fill="#34D399" font-family="system-ui" text-anchor="end">Disco:${diskPct}%</text>`:''}`;
@@ -16275,18 +16293,16 @@ function renderMapaRede() {
   });
 
   container.innerHTML = `
-    <div style="min-width:${svgW}px;width:${svgW}px">
-      <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="display:block">
-        <defs>
-          <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--g100,#f1f5f9)" stroke-width="1"/>
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#grid)"/>
-        ${lines}
-        ${svgContent}
-      </svg>
-    </div>`;
+    <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="min-width:100%">
+      <defs>
+        <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--g100,#f1f5f9)" stroke-width="1"/>
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#grid)"/>
+      ${lines}
+      ${svgContent}
+    </svg>`;
 }
 
 

@@ -734,7 +734,7 @@ window.dispatchEvent(new Event('firebase-ready'));
     <!-- ATIVOS -->
     <div class="page" id="page-ativos">
       <div class="flex items-center justify-between mb-20">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Gestão de Ativos</h2><p class="text-sm text-muted mt-8">Controle patrimonial completo — substitui o SAP</p></div>
+        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Gestão de Ativos</h2><p class="text-sm text-muted mt-8">Controle patrimonial completo</p></div>
         <div class="flex gap-8" style="flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="patAbrirBusca()">📷 Buscar PAT / Câmera</button>
           <button class="btn btn-secondary btn-sm" onclick="openModal('modal-transferencia')">↔ Transferência</button>
@@ -753,7 +753,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
       <div class="card">
         <div class="card-header">
-          <input id="pat-search" class="form-control" style="width:240px;margin:0" placeholder="🔍 Buscar patrimônio..." id="at-search-input" oninput="renderAtivos()">
+          <input id="pat-search" class="form-control" style="width:240px;margin:0" placeholder="🔍 Buscar PAT, hostname, IP, área, responsável..." id="at-search-input" oninput="renderAtivos()">
           <select id="pat-filter-status" class="form-control" style="width:150px;margin:0" onchange="renderAtivos()"><option value="">Todos os status</option><option value="ativo">Em Uso</option><option value="disponivel">Disponível</option><option value="manut">Manutenção</option><option value="terceirizada">Na Terceirizada</option><option value="sc">Santa Clara</option></select>
           <select class="form-control" style="width:140px;margin:0"><option>Todas as áreas</option><option>TI</option><option>RH</option><option>Financeiro</option><option>Comercial</option></select>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto">⬇ Exportar</button>
@@ -2406,7 +2406,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
 
       <!-- VIEW: MAPA DE REDE -->
-      <div id="mon-view-mapa-wrap" style="display:none;padding:0;overflow:visible" class="card">
+      <div id="mon-view-mapa-wrap" style="display:none" class="card" style="padding:0;overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--g100,#f1f5f9);display:flex;justify-content:space-between;align-items:center">
           <div>
             <span style="font-size:13px;font-weight:700;color:var(--g900)">🗺️ Mapa de Topologia</span>
@@ -2419,7 +2419,7 @@ window.dispatchEvent(new Event('firebase-ready'));
             <span><span style="display:inline-block;width:10px;height:10px;background:#94A3B8;border-radius:50%;margin-right:4px"></span>Desconhecido</span>
           </div>
         </div>
-        <div id="mapa-rede-svg" style="overflow-x:auto;overflow-y:auto;padding:16px;min-height:320px;background:var(--g50,#f8fafc);width:100%">
+        <div id="mapa-rede-svg" style="overflow:auto;padding:16px;min-height:320px;background:var(--g50,#f8fafc)">
           <div style="display:flex;align-items:center;justify-content:center;height:240px;color:var(--g400)">🔄 Carregando mapa...</div>
         </div>
       </div>
