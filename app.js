@@ -15483,7 +15483,7 @@ async function carregarPaginaChamados(pagina = 0) {
     if(e.key==='Escape' && _pmOpen) fecharPatMode();
   });
 })();
-</script>
+
 
 window.abrirModalMovSAP = function(){
   var d = document.getElementById('movs-data');
@@ -16413,4 +16413,3 @@ function monSetView(view) {
     if (typeof _prev === 'function') return _prev(id, val);
   };
 })();
-</script>
