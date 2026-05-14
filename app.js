@@ -715,20 +715,18 @@ function startFirestoreListeners() {
   function norm(d) {
     return {
       ...d,
-      // pat: NUNCA usa IP como fallback
       pat:      d.pat      || d.patrimonio || '',
-      // desc: prefere desc → hostname → sysDescr → ''
       desc:     d.desc     || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
       tipo:     d.tipo     || 'workstation',
       area:     d.area     || d.local      || '',
       resp:     d.resp     || d.responsavel || '',
       status:   d.status   || (d.reachable ? 'ativo' : 'offline'),
       fonte:    d.fonte    || 'Discovery',
-      // Campos específicos de switch/roteador — garantir que nunca sejam undefined
+      // Campos de switch/roteador — nunca undefined
       local:    d.local    || d.area       || d.localizacao || '',
       marca:    d.marca    || d.fabricante || '',
       modelo:   d.modelo   || d.model      || '',
-      hostname: d.hostname || d.nome       || d.ip          || '',
+      hostname: d.hostname || d.nome       || '',
       ip:       d.ip       || d.ipAddress  || '',
       firmware: d.firmware || '',
       uptime:   d.uptime   || '',
@@ -2755,9 +2753,8 @@ document.addEventListener('DOMContentLoaded', () => {
           'monitor': 3,
           'switch,router,ap,firewall,access point': 4,
           'servidor,server-linux': 5,
-          'outro,rack,storage,appliance,ups,camera': 6,
-          'impressora,printer': 6,
-          'software': 6,
+          'printer,impressora': 6,
+          'ups,camera,rack,storage,appliance,outro': 7,
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
@@ -8985,38 +8982,21 @@ function renderPortMinimap(s){
 
 function goSwView(v){currentSwView=v;document.getElementById('sw-view-cards').style.display=v==='cards'?'':'none';document.getElementById('sw-view-table').style.display=v==='table'?'':'none';renderSwitches();}
 
-// Event delegation para botões dos cards de switch (evita quebra de onclick com IDs)
-(function() {
-  let _swDelegateAttached = false;
-  function attachSwDelegate() {
-    const grid = document.getElementById('sw-cards-grid');
-    if (!grid || _swDelegateAttached) return;
-    _swDelegateAttached = true;
-    grid.addEventListener('click', function(e) {
-      const btn = e.target.closest('[data-swid][data-swact]');
-      if (!btn) return;
-      const id  = btn.dataset.swid;
-      const act = btn.dataset.swact;
-      switch(act) {
-        case 'gerenciar': abrirGerenciarSwitch(id); break;
-        case 'historico': abrirHistSwitch(id); break;
-        case 'chamado':   openModal('modal-novo-chamado'); break;
-        case 'ping':      swActionDirect('ping', id); break;
-        case 'ssh':       swActionDirect('ssh', id); break;
-        case 'backup':    swActionDirect('backup-config', id); break;
-      }
-    });
+// Event delegation para botões dos cards de switch
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-swid][data-swact]');
+  if (!btn) return;
+  const id  = btn.dataset.swid;
+  const act = btn.dataset.swact;
+  switch(act) {
+    case 'gerenciar': abrirGerenciarSwitch(id); break;
+    case 'historico': abrirHistSwitch(id); break;
+    case 'chamado':   openModal('modal-novo-chamado'); break;
+    case 'ping':      swActionDirect('ping', id); break;
+    case 'ssh':       swActionDirect('ssh', id); break;
+    case 'backup':    swActionDirect('backup-config', id); break;
   }
-  // Tenta attachar imediatamente e também após render
-  const _origRenderSw = typeof renderSwitches !== 'undefined' ? renderSwitches : null;
-  document.addEventListener('DOMContentLoaded', attachSwDelegate);
-  setTimeout(attachSwDelegate, 1000);
-  // Monkey-patch para re-attachar após cada render
-  const _checkInterval = setInterval(() => {
-    attachSwDelegate();
-    if (_swDelegateAttached) clearInterval(_checkInterval);
-  }, 500);
-})();
+});
 
 function abrirGerenciarSwitch(id){
   const sw=(STATE.switches||[]).find(s=>s.id===id);if(!sw) return;
