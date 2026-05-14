@@ -1015,25 +1015,7 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
-    if (q) {
-      // Tenta encontrar nome do empregado vinculado pela matrícula ou login
-      const empMatch = (() => {
-        const emps = STATE.empregados || [];
-        const e = emps.find(e =>
-          (a.resp && (e.mat === a.resp || e.login === a.resp || (e.nome||'').toLowerCase() === (a.resp||'').toLowerCase())) ||
-          (a.matriculaResp && (e.mat === a.matriculaResp || e.login === a.matriculaResp))
-        );
-        return e ? `${e.nome||''} ${e.login||''} ${e.mat||''}` : '';
-      })();
-      const searchStr = [
-        a.pat, a.desc, a.area, a.resp,
-        a.ip, a.hostname, a.sysName, a.name,
-        a.local, a.sala, a.loc,
-        a.lotacao, a.setor,
-        empMatch,
-      ].filter(Boolean).join(' ').toLowerCase();
-      if (!searchStr.includes(q)) return false;
-    }
+    if (q && !`${a.pat} ${a.desc} ${a.area} ${a.resp||''} ${a.ip||''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -8949,7 +8931,7 @@ function renderSwitches(){
   const q=(document.getElementById('sw-search-input')?.value||'').toLowerCase();
   const fs=document.getElementById('sw-filter-status')?.value||'';
   const ft=document.getElementById('sw-filter-tipo')?.value||'';
-  const filtered=sws.filter(s=>(!q||s.hostname.toLowerCase().includes(q)||s.ip.includes(q)||s.modelo.toLowerCase().includes(q)||s.local.toLowerCase().includes(q))&&(!fs||s.status===fs)&&(!ft||s.tipo===ft));
+  const filtered=sws.filter(s=>(!q||(s.hostname||s.sysName||s.name||'').toLowerCase().includes(q)||(s.ip||'').includes(q)||(s.modelo||'').toLowerCase().includes(q)||(s.local||s.sysLocation||'').toLowerCase().includes(q)||(s.marca||'').toLowerCase().includes(q))&&(!fs||s.status===fs)&&(!ft||s.tipo===ft));
   sv('sw-s-total',sws.length);sv('sw-s-online',sws.filter(s=>s.status==='online').length);
   sv('sw-s-offline',sws.filter(s=>s.status==='offline').length);sv('sw-s-alerta',sws.filter(s=>s.status==='alerta').length);
   sv('sw-s-portas',sws.reduce((a,s)=>a+(s.totalPortas||0),0));
@@ -8957,15 +8939,45 @@ function renderSwitches(){
   nbUpdate('nb-switches',sws.filter(s=>s.status==='offline'||s.status==='alerta').length);
   const alertas=sws.filter(s=>s.status==='offline'||s.status==='alerta');
   const alertDiv=document.getElementById('sw-network-alerts');
-  if(alertDiv) alertDiv.innerHTML=alertas.map(s=>`<div class='alert ${s.status==='offline'?'alert-danger':'alert-warning'}' style='margin-bottom:8px'><span>${s.status==='offline'?'🔴':'🟡'}</span><div><strong>${s.hostname}</strong> — ${s.status==='offline'?'OFFLINE':'Em Alerta'}<br><span style='font-size:11.5px'>${s.ip} · ${s.local} · ${s.marca} ${s.modelo}</span></div><button class='btn btn-danger btn-sm' style='margin-left:auto;flex-shrink:0' onclick="abrirGerenciarSwitch('${s.id}')">Investigar</button></div>`).join('');
+  if(alertDiv) alertDiv.innerHTML=alertas.map(s=>{const _h=s.hostname||s.sysName||s.name||s.ip||'—';const _l=s.local&&s.local!=='undefined'?s.local:s.sysLocation&&s.sysLocation!=='undefined'?s.sysLocation:'sem local';const _m=[s.marca,s.modelo].filter(v=>v&&v!=='undefined').join(' ')||'';return `<div class='alert ${s.status==='offline'?'alert-danger':'alert-warning'}' style='margin-bottom:8px'><span>${s.status==='offline'?'🔴':'🟡'}</span><div><strong>${_h}</strong> — ${s.status==='offline'?'OFFLINE':'Em Alerta'}<br><span style='font-size:11.5px'>${s.ip} · ${_l}${_m?' · '+_m:''}</span></div><button class='btn btn-danger btn-sm' style='margin-left:auto;flex-shrink:0' onclick="abrirGerenciarSwitch('${s.id}')">Investigar</button></div>`}).join('');
   if(currentSwView==='cards'){
     const grid=document.getElementById('sw-cards-grid');
     if(!grid) return;
     grid.innerHTML=filtered.map(s=>{
-      const pct=Math.round((s.portasUso/s.totalPortas)*100)||0;
+      const pct=Math.round(((s.portasUso||0)/(s.totalPortas||1))*100)||0;
       const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
-      const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#0F172A';
-      return `<div class='sw-card'><div class='sw-card-header'><div style='width:36px;height:36px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>${ico}</div><div style='flex:1;min-width:0'><div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace'>${s.hostname}</div><div style='font-size:10.5px;color:var(--g400)'>${s.marca} ${s.modelo}</div></div>${swStatusHtml(s.status)}</div><div class='sw-card-body'><div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>${s.ip}</span></div><div class='mdm-card-field'><span class='lbl'>Local</span><span class='val'>${s.local}</span></div><div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</span></div><div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>${s.firmware||'—'}</span></div>${s.tipo!=='ap'&&s.tipo!=='firewall'?`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: ${s.portasUso}/${s.totalPortas}</span><span>${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:${pct}%;height:100%;border-radius:4px'></div></div></div>`:''}</div><div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>${renderPortMinimap(s)}</div></div><div class='sw-card-actions'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️ Gerenciar</button><button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('${s.id}')">📜 Histórico</button><button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶 Ping</button><button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','${s.id}')">🖥️ SSH</button><button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','${s.id}')">💾 Backup</button></div></div>`;
+      const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#1E293B';
+      // Fallbacks seguros para campos que podem vir undefined do Firestore
+      const hostname   = s.hostname || s.sysName || s.name || s.host || s.ip || '—';
+      const marcaModelo= [s.marca, s.modelo].filter(v => v && v !== 'undefined').join(' ') || '—';
+      const local      = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
+      const portasLabel= (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0)+'/'+s.totalPortas : '—/—';
+      return `<div class='sw-card'>
+        <div class='sw-card-header' style='background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px'>
+          <div style='width:36px;height:36px;border-radius:8px;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>\${ico}</div>
+          <div style='flex:1;min-width:0;margin-left:10px'>
+            <div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>\${hostname}</div>
+            <div style='font-size:10.5px;color:#94A3B8;margin-top:2px'>\${marcaModelo}</div>
+          </div>
+          \${swStatusHtml(s.status)}
+        </div>
+        <div class='sw-card-body'>
+          <div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>\${s.ip||'—'}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Local</span><span class='val' style='\${local==='—'?'color:var(--g400);font-style:italic':''}'>\${local}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:\${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ \${s.uptime||'—'}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>\${s.firmware||'—'}</span></div>
+          \${s.tipo!=='ap'&&s.tipo!=='firewall'?\`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: \${portasLabel}</span><span>\${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:\${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:\${pct}%;height:100%;border-radius:4px'></div></div></div>\`:''}
+        </div>
+        <div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>\${renderPortMinimap(s)}</div></div>
+        <div class='sw-card-actions'>
+          <button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('\${s.id}')">⚙️ Gerenciar</button>
+          <button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('\${s.id}')">📜 Histórico</button>
+          <button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>
+          <button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','\${s.id}')">📶 Ping</button>
+          <button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','\${s.id}')">🖥️ SSH</button>
+          <button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','\${s.id}')">💾 Backup</button>
+        </div>
+      </div>`;
     }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
   } else {
     const tbody=document.getElementById('sw-table-body');
