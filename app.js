@@ -713,44 +713,18 @@ function startFirestoreListeners() {
   const snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
   function norm(d) {
-    // Aliases: discovery/SNMP podem gravar com nomes variados
-    const hostname    = d.hostname   || d.sysName    || d.name      || d.host       || '';
-    const local       = d.local      || d.sysLocation || d.location  || d.localidade || d.sala || '';
-    const marca       = d.marca      || d.brand       || d.manufacturer || (d.sysDescr ? (() => {
-      const s = d.sysDescr.toLowerCase();
-      if (s.includes('aruba'))  return 'Aruba';
-      if (s.includes('cisco'))  return 'Cisco';
-      if (s.includes('hp') || s.includes('hewlett')) return 'HP';
-      if (s.includes('juniper')) return 'Juniper';
-      if (s.includes('dell'))   return 'Dell';
-      return '';
-    })() : '');
-    const modelo      = d.modelo     || d.model       || '';
-    const totalPortas = d.totalPortas || d.portCount   || d.numPorts  || 0;
-    const portasUso   = d.portasUso   || d.portsUp     || d.usedPorts || 0;
-    const uptime      = d.uptime     || '';
-    const firmware    = d.firmware   || d.firmwareVersion || d.swVersion || '';
     return {
       ...d,
-      hostname,
       // pat: NUNCA usa IP como fallback — IP não é número de patrimônio
+      // Máquinas sem PAT vinculado ficam com pat vazio e exibem indicador visual na tabela
       pat:    d.pat    || d.patrimonio || '',
       // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
-      desc:   d.desc   || hostname || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
+      desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
       tipo:   d.tipo   || 'workstation',
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
       status: d.status || (d.reachable ? 'ativo' : 'offline'),
       fonte:  d.fonte  || 'Discovery',
-      // Switch/rede — aliases normalizados
-      local,
-      marca,
-      modelo,
-      totalPortas,
-      portasUso,
-      uptime,
-      firmware,
-      ip:     d.ip     || d.ipAddress  || d.endereco_ip || '',
     };
   }
 
@@ -16239,7 +16213,7 @@ function renderMapaRede() {
   }
 
   // Layout: cada subnet é uma coluna
-  const W_COL = 220, H_NODE = 52, PAD = 16, HEADER_H = 70;
+  const W_COL = 260, H_NODE = 56, PAD = 14, HEADER_H = 72;
   const svgW  = subnets.length * (W_COL + 24) + 40;
   const maxNodes = Math.max(...subnets.map(([,s])=>s.switches.length+s.ativos.length));
   const svgH  = HEADER_H + maxNodes * (H_NODE + PAD) + 60;
@@ -16282,7 +16256,7 @@ function renderMapaRede() {
           style="cursor:pointer;filter:drop-shadow(0 2px 6px rgba(0,0,0,.1))"
           onclick="abrirMonitorDetalhe('${node.id}','${node._isSw?'switches':'ativos'}')"/>
         <circle cx="${nx+18}" cy="${ny+H_NODE/2}" r="6" fill="${statusColor}"/>
-        <text x="${nx+30}" y="${ny+18}" font-size="11" font-weight="700" fill="${node._isSw?'#fff':'var(--g900,#111827)'}" font-family="system-ui">${icon} ${escapeHtml((node.hostname||node.desc||node.ip||'—').slice(0,20))}</text>
+        <text x="${nx+30}" y="${ny+18}" font-size="11" font-weight="700" fill="${node._isSw?'#fff':'var(--g900,#111827)'}" font-family="system-ui">${icon} ${escapeHtml((node.hostname||node.desc||node.ip||'—').slice(0,26))}</text>
         <text x="${nx+30}" y="${ny+30}" font-size="9.5" fill="${node._isSw?'rgba(255,255,255,.6)':'var(--g400,#94a3b8)'}" font-family="monospace">${escapeHtml(node.ip||node.ipAddress||'—')}</text>
         ${cpuPct!=null?`<text x="${nx+30}" y="${ny+42}" font-size="9" fill="#60A5FA" font-family="system-ui">CPU:${cpuPct}%${memPct!=null?' MEM:'+memPct+'%':''}</text>`:''}
         ${diskPct!=null?`<text x="${nx+W_COL-8}" y="${ny+42}" font-size="9" fill="#34D399" font-family="system-ui" text-anchor="end">Disco:${diskPct}%</text>`:''}`;
@@ -16301,16 +16275,18 @@ function renderMapaRede() {
   });
 
   container.innerHTML = `
-    <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="min-width:100%">
-      <defs>
-        <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--g100,#f1f5f9)" stroke-width="1"/>
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#grid)"/>
-      ${lines}
-      ${svgContent}
-    </svg>`;
+    <div style="min-width:${svgW}px;width:${svgW}px">
+      <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="display:block">
+        <defs>
+          <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--g100,#f1f5f9)" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+        ${lines}
+        ${svgContent}
+      </svg>
+    </div>`;
 }
 
 
