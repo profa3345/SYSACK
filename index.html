@@ -4007,10 +4007,27 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="form-group"><label class="form-label req">Descrição / Modelo</label><input class="form-control" id="ativo-desc" placeholder="Ex: Dell OptiPlex 7090, HP EliteBook 840 G8..."></div>
       <div class="form-row c2">
         <div class="form-group">
-          <label class="form-label req">Área Responsável</label>
-          <select class="form-control" id="ativo-area">
-            <option>TI</option><option>RH</option><option>Financeiro</option><option>Comercial</option><option>Jurídico</option><option>Operações</option><option>Logística</option><option>Diretoria</option>
-          </select>
+          <label class="form-label req">Local (Unidade)</label>
+          <input class="form-control" id="ativo-local" placeholder="Ex: Rui Barbosa, Maruípe, Sede..." list="ativo-local-list"
+            oninput="ativoAutoPreencherArea(this.value)">
+          <datalist id="ativo-local-list">
+            <option value="Rui Barbosa"><option value="Maruípe"><option value="Sede">
+            <option value="Carapina"><option value="Cachoeiro"><option value="Aracruz">
+            <option value="Linhares"><option value="São Mateus"><option value="Colatina">
+            <option value="Santa Clara"><option value="Data Center">
+          </datalist>
+          <p class="form-hint">Localidade física (physicalDeliveryOfficeName no AD)</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label req">Área (Unidade/Setor)</label>
+          <input class="form-control" id="ativo-area" placeholder="Ex: A-DSI, A-RH, A-FIN..."
+            list="ativo-area-list" style="font-family:monospace;font-weight:600">
+          <datalist id="ativo-area-list">
+            <option value="A-DSI"><option value="A-RH"><option value="A-FIN">
+            <option value="A-COM"><option value="A-OPE"><option value="A-LOG">
+            <option value="A-DIR"><option value="A-JUR"><option value="A-ENG">
+          </datalist>
+          <p class="form-hint">Sigla da unidade (department no AD, ex: A-DSI)</p>
         </div>
         <div class="form-group">
           <label class="form-label req">Sala</label>

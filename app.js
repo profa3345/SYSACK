@@ -1003,7 +1003,7 @@ function renderAtivos() {
   if (thead) {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Hostname</th><th style="font-size:11px">PAT (Auto)</th>' : ''}
-      <th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
+      <th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Local · Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
       ${isComp ? '<th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
@@ -1015,7 +1015,7 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
-    if (q && !`${a.pat} ${a.desc} ${a.area} ${a.resp||''} ${a.ip||''}`.toLowerCase().includes(q)) return false;
+    if (q && !`${a.pat} ${a.desc} ${a.area} ${a.local||''} ${a.resp||''} ${a.ip||''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -1038,7 +1038,10 @@ function renderAtivos() {
           : (a.hostname && a.hostname !== a.ip ? a.hostname : (a.ip ? `<span style="font-family:monospace;font-size:11px;color:var(--g500)">${a.ip}</span>` : '—'))
       }</td>
       <td><span class="tag">${a.tipo||'—'}</span></td>
-      <td>${a.area||'—'}</td>
+      <td>
+        ${a.local ? `<div style="font-size:12px;font-weight:600;color:var(--g800)">${escapeHtml(a.local)}</div>` : ''}
+        ${a.area  ? `<div style="font-size:11px;font-family:monospace;color:var(--g400)">${escapeHtml(a.area)}</div>` : (!a.local ? '—' : '')}
+      </td>
       <td>${a.resp||'—'}</td>
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.sala||a.loc||a.area||''}">
@@ -2467,11 +2470,27 @@ function salvarRascunhoChamado() {
 
 // openModal init handled inline in the single openModal below
 
+// ── Mapeamento local → sigla de área (AD: physicalDeliveryOfficeName → department) ──
+const AREA_POR_LOCAL = {
+  'rui barbosa': 'A-DSI', 'sede': 'A-DSI', 'data center': 'A-DSI',
+  'maruípe': 'A-OPE', 'maruipe': 'A-OPE',
+  'carapina': 'A-OPE', 'cachoeiro': 'A-OPE',
+  'aracruz': 'A-OPE', 'linhares': 'A-OPE',
+  'são mateus': 'A-OPE', 'sao mateus': 'A-OPE',
+  'colatina': 'A-OPE', 'santa clara': 'A-ALM',
+};
+function ativoAutoPreencherArea(localVal) {
+  const key  = (localVal || '').toLowerCase().trim();
+  const sigla = AREA_POR_LOCAL[key];
+  const campArea = document.getElementById('ativo-area');
+  if (campArea && sigla && !campArea.value) campArea.value = sigla;
+}
+
 function salvarAtivo() {
   const pat  = document.getElementById('ativo-pat').value.trim();
   const desc = document.getElementById('ativo-desc').value.trim();
   if (!pat||!desc) return showToast('Patrimônio e descrição são obrigatórios', 'danger');
-      const novo = { id:'a'+Date.now(), pat, desc, tipo:document.getElementById('ativo-tipo').value, area:document.getElementById('ativo-area').value, status:document.getElementById('ativo-status').value, sala:document.getElementById('ativo-sala')?.value?.trim()||'', loc:document.getElementById('ativo-loc').value, resp:document.getElementById('ativo-resp').value, serie:document.getElementById('ativo-serie').value, fab:document.getElementById('ativo-fab').value, createdAt:new Date() };
+      const novo = { id:'a'+Date.now(), pat, desc, tipo:document.getElementById('ativo-tipo').value, area:document.getElementById('ativo-area')?.value||'', local:document.getElementById('ativo-local')?.value?.trim()||'', status:document.getElementById('ativo-status').value, sala:document.getElementById('ativo-sala')?.value?.trim()||'', loc:document.getElementById('ativo-loc').value, resp:document.getElementById('ativo-resp').value, serie:document.getElementById('ativo-serie').value, fab:document.getElementById('ativo-fab').value, createdAt:new Date() };
   STATE.ativos.push(novo);
   // TODO Banco: await addDoc(collection(db,'ativos'), novo);
   closeModal('modal-novo-ativo');
@@ -15627,14 +15646,14 @@ function patAbrirBusca() {
     <div style="background:linear-gradient(135deg,#1E3A8A,#2563EB);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center">
       <div>
         <h3 style="color:#fff;margin:0;font-size:16px;font-weight:700">🔍 Busca de Patrimônio</h3>
-        <p style="color:rgba(255,255,255,.7);font-size:12px;margin:4px 0 0">Câmera · Foto · Texto · Hostname · Área · IP</p>
+        <p style="color:rgba(255,255,255,.7);font-size:12px;margin:4px 0 0">Câmera · Foto · Texto · Hostname · Local · IP · LDAP</p>
       </div>
       <button onclick="this.closest('#pat-busca-overlay').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px">✕</button>
     </div>
 
     <!-- TABS -->
     <div style="display:flex;border-bottom:1px solid var(--g200,#e2e8f0);padding:0 20px">
-      ${['📷 Câmera','🖼️ Foto','🔤 Texto','🔤 Hostname','🏢 Área/IP'].map((t,i)=>
+      ${['📷 Câmera','🖼️ Foto','🔤 Texto','🔤 Hostname','🏢 Local/IP','👤 LDAP'].map((t,i)=>
         `<button onclick="patBuscaTab(${i})" id="pat-btab-${i}"
           style="padding:10px 14px;border:none;background:none;cursor:pointer;font-size:12px;font-weight:${i===0?'700':'500'};color:${i===0?'#2563EB':'var(--g500,#64748b)'};border-bottom:${i===0?'2px solid #2563EB':'2px solid transparent'};transition:all .2s"
         >${t}</button>`).join('')}
@@ -15688,11 +15707,11 @@ function patAbrirBusca() {
       <div id="pat-hostname-result" style="margin-top:12px"></div>
     </div>
 
-    <!-- PAINEL ÁREA / IP -->
+    <!-- PAINEL LOCAL / IP -->
     <div id="pat-bpanel-4" style="display:none;padding:20px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
         <div>
-          <label style="font-size:12px;font-weight:600;color:var(--g600,#4b5563);display:block;margin-bottom:4px">Área / Gerência</label>
+          <label style="font-size:12px;font-weight:600;color:var(--g600,#4b5563);display:block;margin-bottom:4px">Local / Gerência</label>
           <input id="pat-busca-area" class="form-control" placeholder="Ex: TI, Financeiro" oninput="patBuscarFiltros()">
         </div>
         <div>
@@ -15711,13 +15730,28 @@ function patAbrirBusca() {
       </div>
       <div id="pat-filtros-result" style="margin-top:8px"></div>
     </div>
+
+    <!-- PAINEL LDAP -->
+    <div id="pat-bpanel-5" style="display:none;padding:20px">
+      <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#1E40AF">
+        🏢 Busca diretamente no <strong>Active Directory (CESAN)</strong> — nome, lotação e telefone do funcionário
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input id="ldap-busca-input" class="form-control" placeholder="Nome, login ou matrícula do funcionário"
+          style="flex:1"
+          onkeydown="if(event.key==='Enter')patLdapBuscar()"
+          oninput="if(this.value.length>2)patLdapBuscar()">
+        <button onclick="patLdapBuscar()" class="btn btn-primary" style="white-space:nowrap">🔍 Buscar</button>
+      </div>
+      <div id="ldap-busca-result"></div>
+    </div>
   </div>`;
   document.body.appendChild(overlay);
   overlay.onclick = e => { if (e.target === overlay) { patPararCamera(); overlay.remove(); }};
 }
 
 function patBuscaTab(idx) {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     const btn = document.getElementById('pat-btab-' + i);
     const pan = document.getElementById('pat-bpanel-' + i);
     if (btn) { btn.style.fontWeight = i===idx?'700':'500'; btn.style.color = i===idx?'#2563EB':'var(--g500,#64748b)'; btn.style.borderBottom = i===idx?'2px solid #2563EB':'2px solid transparent'; }
@@ -15725,6 +15759,88 @@ function patBuscaTab(idx) {
   }
   if (idx !== 0) patPararCamera();
 }
+
+// ── Busca LDAP — Active Directory CESAN ─────────────────────────
+let _ldapDebounce = null;
+async function patLdapBuscar() {
+  const q = (document.getElementById('ldap-busca-input')?.value || '').trim();
+  const div = document.getElementById('ldap-busca-result');
+  if (!div) return;
+  if (q.length < 2) { div.innerHTML = ''; return; }
+
+  // Debounce para não disparar a cada tecla
+  clearTimeout(_ldapDebounce);
+  _ldapDebounce = setTimeout(async () => {
+    div.innerHTML = '<div style="color:var(--g400,#94a3b8);font-size:13px;padding:8px 0">🔄 Consultando Active Directory...</div>';
+
+    try {
+      // Proxy LDAP — chama backend que faz a query LDAPS no AD CESAN
+      // Endpoint: POST /api/ldap-search  { query: "..." }
+      // Retorna: [{ name, sAMAccountName, department, physicalDeliveryOfficeName, telephoneNumber, mobile, ipPhone, mail }]
+      const resp = await fetch('/api/ldap-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q })
+      });
+
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const usuarios = await resp.json();
+
+      if (!usuarios || !usuarios.length) {
+        div.innerHTML = `<div style="color:var(--g400,#94a3b8);font-size:13px;padding:8px 0">Nenhum funcionário encontrado para "<strong>${escapeHtml(q)}</strong>"</div>`;
+        return;
+      }
+
+      div.innerHTML = `
+        <div style="font-size:12px;font-weight:600;color:var(--g500,#64748b);margin-bottom:8px">${usuarios.length} funcionário(s) encontrado(s)</div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto">
+          ${usuarios.map(u => `
+          <div style="border:1px solid var(--g200,#e2e8f0);border-radius:10px;padding:14px;background:var(--bg,#fff);display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:700;font-size:14px;color:var(--g900,#111827);margin-bottom:2px">${escapeHtml(u.name||'—')}</div>
+              <div style="font-size:11px;color:var(--g400,#94a3b8);margin-bottom:6px">
+                <span style="font-family:monospace">${escapeHtml(u.sAMAccountName||'—')}</span>
+                ${u.mail ? ` · <a href="mailto:${escapeHtml(u.mail)}" style="color:#2563EB">${escapeHtml(u.mail)}</a>` : ''}
+              </div>
+              <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12px">
+                ${u.department ? `<span style="color:var(--g400,#94a3b8)">Unidade</span><span style="font-weight:600">${escapeHtml(u.department)}</span>` : ''}
+                ${u.physicalDeliveryOfficeName ? `<span style="color:var(--g400,#94a3b8)">Local</span><span>${escapeHtml(u.physicalDeliveryOfficeName)}</span>` : ''}
+                ${u.telephoneNumber ? `<span style="color:var(--g400,#94a3b8)">Fixo</span><span>${escapeHtml(u.telephoneNumber)}</span>` : ''}
+                ${u.ipPhone ? `<span style="color:var(--g400,#94a3b8)">Ramal</span><span>${escapeHtml(u.ipPhone)}</span>` : ''}
+                ${u.mobile ? `<span style="color:var(--g400,#94a3b8)">Celular</span><span>${escapeHtml(u.mobile)}</span>` : ''}
+              </div>
+            </div>
+            <button onclick="patLdapUsarFuncionario(${JSON.stringify(JSON.stringify(u))})"
+              class="btn btn-primary btn-sm" style="white-space:nowrap;flex-shrink:0">
+              ✔ Usar
+            </button>
+          </div>`).join('')}
+        </div>`;
+    } catch(e) {
+      div.innerHTML = `
+        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px;font-size:12px;color:#991B1B">
+          <strong>⚠️ Não foi possível conectar ao AD:</strong> ${escapeHtml(e.message)}<br>
+          <span style="color:#7F1D1D;margin-top:4px;display:block">Verifique se o backend LDAP proxy está configurado em <code>/api/ldap-search</code></span>
+        </div>`;
+    }
+  }, 350);
+}
+
+// Preenche campos do ativo com dados do funcionário selecionado no AD
+function patLdapUsarFuncionario(jsonStr) {
+  try {
+    const u = JSON.parse(jsonStr);
+    // Tenta preencher campos de responsável se o modal de ativo estiver aberto
+    const campResp = document.getElementById('ativo-resp') || document.getElementById('new-pat-resp');
+    if (campResp) campResp.value = u.name || '';
+    const campArea = document.getElementById('ativo-area') || document.getElementById('new-pat-area');
+    if (campArea) campArea.value = u.department || '';
+    showToast(`✅ Funcionário "${u.name}" aplicado`, 'success');
+    // Fecha overlay de busca
+    document.getElementById('pat-busca-overlay')?.remove();
+  } catch(e) { showToast('Erro ao aplicar funcionário', 'error'); }
+}
+
 
 let _patScanStream = null;
 async function patIniciarCamera() {
@@ -15841,7 +15957,7 @@ function patBuscarFiltros() {
   const pats   = (STATE.patrimonios || []);
 
   let lista = ativos.filter(a => {
-    if (area && !(a.area||'').toLowerCase().includes(area) && !(a.gerencia||'').toLowerCase().includes(area)) return false;
+    if (area && !(a.area||'').toLowerCase().includes(area) && !(a.local||'').toLowerCase().includes(area) && !(a.gerencia||'').toLowerCase().includes(area)) return false;
     if (ip   && !(a.ip||'').includes(ip)) return false;
     if (!todos) {
       const tipo = (a.tipo||'').toLowerCase();
@@ -15928,7 +16044,7 @@ function patCardResultado(ativo, pat, hn, pp) {
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
       <div>
         <div style="font-size:15px;font-weight:700;color:var(--g900,#111827)">${escapeHtml(a.desc||p.desc||hn||'Ativo')}</div>
-        <div style="font-size:11px;color:var(--g400,#94a3b8)">${escapeHtml(a.tipo||'—')} · ${escapeHtml(a.area||p.gerencia||'—')}</div>
+        <div style="font-size:11px;color:var(--g400,#94a3b8)">${escapeHtml(a.tipo||'—')} · ${escapeHtml(a.local||a.area||p.gerencia||'—')}${a.area&&a.local?' <span style="font-family:monospace;font-size:10px">('+escapeHtml(a.area)+')</span>':''}</div>
       </div>
       <span style="font-size:11px;font-weight:700;color:${cor};white-space:nowrap">${status}</span>
     </div>
