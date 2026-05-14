@@ -2730,7 +2730,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Nav
   document.querySelectorAll('.nav-i[data-page]').forEach(el => {
-    el.addEventListener('click', () => goPage(el.dataset.page));
+    el.addEventListener('click', () => {
+      const tipo = el.dataset.tipo || null;
+      goPage(el.dataset.page);
+      // Se tiver data-tipo, aplica o filtro de categoria automaticamente
+      if (tipo !== null && el.dataset.page === 'ativos') {
+        _ativoFiltroTipo = tipo;
+        // Destaca a aba correta dentro da página de ativos
+        const tabMap = {
+          'computador,workstation,notebook,desktop': 1,
+          'notebook': 2,
+          'monitor': 3,
+          'switch,router,ap,firewall,access point': 4,
+          'servidor,server-linux': 5,
+          'outro,rack,storage,appliance,ups,camera': 6,
+          'impressora,printer': 6,
+          'software': 6,
+        };
+        const tabs = document.querySelectorAll('#ativos-tabs .tab');
+        tabs.forEach(t => t.classList.remove('active'));
+        const tabIdx = tabMap[tipo];
+        if (tabIdx !== undefined && tabs[tabIdx]) {
+          tabs[tabIdx].classList.add('active');
+        } else {
+          // Aba "Todos" ativa se não tiver mapeamento
+          if (tabs[0]) tabs[0].classList.add('active');
+        }
+        const isComp = tipo.includes('computador') || tipo.includes('notebook') || tipo.includes('desktop') || tipo.includes('workstation');
+        updateAtivosTableForComputadores(isComp);
+        renderAtivos();
+      } else if (el.dataset.page === 'ativos' && !tipo) {
+        // Clicou em "Ativos" sem tipo — mostra todos
+        _ativoFiltroTipo = '';
+        const tabs = document.querySelectorAll('#ativos-tabs .tab');
+        tabs.forEach(t => t.classList.remove('active'));
+        if (tabs[0]) tabs[0].classList.add('active');
+        renderAtivos();
+      }
+    });
   });
 
   // Breadcrumb root
