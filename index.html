@@ -3046,55 +3046,83 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div class="page" id="page-empregados">
       <div class="flex items-center justify-between mb-20">
         <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Empregados & Ausências</h2>
-          <p class="text-sm text-muted mt-8">Sincronizado com CadastroSAP · Alertas suprimidos durante ausências</p>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Empregados &amp; Organograma</h2>
+          <p class="text-sm text-muted mt-8">Sincronizado com Active Directory · Ausências via CadastroSAP</p>
         </div>
         <div class="flex gap-8">
           <div style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--g50);border:1px solid var(--g200);border-radius:20px;font-size:12px" id="emp-sync-status">
             <span style="width:7px;height:7px;border-radius:50%;background:var(--g300)"></span>
             Aguardando sync
           </div>
-          <button class="btn btn-secondary btn-sm" onclick="renderEmpregados()">↺ Atualizar</button>
+          <button class="btn btn-secondary btn-sm" onclick="empRefresh()">↺ Atualizar</button>
         </div>
       </div>
 
       <!-- STATS -->
       <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px">
-        <div class="stat-card blue">  <div class="stat-label">Total</div>          <div class="stat-value" id="emp-total">—</div></div>
-        <div class="stat-card green"> <div class="stat-label">Ativos</div>         <div class="stat-value" id="emp-ativos">—</div></div>
-        <div class="stat-card orange"><div class="stat-label">Em Ausência</div>    <div class="stat-value" id="emp-ausentes">—</div></div>
+        <div class="stat-card blue">  <div class="stat-label">Total</div>             <div class="stat-value" id="emp-total">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Ativos</div>            <div class="stat-value" id="emp-ativos">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Em Ausência</div>       <div class="stat-value" id="emp-ausentes">—</div></div>
         <div class="stat-card violet"><div class="stat-label">Alertas Suprimidos</div><div class="stat-value" id="emp-suprimidos">—</div></div>
-        <div class="stat-card red">   <div class="stat-label">Último Sync</div>   <div class="stat-value" style="font-size:14px" id="emp-last-sync">—</div></div>
+        <div class="stat-card red">   <div class="stat-label">Conta AD Inativa</div> <div class="stat-value" id="emp-inativos-ad">—</div></div>
       </div>
 
-      <!-- FILTROS -->
-      <div class="doc-filter-row mb-12">
-        <input class="form-control" style="width:240px;margin:0" placeholder="🔍 Nome ou matrícula..." id="emp-search" oninput="renderEmpregados()">
-        <select class="form-control" style="width:160px;margin:0" id="emp-filter-status" onchange="renderEmpregados()">
-          <option value="">Todos</option>
-          <option value="ativo">Apenas ativos</option>
-          <option value="ausente">Apenas ausentes</option>
-        </select>
-        <select class="form-control" style="width:180px;margin:0" id="emp-filter-setor" onchange="renderEmpregados()">
-          <option value="">Todos os setores</option>
-        </select>
+      <!-- ABAS -->
+      <div style="display:flex;border-bottom:2px solid var(--g200);margin-bottom:16px;gap:0">
+        <button id="emp-tab-tabela" onclick="empSetTab('tabela')"
+          style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:700;color:var(--accent);border-bottom:2px solid var(--accent);margin-bottom:-2px">
+          👥 Lista
+        </button>
+        <button id="emp-tab-organograma" onclick="empSetTab('organograma')"
+          style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--g500);border-bottom:2px solid transparent;margin-bottom:-2px">
+          🏢 Organograma
+        </button>
       </div>
 
-      <!-- TABELA -->
-      <div class="card">
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Matrícula</th><th>Nome</th><th>Setor</th><th>Cargo</th>
-              <th>Status</th><th>Ausência</th><th>Período</th><th>Alertas</th>
-            </tr></thead>
-            <tbody id="emp-body">
-              <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">
-                Instale o SYSACK Agent no servidor para sincronizar os empregados.
-              </td></tr>
-            </tbody>
-          </table>
+      <!-- PAINEL LISTA -->
+      <div id="emp-panel-tabela">
+        <div class="doc-filter-row mb-12">
+          <input class="form-control" style="width:240px;margin:0" placeholder="🔍 Nome, matrícula ou login..." id="emp-search" oninput="renderEmpregados()">
+          <select class="form-control" style="width:160px;margin:0" id="emp-filter-status" onchange="renderEmpregados()">
+            <option value="">Todos</option>
+            <option value="ativo">Apenas ativos</option>
+            <option value="ausente">Em ausência</option>
+            <option value="inativo-ad">Conta AD inativa</option>
+          </select>
+          <select class="form-control" style="width:200px;margin:0" id="emp-filter-setor" onchange="renderEmpregados()">
+            <option value="">Todas as lotações</option>
+          </select>
         </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Matrícula</th><th>Nome</th><th>Login</th><th>Lotação</th><th>Local</th>
+                <th>Telefone</th><th>Ramal</th><th>Status AD</th><th>Ausência</th><th>Alertas</th>
+              </tr></thead>
+              <tbody id="emp-body">
+                <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--g400)">
+                  Aguardando sincronização com o Active Directory...
+                </td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAINEL ORGANOGRAMA -->
+      <div id="emp-panel-organograma" style="display:none">
+        <div class="doc-filter-row mb-12">
+          <input class="form-control" style="width:260px;margin:0" placeholder="🔍 Buscar pessoa ou unidade..." id="org-search" oninput="renderOrganograma()">
+          <select class="form-control" style="width:200px;margin:0" id="org-filter-dir" onchange="renderOrganograma()">
+            <option value="">Todas as diretorias</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--g600);margin:0;cursor:pointer">
+            <input type="checkbox" id="org-show-inativos" onchange="renderOrganograma()" style="accent-color:var(--accent)">
+            Mostrar contas inativas
+          </label>
+        </div>
+        <div id="org-tree-container" style="display:flex;flex-direction:column;gap:12px"></div>
       </div>
     </div>
 
@@ -4007,27 +4035,10 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="form-group"><label class="form-label req">Descrição / Modelo</label><input class="form-control" id="ativo-desc" placeholder="Ex: Dell OptiPlex 7090, HP EliteBook 840 G8..."></div>
       <div class="form-row c2">
         <div class="form-group">
-          <label class="form-label req">Local (Unidade)</label>
-          <input class="form-control" id="ativo-local" placeholder="Ex: Rui Barbosa, Maruípe, Sede..." list="ativo-local-list"
-            oninput="ativoAutoPreencherArea(this.value)">
-          <datalist id="ativo-local-list">
-            <option value="Rui Barbosa"><option value="Maruípe"><option value="Sede">
-            <option value="Carapina"><option value="Cachoeiro"><option value="Aracruz">
-            <option value="Linhares"><option value="São Mateus"><option value="Colatina">
-            <option value="Santa Clara"><option value="Data Center">
-          </datalist>
-          <p class="form-hint">Localidade física (physicalDeliveryOfficeName no AD)</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label req">Área (Unidade/Setor)</label>
-          <input class="form-control" id="ativo-area" placeholder="Ex: A-DSI, A-RH, A-FIN..."
-            list="ativo-area-list" style="font-family:monospace;font-weight:600">
-          <datalist id="ativo-area-list">
-            <option value="A-DSI"><option value="A-RH"><option value="A-FIN">
-            <option value="A-COM"><option value="A-OPE"><option value="A-LOG">
-            <option value="A-DIR"><option value="A-JUR"><option value="A-ENG">
-          </datalist>
-          <p class="form-hint">Sigla da unidade (department no AD, ex: A-DSI)</p>
+          <label class="form-label req">Área Responsável</label>
+          <select class="form-control" id="ativo-area">
+            <option>TI</option><option>RH</option><option>Financeiro</option><option>Comercial</option><option>Jurídico</option><option>Operações</option><option>Logística</option><option>Diretoria</option>
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label req">Sala</label>
