@@ -715,16 +715,28 @@ function startFirestoreListeners() {
   function norm(d) {
     return {
       ...d,
-      // pat: NUNCA usa IP como fallback — IP não é número de patrimônio
-      // Máquinas sem PAT vinculado ficam com pat vazio e exibem indicador visual na tabela
-      pat:    d.pat    || d.patrimonio || '',
-      // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
-      desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      tipo:   d.tipo   || 'workstation',
-      area:   d.area   || '',
-      resp:   d.resp   || d.responsavel || '',
-      status: d.status || (d.reachable ? 'ativo' : 'offline'),
-      fonte:  d.fonte  || 'Discovery',
+      // pat: NUNCA usa IP como fallback
+      pat:      d.pat      || d.patrimonio || '',
+      // desc: prefere desc → hostname → sysDescr → ''
+      desc:     d.desc     || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
+      tipo:     d.tipo     || 'workstation',
+      area:     d.area     || d.local      || '',
+      resp:     d.resp     || d.responsavel || '',
+      status:   d.status   || (d.reachable ? 'ativo' : 'offline'),
+      fonte:    d.fonte    || 'Discovery',
+      // Campos específicos de switch/roteador — garantir que nunca sejam undefined
+      local:    d.local    || d.area       || d.localizacao || '',
+      marca:    d.marca    || d.fabricante || '',
+      modelo:   d.modelo   || d.model      || '',
+      hostname: d.hostname || d.nome       || d.ip          || '',
+      ip:       d.ip       || d.ipAddress  || '',
+      firmware: d.firmware || '',
+      uptime:   d.uptime   || '',
+      totalPortas: d.totalPortas || 0,
+      portasUso:   d.portasUso   || 0,
+      portasSfp:   d.portasSfp   || 0,
+      vlans:       d.vlans       || [],
+      historico:   d.historico   || [],
     };
   }
 
@@ -8953,7 +8965,7 @@ function renderSwitches(){
       const pct=Math.round((s.portasUso/s.totalPortas)*100)||0;
       const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
       const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#0F172A';
-      return `<div class='sw-card'><div class='sw-card-header'><div style='width:36px;height:36px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>${ico}</div><div style='flex:1;min-width:0'><div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace'>${s.hostname}</div><div style='font-size:10.5px;color:var(--g400)'>${s.marca} ${s.modelo}</div></div>${swStatusHtml(s.status)}</div><div class='sw-card-body'><div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>${s.ip}</span></div><div class='mdm-card-field'><span class='lbl'>Local</span><span class='val'>${s.local}</span></div><div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</span></div><div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>${s.firmware||'—'}</span></div>${s.tipo!=='ap'&&s.tipo!=='firewall'?`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: ${s.portasUso}/${s.totalPortas}</span><span>${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:${pct}%;height:100%;border-radius:4px'></div></div></div>`:''}</div><div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>${renderPortMinimap(s)}</div></div><div class='sw-card-actions'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️ Gerenciar</button><button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('${s.id}')">📜 Histórico</button><button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶 Ping</button><button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','${s.id}')">🖥️ SSH</button><button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','${s.id}')">💾 Backup</button></div></div>`;
+      return `<div class='sw-card'><div class='sw-card-header'><div style='width:36px;height:36px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>${ico}</div><div style='flex:1;min-width:0'><div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace'>${s.hostname}</div><div style='font-size:10.5px;color:var(--g400)'>${s.marca} ${s.modelo}</div></div>${swStatusHtml(s.status)}</div><div class='sw-card-body'><div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>${s.ip}</span></div><div class='mdm-card-field'><span class='lbl'>Local</span><span class='val'>${s.local}</span></div><div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</span></div><div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>${s.firmware||'—'}</span></div>${s.tipo!=='ap'&&s.tipo!=='firewall'?`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: ${s.portasUso}/${s.totalPortas}</span><span>${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:${pct}%;height:100%;border-radius:4px'></div></div></div>`:''}</div><div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>${renderPortMinimap(s)}</div></div><div class='sw-card-actions'><button class='mdm-action-btn mab-gray' data-swid='${s.id}' data-swact='gerenciar'>⚙️ Gerenciar</button><button class='mdm-action-btn mab-info' data-swid='${s.id}' data-swact='historico'>📜 Histórico</button><button class='mdm-action-btn mab-success' data-swid='${s.id}' data-swact='chamado'>🎫 Chamado</button><button class='mdm-action-btn mab-warning' data-swid='${s.id}' data-swact='ping'>📶 Ping</button><button class='mdm-action-btn mab-dark' data-swid='${s.id}' data-swact='ssh'>🖥️ SSH</button><button class='mdm-action-btn mab-violet' data-swid='${s.id}' data-swact='backup'>💾 Backup</button></div></div>`;
     }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
   } else {
     const tbody=document.getElementById('sw-table-body');
@@ -8972,6 +8984,39 @@ function renderPortMinimap(s){
 }
 
 function goSwView(v){currentSwView=v;document.getElementById('sw-view-cards').style.display=v==='cards'?'':'none';document.getElementById('sw-view-table').style.display=v==='table'?'':'none';renderSwitches();}
+
+// Event delegation para botões dos cards de switch (evita quebra de onclick com IDs)
+(function() {
+  let _swDelegateAttached = false;
+  function attachSwDelegate() {
+    const grid = document.getElementById('sw-cards-grid');
+    if (!grid || _swDelegateAttached) return;
+    _swDelegateAttached = true;
+    grid.addEventListener('click', function(e) {
+      const btn = e.target.closest('[data-swid][data-swact]');
+      if (!btn) return;
+      const id  = btn.dataset.swid;
+      const act = btn.dataset.swact;
+      switch(act) {
+        case 'gerenciar': abrirGerenciarSwitch(id); break;
+        case 'historico': abrirHistSwitch(id); break;
+        case 'chamado':   openModal('modal-novo-chamado'); break;
+        case 'ping':      swActionDirect('ping', id); break;
+        case 'ssh':       swActionDirect('ssh', id); break;
+        case 'backup':    swActionDirect('backup-config', id); break;
+      }
+    });
+  }
+  // Tenta attachar imediatamente e também após render
+  const _origRenderSw = typeof renderSwitches !== 'undefined' ? renderSwitches : null;
+  document.addEventListener('DOMContentLoaded', attachSwDelegate);
+  setTimeout(attachSwDelegate, 1000);
+  // Monkey-patch para re-attachar após cada render
+  const _checkInterval = setInterval(() => {
+    attachSwDelegate();
+    if (_swDelegateAttached) clearInterval(_checkInterval);
+  }, 500);
+})();
 
 function abrirGerenciarSwitch(id){
   const sw=(STATE.switches||[]).find(s=>s.id===id);if(!sw) return;
@@ -14428,18 +14473,12 @@ function abrirModalNovoGrupoAlerta(grupoId) {
       </div>`;
   }).join('');
 
-  // HTML atual dos destinatários (empregados)
+  // HTML atual dos emails
   const emailsHtml = (grupo?.emails||[]).map((e, i) => `
-    <div class="ga-email-row" style="display:flex;gap:6px;margin-bottom:6px;align-items:center" data-idx="${i}">
-      <div style="flex:1.8;position:relative">
-        <input class="form-control ga-nome-emp" placeholder="Nome do empregado"
-          value="${escapeHtml(e.nome||'')}" style="margin:0;width:100%"
-          oninput="gaFiltrarEmpregados(this)"
-          onblur="setTimeout(()=>this.closest('.ga-email-row').querySelector('.ga-emp-dropdown')?.remove(),200)">
-        <div class="ga-emp-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:8px;max-height:200px;overflow-y:auto;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.12)"></div>
-      </div>
-      <input class="form-control ga-email" placeholder="E-mail" value="${escapeHtml(e.email||'')}" style="margin:0;flex:2">
-      <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 6px" title="Remover">✕</button>
+    <div class="ga-email-row" style="display:flex;gap:6px;margin-bottom:6px" data-idx="${i}">
+      <input class="form-control ga-email" placeholder="e-mail" value="${escapeHtml(e.email||'')}" style="margin:0;flex:2">
+      <input class="form-control ga-nome"  placeholder="nome (opcional)" value="${escapeHtml(e.nome||'')}" style="margin:0;flex:1.5">
+      <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 4px">✕</button>
     </div>`).join('');
 
   // Unidades (da planilha de redes)
@@ -14465,31 +14504,12 @@ function abrirModalNovoGrupoAlerta(grupoId) {
         </div>
       </div>
 
-      <!-- Destinatários -->
+      <!-- Destinatários de e-mail -->
       <div style="border:1px solid var(--g200);border-radius:10px;padding:16px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div style="font-size:13px;font-weight:700;color:var(--g700)">👥 Destinatários</div>
-          <span style="font-size:11px;color:var(--g400)">Digite nome ou e-mail — busca empregados cadastrados</span>
-        </div>
-
-        <!-- Barra de busca rápida de empregados -->
-        <div style="position:relative;margin-bottom:10px">
-          <input id="ga-busca-emp" class="form-control" placeholder="🔍  Buscar empregado por nome ou matrícula para adicionar rapidamente..."
-            style="margin:0;padding-left:12px"
-            oninput="gaFiltrarBuscaRapida(this)"
-            onblur="setTimeout(()=>document.getElementById('ga-busca-dropdown')?.style&&(document.getElementById('ga-busca-dropdown').style.display='none'),200)">
-          <div id="ga-busca-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:8px;max-height:220px;overflow-y:auto;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.15)"></div>
-        </div>
-
+        <div style="font-size:13px;font-weight:700;color:var(--g700);margin-bottom:12px">✉️ Destinatários</div>
         <div id="ga-emails-container">${emailsHtml || ''}</div>
-
-        <button onclick="gaAdicionarEmail()" class="btn btn-ghost btn-sm" style="margin-top:8px">
-          + Adicionar manualmente
-        </button>
-        <p class="form-hint" style="margin-top:8px">
-          Você pode adicionar múltiplos destinatários (sem limite). Use a busca acima para empregados cadastrados
-          ou clique em "+ Adicionar manualmente" para digitar nome e e-mail livremente.
-        </p>
+        <button onclick="gaAdicionarEmail()" class="btn btn-ghost btn-sm" style="margin-top:4px">+ Adicionar e-mail</button>
+        <p class="form-hint" style="margin-top:8px">Você pode adicionar múltiplos destinatários. Todos receberão os alertas configurados abaixo.</p>
       </div>
 
       <!-- Escopo de monitoramento -->
@@ -14588,105 +14608,18 @@ function gaToggleEscopo(val) {
   if (g) g.style.display = val === 'gerencia' ? '' : 'none';
 }
 
-function gaAdicionarEmail(nome, email) {
+function gaAdicionarEmail() {
   const cont = document.getElementById('ga-emails-container');
   if (!cont) return;
   const row = document.createElement('div');
   row.className = 'ga-email-row';
-  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
   row.innerHTML = `
-    <div style="flex:1.8;position:relative">
-      <input class="form-control ga-nome-emp" placeholder="Nome do empregado"
-        value="${escapeHtml(nome||'')}" style="margin:0;width:100%"
-        oninput="gaFiltrarEmpregados(this)"
-        onblur="setTimeout(()=>this.closest('.ga-email-row').querySelector('.ga-emp-dropdown')?.remove(),200)">
-      <div class="ga-emp-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:8px;max-height:200px;overflow-y:auto;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.12)"></div>
-    </div>
-    <input class="form-control ga-email" placeholder="E-mail"
-      value="${escapeHtml(email||'')}" style="margin:0;flex:2">
-    <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 6px" title="Remover">✕</button>`;
+    <input class="form-control ga-email" placeholder="e-mail" style="margin:0;flex:2">
+    <input class="form-control ga-nome"  placeholder="nome (opcional)" style="margin:0;flex:1.5">
+    <button onclick="this.closest('.ga-email-row').remove()" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 4px">✕</button>`;
   cont.appendChild(row);
-  const input = row.querySelector('.ga-nome-emp');
-  if (!nome) input.focus();
-}
-
-// Filtra empregados no campo inline de cada row
-function gaFiltrarEmpregados(input) {
-  const row = input.closest('.ga-email-row');
-  if (!row) return;
-  let dd = row.querySelector('.ga-emp-dropdown');
-  if (!dd) return;
-  const q = input.value.toLowerCase().trim();
-  if (!q || q.length < 2) { dd.style.display = 'none'; return; }
-
-  const emps = (STATE.empregados || []).filter(e =>
-    e.nome?.toLowerCase().includes(q) || e.mat?.includes(q) || e.email?.toLowerCase().includes(q)
-  ).slice(0, 10);
-
-  if (!emps.length) { dd.style.display = 'none'; return; }
-
-  dd.innerHTML = emps.map(e => `
-    <div onclick="gaSelectEmpregado(this,'${escapeHtml(e.nome||'')}','${escapeHtml(e.email||'')}')"
-      style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;flex-direction:column"
-      onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
-      <span style="font-size:12.5px;font-weight:600;color:var(--g800)">${escapeHtml(e.nome||'—')}</span>
-      <span style="font-size:11px;color:var(--g400)">${escapeHtml(e.email||'sem e-mail')} · Mat. ${escapeHtml(e.mat||'—')}</span>
-    </div>`).join('');
-  dd.style.display = '';
-}
-
-function gaSelectEmpregado(el, nome, email) {
-  const row = el.closest('.ga-email-row') || el.closest('.ga-email-row');
-  // el está dentro do dropdown que está dentro da div relativa dentro do row
-  const rowEl = el.closest('.ga-email-row');
-  if (!rowEl) return;
-  rowEl.querySelector('.ga-nome-emp').value = nome;
-  rowEl.querySelector('.ga-email').value = email;
-  const dd = rowEl.querySelector('.ga-emp-dropdown');
-  if (dd) dd.style.display = 'none';
-}
-
-// Busca rápida no topo para adicionar empregado com um clique
-function gaFiltrarBuscaRapida(input) {
-  const dd = document.getElementById('ga-busca-dropdown');
-  if (!dd) return;
-  const q = input.value.toLowerCase().trim();
-  if (!q || q.length < 2) { dd.style.display = 'none'; return; }
-
-  const emps = (STATE.empregados || []).filter(e =>
-    e.nome?.toLowerCase().includes(q) || e.mat?.includes(q) || e.email?.toLowerCase().includes(q)
-  ).slice(0, 12);
-
-  if (!emps.length) {
-    dd.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum empregado encontrado</div>';
-    dd.style.display = '';
-    return;
-  }
-
-  dd.innerHTML = emps.map(e => `
-    <div onclick="gaAdicionarEmpregadoRapido('${escapeHtml(e.nome||'')}','${escapeHtml(e.email||'')}',this)"
-      style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;align-items:center;justify-content:space-between;gap:12px"
-      onmouseover="this.style.background='#EFF6FF'" onmouseout="this.style.background=''">
-      <div>
-        <div style="font-size:12.5px;font-weight:600;color:var(--g800)">${escapeHtml(e.nome||'—')}</div>
-        <div style="font-size:11px;color:var(--g400)">${escapeHtml(e.email||'sem e-mail')} · Mat. ${escapeHtml(e.mat||'—')} · ${escapeHtml(e.setor||e.cargo||'')}</div>
-      </div>
-      <span style="font-size:11px;color:var(--accent);font-weight:600;white-space:nowrap">+ Adicionar</span>
-    </div>`).join('');
-  dd.style.display = '';
-}
-
-function gaAdicionarEmpregadoRapido(nome, email, el) {
-  // Verifica se já está na lista
-  const jaAdicionado = [...document.querySelectorAll('.ga-email')].some(i => i.value === email);
-  if (jaAdicionado) { showToast(`${nome} já está na lista`, 'info'); return; }
-  gaAdicionarEmail(nome, email);
-  // Limpa busca
-  const inp = document.getElementById('ga-busca-emp');
-  if (inp) inp.value = '';
-  const dd = document.getElementById('ga-busca-dropdown');
-  if (dd) dd.style.display = 'none';
-  showToast(`${nome} adicionado como destinatário`, 'success', 2000);
+  row.querySelector('.ga-email').focus();
 }
 
 async function salvarGrupoAlerta(grupoId, btn) {
@@ -14702,7 +14635,7 @@ async function salvarGrupoAlerta(grupoId, btn) {
   // Coleta e-mails
   const emails = [...document.querySelectorAll('.ga-email-row')].map(row => ({
     email: row.querySelector('.ga-email')?.value?.trim() || '',
-    nome:  (row.querySelector('.ga-nome-emp') || row.querySelector('.ga-nome'))?.value?.trim() || '',
+    nome:  row.querySelector('.ga-nome')?.value?.trim()  || '',
   })).filter(e => e.email && e.email.includes('@'));
 
   if (!emails.length) return showToast('Adicione pelo menos um e-mail válido', 'warning');
