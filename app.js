@@ -748,7 +748,7 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] switches erro:', e.message); });
 
   // empregados
-  db.collection('empregados').orderBy('nome').limit(500).onSnapshot(function(snap) {
+  db.collection('empregados').orderBy('nome').limit(2000).onSnapshot(function(snap) {
     STATE.empregados = snap2arr(snap);
     // Calcula data do último sync (campo gravado pelo agente)
     const primeiro = STATE.empregados[0];
@@ -8825,7 +8825,7 @@ function renderEmpregados() {
   }
 
   tbody.innerHTML = lista.map(e => {
-    const ausenciaLabel = e.ausencia || (e.emAusencia ? e.status : '');
+    const ausenciaLabel = e.ausencia || '';
     const periodoLabel  = e.dataInicioAusencia
       ? fmtDate(e.dataInicioAusencia) + ' → ' + (e.dataFimAusencia ? fmtDate(e.dataFimAusencia) : 'Indefinido')
       : '—';
