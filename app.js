@@ -8818,29 +8818,39 @@ function renderEmpregados() {
   if (fSetor)   lista = lista.filter(e => e.setor === fSetor);
 
   if (!lista.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">' +
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--g400)">' +
       (empregados.length ? 'Nenhum empregado encontrado com esses filtros.' : 'Instale o SYSACK Agent no servidor para sincronizar os empregados.') +
       '</td></tr>';
     return;
   }
 
+  // Atualiza cabeçalho dinamicamente com as colunas corretas
+  const thead = tbody.closest('table')?.querySelector('thead tr');
+  if (thead) {
+    thead.innerHTML =
+      '<th>Matrícula</th><th>Nome</th><th>Login</th><th>Setor</th><th>Cargo</th>' +
+      '<th>Email</th><th>Ramal</th><th>Celular</th>' +
+      '<th>Status</th><th>Ausência</th><th>Alertas</th>';
+  }
+
   tbody.innerHTML = lista.map(e => {
     const ausenciaLabel = e.ausencia || '';
-    const periodoLabel  = e.dataInicioAusencia
-      ? fmtDate(e.dataInicioAusencia) + ' → ' + (e.dataFimAusencia ? fmtDate(e.dataFimAusencia) : 'Indefinido')
-      : '—';
+    const matLabel = /^\d+$/.test(e.mat || '') ? e.mat : '—';
     return '<tr>' +
-      '<td class="td-mono" style="font-size:12px">' + e.mat + '</td>' +
-      '<td style="font-weight:600;font-size:13px">' + e.nome + '</td>' +
+      '<td class="td-mono" style="font-size:12px">' + matLabel + '</td>' +
+      '<td style="font-weight:600;font-size:13px">' + (e.nome||'—') + '</td>' +
+      '<td class="td-mono" style="font-size:11px;color:var(--g500)">' + (e.login||'—') + '</td>' +
       '<td style="font-size:12px">' + (e.setor||'—') + '</td>' +
       '<td style="font-size:12px;color:var(--g500)">' + (e.cargo||'—') + '</td>' +
+      '<td style="font-size:11px">' + (e.email||'—') + '</td>' +
+      '<td class="td-mono" style="font-size:12px">' + (e.ramal||'—') + '</td>' +
+      '<td class="td-mono" style="font-size:12px">' + (e.celular||'—') + '</td>' +
       '<td>' + (e.emAusencia
         ? '<span class="badge badge-warning">Em Ausência</span>'
         : e.ativo
           ? '<span class="badge badge-success">Ativo</span>'
           : '<span class="badge">Inativo</span>') + '</td>' +
       '<td>' + (ausenciaLabel ? '<span class="tag">' + ausenciaLabel + '</span>' : '—') + '</td>' +
-      '<td style="font-size:11px;color:var(--g500)">' + periodoLabel + '</td>' +
       '<td>' + (e.suprimirAlertas
         ? '<span style="font-size:11px;color:var(--warning);font-weight:600">🔕 Suprimidos</span>'
         : '<span style="font-size:11px;color:var(--success)">🔔 Ativos</span>') + '</td>' +
