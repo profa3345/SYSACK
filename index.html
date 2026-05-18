@@ -266,6 +266,10 @@ window.dispatchEvent(new Event('firebase-ready'));
         Empregados
         <span class="nav-badge" id="nb-ausentes">0</span>
       </a>
+      <a class="nav-i nav-sub" data-page="organograma">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="6" y="1" width="4" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="12" width="4" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="6" y="12" width="4" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="11" y="12" width="4" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M8 4v3M8 7H3v2M8 7h5v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Organograma
+      </a>
       <a class="nav-i nav-sub" data-page="lembretes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 1v3M11 1v3M2 7h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Lembretes</a>
       <a class="nav-i nav-sub" data-page="kb"><svg viewBox="0 0 16 16" fill="none"><path d="M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1Z" stroke="currentColor" stroke-width="1.4"/><path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Base de Conhecimento</a>
       <a class="nav-i nav-sub" data-page="pesquisas"><svg viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5L13 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Pesquisas salvas</a>
@@ -3043,6 +3047,48 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <!-- EMPREGADOS & AUSÊNCIAS -->
+    <div class="page" id="page-organograma">
+      <div class="flex items-center justify-between mb-20">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🏢 Organograma</h2>
+          <p class="text-sm text-muted mt-8">Estrutura de lotações sincronizada do Active Directory</p>
+        </div>
+        <div class="flex gap-8">
+          <input class="form-control" id="org-search" style="width:220px;margin:0" placeholder="🔍 Buscar setor ou empregado..." oninput="renderOrganograma()">
+          <select class="form-control" id="org-view" style="width:140px;margin:0" onchange="renderOrganograma()">
+            <option value="cards">Cards por setor</option>
+            <option value="lista">Lista de empregados</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+        <div class="stat-card blue">  <div class="stat-label">Total de setores</div><div class="stat-value" id="org-total-setores">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Empregados ativos</div><div class="stat-value" id="org-total-ativos">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Inativos / Afastados</div><div class="stat-value" id="org-total-inativos">—</div></div>
+        <div class="stat-card violet"><div class="stat-label">Ativos de TI vinculados</div><div class="stat-value" id="org-total-ativos-ti">—</div></div>
+      </div>
+
+      <!-- Grid de setores -->
+      <div id="org-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px"></div>
+
+      <!-- Modal: detalhe do setor -->
+      <div id="org-modal-setor" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.5);align-items:center;justify-content:center">
+        <div style="background:var(--panel,#fff);border-radius:16px;padding:0;max-width:640px;width:92%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+          <div style="padding:16px 20px;border-bottom:1px solid var(--line,#e2e8f0);display:flex;align-items:center;justify-content:space-between">
+            <h3 id="org-modal-titulo" style="margin:0;font-size:16px;font-weight:700">Setor</h3>
+            <button onclick="document.getElementById('org-modal-setor').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--g400)">✕</button>
+          </div>
+          <div style="padding:16px 20px;overflow-y:auto;flex:1">
+            <div id="org-modal-stats" style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap"></div>
+            <input class="form-control" id="org-modal-search" style="margin-bottom:12px" placeholder="🔍 Filtrar empregados..." oninput="filtrarEmpregadosModal()">
+            <div id="org-modal-lista"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="page-empregados">
       <div class="flex items-center justify-between mb-20">
         <div>
@@ -3696,33 +3742,6 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="flow-step"><div class="step-circle">6</div><div class="step-label">Retorno/Destino</div></div>
         <div class="flow-step"><div class="step-circle">7</div><div class="step-label">Concluído</div></div>
       </div>
-
-      <!-- DADOS DO CHAMADO ORIGINAL — leitura -->
-      <div id="at-chamado-original" style="background:var(--g50,#F8FAFC);border:1px solid var(--g200,#E2E8F0);border-radius:12px;padding:14px 18px;margin-bottom:20px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <span style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.04em">📋 Chamado Original</span>
-          <button onclick="document.getElementById('at-ch-body').style.display=document.getElementById('at-ch-body').style.display==='none'?'':'none'" style="background:none;border:none;font-size:11px;color:var(--g400);cursor:pointer">▼ recolher</button>
-        </div>
-        <div id="at-ch-body">
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:12px">
-            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Solicitante</div><div style="font-size:13px;font-weight:600" id="at-ch-sol">—</div></div>
-            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Área</div><div style="font-size:13px;font-weight:600" id="at-ch-area">—</div></div>
-            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Tipo</div><div style="font-size:13px;font-weight:600" id="at-ch-tipo">—</div></div>
-            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Prioridade</div><div style="font-size:13px;font-weight:600" id="at-ch-prior">—</div></div>
-            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Aberto em</div><div style="font-size:13px;font-weight:600" id="at-ch-data">—</div></div>
-            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Patrimônio</div><div style="font-size:13px;font-weight:600;color:var(--accent)" id="at-ch-pat">—</div></div>
-          </div>
-          <div style="background:#fff;border:1px solid var(--g200);border-radius:8px;padding:10px 14px">
-            <div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:6px">Descrição / Relato do usuário</div>
-            <div style="font-size:13px;color:var(--g700);white-space:pre-wrap;line-height:1.5" id="at-ch-desc">—</div>
-          </div>
-          <div id="at-ch-obs-wrap" style="display:none;margin-top:8px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px">
-            <div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:4px">Observações adicionais</div>
-            <div style="font-size:12px;color:var(--g700)" id="at-ch-obs">—</div>
-          </div>
-        </div>
-      </div>
-
       <h4 style="font-size:14px;font-weight:700;margin-bottom:14px">Diagnóstico e Atendimento</h4>
       <div class="form-row c2">
         <div class="form-group">

@@ -784,6 +784,12 @@ function startFirestoreListeners() {
     STATE.mobiliario = snap2arr(snap);
   }, function(e){ console.error('[Banco] mobiliario erro:', e.message); });
 
+  // organograma_unidades — sincronizado pelo agent.js a cada 5 min
+  db.collection('organograma_unidades').onSnapshot(function(snap) {
+    STATE.orgUnidades = snap2arr(snap);
+    console.log('[Banco] organograma_unidades:', STATE.orgUnidades.length);
+  }, function(e){ console.error('[Banco] orgUnidades erro:', e.message); });
+
   console.log('[Banco] Listeners iniciados');
 }
 
@@ -884,6 +890,7 @@ function renderPage(id) {
     'monitor-rede':  () => { renderMonitorRede(); setTimeout(renderMapaRede, 200); },
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
+    'organograma':   () => renderOrganograma(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -1352,47 +1359,7 @@ function abrirAtendimento(chamadoId) {
   const ch = STATE.chamados.find(c=>c.id===chamadoId);
   if (!ch) return;
   document.getElementById('atender-ch-id').textContent = chamadoId;
-
-  // Pega PAT: do chamado, ou do primeiro ativo vinculado, ou do ativoId
-  let pat = ch.pat || ch.patVinculado || '';
-  if (!pat && ch.itensVinculados?.length) pat = ch.itensVinculados[0];
-  if (!pat && ch.ativoId) {
-    const ativo = (STATE.ativos||[]).find(a => a.id === ch.ativoId);
-    if (ativo) pat = ativo.pat || '';
-  }
-  document.getElementById('at-patrimonio').value = pat;
-
-  // ── Preenche o painel de leitura do chamado original ─────────
-  const sv = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || '—'; };
-
-  // Prioridade com cor
-  const priorCor = { critica:'#DC2626', alta:'#EA580C', media:'#D97706', baixa:'#059669' };
-  const priorEl = document.getElementById('at-ch-prior');
-  if (priorEl) {
-    priorEl.textContent = (ch.prioridade || '—').charAt(0).toUpperCase() + (ch.prioridade||'').slice(1);
-    priorEl.style.color = priorCor[ch.prioridade] || 'inherit';
-  }
-
-  sv('at-ch-sol',  ch.solicitante || ch.usuario || '—');
-  sv('at-ch-area', ch.area || '—');
-  sv('at-ch-tipo', ch.tipo ? ch.tipo.charAt(0).toUpperCase() + ch.tipo.slice(1) : '—');
-  sv('at-ch-data', ch.createdAt ? new Date(ch.createdAt.seconds ? ch.createdAt.seconds*1000 : ch.createdAt).toLocaleString('pt-BR') : '—');
-  sv('at-ch-pat',  pat || '—');
-  sv('at-ch-desc', ch.desc || ch.descricao || ch.titulo || '—');
-
-  // Observações — só mostra o bloco se tiver conteúdo
-  const obsWrap = document.getElementById('at-ch-obs-wrap');
-  if (ch.obs && ch.obs.trim()) {
-    sv('at-ch-obs', ch.obs);
-    if (obsWrap) obsWrap.style.display = '';
-  } else {
-    if (obsWrap) obsWrap.style.display = 'none';
-  }
-
-  // Garante que o painel de leitura está expandido
-  const body = document.getElementById('at-ch-body');
-  if (body) body.style.display = '';
-
+  document.getElementById('at-patrimonio').value = ch.pat||'';
   openModal('modal-atender-chamado');
 }
 
@@ -1505,7 +1472,7 @@ async function salvarChamado() {
     id, tipo: document.getElementById('ch-tipo')?.value||'incidente',
     area: document.getElementById('ch-area')?.value||'TI',
     solicitante: sol, tecnico: document.getElementById('ch-tecnico')?.value||'',
-    pat: document.getElementById('ch-pat-antigo')?.value?.trim() || document.getElementById('ch-pat-vinculado-hidden')?.value?.trim() || document.getElementById('ch-patrimonio')?.value?.trim() || '',
+    pat: document.getElementById('ch-pat-antigo')?.value?.trim() || document.getElementById('ch-patrimonio')?.value||'',
     desc: titulo + (desc?'\n'+desc:''), obs: document.getElementById('ch-obs')?.value||'',
     status: temMovimentacao ? 'aguardando-aprovacao' : 'aberto',
     prioridade: document.getElementById('ch-prioridade')?.value||'media',
@@ -1517,19 +1484,7 @@ async function salvarChamado() {
   };
   if (!STATE.chamados) STATE.chamados = [];
   STATE.chamados.unshift(novo);
-  fsAdd('chamados', novo, STATE.chamados).then(chamadoId => {
-    // Grava no histórico do ativo vinculado ao chamado
-    if (novo.pat) {
-      const ativo = (STATE.ativos||[]).find(a => a.pat === novo.pat);
-      if (ativo?.id && window._fs?.httpsCallable) {
-        window._fs.httpsCallable('adicionarNotaHistorico')({
-          ativoId: ativo.id,
-          nota: `Chamado ${novo.id} aberto — ${novo.desc?.slice(0,120)||'—'} · Solicitante: ${sol} · Técnico: ${novo.tecnico||'—'}`,
-          tipo: 'manutencao',
-        }).catch(() => {});
-      }
-    }
-  }).catch(() => {});
+  fsAdd('chamados', novo, STATE.chamados);
 
   // Se tem movimentação: cria aprovação pendente e notifica gestor
   if (temMovimentacao && movimentacao) {
@@ -2507,19 +2462,8 @@ function vincularAtivoAoChamado() {
   const container = document.getElementById('ch-itens-vinculados');
   if (!container) return;
   const label = ativo ? `${ativo.pat} — ${ativo.desc}` : pat;
-
-  // Salva o PAT vinculado em hidden input para o salvarChamado() capturar
-  let hidden = document.getElementById('ch-pat-vinculado-hidden');
-  if (!hidden) {
-    hidden = document.createElement('input');
-    hidden.type = 'hidden';
-    hidden.id = 'ch-pat-vinculado-hidden';
-    container.parentElement.appendChild(hidden);
-  }
-  hidden.value = pat; // usa o último PAT vinculado como principal
-
   container.insertAdjacentHTML('beforeend', `
-    <div style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)" data-pat="${pat}">
+    <div style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
       🖥️ ${label}
       <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
     </div>`);
@@ -2550,58 +2494,20 @@ function salvarAtivo() {
   showToast(`✓ Ativo ${pat} cadastrado!`);
 }
 
-async function salvarAtendimento() {
-  const pat         = document.getElementById('at-patrimonio')?.value?.trim() || '';
-  const diagnostico = document.getElementById('at-diagnostico')?.value || '';
-  const descAtend   = document.getElementById('at-desc')?.value?.trim() || '';
-  const tecnico     = CURRENT_USER?.nome || 'Técnico';
-  const chamadoId   = document.getElementById('atender-ch-id')?.textContent?.trim() || '';
-
+function salvarAtendimento() {
   closeModal('modal-atender-chamado');
-
-  // Grava atendimento no histórico imutável do ativo
-  if (pat) {
-    const ativo = (STATE.ativos||[]).find(a => a.pat === pat);
-    if (ativo?.id && window._fs?.httpsCallable) {
-      const nota = `Chamado ${chamadoId} atendido — Diagnóstico: ${diagnostico||'—'}. ${descAtend ? descAtend.slice(0,200) : ''} · Técnico: ${tecnico}`.trim();
-      window._fs.httpsCallable('adicionarNotaHistorico')({
-        ativoId: ativo.id, nota, tipo: 'manutencao',
-      }).catch(() => {});
-    }
-    // Atualiza chamado no Firestore com diagnóstico
-    const ch = (STATE.chamados||[]).find(c => c.id === chamadoId);
-    if (ch?.id && !ch.id.startsWith('offline_')) {
-      fsUpdate('chamados', ch.id, {
-        diagnostico, descAtendimento: descAtend,
-        tecnicoAtendeu: tecnico,
-        atendidoEm: new Date().toISOString(),
-        status: 'em-atendimento',
-      }).catch(() => {});
-    }
-  }
-
-  const destino = document.getElementById('at-destino-antigo')?.value || '';
-  if (destino === 'terceirizada') {
-    const aprov = {
-      tipo: 'Envio para Terceirizada', pat: pat||'—', ativo: '—',
-      solicitante: tecnico, solicitanteId: CURRENT_USER?.uid||'',
-      detalhes: { destino: 'terceirizada', patAntigo: pat },
-      status: 'pendente', createdAt: new Date().toISOString(),
-    };
-    fsAdd('aprovacoes', aprov, STATE.aprovacoes).then(id => {
-      if (id && window._fs?.httpsCallable) {
-        window._fs.httpsCallable('notificarGestorAprovacao')({
-          aprovacaoId: id, tipo: 'Envio para Terceirizada',
-          pat: pat||'—', solicitante: tecnico,
-        }).catch(() => {});
-      }
-    }).catch(() => {});
+  const destino = document.getElementById('at-destino-antigo').value;
+  if (destino==='terceirizada') {
+    const aprov = { id:'ap'+Date.now(), tipo:'Envio para Terceirizada', pat:document.getElementById('at-patrimonio').value||'—', ativo:'—', solicitante:'Técnico SYSACK', data:new Date(), status:'pendente', obs:'' };
+    STATE.aprovacoes.unshift(aprov);
+    // TODO Banco + SMTP: enviar email gestor
     showToast('⏳ Enviado para aprovação do gestor', 'warning');
   } else {
-    showToast('✓ Atendimento registrado!', 'success');
+    showToast('✓ Atendimento registrado!');
   }
   renderDashboard();
 }
+
 function salvarRetornoTerc() {
   closeModal('modal-retorno-terc');
   showToast('✓ Retorno registrado! Aguardando aprovação do gestor.', 'success');
@@ -2655,11 +2561,6 @@ function openModal(id) {
   const el = document.getElementById(id);
   if (el) el.classList.add('open');
   if (id === 'modal-novo-chamado') {
-    // Limpa hidden field de PAT vinculado ao abrir novo chamado
-    const hid = document.getElementById('ch-pat-vinculado-hidden');
-    if (hid) hid.value = '';
-    const itensContainer = document.getElementById('ch-itens-vinculados');
-    if (itensContainer) itensContainer.innerHTML = '';
     const now = new Date();
     const iso = now.toISOString().slice(0,16);
     const abEl = document.getElementById('ch-data-abertura');
@@ -8879,6 +8780,188 @@ function renderSelfService() {
 // ════════════════════════════════════════════════════════════
 // EMPREGADOS & AUSÊNCIAS
 // ════════════════════════════════════════════════════════════
+
+// ─── ORGANOGRAMA ─────────────────────────────────────────────────
+let _orgSetorAberto = null;
+
+function renderOrganograma() {
+  const unidades  = STATE.orgUnidades || [];
+  const empregados = STATE.empregados || [];
+  const q         = (document.getElementById('org-search')?.value || '').toLowerCase();
+  const view      = document.getElementById('org-view')?.value || 'cards';
+
+  // KPIs
+  const totalAtivos   = empregados.filter(e => e.adAtivo !== false).length;
+  const totalInativos = empregados.filter(e => e.adAtivo === false).length;
+  const totalAtivosTI = (STATE.ativos || []).filter(a => a.resp && a.resp.trim()).length;
+  const sv = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  sv('org-total-setores',   unidades.length);
+  sv('org-total-ativos',    totalAtivos);
+  sv('org-total-inativos',  totalInativos);
+  sv('org-total-ativos-ti', totalAtivosTI);
+
+  const grid = document.getElementById('org-grid');
+  if (!grid) return;
+
+  // Filtra unidades pela busca
+  let filtered = unidades;
+  if (q) {
+    filtered = unidades.filter(u => {
+      if ((u.sigla||'').toLowerCase().includes(q)) return true;
+      if ((u.empregados||[]).some(e => (e.nome||'').toLowerCase().includes(q) || (e.cargo||'').toLowerCase().includes(q))) return true;
+      return false;
+    });
+  }
+
+  if (!filtered.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🏢</div><div>Nenhum setor encontrado</div></div>';
+    return;
+  }
+
+  // Ordena por total de empregados (maior primeiro)
+  filtered = [...filtered].sort((a,b) => (b.totalAtivos||0) - (a.totalAtivos||0));
+
+  if (view === 'lista') {
+    // Vista lista: todos os empregados filtrados
+    const todos = filtered.flatMap(u => (u.empregados||[]).map(e => ({...e, setor: u.sigla})));
+    const filtradosEmp = q
+      ? todos.filter(e => (e.nome||'').toLowerCase().includes(q) || (e.cargo||'').toLowerCase().includes(q) || (e.setor||'').toLowerCase().includes(q))
+      : todos;
+    grid.innerHTML = `
+      <div style="grid-column:1/-1">
+        <div style="background:var(--panel,#fff);border-radius:12px;overflow:hidden;border:0.5px solid var(--line,#e2e8f0)">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--g50)">
+              <th style="padding:10px 14px;text-align:left;font-size:11px;color:var(--g500);font-weight:600;text-transform:uppercase">Nome</th>
+              <th style="padding:10px 14px;text-align:left;font-size:11px;color:var(--g500);font-weight:600;text-transform:uppercase">Cargo</th>
+              <th style="padding:10px 14px;text-align:left;font-size:11px;color:var(--g500);font-weight:600;text-transform:uppercase">Lotação</th>
+              <th style="padding:10px 14px;text-align:left;font-size:11px;color:var(--g500);font-weight:600;text-transform:uppercase">E-mail</th>
+              <th style="padding:10px 14px;text-align:left;font-size:11px;color:var(--g500);font-weight:600;text-transform:uppercase">Status</th>
+            </tr></thead>
+            <tbody>${filtradosEmp.slice(0,200).map(e => `
+              <tr style="border-top:0.5px solid var(--g100)">
+                <td style="padding:9px 14px;font-size:13px;font-weight:600">${escapeHtml(e.nome||'—')}</td>
+                <td style="padding:9px 14px;font-size:12px;color:var(--g600)">${escapeHtml(e.cargo||'—')}</td>
+                <td style="padding:9px 14px"><span class="tag" style="font-size:10px">${escapeHtml(e.setor||'—')}</span></td>
+                <td style="padding:9px 14px;font-size:11px;color:var(--accent);font-family:monospace">${escapeHtml(e.email||'—')}</td>
+                <td style="padding:9px 14px"><span style="font-size:10px;padding:2px 8px;border-radius:20px;background:${e.ativo!==false?'#eaf3de':'#fee2e2'};color:${e.ativo!==false?'#3b6d11':'#a32d2d'}">${e.ativo!==false?'Ativo':'Inativo'}</span></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          ${filtradosEmp.length > 200 ? `<div style="padding:10px;text-align:center;font-size:12px;color:var(--g400)">Mostrando 200 de ${filtradosEmp.length}. Refine a busca para ver mais.</div>` : ''}
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Vista cards
+  grid.innerHTML = filtered.map(u => {
+    const ativos   = u.totalAtivos   || 0;
+    const total    = u.totalEmpregados || u.empregados?.length || 0;
+    const inativos = total - ativos;
+    const pct      = total > 0 ? Math.round((ativos / total) * 100) : 0;
+    const barCor   = pct > 80 ? 'var(--success)' : pct > 50 ? 'var(--warning)' : 'var(--danger)';
+
+    // Ativos de TI vinculados a este setor
+    const ativosTI = (STATE.ativos||[]).filter(a =>
+      (a.resp||'').toLowerCase().includes((u.sigla||'').toLowerCase()) ||
+      (a.area||'').toLowerCase().includes((u.sigla||'').toLowerCase())
+    ).length;
+
+    // Empregados em destaque (primeiros 3)
+    const destaques = (u.empregados||[]).filter(e => e.ativo !== false).slice(0,3);
+
+    return `
+      <div onclick="abrirDetalheSetor('${u.sigla}')" style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;padding:16px;cursor:pointer;transition:all .2s;border-top:3px solid var(--accent)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
+          <div>
+            <div style="font-size:16px;font-weight:800;color:var(--text)">${escapeHtml(u.sigla||'—')}</div>
+            <div style="font-size:11px;color:var(--g400);margin-top:2px">${total} empregado${total!==1?'s':''}</div>
+          </div>
+          <span style="background:var(--accent-l,#EFF6FF);color:var(--accent);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">${ativos} ativos</span>
+        </div>
+
+        <!-- Barra de ativos -->
+        <div style="background:var(--g100);border-radius:4px;height:4px;overflow:hidden;margin-bottom:12px">
+          <div style="background:${barCor};width:${pct}%;height:100%;border-radius:4px;transition:width .4s"></div>
+        </div>
+
+        <!-- Mini lista de empregados -->
+        <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
+          ${destaques.map(e => `
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="width:26px;height:26px;border-radius:50%;background:var(--accent-l);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--accent);flex-shrink:0">${(e.nome||'?').charAt(0)}</div>
+              <div style="min-width:0">
+                <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(e.nome||'—')}</div>
+                <div style="font-size:10px;color:var(--g400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(e.cargo||'—')}</div>
+              </div>
+            </div>`).join('')}
+          ${total > 3 ? `<div style="font-size:11px;color:var(--g400);padding-left:34px">+${total-3} outros...</div>` : ''}
+        </div>
+
+        <!-- Rodapé com ativos TI -->
+        <div style="display:flex;gap:12px;padding-top:8px;border-top:0.5px solid var(--g100);font-size:11px;color:var(--g500)">
+          <span>🖥️ ${ativosTI} ativo${ativosTI!==1?'s':''} de TI</span>
+          ${inativos > 0 ? `<span>💤 ${inativos} inativo${inativos!==1?'s':''}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function abrirDetalheSetor(sigla) {
+  const u = (STATE.orgUnidades||[]).find(u => u.sigla === sigla);
+  if (!u) return;
+  _orgSetorAberto = u;
+
+  document.getElementById('org-modal-titulo').textContent = '🏢 ' + sigla;
+
+  const ativos   = u.totalAtivos || 0;
+  const total    = u.totalEmpregados || u.empregados?.length || 0;
+  const ativosTI = (STATE.ativos||[]).filter(a =>
+    (a.resp||'').toLowerCase().includes(sigla.toLowerCase()) ||
+    (a.area||'').toLowerCase().includes(sigla.toLowerCase())
+  ).length;
+
+  document.getElementById('org-modal-stats').innerHTML = [
+    ['Total', total, '#2563EB'],
+    ['Ativos', ativos, '#059669'],
+    ['Inativos', total - ativos, '#DC2626'],
+    ['Ativos TI', ativosTI, '#7C3AED'],
+  ].map(([l,v,c]) => `
+    <div style="background:${c}11;border:1px solid ${c}33;border-radius:10px;padding:8px 14px;text-align:center;min-width:80px">
+      <div style="font-size:20px;font-weight:800;color:${c}">${v}</div>
+      <div style="font-size:10px;color:${c};font-weight:600">${l}</div>
+    </div>`).join('');
+
+  document.getElementById('org-modal-search').value = '';
+  filtrarEmpregadosModal();
+  document.getElementById('org-modal-setor').style.display = 'flex';
+}
+
+function filtrarEmpregadosModal() {
+  const u = _orgSetorAberto;
+  if (!u) return;
+  const q = (document.getElementById('org-modal-search')?.value || '').toLowerCase();
+  const emps = (u.empregados||[]).filter(e =>
+    !q || (e.nome||'').toLowerCase().includes(q) || (e.cargo||'').toLowerCase().includes(q) || (e.email||'').toLowerCase().includes(q)
+  );
+
+  document.getElementById('org-modal-lista').innerHTML = emps.length
+    ? emps.map(e => `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid var(--g100)">
+          <div style="width:36px;height:36px;border-radius:50%;background:${e.ativo!==false?'var(--accent-l)':'var(--g100)'};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${e.ativo!==false?'var(--accent)':'var(--g400)'};flex-shrink:0">${(e.nome||'?').charAt(0)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">
+              ${escapeHtml(e.nome||'—')}
+              ${e.ativo===false ? '<span style="font-size:10px;background:#fee2e2;color:#a32d2d;padding:1px 6px;border-radius:10px">Inativo</span>' : ''}
+            </div>
+            <div style="font-size:11px;color:var(--g500)">${escapeHtml(e.cargo||'—')}</div>
+            ${e.email ? `<div style="font-size:11px;color:var(--accent);font-family:monospace">${escapeHtml(e.email)}</div>` : ''}
+          </div>
+          ${e.ramal ? `<div style="font-size:11px;color:var(--g500);flex-shrink:0">📞 ${escapeHtml(e.ramal)}</div>` : ''}
+        </div>`).join('')
+    : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum empregado encontrado</div>';
+}
 
 function renderEmpregados() {
   const tbody    = document.getElementById('emp-body');
