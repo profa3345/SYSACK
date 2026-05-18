@@ -3696,6 +3696,33 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="flow-step"><div class="step-circle">6</div><div class="step-label">Retorno/Destino</div></div>
         <div class="flow-step"><div class="step-circle">7</div><div class="step-label">Concluído</div></div>
       </div>
+
+      <!-- DADOS DO CHAMADO ORIGINAL — leitura -->
+      <div id="at-chamado-original" style="background:var(--g50,#F8FAFC);border:1px solid var(--g200,#E2E8F0);border-radius:12px;padding:14px 18px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.04em">📋 Chamado Original</span>
+          <button onclick="document.getElementById('at-ch-body').style.display=document.getElementById('at-ch-body').style.display==='none'?'':'none'" style="background:none;border:none;font-size:11px;color:var(--g400);cursor:pointer">▼ recolher</button>
+        </div>
+        <div id="at-ch-body">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:12px">
+            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Solicitante</div><div style="font-size:13px;font-weight:600" id="at-ch-sol">—</div></div>
+            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Área</div><div style="font-size:13px;font-weight:600" id="at-ch-area">—</div></div>
+            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Tipo</div><div style="font-size:13px;font-weight:600" id="at-ch-tipo">—</div></div>
+            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Prioridade</div><div style="font-size:13px;font-weight:600" id="at-ch-prior">—</div></div>
+            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Aberto em</div><div style="font-size:13px;font-weight:600" id="at-ch-data">—</div></div>
+            <div><div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:2px">Patrimônio</div><div style="font-size:13px;font-weight:600;color:var(--accent)" id="at-ch-pat">—</div></div>
+          </div>
+          <div style="background:#fff;border:1px solid var(--g200);border-radius:8px;padding:10px 14px">
+            <div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:6px">Descrição / Relato do usuário</div>
+            <div style="font-size:13px;color:var(--g700);white-space:pre-wrap;line-height:1.5" id="at-ch-desc">—</div>
+          </div>
+          <div id="at-ch-obs-wrap" style="display:none;margin-top:8px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px">
+            <div style="font-size:10px;color:var(--g500);text-transform:uppercase;margin-bottom:4px">Observações adicionais</div>
+            <div style="font-size:12px;color:var(--g700)" id="at-ch-obs">—</div>
+          </div>
+        </div>
+      </div>
+
       <h4 style="font-size:14px;font-weight:700;margin-bottom:14px">Diagnóstico e Atendimento</h4>
       <div class="form-row c2">
         <div class="form-group">
@@ -4122,18 +4149,9 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="timeline" id="hist-timeline"></div>
       <div class="divider"></div>
       <div class="form-group">
-        <label class="form-label fw-700">Adicionar ao Histórico</label>
-        <div class="flex gap-8 mb-8">
-          <select id="hist-obs-tipo" class="form-control" style="width:200px;margin:0">
-            <option value="obs">📝 Observação técnica</option>
-            <option value="manutencao">🔧 Manutenção realizada</option>
-            <option value="alerta">⚠️ Alerta / Problema</option>
-            <option value="transferencia">↔️ Transferência</option>
-            <option value="atualizacao">✅ Atualização de status</option>
-          </select>
-        </div>
-        <textarea class="form-control" rows="2" id="hist-obs-input" placeholder="Observação técnica ou informação relevante sobre este ativo..."></textarea>
-        <button class="btn btn-secondary btn-sm mt-8" onclick="adicionarObsHistorico()">+ Salvar no histórico</button>
+        <label class="form-label fw-700">Adicionar Observação ao Histórico</label>
+        <textarea class="form-control" rows="2" id="hist-obs-input" placeholder="Observação técnica ou informação relevante..."></textarea>
+        <button class="btn btn-secondary btn-sm mt-8" onclick="adicionarObsHistorico()">+ Adicionar</button>
       </div>
     </div>
   </div>

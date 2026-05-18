@@ -1353,21 +1353,45 @@ function abrirAtendimento(chamadoId) {
   if (!ch) return;
   document.getElementById('atender-ch-id').textContent = chamadoId;
 
-  // Pega PAT: do chamado, ou do primeiro ativo vinculado, ou do ativo relacionado ao solicitante
+  // Pega PAT: do chamado, ou do primeiro ativo vinculado, ou do ativoId
   let pat = ch.pat || ch.patVinculado || '';
   if (!pat && ch.itensVinculados?.length) pat = ch.itensVinculados[0];
   if (!pat && ch.ativoId) {
     const ativo = (STATE.ativos||[]).find(a => a.id === ch.ativoId);
     if (ativo) pat = ativo.pat || '';
   }
-
   document.getElementById('at-patrimonio').value = pat;
 
-  // Preenche outros campos se disponíveis
-  if (ch.area) {
-    const areaEl = document.getElementById('at-area');
-    if (areaEl) areaEl.value = ch.area;
+  // ── Preenche o painel de leitura do chamado original ─────────
+  const sv = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || '—'; };
+
+  // Prioridade com cor
+  const priorCor = { critica:'#DC2626', alta:'#EA580C', media:'#D97706', baixa:'#059669' };
+  const priorEl = document.getElementById('at-ch-prior');
+  if (priorEl) {
+    priorEl.textContent = (ch.prioridade || '—').charAt(0).toUpperCase() + (ch.prioridade||'').slice(1);
+    priorEl.style.color = priorCor[ch.prioridade] || 'inherit';
   }
+
+  sv('at-ch-sol',  ch.solicitante || ch.usuario || '—');
+  sv('at-ch-area', ch.area || '—');
+  sv('at-ch-tipo', ch.tipo ? ch.tipo.charAt(0).toUpperCase() + ch.tipo.slice(1) : '—');
+  sv('at-ch-data', ch.createdAt ? new Date(ch.createdAt.seconds ? ch.createdAt.seconds*1000 : ch.createdAt).toLocaleString('pt-BR') : '—');
+  sv('at-ch-pat',  pat || '—');
+  sv('at-ch-desc', ch.desc || ch.descricao || ch.titulo || '—');
+
+  // Observações — só mostra o bloco se tiver conteúdo
+  const obsWrap = document.getElementById('at-ch-obs-wrap');
+  if (ch.obs && ch.obs.trim()) {
+    sv('at-ch-obs', ch.obs);
+    if (obsWrap) obsWrap.style.display = '';
+  } else {
+    if (obsWrap) obsWrap.style.display = 'none';
+  }
+
+  // Garante que o painel de leitura está expandido
+  const body = document.getElementById('at-ch-body');
+  if (body) body.style.display = '';
 
   openModal('modal-atender-chamado');
 }
