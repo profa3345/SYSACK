@@ -756,7 +756,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <input id="pat-search" class="form-control" style="width:240px;margin:0" placeholder="🔍 Buscar PAT, hostname, IP, área, responsável..." id="at-search-input" oninput="renderAtivos()">
           <select id="pat-filter-status" class="form-control" style="width:150px;margin:0" onchange="renderAtivos()"><option value="">Todos os status</option><option value="ativo">Em Uso</option><option value="disponivel">Disponível</option><option value="manut">Manutenção</option><option value="terceirizada">Na Terceirizada</option><option value="sc">Santa Clara</option></select>
           <select class="form-control" style="width:140px;margin:0"><option>Todas as áreas</option><option>TI</option><option>RH</option><option>Financeiro</option><option>Comercial</option></select>
-          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="exportarAtivosCSV()">⬇ Exportar</button>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto">⬇ Exportar</button>
         </div>
         <div class="table-wrap"><table id="ativos-table"><thead id="ativos-thead"><tr><th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th><th>Ações</th></tr></thead><tbody id="ativos-body"></tbody></table></div>
       </div>
@@ -4122,9 +4122,18 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="timeline" id="hist-timeline"></div>
       <div class="divider"></div>
       <div class="form-group">
-        <label class="form-label fw-700">Adicionar Observação ao Histórico</label>
-        <textarea class="form-control" rows="2" id="hist-obs-input" placeholder="Observação técnica ou informação relevante..."></textarea>
-        <button class="btn btn-secondary btn-sm mt-8" onclick="adicionarObsHistorico()">+ Adicionar</button>
+        <label class="form-label fw-700">Adicionar ao Histórico</label>
+        <div class="flex gap-8 mb-8">
+          <select id="hist-obs-tipo" class="form-control" style="width:200px;margin:0">
+            <option value="obs">📝 Observação técnica</option>
+            <option value="manutencao">🔧 Manutenção realizada</option>
+            <option value="alerta">⚠️ Alerta / Problema</option>
+            <option value="transferencia">↔️ Transferência</option>
+            <option value="atualizacao">✅ Atualização de status</option>
+          </select>
+        </div>
+        <textarea class="form-control" rows="2" id="hist-obs-input" placeholder="Observação técnica ou informação relevante sobre este ativo..."></textarea>
+        <button class="btn btn-secondary btn-sm mt-8" onclick="adicionarObsHistorico()">+ Salvar no histórico</button>
       </div>
     </div>
   </div>
