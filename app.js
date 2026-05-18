@@ -784,29 +784,59 @@ function startFirestoreListeners() {
     STATE.mobiliario = snap2arr(snap);
   }, function(e){ console.error('[Banco] mobiliario erro:', e.message); });
 
-  // técnicos (A-DSI + Mindworks) — coleção real no Firestore
+  // scAtivos — Santa Clara: listener em tempo real, atualiza card automaticamente
+  db.collection('scAtivos').onSnapshot(function(snap) {
+    STATE.scAtivos = snap2arr(snap);
+    var page = document.getElementById('page-santa-clara');
+    if (page && page.classList.contains('active') && typeof renderSantaClara === 'function') renderSantaClara();
+    console.log('[Banco] scAtivos:', STATE.scAtivos.length);
+  }, function(e){ console.error('[Banco] scAtivos erro:', e.message); });
+
+  // terceirizadaAtivos — Mindworks: listener em tempo real
+  db.collection('terceirizadaAtivos').onSnapshot(function(snap) {
+    STATE.terceirizadaAtivos = snap2arr(snap);
+    var hoje = new Date(); hoje.setHours(0,0,0,0);
+    STATE.terceirizadaAtivos.forEach(function(t) {
+      if (!t.dataEnvio) return;
+      var envio = new Date(t.dataEnvio); envio.setHours(0,0,0,0);
+      var dias = 0, d = new Date(envio);
+      while (d <= hoje) { var dow = d.getDay(); if (dow !== 0 && dow !== 6) dias++; d.setDate(d.getDate()+1); }
+      t.diasUteis = dias;
+    });
+    var page = document.getElementById('page-terceirizada');
+    if (page && page.classList.contains('active') && typeof renderTerceirizada === 'function') renderTerceirizada();
+    var overdue = STATE.terceirizadaAtivos.filter(function(t){ return !t.retornado && t.diasUteis > 10; });
+    nbUpdate('nb-terc', overdue.length);
+    console.log('[Banco] terceirizadaAtivos:', STATE.terceirizadaAtivos.length);
+  }, function(e){ console.error('[Banco] terceirizadaAtivos erro:', e.message); });
+
+  // movimentacoes — histórico: listener em tempo real
+  db.collection('movimentacoes').orderBy('data', 'desc').limit(500).onSnapshot(function(snap) {
+    STATE.movimentacoes = snap2arr(snap);
+    console.log('[Banco] movimentacoes:', STATE.movimentacoes.length);
+  }, function(e){ console.error('[Banco] movimentacoes erro:', e.message); });
+
+  // técnicos — A-DSI + Mindworks
   db.collection('tecnicos').onSnapshot(function(snap) {
     STATE.tecnicos = snap2arr(snap);
     console.log('[Banco] tecnicos:', STATE.tecnicos.length);
   }, function(e){ console.error('[Banco] tecnicos erro:', e.message); });
 
-  // eventos detectados pelo Event Engine (mudanças de IP, usuário, hostname, área)
-  db.collection('eventos_detectados')
-    .orderBy('detecEm', 'desc').limit(100)
-    .onSnapshot(function(snap) {
-      STATE.eventosDetectados = snap2arr(snap);
-    }, function(e){ console.error('[Banco] eventosDetectados erro:', e.message); });
+  // eventos detectados pelo Event Engine
+  db.collection('eventos_detectados').orderBy('detecEm', 'desc').limit(100).onSnapshot(function(snap) {
+    STATE.eventosDetectados = snap2arr(snap);
+  }, function(e){ console.error('[Banco] eventosDetectados erro:', e.message); });
 
   console.log('[Banco] Listeners iniciados');
 
-  // Renotificação automática de aprovações urgentes a cada 4h
+  // Renotifica gestor sobre aprovações pendentes a cada 4h
   setInterval(function() {
     var urgentes = (STATE.aprovacoes || []).filter(function(a) {
       if (a.status !== 'pendente') return false;
-      var criado = a.createdAt ? new Date(a.createdAt.seconds ? a.createdAt.seconds * 1000 : a.createdAt) : null;
+      var criado = a.createdAt ? new Date(a.createdAt.seconds ? a.createdAt.seconds*1000 : a.createdAt) : null;
       return criado && (Date.now() - criado.getTime()) > 86400000;
     });
-    if (!urgentes.length || !window._fs?.httpsCallable) return;
+    if (!urgentes.length || !window._fs || !window._fs.httpsCallable) return;
     window._fs.httpsCallable('renotificarGestorAprovacoesPendentes')({
       urgentes: urgentes.length,
       itens: urgentes.slice(0,10).map(function(a) {
@@ -1341,190 +1371,38 @@ const noData = n => `<tr><td colspan="${n}" style="text-align:center;padding:24p
 // ============================================================
 // HISTÓRICO DO ATIVO
 // ============================================================
-// ─── Histórico completo do ativo — busca dados reais do Firestore ─
-let _histAtivoId = null;
-
-async function abrirHistorico(pat) {
-  if (!pat || pat === '—') return showToast('Nenhum patrimônio para exibir', 'danger');
-
-  const ativo = STATE.ativos.find(a => a.pat === pat) || STATE.ativos.find(a => a.id === pat);
-  _histAtivoId = ativo?.id || null;
-
+function abrirHistorico(pat) {
+  if (!pat||pat==='—') return showToast('Nenhum patrimônio para exibir', 'danger');
   document.getElementById('hist-patrimonio').textContent = pat;
+  const ativo = STATE.ativos.find(a=>a.pat===pat);
   const infoRow = document.getElementById('hist-info-row');
   if (ativo) {
     infoRow.innerHTML = [
-      ['Tipo',        `<span class="tag">${ativo.tipo||'—'}</span>`],
-      ['Descrição',   escapeHtml(ativo.desc||ativo.hostname||'—')],
-      ['Status',      statusAtivoHtml(ativo.status)],
-      ['Localização', escapeHtml(ativo.sala||ativo.loc||'—')],
-      ['Responsável', escapeHtml(ativo.resp||'—')],
-      ['Série',       escapeHtml(ativo.serie||'—')],
-      ['Hostname',    `<span style="font-family:monospace;font-size:12px">${escapeHtml(ativo.hostname||'—')}</span>`],
-      ['IP',          `<span style="font-family:monospace;font-size:12px">${escapeHtml(ativo.ip||'—')}</span>`],
-      ['Cadastrado',  fmtDate(ativo.createdAt)],
-    ].map(([l,v]) => `
-      <div style="min-width:130px">
-        <div style="font-size:10.5px;color:var(--g500);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">${l}</div>
-        <div style="font-size:13px;font-weight:600">${v}</div>
-      </div>`).join('');
-  } else {
-    infoRow.innerHTML = '<p class="text-muted">Ativo não encontrado no cadastro</p>';
-  }
-
-  const tl = document.getElementById('hist-timeline');
-  tl.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)"><div style="font-size:24px;margin-bottom:8px">⏳</div>Carregando histórico...</div>';
+      ['Tipo', ativo.tipo], ['Descrição', ativo.desc],
+      ['Status', statusAtivoHtml(ativo.status)], ['Localização', ativo.loc||'—'],
+      ['Fabricante', ativo.fab||'—'], ['Série', ativo.serie||'—'],
+      ['Cadastrado em', fmtDate(ativo.createdAt)],
+    ].map(([l,v])=>`<div><div class="text-xs text-muted">${l}</div><div style="font-size:13px;font-weight:600;margin-top:2px">${v}</div></div>`).join('');
+  } else { infoRow.innerHTML = '<p class="text-muted">Ativo não encontrado no cadastro</p>'; }
+  const movs = STATE.movimentacoes.filter(m=>m.pat===pat);
+  const chs  = STATE.chamados.filter(c=>c.pat===pat);
+  const entries = [
+    {dot:'green', title:'Cadastro inicial no sistema', desc:`Patrimônio ${pat} registrado no SYSACK`, time: ativo?fmtDate(ativo.createdAt):'—'},
+    ...chs.map(c=>({dot:'blue', title:`Chamado ${c.id} — ${tipoLabel(c.tipo)}`, desc:c.desc.slice(0,60), time:fmtDate(c.createdAt)})),
+    ...movs.map(m=>({dot:m.tipo==='Terceirizada'?'orange':m.tipo==='Santa Clara'?'violet':'blue', title:`${m.tipo}: ${m.de} → ${m.para}`, desc:`Técnico: ${m.tecnico} · Aprovação: ${m.status}`, time:fmtDate(m.data)})),
+  ].sort((a,b)=>0);
+  document.getElementById('hist-timeline').innerHTML = entries.map(e=>`
+    <div class="tl-item"><div class="tl-dot ${e.dot}"></div><div class="tl-title">${e.title}</div><div class="tl-desc">${e.desc}</div><div class="tl-time">${e.time}</div></div>`).join('');
   openModal('modal-historico-ativo');
-
-  const movs = (STATE.movimentacoes      || []).filter(m => m.pat === pat);
-  const chs  = (STATE.chamados           || []).filter(c => c.pat === pat);
-  const terc = (STATE.terceirizadaAtivos || []).filter(t => t.pat === pat || t.ativo === pat);
-  const scIt = (STATE.scAtivos           || []).filter(s => s.pat === pat);
-
-  const entries = [];
-
-  const toMs = v => {
-    if (!v) return 0;
-    if (v.seconds) return v.seconds * 1000;
-    const d = new Date(v);
-    return isNaN(d) ? 0 : d.getTime();
-  };
-
-  if (ativo) entries.push({
-    dot:'green', icon:'🟢',
-    title: 'Cadastro inicial no sistema',
-    desc:  `Patrimônio ${pat} registrado no SYSACK.`,
-    time:  ativo.createdAt,
-    ordem: toMs(ativo.createdAt) || 0,
-  });
-
-  chs.forEach(c => entries.push({
-    dot:'blue', icon:'🔧',
-    title: `Chamado ${c.id} — ${tipoLabel(c.tipo||'problema')}`,
-    desc:  (c.desc||'').slice(0,80) + (c.status ? ' · Status: ' + c.status : ''),
-    time:  c.createdAt,
-    ordem: toMs(c.createdAt),
-  }));
-
-  movs.forEach(m => entries.push({
-    dot: m.tipo==='Terceirizada'?'orange': m.tipo==='Santa Clara'?'violet':'blue',
-    icon:'↔️',
-    title: `${m.tipo||'Movimentação'}: ${m.de||'—'} → ${m.para||'—'}`,
-    desc:  `Técnico: ${m.tecnico||'—'} · ${m.status||''}`,
-    time:  m.data,
-    ordem: toMs(m.data),
-  }));
-
-  terc.forEach(t => {
-    entries.push({
-      dot:'orange', icon:'📤',
-      title: 'Enviado para Mindworks',
-      desc:  `Técnico: ${t.tecnicoMwNome||t.tecnicoTerceirizada||'—'} · Prazo: ${t.prazoRetorno||'—'} · Chamado: ${t.chamadoId||'—'}`,
-      time:  t.dataEnvio,
-      ordem: toMs(t.dataEnvio),
-    });
-    if (t.retornado) entries.push({
-      dot:'green', icon:'📦',
-      title: `Retorno da Mindworks${t.confirmadoAdsi ? ' (confirmado A-DSI)' : ' (aguardando confirmação)'}`,
-      desc:  `Destino: ${t.destinoFinal||t.destinoRetorno||'—'}${t.tecnicoAdsiNome ? ' · Recebido por: '+t.tecnicoAdsiNome : ''}`,
-      time:  t.dataRetorno || t.dataRecebimento,
-      ordem: toMs(t.dataRetorno || t.dataRecebimento),
-    });
-  });
-
-  scIt.forEach(s => {
-    entries.push({
-      dot:'violet', icon:'📍',
-      title: 'Entrada em Santa Clara',
-      desc:  `Local: ${s.local||'—'}${s.fotoUrl ? ' · Foto registrada ✓' : ''}`,
-      time:  s.dataEntrada,
-      ordem: toMs(s.dataEntrada),
-    });
-    (s.historicoLocais||[]).slice(1).forEach(h => entries.push({
-      dot:'violet', icon:'📍',
-      title: 'Mudança de local em Santa Clara',
-      desc:  `Novo local: ${h.local||'—'} · Técnico: ${h.tecnico||'—'}`,
-      time:  h.data,
-      ordem: toMs(h.data),
-    }));
-  });
-
-  if (ativo?.ipAnterior) entries.push({
-    dot:'orange', icon:'🔄',
-    title: 'Mudança de IP detectada automaticamente',
-    desc:  `IP anterior: ${ativo.ipAnterior} → ${ativo.ip} (via ${ativo.dedupVia||'Discovery'})`,
-    time:  ativo.ipMudouEm,
-    ordem: toMs(ativo.ipMudouEm),
-  });
-
-  // Busca subcoleção historico do Firestore via Cloud Function
-  let fsEntries = [];
-  if (_histAtivoId && window._fs?.httpsCallable) {
-    try {
-      const res = await window._fs.httpsCallable('getHistoricoAtivo')({ ativoId: _histAtivoId, limite: 100 });
-      fsEntries = (res.data?.historico || []).map(h => ({
-        dot:   h.dot   || 'gray',
-        icon:  h.tipo === 'obs' ? '📝' : h.tipo === 'alerta' ? '⚠️' : h.tipo === 'transferencia' ? '↔️' : '📋',
-        title: h.titulo || 'Evento',
-        desc:  h.desc   || '',
-        autor: h.autor  || '',
-        time:  h.data,
-        ordem: toMs(h.data),
-        fromFS: true,
-      }));
-    } catch(e) {
-      console.warn('[Histórico] Cloud Function indisponível:', e.message);
-    }
-  }
-
-  const todos = [...entries, ...fsEntries]
-    .sort((a,b) => (b.ordem||0) - (a.ordem||0));
-
-  if (!todos.length) {
-    tl.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)">Nenhum evento registrado ainda para este ativo.</div>';
-    return;
-  }
-
-  tl.innerHTML = todos.map(e => `
-    <div class="tl-item">
-      <div class="tl-dot ${e.dot}"></div>
-      <div class="tl-title">${e.icon ? e.icon + ' ' : ''}${escapeHtml(e.title)}</div>
-      ${e.desc  ? `<div class="tl-desc">${escapeHtml(e.desc)}</div>` : ''}
-      ${e.autor ? `<div class="tl-desc" style="color:var(--g400);font-style:italic">Por: ${escapeHtml(e.autor)}</div>` : ''}
-      <div class="tl-time">${fmtDate(e.time)}</div>
-    </div>`).join('');
 }
 
-async function adicionarObsHistorico() {
-  const obs  = document.getElementById('hist-obs-input')?.value?.trim();
-  const tipo = document.getElementById('hist-obs-tipo')?.value || 'obs';
-  if (!obs) return showToast('Digite a observação antes de salvar', 'warning');
-
-  const btn = document.querySelector('[onclick="adicionarObsHistorico()"]');
-  if (btn) btn.disabled = true;
-
-  try {
-    if (_histAtivoId && window._fs?.httpsCallable) {
-      await window._fs.httpsCallable('adicionarNotaHistorico')({ ativoId: _histAtivoId, nota: obs, tipo });
-    }
-    const dotMap  = { obs:'gray', manutencao:'orange', alerta:'red', transferencia:'violet', atualizacao:'green' };
-    const iconMap = { obs:'📝', manutencao:'🔧', alerta:'⚠️', transferencia:'↔️', atualizacao:'✅' };
-    const tl = document.getElementById('hist-timeline');
-    tl.innerHTML = `
-      <div class="tl-item">
-        <div class="tl-dot ${dotMap[tipo]||'gray'}"></div>
-        <div class="tl-title">${iconMap[tipo]||'📝'} ${tipo === 'obs' ? 'Observação do técnico' : tipo}</div>
-        <div class="tl-desc">${escapeHtml(obs)}</div>
-        <div class="tl-desc" style="color:var(--g400);font-style:italic">Por: ${escapeHtml(CURRENT_USER?.nome||'Técnico')}</div>
-        <div class="tl-time">agora</div>
-      </div>` + tl.innerHTML;
-    document.getElementById('hist-obs-input').value = '';
-    showToast('✅ Observação salva no histórico', 'success', 3000);
-  } catch(e) {
-    showToast('Erro ao salvar: ' + e.message, 'error');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
+function adicionarObsHistorico() {
+  const obs = document.getElementById('hist-obs-input').value.trim();
+  if (!obs) return;
+  const tl = document.getElementById('hist-timeline');
+  tl.innerHTML = `<div class="tl-item"><div class="tl-dot gray"></div><div class="tl-title">Observação adicionada</div><div class="tl-desc">${obs}</div><div class="tl-time">agora</div></div>` + tl.innerHTML;
+  document.getElementById('hist-obs-input').value = '';
+  showToast('Observação adicionada ao histórico');
 }
 
 // ============================================================
@@ -1898,130 +1776,6 @@ function permissionsForRole(role) {
   return map[role] || map.viewer;
 }
 
-// ─── Alerta ao logar — banner com pendências reais ───────────────
-function mostrarAlertasAoLogar(user) {
-  const role = user?.role || '';
-
-  // Coleta pendências relevantes para o role
-  const itens = [];
-
-  // Aprovações pendentes (gestor vê todas, técnico vê as suas)
-  const aprovPend = (STATE.aprovacoes || []).filter(a => a.status === 'pendente');
-  if (aprovPend.length > 0) {
-    if (role === 'gestor' || role === 'admin') {
-      itens.push({
-        cor: '#DC2626', icone: '⏳',
-        titulo: `${aprovPend.length} aprovação(ões) aguardando sua decisão`,
-        desc: 'O fluxo de movimentação está pausado até você autorizar.',
-        acao: () => goPage('aprovacoes'),
-        label: 'Ver aprovações',
-      });
-    } else {
-      const minhas = aprovPend.filter(a => a.solicitanteId === user.uid);
-      if (minhas.length > 0) itens.push({
-        cor: '#D97706', icone: '⏳',
-        titulo: `${minhas.length} movimentação(ões) suas aguardam aprovação do gestor`,
-        desc: 'O fluxo está pausado. O gestor foi notificado.',
-        acao: () => goPage('aprovacoes'),
-        label: 'Ver status',
-      });
-    }
-  }
-
-  // Equipamentos em atraso na Mindworks
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const tercAtraso = (STATE.terceirizadaAtivos || []).filter(t => {
-    if (t.retornado) return false;
-    if (!t.prazoRetorno) return false;
-    const venc = new Date(t.prazoRetorno); venc.setHours(0,0,0,0);
-    return venc < hoje;
-  });
-  if (tercAtraso.length > 0) {
-    itens.push({
-      cor: '#DC2626', icone: '🚨',
-      titulo: `${tercAtraso.length} equipamento(s) em atraso na Mindworks`,
-      desc: tercAtraso.map(t => t.pat || t.ativo).slice(0,3).join(', ') + (tercAtraso.length > 3 ? '...' : ''),
-      acao: () => goPage('terceirizada'),
-      label: 'Ver terceirizada',
-    });
-  }
-
-  // Equipamentos aguardando confirmação A-DSI
-  const aguardAdsi = (STATE.terceirizadaAtivos || []).filter(t =>
-    !t.retornado && t.etapa === 'aguardando-confirmacao-adsi'
-  );
-  if (aguardAdsi.length > 0) {
-    itens.push({
-      cor: '#2563EB', icone: '📦',
-      titulo: `${aguardAdsi.length} equipamento(s) aguardam confirmação de recebimento`,
-      desc: 'A Mindworks marcou a devolução. Confirme o recebimento físico.',
-      acao: () => goPage('terceirizada'),
-      label: 'Confirmar recebimento',
-    });
-  }
-
-  // Máquinas offline > 5 dias
-  const agora = new Date();
-  const offline = (STATE.ativos || []).filter(a => {
-    if (!a.lastSeen) return false;
-    const ls = new Date(a.lastSeen.seconds ? a.lastSeen.seconds*1000 : a.lastSeen);
-    return (agora - ls) / 86400000 > 5;
-  });
-  if (offline.length > 0) {
-    itens.push({
-      cor: '#6B7280', icone: '💤',
-      titulo: `${offline.length} máquina(s) offline há mais de 5 dias`,
-      desc: offline.slice(0,3).map(a => a.desc || a.hostname || a.ip).join(', ') + (offline.length > 3 ? '...' : ''),
-      acao: () => goPage('ativos'),
-      label: 'Ver ativos',
-    });
-  }
-
-  if (!itens.length) return; // sem pendências, não mostra nada
-
-  // Cria o banner
-  const banner = document.createElement('div');
-  banner.id = 'sysack-login-alert-banner';
-  banner.style.cssText = [
-    'position:fixed', 'top:80px', 'right:20px', 'z-index:9990',
-    'width:380px', 'background:var(--panel,#fff)',
-    'border:1px solid var(--line,#e2e8f0)', 'border-radius:16px',
-    'box-shadow:0 8px 32px rgba(0,0,0,.15)', 'overflow:hidden',
-    'animation:slideInRight .35s ease',
-  ].join(';');
-
-  banner.innerHTML = `
-    <style>
-      @keyframes slideInRight {
-        from { opacity:0; transform:translateX(30px); }
-        to   { opacity:1; transform:translateX(0); }
-      }
-    </style>
-    <div style="background:#0F172A;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
-      <span style="font-size:13px;font-weight:700">🔔 Pendências ao logar</span>
-      <button onclick="document.getElementById('sysack-login-alert-banner').remove()"
-        style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:8px;padding:2px 8px;cursor:pointer;font-size:13px">✕</button>
-    </div>
-    <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
-      ${itens.map(it => `
-        <div style="border-left:3px solid ${it.cor};padding:8px 10px;background:${it.cor}11;border-radius:0 8px 8px 0">
-          <div style="font-size:13px;font-weight:600;color:var(--text,#1e293b);margin-bottom:2px">${it.icone} ${it.titulo}</div>
-          <div style="font-size:11.5px;color:var(--muted,#64748b);margin-bottom:6px">${it.desc}</div>
-          <button onclick="(${it.acao.toString()})();document.getElementById('sysack-login-alert-banner').remove()"
-            style="font-size:11px;font-weight:700;background:${it.cor};color:#fff;border:none;border-radius:8px;padding:4px 10px;cursor:pointer">${it.label} →</button>
-        </div>`).join('')}
-    </div>
-    <div style="padding:8px 16px 12px;text-align:right">
-      <button onclick="document.getElementById('sysack-login-alert-banner').remove()"
-        style="font-size:11px;color:var(--muted,#64748b);background:none;border:none;cursor:pointer">Fechar e verificar depois</button>
-    </div>`;
-
-  document.body.appendChild(banner);
-
-  // Auto-remove após 30 segundos
-  setTimeout(() => banner?.remove(), 30000);
-}
-
 function loginSuccess(user, showWelcome = true) {
   SESSION_USER = user;
   // Atualiza CURRENT_USER global
@@ -2054,12 +1808,6 @@ function loginSuccess(user, showWelcome = true) {
     showToast(`${saud}, ${user.nome.split(' ')[0]}! 👋 Bem-vindo ao SYSACK.`, 'success');
   }
   auditLog('LOGIN', 'auth', user.uid, 'user', { nome: user.nome, role: user.role });
-
-  // ── Alerta ao logar — verifica pendências e exibe banner ─────
-  // Aguarda listeners carregarem (1.5s) e então mostra pendências
-  setTimeout(function() {
-    mostrarAlertasAoLogar(user);
-  }, 2000);
 
   // Inicia listeners do Firestore APÓS o usuário estar autenticado
   function _iniciarListeners() {
