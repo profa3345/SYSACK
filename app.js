@@ -777,7 +777,6 @@ function startFirestoreListeners() {
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
-    nbUpdate('nb-servidores', identificarServidores(STATE.ativos).length);
     console.log('[Banco] ativos:', STATE._assetsDisc.length);
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
@@ -941,7 +940,6 @@ function renderPage(id) {
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
     'organograma':   () => renderOrganograma(),
-    'servidores':    () => renderServidores(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -8832,458 +8830,6 @@ function renderSelfService() {
 // EMPREGADOS & AUSÊNCIAS
 // ════════════════════════════════════════════════════════════
 
-// ─── PAT SERVIDOR — atribuição por câmera, foto, voz ou digitação ──
-let _srvPatAtivoId = null;
-let _srvPatStream   = null;
-let _srvPatValor    = null;
-let _srvPatTab      = 'digitar';
-
-function abrirPatServidor(ativoId, hostname) {
-  _srvPatAtivoId = ativoId;
-  _srvPatValor   = null;
-
-  // Info do servidor no topo do modal
-  const info = document.getElementById('srv-pat-info');
-  if (info) info.textContent = '🖥️ ' + (hostname || ativoId);
-
-  // Limpa todos os campos
-  const inp = document.getElementById('srv-pat-digitar-input');
-  if (inp) inp.value = '';
-  document.getElementById('srv-pat-digitar-feedback').textContent = 'Digite o número da plaqueta de patrimônio';
-  document.getElementById('srv-pat-foto-preview').style.display = 'none';
-  document.getElementById('srv-pat-voz-resultado').style.display = 'none';
-  document.getElementById('srv-pat-voz-btn-area').style.display = '';
-  document.getElementById('srv-pat-confirmacao').style.display = 'none';
-  document.getElementById('srv-pat-salvar-btn').disabled = true;
-
-  // Ativa aba de digitação por padrão
-  srvPatTab('digitar', document.querySelector('.srv-pat-tab'));
-  openModal('modal-pat-servidor');
-}
-
-function fecharModalPatServidor() {
-  srvPatPararCamera();
-  closeModal('modal-pat-servidor');
-}
-
-function srvPatTab(tab, el) {
-  _srvPatTab = tab;
-  ['digitar','camera','foto','voz'].forEach(t => {
-    document.getElementById('srv-pat-panel-' + t).style.display = t === tab ? '' : 'none';
-  });
-  document.querySelectorAll('.srv-pat-tab').forEach(b => {
-    b.style.background = 'transparent';
-    b.style.color = 'var(--g500)';
-    b.style.boxShadow = 'none';
-  });
-  if (el) {
-    el.style.background = '#fff';
-    el.style.color = 'var(--g900)';
-    el.style.boxShadow = '0 1px 3px rgba(0,0,0,.1)';
-  }
-  // Para câmera ao trocar de aba
-  if (tab !== 'camera') srvPatPararCamera();
-}
-
-function srvPatValidar(val) {
-  const limpo = (val || '').replace(/[^0-9A-Za-z\-]/g, '').trim();
-  const feedback = document.getElementById('srv-pat-digitar-feedback');
-  const btn = document.getElementById('srv-pat-salvar-btn');
-  if (limpo.length >= 2) {
-    _srvPatValor = limpo;
-    srvPatMostrarConfirmacao(limpo);
-    if (btn) btn.disabled = false;
-    if (feedback) { feedback.textContent = '✅ PAT: ' + limpo; feedback.style.color = 'var(--success)'; }
-  } else {
-    _srvPatValor = null;
-    document.getElementById('srv-pat-confirmacao').style.display = 'none';
-    if (btn) btn.disabled = true;
-    if (feedback) { feedback.textContent = 'Digite o número da plaqueta de patrimônio'; feedback.style.color = 'var(--g400)'; }
-  }
-}
-
-function srvPatMostrarConfirmacao(pat) {
-  const box = document.getElementById('srv-pat-confirmacao');
-  const val = document.getElementById('srv-pat-valor-confirmado');
-  if (box) box.style.display = '';
-  if (val) val.textContent = pat;
-  const btn = document.getElementById('srv-pat-salvar-btn');
-  if (btn) btn.disabled = false;
-}
-
-// ── Câmera ────────────────────────────────────────────────────────
-async function srvPatIniciarCamera() {
-  const video  = document.getElementById('srv-pat-video');
-  const status = document.getElementById('srv-pat-camera-status');
-  if (!video) return;
-  try {
-    _srvPatStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
-    video.srcObject = _srvPatStream;
-    if (status) status.textContent = 'Câmera ativa — buscando código...';
-    srvPatDecodeLoop(video, status);
-  } catch(e) {
-    if (status) status.textContent = '❌ Câmera indisponível: ' + e.message;
-  }
-}
-
-function srvPatPararCamera() {
-  if (_srvPatStream) {
-    _srvPatStream.getTracks().forEach(t => t.stop());
-    _srvPatStream = null;
-  }
-}
-
-async function srvPatDecodeLoop(video, status) {
-  try {
-    const ZXing = await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/esm/index.min.js').catch(() => null);
-    if (!ZXing) {
-      if (status) status.textContent = '⚠️ Scanner indisponível — tire uma foto ou digite manualmente';
-      return;
-    }
-    const decoder = new ZXing.BrowserMultiFormatReader();
-    decoder.decodeFromVideoElement(video, function(result, err) {
-      if (result) {
-        srvPatPararCamera();
-        const code = result.getText().replace(/[^0-9A-Za-z\-]/g, '');
-        if (status) status.textContent = '✅ Lido: ' + code;
-        _srvPatValor = code;
-        srvPatMostrarConfirmacao(code);
-        // Preenche também o campo de digitação
-        const inp = document.getElementById('srv-pat-digitar-input');
-        if (inp) inp.value = code;
-      }
-    });
-  } catch(e) {
-    if (status) status.textContent = 'Erro no scanner: ' + e.message;
-  }
-}
-
-// ── Foto ──────────────────────────────────────────────────────────
-async function srvPatLerFoto(input) {
-  const file = input.files?.[0];
-  if (!file) return;
-  const prev   = document.getElementById('srv-pat-foto-preview');
-  const img    = document.getElementById('srv-pat-foto-img');
-  const status = document.getElementById('srv-pat-foto-status');
-
-  if (prev) prev.style.display = '';
-  if (img)  img.src = URL.createObjectURL(file);
-  if (status) status.textContent = '🔍 Tentando ler código...';
-
-  try {
-    const ZXing = await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/esm/index.min.js').catch(() => null);
-    if (ZXing) {
-      const image = new Image();
-      image.src = img.src;
-      image.onload = async function() {
-        try {
-          const decoder = new ZXing.BrowserMultiFormatReader();
-          const result  = await decoder.decodeFromImageElement(image);
-          const code    = result.getText().replace(/[^0-9A-Za-z\-]/g, '');
-          if (status) { status.textContent = '✅ PAT detectado: ' + code; status.style.color = 'var(--success)'; }
-          _srvPatValor = code;
-          srvPatMostrarConfirmacao(code);
-        } catch(e) {
-          // QR/barcode não encontrado — tenta Gemini Vision
-          srvPatGeminiVision(file, status);
-        }
-      };
-    } else {
-      srvPatGeminiVision(file, status);
-    }
-  } catch(e) {
-    srvPatGeminiVision(file, status);
-  }
-}
-
-async function srvPatGeminiVision(file, status) {
-  if (status) status.textContent = '🤖 Analisando plaqueta com IA...';
-  try {
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-      const b64 = e.target.result.split(',')[1];
-      if (window._fs?.httpsCallable) {
-        const res = await window._fs.httpsCallable('extrairPATdaFoto')({ imageBase64: b64 });
-        const pat = res.data?.pat;
-        if (pat) {
-          if (status) { status.textContent = '✅ PAT detectado pela IA: ' + pat; status.style.color = 'var(--success)'; }
-          _srvPatValor = pat;
-          srvPatMostrarConfirmacao(pat);
-        } else {
-          if (status) status.textContent = '⚠️ Não detectado automaticamente. Troque para a aba "Digitar" e informe o PAT.';
-        }
-      } else {
-        if (status) status.textContent = '⚠️ Informe o PAT manualmente na aba "Digitar".';
-      }
-    };
-    reader.readAsDataURL(file);
-  } catch(e) {
-    if (status) status.textContent = '⚠️ Erro na análise. Use a aba "Digitar".';
-  }
-}
-
-// ── Voz ──────────────────────────────────────────────────────────
-function srvPatIniciarVoz() {
-  const btn    = document.getElementById('srv-pat-voz-btn');
-  const status = document.getElementById('srv-pat-voz-status');
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-  if (!SpeechRecognition) {
-    if (status) status.textContent = '❌ Reconhecimento de voz não suportado neste browser. Use Chrome.';
-    return;
-  }
-
-  const rec = new SpeechRecognition();
-  rec.lang = 'pt-BR';
-  rec.continuous = false;
-  rec.interimResults = false;
-  rec.maxAlternatives = 3;
-
-  if (btn) { btn.style.background = '#DC2626'; btn.style.animation = 'pulse 1s infinite'; }
-  if (status) status.textContent = '🔴 Ouvindo... fale o número do patrimônio';
-
-  rec.onresult = function(event) {
-    if (btn) { btn.style.background = 'var(--accent)'; btn.style.animation = ''; }
-    // Pega a melhor alternativa
-    let texto = event.results[0][0].transcript;
-    // Converte palavras em números se necessário
-    texto = texto.replace(/\s+/g, '');
-    const numeros = {
-      'zero':'0','um':'1','uma':'1','dois':'2','duas':'2','três':'3','quatro':'4',
-      'cinco':'5','seis':'6','sete':'7','oito':'8','nove':'9','dez':'10'
-    };
-    let resultado = texto;
-    Object.entries(numeros).forEach(([palavra, num]) => {
-      resultado = resultado.replace(new RegExp(palavra, 'gi'), num);
-    });
-    resultado = resultado.replace(/[^0-9A-Za-z\-]/g, '').trim();
-
-    if (resultado.length >= 2) {
-      _srvPatValor = resultado;
-      document.getElementById('srv-pat-voz-btn-area').style.display = 'none';
-      const resDiv = document.getElementById('srv-pat-voz-resultado');
-      const patDiv = document.getElementById('srv-pat-voz-pat');
-      if (resDiv) resDiv.style.display = '';
-      if (patDiv) patDiv.textContent  = resultado;
-      if (status) status.textContent  = '✅ PAT reconhecido!';
-      srvPatMostrarConfirmacao(resultado);
-    } else {
-      if (status) status.textContent = '⚠️ Não entendi. Tente novamente ou use outra forma.';
-      if (btn) btn.style.background = 'var(--accent)';
-    }
-  };
-
-  rec.onerror = function(e) {
-    if (btn) { btn.style.background = 'var(--accent)'; btn.style.animation = ''; }
-    if (status) status.textContent = '❌ Erro: ' + e.error + '. Tente novamente.';
-  };
-
-  rec.start();
-}
-
-function srvPatReiniciarVoz() {
-  _srvPatValor = null;
-  document.getElementById('srv-pat-voz-resultado').style.display = 'none';
-  document.getElementById('srv-pat-voz-btn-area').style.display  = '';
-  document.getElementById('srv-pat-voz-status').textContent = 'Clique e fale o número do patrimônio';
-  document.getElementById('srv-pat-confirmacao').style.display = 'none';
-  document.getElementById('srv-pat-salvar-btn').disabled = true;
-}
-
-// ── Salvar PAT no ativo ───────────────────────────────────────────
-async function confirmarPatServidor() {
-  const pat = _srvPatValor;
-  const id  = _srvPatAtivoId;
-  if (!pat || !id) return showToast('PAT não definido', 'warning');
-
-  const btn = document.getElementById('srv-pat-salvar-btn');
-  setButtonLoading(btn, true, 'Salvando...');
-
-  try {
-    await fsUpdate('ativos', id, {
-      pat,
-      updatedAt: new Date().toISOString(),
-    });
-
-    // Grava no histórico imutável do ativo
-    if (window._fs?.httpsCallable) {
-      const ativo = (STATE.ativos||[]).find(a => a.id === id);
-      if (ativo?.id) {
-        window._fs.httpsCallable('adicionarNotaHistorico')({
-          ativoId: id,
-          nota: 'PAT ' + pat + ' atribuído manualmente ao servidor físico ' + (ativo.hostname||id) + ' por ' + (CURRENT_USER?.nome||'Técnico') + '.',
-          tipo: 'atualizacao',
-        }).catch(() => {});
-      }
-    }
-
-    fecharModalPatServidor();
-    showToast('✅ PAT ' + pat + ' atribuído ao servidor!', 'success', 4000);
-    renderServidores();
-  } catch(e) {
-    showToast('Erro ao salvar: ' + e.message, 'error');
-  } finally {
-    setButtonLoading(btn, false);
-  }
-}
-
-// ─── SERVIDORES ───────────────────────────────────────────────────
-// Identifica servidores pelo hostname: SERV* = físico, VSERV* = virtual
-// Inclui também ativos com tipo 'servidor' ou 'server-linux'
-
-let _srvTab = 'todos';
-
-function isFisicoServidor(a) {
-  const hn = (a.hostname || a.desc || '').toUpperCase();
-  return hn.startsWith('SERV') && !hn.startsWith('VSERV');
-}
-
-function isVirtualServidor(a) {
-  const hn = (a.hostname || a.desc || '').toUpperCase();
-  return hn.startsWith('VSERV');
-}
-
-function isServidor(a) {
-  const hn   = (a.hostname || a.desc || '').toUpperCase();
-  const tipo = (a.tipo || '').toLowerCase();
-  return hn.startsWith('SERV') || hn.startsWith('VSERV')
-      || tipo === 'servidor' || tipo === 'server-linux';
-}
-
-function identificarServidores(ativos) {
-  return (ativos || []).filter(isServidor);
-}
-
-function srvTab(tab, el) {
-  _srvTab = tab;
-  document.querySelectorAll('.srv-tab-btn').forEach(b => b.classList.remove('active'));
-  if (el) el.classList.add('active');
-  renderServidores();
-}
-
-function renderServidores() {
-  const q       = (document.getElementById('srv-search')?.value || '').toLowerCase();
-  const fTipo   = document.getElementById('srv-filter-tipo')?.value || '';
-  const fStatus = document.getElementById('srv-filter-status')?.value || '';
-
-  let lista = identificarServidores(STATE.ativos);
-
-  if (fTipo === 'fisico'  || _srvTab === 'fisico')  lista = lista.filter(isFisicoServidor);
-  if (fTipo === 'virtual' || _srvTab === 'virtual')  lista = lista.filter(isVirtualServidor);
-  if (fStatus) lista = lista.filter(a => (a.status||'').toLowerCase() === fStatus);
-  if (q) lista = lista.filter(a =>
-    (a.hostname||'').toLowerCase().includes(q) ||
-    (a.ip||'').toLowerCase().includes(q) ||
-    (a.desc||'').toLowerCase().includes(q) ||
-    (a.area||'').toLowerCase().includes(q) ||
-    (a.pat||'').toLowerCase().includes(q)
-  );
-
-  const todos    = identificarServidores(STATE.ativos);
-  const fisicos  = todos.filter(isFisicoServidor);
-  const virtuais = todos.filter(isVirtualServidor);
-  const online   = todos.filter(a => (a.status||'').toLowerCase() === 'online' || a.reachable === true);
-  const offline  = todos.filter(a => ['offline','critico'].includes((a.status||'').toLowerCase()));
-
-  const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  sv('srv-kpi-total',    todos.length);
-  sv('srv-kpi-fisicos',  fisicos.length);
-  sv('srv-kpi-virtuais', virtuais.length);
-  sv('srv-kpi-online',   online.length);
-  sv('srv-kpi-offline',  offline.length);
-  nbUpdate('nb-servidores', todos.length);
-
-  const grid = document.getElementById('srv-grid');
-  if (!grid) return;
-
-  if (!lista.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)">'
-      + '<div style="font-size:40px;margin-bottom:12px">🖥️</div>'
-      + '<div style="font-weight:600">Nenhum servidor encontrado</div>'
-      + '<div style="font-size:12px;margin-top:6px">Servidores físicos: hostname SERV* · Virtuais: hostname VSERV*</div>'
-      + '</div>';
-    return;
-  }
-
-  lista.sort(function(a,b) {
-    const ord = {critico:0,offline:1,alerta:2,online:3,ativo:4};
-    const sa = ord[(a.status||'').toLowerCase()] ?? 5;
-    const sb = ord[(b.status||'').toLowerCase()] ?? 5;
-    if (sa !== sb) return sa - sb;
-    return (a.hostname||a.desc||'').localeCompare(b.hostname||b.desc||'');
-  });
-
-  function metricBar(label, val, danger, warn) {
-    if (val == null) return '';
-    const cor = val >= danger ? '#DC2626' : val >= warn ? '#D97706' : '#059669';
-    return '<div style="margin-bottom:5px">'
-      + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px">'
-        + '<span>' + label + '</span><span style="font-weight:700;color:' + cor + '">' + val + '%</span>'
-      + '</div>'
-      + '<div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden">'
-        + '<div style="background:' + cor + ';width:' + Math.min(val,100) + '%;height:100%;border-radius:3px"></div>'
-      + '</div></div>';
-  }
-
-  grid.innerHTML = lista.map(function(a) {
-    const hn      = a.hostname || a.desc || a.ip || '—';
-    const isVirt  = isVirtualServidor(a);
-    const isFis   = isFisicoServidor(a);
-    const tLabel  = isVirt ? '☁️ Virtual' : '🖥️ Físico';
-    const tColor  = isVirt ? '#7C3AED' : '#2563EB';
-    const st      = (a.status||'desconhecido').toLowerCase();
-    const stColor = st==='online'||a.reachable ? '#059669' : st==='critico' ? '#DC2626' : st==='offline' ? '#6B7280' : '#D97706';
-    const stLabel = st==='online'||a.reachable ? 'Online' : st==='critico' ? 'Crítico' : st==='offline' ? 'Offline' : st.charAt(0).toUpperCase()+st.slice(1);
-    const cpu     = a.cpuPct != null ? a.cpuPct : null;
-    const mem     = a.memPct != null ? a.memPct : null;
-    const disco   = a.discoC_livrePct != null ? Math.round(100 - a.discoC_livrePct) : null;
-    const uptime  = a.uptimeHoras != null ? (a.uptimeHoras >= 24 ? Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h' : Math.round(a.uptimeHoras)+'h') : null;
-    const lastSeen = a.lastSeen ? new Date(a.lastSeen.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleString('pt-BR') : '—';
-
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tColor+'">'
-      + '<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
-          + '<span style="font-size:22px;flex-shrink:0">'+(isVirt?'☁️':'🖥️')+'</span>'
-          + '<div style="min-width:0">'
-            + '<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
-            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(a.area||'—')+'</div>'
-          + '</div>'
-        + '</div>'
-        + '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
-          + '<span style="background:'+stColor+'22;color:'+stColor+';border:1px solid '+stColor+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+stLabel+'</span>'
-          + '<span style="background:'+tColor+'22;color:'+tColor+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+tLabel+'</span>'
-        + '</div>'
-      + '</div>'
-      + '<div style="padding:14px 16px">'
-        + (cpu!=null||mem!=null||disco!=null
-          ? metricBar('CPU',cpu,90,70)+metricBar('Memória',mem,90,80)+metricBar('Disco C:',disco,95,85)
-          : '<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Métricas indisponíveis — agente não instalado</div>')
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:8px">'
-          + '<div>'
-            + (isVirt
-              ? '<span style="color:var(--g400)">PAT:</span> <span style="background:#F3F4F6;color:var(--g400);font-size:10px;padding:1px 6px;border-radius:8px">N/A — Virtual</span>'
-              : (a.pat
-                  ? '<span style="color:var(--g400)">PAT:</span> <span style="font-family:monospace;font-weight:700;color:var(--accent)">' + escapeHtml(a.pat) + '</span>'
-                  + ' <button data-id="' + escapeHtml(a.id) + '" data-hn="' + escapeHtml(hn) + '" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="font-size:10px;background:#FEF3C7;color:#92400E;border:none;padding:1px 6px;border-radius:8px;cursor:pointer;font-weight:600">✏️ Alterar</button>'
-                  : '<button data-id="' + escapeHtml(a.id) + '" data-hn="' + escapeHtml(hn) + '" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="background:#FEF3C7;color:#92400E;border:none;padding:3px 10px;border-radius:8px;cursor:pointer;font-weight:700;font-size:11px">🏷️ Atribuir PAT</button>'))
-          + '</div>'
-          + '<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').split(' ').slice(0,3).join(' '))+'</span></div>'
-          + '<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(uptime||'—')+'</span></div>'
-          + '<div><span style="color:var(--g400)">Último contato:</span> <span style="font-size:10px">'+lastSeen+'</span></div>'
-          + (a.usuarioLogado ? '<div style="grid-column:1/-1"><span style="color:var(--g400)">Usuário:</span> <span>'+escapeHtml(a.usuarioLogado)+'</span></div>' : '')
-        + '</div>'
-      + '</div>'
-      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        + '<button onclick="abrirHistorico(\'' + escapeHtml(a.pat||a.id) + '\')" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
-        + '<button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
-        + '<button data-sid="' + escapeHtml(a.id) + '" onclick="swActionDirect(\'ping\',this.dataset.sid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
-      + '</div>'
-    + '</div>';
-  }).join('');
-}
-
 // ─── ORGANOGRAMA ─────────────────────────────────────────────────
 let _orgSetorAberto = null;
 
@@ -9652,42 +9198,56 @@ function renderSwitches(){
   if(currentSwView==='cards'){
     const grid=document.getElementById('sw-cards-grid');
     if(!grid) return;
-    grid.innerHTML=filtered.map(s=>{
-      const pct=Math.round(((s.portasUso||0)/(s.totalPortas||1))*100)||0;
-      const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
-      const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#1E293B';
-      // Fallbacks seguros para campos que podem vir undefined do Firestore
-      const hostname   = s.hostname || s.sysName || s.name || s.host || s.ip || '—';
-      const marcaModelo= [s.marca, s.modelo].filter(v => v && v !== 'undefined').join(' ') || '—';
-      const local      = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
-      const portasLabel= (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0)+'/'+s.totalPortas : '—/—';
-      return `<div class='sw-card'>
-        <div class='sw-card-header' style='background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px'>
-          <div style='width:36px;height:36px;border-radius:8px;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>\${ico}</div>
-          <div style='flex:1;min-width:0;margin-left:10px'>
-            <div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>\${hostname}</div>
-            <div style='font-size:10.5px;color:#94A3B8;margin-top:2px'>\${marcaModelo}</div>
-          </div>
-          \${swStatusHtml(s.status)}
-        </div>
-        <div class='sw-card-body'>
-          <div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>\${s.ip||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Local</span><span class='val' style='\${local==='—'?'color:var(--g400);font-style:italic':''}'>\${local}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:\${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ \${s.uptime||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>\${s.firmware||'—'}</span></div>
-          \${s.tipo!=='ap'&&s.tipo!=='firewall'?\`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: \${portasLabel}</span><span>\${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:\${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:\${pct}%;height:100%;border-radius:4px'></div></div></div>\`:''}
-        </div>
-        <div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>\${renderPortMinimap(s)}</div></div>
-        <div class='sw-card-actions'>
-          <button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('\${s.id}')">⚙️ Gerenciar</button>
-          <button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('\${s.id}')">📜 Histórico</button>
-          <button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>
-          <button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','\${s.id}')">📶 Ping</button>
-          <button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','\${s.id}')">🖥️ SSH</button>
-          <button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','\${s.id}')">💾 Backup</button>
-        </div>
-      </div>`;
-    }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
+    grid.innerHTML = filtered.map(function(s) {
+      const pct         = Math.round(((s.portasUso||0) / (s.totalPortas||1)) * 100) || 0;
+      const ico         = {'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo] || '🔌';
+      const bg          = {'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo] || '#1E293B';
+      const hostname    = s.hostname || s.sysName || s.name || s.host || s.ip || '—';
+      const marcaModelo = [s.marca, s.modelo].filter(function(v){ return v && v !== 'undefined'; }).join(' ') || '—';
+      const local       = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
+      const portasLabel = (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0) + '/' + s.totalPortas : '—/—';
+      const localStyle  = local === '—' ? 'color:var(--g400);font-style:italic' : '';
+      const uptimeColor = s.status === 'online' ? 'var(--success)' : 'var(--danger)';
+      const pctColor    = pct > 85 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--success)';
+
+      const portasBar = (s.tipo !== 'ap' && s.tipo !== 'firewall')
+        ? '<div style="margin-top:8px">'
+            + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px">'
+              + '<span>Portas: ' + portasLabel + '</span><span>' + pct + '%</span>'
+            + '</div>'
+            + '<div style="background:var(--g200);border-radius:4px;height:5px;overflow:hidden">'
+              + '<div style="background:' + pctColor + ';width:' + pct + '%;height:100%;border-radius:4px"></div>'
+            + '</div>'
+          + '</div>'
+        : '';
+
+      return '<div class="sw-card">'
+        + '<div class="sw-card-header" style="background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px">'
+          + '<div style="width:36px;height:36px;border-radius:8px;background:' + bg + ';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">' + ico + '</div>'
+          + '<div style="flex:1;min-width:0;margin-left:10px">'
+            + '<div style="font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(hostname) + '</div>'
+            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">' + escapeHtml(marcaModelo) + '</div>'
+          + '</div>'
+          + swStatusHtml(s.status)
+        + '</div>'
+        + '<div class="sw-card-body">'
+          + '<div class="mdm-card-field"><span class="lbl">IP</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:11px">' + escapeHtml(s.ip||'—') + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Local</span><span class="val" style="' + localStyle + '">' + escapeHtml(local) + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Uptime</span><span class="val" style="color:' + uptimeColor + '">⏱ ' + escapeHtml(s.uptime||'—') + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Firmware</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:10.5px">' + escapeHtml(s.firmware||'—') + '</span></div>'
+          + portasBar
+        + '</div>'
+        + '<div class="sw-card-ports"><div style="display:flex;flex-wrap:wrap;gap:2px">' + renderPortMinimap(s) + '</div></div>'
+        + '<div class="sw-card-actions">'
+          + '<button class="mdm-action-btn mab-gray" data-sid="' + escapeHtml(s.id) + '" onclick="abrirGerenciarSwitch(this.dataset.sid)">⚙️ Gerenciar</button>'
+          + '<button class="mdm-action-btn mab-info" data-sid="' + escapeHtml(s.id) + '" onclick="abrirHistSwitch(this.dataset.sid)">📜 Histórico</button>'
+          + '<button class="mdm-action-btn mab-success" onclick="openModal(&quot;modal-novo-chamado&quot;)">🎫 Chamado</button>'
+          + '<button class="mdm-action-btn mab-warning" data-sid="' + escapeHtml(s.id) + '" onclick="swActionDirect(&quot;ping&quot;,this.dataset.sid)">📶 Ping</button>'
+          + '<button class="mdm-action-btn mab-dark" data-sid="' + escapeHtml(s.id) + '" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.sid)">🖥️ SSH</button>'
+          + '<button class="mdm-action-btn mab-violet" data-sid="' + escapeHtml(s.id) + '" onclick="swActionDirect(&quot;backup-config&quot;,this.dataset.sid)">💾 Backup</button>'
+        + '</div>'
+      + '</div>';
+    }).join('') || '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
   } else {
     const tbody=document.getElementById('sw-table-body');
     if(tbody) tbody.innerHTML=filtered.map(s=>`<tr><td class='td-mono' style='color:var(--accent)'>${s.pat}</td><td style='font-weight:700;font-family:JetBrains Mono,monospace'>${s.hostname}</td><td><span class='tag'>${s.tipo}</span></td><td>${s.marca} ${s.modelo}</td><td class='td-mono' style='color:var(--accent-hi)'>${s.ip}</td><td>${s.local}</td><td>${s.portasUso||0}/${s.totalPortas||0}</td><td class='td-mono' style='font-size:10.5px'>${(s.vlans||[]).map(v=>v.id).join(', ')||'—'}</td><td class='td-mono' style='font-size:10.5px'>${s.firmware||'—'}</td><td style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</td><td>${swStatusHtml(s.status)}</td><td><div class='flex gap-4'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶</button></div></td></tr>`).join('')||'<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum</td></tr>';
@@ -17154,9 +16714,4 @@ function monSetView(view) {
     }
     if (typeof _prev === 'function') return _prev(id, val);
   };
-})();      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        + '<button data-hist="' + escapeHtml(a.pat||a.id) + '" onclick="abrirHistorico(this.dataset.hist)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
-        + '<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
-        + '<button data-aid="' + escapeHtml(a.id) + '" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
-      + '</div>'
-    + '</div>';
+})();
