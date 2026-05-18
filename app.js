@@ -852,6 +852,12 @@ const PAGE_LABELS = {
   pesquisas:'Pesquisas Salvas', alertas:'Alertas'
 };
 
+// ─── Utilitário: verifica se uma página está ativa no DOM ────
+function isPageActive(pageId) {
+  var page = document.getElementById('page-' + pageId);
+  return !!(page && page.classList.contains('active'));
+}
+
 // ─── SINGLE goPage + renderPage — NO PATCHES, NO RECURSION ───
 function goPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
