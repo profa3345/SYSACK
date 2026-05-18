@@ -1,5 +1,5 @@
-// sw.js — SYSACK Service Worker v5
-// Fix: req.clone() em todos os fetch + Firebase Messaging isolado
+// sw.js — SYSACK Service Worker v6
+// Fix: !res.bodyUsed guard em todos os fetch + isPageActive + exportarAtivosCSV
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
@@ -51,7 +51,7 @@ self.addEventListener('notificationclick', event => {
 });
 
 // ── Cache ─────────────────────────────────────────────────────────
-const CACHE_VER    = 'sysack-v5';
+const CACHE_VER    = 'sysack-v6';
 const STATIC_CACHE = CACHE_VER + '-static';
 
 // URLs que NUNCA devem ser interceptadas pelo SW
@@ -118,7 +118,7 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(req.clone())
         .then(res => {
-          if (res && res.ok) {
+          if (res && res.ok && !res.bodyUsed) {
             caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
           }
           return res;
@@ -133,7 +133,7 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(req.clone())
         .then(res => {
-          if (res && res.ok) {
+          if (res && res.ok && !res.bodyUsed) {
             caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
           }
           return res;
@@ -149,7 +149,7 @@ self.addEventListener('fetch', event => {
       caches.match(req).then(cached => {
         if (cached) return cached;
         return fetch(req.clone()).then(res => {
-          if (res && res.ok) {
+          if (res && res.ok && !res.bodyUsed) {
             caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
           }
           return res;

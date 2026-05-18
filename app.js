@@ -728,10 +728,32 @@ function startFirestoreListeners() {
     };
   }
 
+  // Deduplicação: merge por IP (ou id) priorizando registros com mais dados
+  function mergeAtivos(disc, sw) {
+    const merged = (disc||[]).concat(sw||[]);
+    const seen = new Map();
+    merged.forEach(function(a) {
+      const key = a.ip || a.id;
+      if (!seen.has(key)) {
+        seen.set(key, a);
+      } else {
+        const prev = seen.get(key);
+        // Prefere o registro que tem PAT; em empate, mescla campos
+        if (!prev.pat && a.pat) {
+          seen.set(key, Object.assign({}, prev, a));
+        } else if (prev.pat && !a.pat) {
+          seen.set(key, Object.assign({}, a, prev));
+        }
+        // Se ambos têm (ou não têm) PAT, mantém o primeiro
+      }
+    });
+    return Array.from(seen.values());
+  }
+
   // ativos
   db.collection('ativos').onSnapshot(function(snap) {
     STATE._assetsDisc = snap2arr(snap).map(norm);
-    STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
+    STATE.ativos = mergeAtivos(STATE._assetsDisc, STATE._assetsSw);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
     console.log('[Banco] ativos:', STATE._assetsDisc.length);
@@ -741,7 +763,7 @@ function startFirestoreListeners() {
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
     STATE.switches  = STATE._assetsSw;
-    STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
+    STATE.ativos = mergeAtivos(STATE._assetsDisc, STATE._assetsSw);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
     console.log('[Banco] switches:', STATE._assetsSw.length);
@@ -845,6 +867,12 @@ const PAGE_LABELS = {
   documentos:'Documentos', lembretes:'Lembretes',
   pesquisas:'Pesquisas Salvas', alertas:'Alertas'
 };
+
+// ─── Utilitário: verifica se uma página está ativa no DOM ────
+function isPageActive(pageId) {
+  var page = document.getElementById('page-' + pageId);
+  return !!(page && page.classList.contains('active'));
+}
 
 // ─── SINGLE goPage + renderPage — NO PATCHES, NO RECURSION ───
 function goPage(id) {
@@ -1091,6 +1119,41 @@ function hostnameFromAtivo(a) {
 
 function updateAtivosTableForComputadores(isComputadores) {
   // Header gerenciado exclusivamente pelo renderAtivos() — não fazer nada aqui
+}
+
+// ─── Exportar tabela de ativos filtrada para CSV ──────────────
+function exportarAtivosCSV() {
+  var q     = (document.getElementById('pat-search')?.value || '').toLowerCase();
+  var fSt   = document.getElementById('pat-filter-status')?.value || '';
+  var tipos = window._ativoFiltroTipo ? window._ativoFiltroTipo.split(',') : [];
+
+  var lista = (STATE.ativos || []).filter(function(a) {
+    if (tipos.length > 0) {
+      var t = (a.tipo || '').toLowerCase();
+      if (!tipos.some(function(ft){ return t.includes(ft) || ft.includes(t); })) return false;
+    }
+    if (fSt && a.status !== fSt) return false;
+    if (q && !(a.pat + ' ' + a.desc + ' ' + a.area + ' ' + (a.resp||'') + ' ' + (a.ip||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  var headers = ['PAT','Descrição','Tipo','Área','Responsável','Status','Localização','Hostname','IP'];
+  var rows = lista.map(function(a) {
+    return [
+      a.pat||'', a.desc||'', a.tipo||'', a.area||'', a.resp||'',
+      a.status||'', (a.sala||a.loc||''), (a.hostname||''), (a.ip||'')
+    ].map(function(v){ return '"' + String(v).replace(/"/g,'""') + '"'; }).join(',');
+  });
+
+  var csv  = [headers.join(',')].concat(rows).join('\r\n');
+  var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  var url  = URL.createObjectURL(blob);
+  var el   = document.createElement('a');
+  el.href  = url;
+  el.download = 'SYSACK_Ativos_' + new Date().toISOString().split('T')[0] + '.csv';
+  el.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV exportado — ' + lista.length + ' ativos', 'success', 2500);
 }
 
 // ============================================================

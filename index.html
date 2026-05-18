@@ -756,7 +756,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <input id="pat-search" class="form-control" style="width:240px;margin:0" placeholder="🔍 Buscar PAT, hostname, IP, área, responsável..." id="at-search-input" oninput="renderAtivos()">
           <select id="pat-filter-status" class="form-control" style="width:150px;margin:0" onchange="renderAtivos()"><option value="">Todos os status</option><option value="ativo">Em Uso</option><option value="disponivel">Disponível</option><option value="manut">Manutenção</option><option value="terceirizada">Na Terceirizada</option><option value="sc">Santa Clara</option></select>
           <select class="form-control" style="width:140px;margin:0"><option>Todas as áreas</option><option>TI</option><option>RH</option><option>Financeiro</option><option>Comercial</option></select>
-          <button class="btn btn-ghost btn-sm" style="margin-left:auto">⬇ Exportar</button>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="exportarAtivosCSV()">⬇ Exportar</button>
         </div>
         <div class="table-wrap"><table id="ativos-table"><thead id="ativos-thead"><tr><th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th><th>Ações</th></tr></thead><tbody id="ativos-body"></tbody></table></div>
       </div>
