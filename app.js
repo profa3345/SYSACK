@@ -6118,64 +6118,166 @@ async function recusarMovimentacao(aprovId) {
 }
 
 async function executarMovimentacaoAprovada(aprov) {
-  const det = aprov.detalhes || {};
+  const det    = aprov.detalhes || {};
+  const pat    = det.patAntigo  || aprov.pat || '—';
+  const gestor = CURRENT_USER?.nome || 'Gestor';
+  const agora  = new Date().toISOString().split('T')[0];
 
+  // ── Helper: grava histórico imutável no ativo ───────────────
+  async function gravarHistoricoAtivo(titulo, desc, dot) {
+    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
+    if (!ativo?.id || !window._fs?.httpsCallable) return;
+    try {
+      await window._fs.httpsCallable('adicionarNotaHistorico')({
+        ativoId: ativo.id,
+        nota:    desc,
+        tipo:    dot === 'violet' ? 'transferencia' : dot === 'orange' ? 'transferencia' : 'atualizacao',
+      });
+    } catch(e) { console.warn('[Histórico]', e.message); }
+  }
+
+  // ── Helper: grava na coleção movimentacoes ──────────────────
+  async function gravarMovimentacao(de, para, tipo) {
+    const mov = {
+      pat, ativo: det.descAtivo || pat,
+      tipo, de, para,
+      chamadoId:    aprov.chamadoId || '',
+      tecnico:      gestor,
+      aprovadoPor:  gestor,
+      status:       'aprovado',
+      data:         new Date(),
+    };
+    await fsAdd('movimentacoes', mov, STATE.movimentacoes);
+  }
+
+  // ── Mindworks ───────────────────────────────────────────────
   if (det.destino === 'mindworks') {
-    // Registra na lista de terceirizadas com prazo
-    const dataRecolh = det.dataRecolhimento || new Date().toISOString().split('T')[0];
+    const dataRecolh = det.dataRecolhimento || agora;
     const prazo      = det.prazoTerceirizada || 10;
     const vencimento = calcularDiasUteis(new Date(dataRecolh), prazo);
+    const tecNome    = getTecNome(det.tecnicoTerceirizada) || '—';
 
     const tercItem = {
-      id:            'TERC-' + Date.now(),
-      chamadoId:     aprov.chamadoId,
-      pat:           det.patAntigo || aprov.pat,
-      ativo:         det.patAntigo || aprov.pat,
-      tecnicoId:     det.tecnicoTerceirizada || '',
-      dataEnvio:     dataRecolh,
-      prazoRetorno:  vencimento.toISOString().split('T')[0],
+      chamadoId:      aprov.chamadoId,
+      pat,
+      ativo:          det.descAtivo || pat,
+      tecnicoId:      det.tecnicoTerceirizada || '',
+      tecnicoTerc:    det.tecnicoTerceirizada || '',
+      tecnicoMwNome:  tecNome,
+      tecnicoEmail:   '',
+      dataEnvio:      dataRecolh,
+      prazoRetorno:   vencimento.toISOString().split('T')[0],
       prazoUteisTotal: prazo,
-      status:        'aguardando-retorno',
-      retornado:     false,
-      diasUteis:     0,
+      status:         'aguardando-retorno',
+      retornado:      false,
+      diasUteis:      0,
+      etapa:          'aguardando-retorno',
     };
-    if (!STATE.terceirizadaAtivos) STATE.terceirizadaAtivos = [];
-    STATE.terceirizadaAtivos.unshift(tercItem);
-    await fsAdd('terceirizadaAtivos', tercItem);
-    showToast('📦 Máquina registrada na Empresa Terceirizada com prazo de ' + prazo + ' dias úteis.', 'info', 5000);
+    await fsAdd('terceirizadaAtivos', tercItem, STATE.terceirizadaAtivos);
+    await gravarMovimentacao('A-DSI', 'Mindworks — ' + tecNome, 'Terceirizada');
+    await gravarHistoricoAtivo(
+      'Enviado para Mindworks (aprovado pelo gestor)',
+      `Técnico: ${tecNome} · Prazo: ${vencimento.toISOString().split('T')[0]} · Chamado: ${aprov.chamadoId||'—'}`,
+      'orange'
+    );
+
+    // Atualiza status do ativo
+    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
+    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'manut', updatedAt: new Date().toISOString() });
+
+    // Alerta técnico Mindworks sobre prazo (5 dias a partir do envio)
+    if (window._fs?.httpsCallable) {
+      window._fs.httpsCallable('alertarPrazoTerceirizada')({
+        tercId: 'novo', pat,
+        prazoRetorno: vencimento.toISOString().split('T')[0],
+        diasRestantes: prazo,
+        tecnicoNome:  tecNome,
+        chamadoId:    aprov.chamadoId || '',
+      }).catch(() => {});
+    }
+
+    showToast('📤 Máquina registrada na Mindworks · Prazo: ' + prazo + ' dias úteis', 'info', 5000);
   }
 
+  // ── Santa Clara ─────────────────────────────────────────────
   if (det.destino === 'santa-clara') {
     const scItem = {
-      id:        'SC-' + Date.now(),
-      chamadoId: aprov.chamadoId,
-      pat:       det.patAntigo || aprov.pat,
-      local:     det.scLocal || '',
-      foto:      '', // upload da foto é feito separadamente
-      dataEntrada: new Date().toISOString().split('T')[0],
-      status:    'armazenado',
+      chamadoId:    aprov.chamadoId || '',
+      pat,
+      ativo:        det.descAtivo || pat,
+      desc:         det.descAtivo || pat,
+      local:        det.scLocal   || '',
+      loc:          det.scLocal   || '',
+      fotoUrl:      det.scFoto    || '',
+      foto:         det.scFoto    || '',
+      dataEntrada:  agora,
+      status:       'armazenado',
+      aprovadoPor:  gestor,
+      historicoLocais: [{
+        local:   det.scLocal || '',
+        fotoUrl: det.scFoto  || '',
+        data:    new Date().toISOString(),
+        tecnico: gestor,
+      }],
     };
-    if (!STATE.scAtivos) STATE.scAtivos = [];
-    STATE.scAtivos.unshift(scItem);
-    await fsAdd('scAtivos', scItem);
-    showToast('📦 Máquina registrada em Santa Clara: ' + det.scLocal, 'info', 5000);
+    await fsAdd('scAtivos', scItem, STATE.scAtivos);
+    await gravarMovimentacao('A-DSI', 'Santa Clara — ' + (det.scLocal || '—'), 'Santa Clara');
+    await gravarHistoricoAtivo(
+      'Enviado para Santa Clara (aprovado pelo gestor)',
+      `Local: ${det.scLocal || '—'} · Chamado: ${aprov.chamadoId || '—'} · Aprovado por: ${gestor}`,
+      'violet'
+    );
+
+    // Atualiza status do ativo
+    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
+    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'sc', loc: det.scLocal || '', updatedAt: new Date().toISOString() });
+
+    showToast('📦 Máquina registrada em Santa Clara: ' + (det.scLocal || '—'), 'success', 5000);
   }
 
+  // ── Reutilizada ─────────────────────────────────────────────
   if (det.destino === 'reutilizada') {
-    // Atualiza localização do ativo no sistema
-    if (det.patNovo || det.patAntigo) {
-      const pat = det.patNovo || det.patAntigo;
-      const ativo = (STATE.ativos || []).find(a => a.pat === pat);
-      if (ativo) {
-        if (det.reutLocal)  ativo.local = det.reutLocal;
-        if (det.reutNome)   ativo.desc  = det.reutNome;
-        if (det.reutTipoUso) ativo.tipoUso = det.reutTipoUso;
-        await fsUpdate('ativos', ativo.id, {
-          local: det.reutLocal, desc: det.reutNome || ativo.desc,
-          tipoUso: det.reutTipoUso, updatedAt: new Date().toISOString(),
-        });
+    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
+    if (ativo?.id) {
+      const updateData = {
+        status:    'ativo',
+        local:     det.reutLocal   || ativo.local,
+        resp:      det.reutUsuario || det.reutGrupo || ativo.resp,
+        updatedAt: new Date().toISOString(),
+      };
+      if (det.reutNomenclatura === 'sim' && det.reutNovoNome) {
+        updateData.desc     = det.reutNovoNome;
+        updateData.hostname = det.reutNovoNome;
       }
+      if (det.reutTipoUso) updateData.tipoUso = det.reutTipoUso;
+      await fsUpdate('ativos', ativo.id, updateData);
     }
+    await gravarMovimentacao('—', det.reutLocal || '—', 'Reutilização Interna');
+    await gravarHistoricoAtivo(
+      'Reutilizado internamente (aprovado pelo gestor)',
+      `Novo local: ${det.reutLocal || '—'} · Uso: ${det.reutTipoUso === 'usuario' ? det.reutUsuario : det.reutGrupo || '—'}` +
+      (det.reutNomenclatura === 'sim' ? ` · Novo nome: ${det.reutNovoNome || '—'}` : ''),
+      'green'
+    );
+    showToast('🔄 Máquina reutilizada: ' + (det.reutLocal || '—'), 'success', 4000);
+  }
+
+  // ── Descarte ────────────────────────────────────────────────
+  if (det.destino === 'descarte') {
+    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
+    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'descarte', updatedAt: new Date().toISOString() });
+    await gravarMovimentacao('A-DSI', 'Descarte', 'Descarte');
+    await gravarHistoricoAtivo('Encaminhado para descarte (aprovado pelo gestor)', `Motivo: ${det.descarteMotivo || '—'}`, 'red');
+    showToast('♻️ Máquina encaminhada para descarte', 'info', 4000);
+  }
+
+  // ── Leilão ──────────────────────────────────────────────────
+  if (det.destino === 'leilao') {
+    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
+    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'leilao', updatedAt: new Date().toISOString() });
+    await gravarMovimentacao('A-DSI', 'Leilão/Pregão', 'Leilão');
+    await gravarHistoricoAtivo('Encaminhado para leilão (aprovado pelo gestor)', `Processo: ${det.leilaoProcesso || '—'}`, 'violet');
+    showToast('🏛️ Máquina encaminhada para leilão', 'info', 4000);
   }
 }
 
