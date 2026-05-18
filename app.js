@@ -1352,7 +1352,23 @@ function abrirAtendimento(chamadoId) {
   const ch = STATE.chamados.find(c=>c.id===chamadoId);
   if (!ch) return;
   document.getElementById('atender-ch-id').textContent = chamadoId;
-  document.getElementById('at-patrimonio').value = ch.pat||'';
+
+  // Pega PAT: do chamado, ou do primeiro ativo vinculado, ou do ativo relacionado ao solicitante
+  let pat = ch.pat || ch.patVinculado || '';
+  if (!pat && ch.itensVinculados?.length) pat = ch.itensVinculados[0];
+  if (!pat && ch.ativoId) {
+    const ativo = (STATE.ativos||[]).find(a => a.id === ch.ativoId);
+    if (ativo) pat = ativo.pat || '';
+  }
+
+  document.getElementById('at-patrimonio').value = pat;
+
+  // Preenche outros campos se disponíveis
+  if (ch.area) {
+    const areaEl = document.getElementById('at-area');
+    if (areaEl) areaEl.value = ch.area;
+  }
+
   openModal('modal-atender-chamado');
 }
 
@@ -1465,7 +1481,7 @@ async function salvarChamado() {
     id, tipo: document.getElementById('ch-tipo')?.value||'incidente',
     area: document.getElementById('ch-area')?.value||'TI',
     solicitante: sol, tecnico: document.getElementById('ch-tecnico')?.value||'',
-    pat: document.getElementById('ch-pat-antigo')?.value?.trim() || document.getElementById('ch-patrimonio')?.value||'',
+    pat: document.getElementById('ch-pat-antigo')?.value?.trim() || document.getElementById('ch-pat-vinculado-hidden')?.value?.trim() || document.getElementById('ch-patrimonio')?.value?.trim() || '',
     desc: titulo + (desc?'\n'+desc:''), obs: document.getElementById('ch-obs')?.value||'',
     status: temMovimentacao ? 'aguardando-aprovacao' : 'aberto',
     prioridade: document.getElementById('ch-prioridade')?.value||'media',
@@ -1477,7 +1493,19 @@ async function salvarChamado() {
   };
   if (!STATE.chamados) STATE.chamados = [];
   STATE.chamados.unshift(novo);
-  fsAdd('chamados', novo, STATE.chamados);
+  fsAdd('chamados', novo, STATE.chamados).then(chamadoId => {
+    // Grava no histórico do ativo vinculado ao chamado
+    if (novo.pat) {
+      const ativo = (STATE.ativos||[]).find(a => a.pat === novo.pat);
+      if (ativo?.id && window._fs?.httpsCallable) {
+        window._fs.httpsCallable('adicionarNotaHistorico')({
+          ativoId: ativo.id,
+          nota: `Chamado ${novo.id} aberto — ${novo.desc?.slice(0,120)||'—'} · Solicitante: ${sol} · Técnico: ${novo.tecnico||'—'}`,
+          tipo: 'manutencao',
+        }).catch(() => {});
+      }
+    }
+  }).catch(() => {});
 
   // Se tem movimentação: cria aprovação pendente e notifica gestor
   if (temMovimentacao && movimentacao) {
@@ -2455,8 +2483,19 @@ function vincularAtivoAoChamado() {
   const container = document.getElementById('ch-itens-vinculados');
   if (!container) return;
   const label = ativo ? `${ativo.pat} — ${ativo.desc}` : pat;
+
+  // Salva o PAT vinculado em hidden input para o salvarChamado() capturar
+  let hidden = document.getElementById('ch-pat-vinculado-hidden');
+  if (!hidden) {
+    hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.id = 'ch-pat-vinculado-hidden';
+    container.parentElement.appendChild(hidden);
+  }
+  hidden.value = pat; // usa o último PAT vinculado como principal
+
   container.insertAdjacentHTML('beforeend', `
-    <div style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
+    <div style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)" data-pat="${pat}">
       🖥️ ${label}
       <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
     </div>`);
@@ -2487,20 +2526,58 @@ function salvarAtivo() {
   showToast(`✓ Ativo ${pat} cadastrado!`);
 }
 
-function salvarAtendimento() {
+async function salvarAtendimento() {
+  const pat         = document.getElementById('at-patrimonio')?.value?.trim() || '';
+  const diagnostico = document.getElementById('at-diagnostico')?.value || '';
+  const descAtend   = document.getElementById('at-desc')?.value?.trim() || '';
+  const tecnico     = CURRENT_USER?.nome || 'Técnico';
+  const chamadoId   = document.getElementById('atender-ch-id')?.textContent?.trim() || '';
+
   closeModal('modal-atender-chamado');
-  const destino = document.getElementById('at-destino-antigo').value;
-  if (destino==='terceirizada') {
-    const aprov = { id:'ap'+Date.now(), tipo:'Envio para Terceirizada', pat:document.getElementById('at-patrimonio').value||'—', ativo:'—', solicitante:'Técnico SYSACK', data:new Date(), status:'pendente', obs:'' };
-    STATE.aprovacoes.unshift(aprov);
-    // TODO Banco + SMTP: enviar email gestor
+
+  // Grava atendimento no histórico imutável do ativo
+  if (pat) {
+    const ativo = (STATE.ativos||[]).find(a => a.pat === pat);
+    if (ativo?.id && window._fs?.httpsCallable) {
+      const nota = `Chamado ${chamadoId} atendido — Diagnóstico: ${diagnostico||'—'}. ${descAtend ? descAtend.slice(0,200) : ''} · Técnico: ${tecnico}`.trim();
+      window._fs.httpsCallable('adicionarNotaHistorico')({
+        ativoId: ativo.id, nota, tipo: 'manutencao',
+      }).catch(() => {});
+    }
+    // Atualiza chamado no Firestore com diagnóstico
+    const ch = (STATE.chamados||[]).find(c => c.id === chamadoId);
+    if (ch?.id && !ch.id.startsWith('offline_')) {
+      fsUpdate('chamados', ch.id, {
+        diagnostico, descAtendimento: descAtend,
+        tecnicoAtendeu: tecnico,
+        atendidoEm: new Date().toISOString(),
+        status: 'em-atendimento',
+      }).catch(() => {});
+    }
+  }
+
+  const destino = document.getElementById('at-destino-antigo')?.value || '';
+  if (destino === 'terceirizada') {
+    const aprov = {
+      tipo: 'Envio para Terceirizada', pat: pat||'—', ativo: '—',
+      solicitante: tecnico, solicitanteId: CURRENT_USER?.uid||'',
+      detalhes: { destino: 'terceirizada', patAntigo: pat },
+      status: 'pendente', createdAt: new Date().toISOString(),
+    };
+    fsAdd('aprovacoes', aprov, STATE.aprovacoes).then(id => {
+      if (id && window._fs?.httpsCallable) {
+        window._fs.httpsCallable('notificarGestorAprovacao')({
+          aprovacaoId: id, tipo: 'Envio para Terceirizada',
+          pat: pat||'—', solicitante: tecnico,
+        }).catch(() => {});
+      }
+    }).catch(() => {});
     showToast('⏳ Enviado para aprovação do gestor', 'warning');
   } else {
-    showToast('✓ Atendimento registrado!');
+    showToast('✓ Atendimento registrado!', 'success');
   }
   renderDashboard();
 }
-
 function salvarRetornoTerc() {
   closeModal('modal-retorno-terc');
   showToast('✓ Retorno registrado! Aguardando aprovação do gestor.', 'success');
@@ -2554,6 +2631,11 @@ function openModal(id) {
   const el = document.getElementById(id);
   if (el) el.classList.add('open');
   if (id === 'modal-novo-chamado') {
+    // Limpa hidden field de PAT vinculado ao abrir novo chamado
+    const hid = document.getElementById('ch-pat-vinculado-hidden');
+    if (hid) hid.value = '';
+    const itensContainer = document.getElementById('ch-itens-vinculados');
+    if (itensContainer) itensContainer.innerHTML = '';
     const now = new Date();
     const iso = now.toISOString().slice(0,16);
     const abEl = document.getElementById('ch-data-abertura');
@@ -8969,45 +9051,33 @@ function renderSwitches(){
       const marcaModelo= [s.marca, s.modelo].filter(v => v && v !== 'undefined').join(' ') || '—';
       const local      = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
       const portasLabel= (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0)+'/'+s.totalPortas : '—/—';
-      // Build card HTML using string concatenation to avoid nested template literal escaping issues
-      const portasBar = s.tipo !== 'ap' && s.tipo !== 'firewall'
-        ? '<div style="margin-top:8px">'
-          + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px">'
-          + '<span>Portas: ' + portasLabel + '</span><span>' + pct + '%</span></div>'
-          + '<div style="background:var(--g200);border-radius:4px;height:5px;overflow:hidden">'
-          + '<div style="background:' + (pct > 85 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--success)') + ';width:' + pct + '%;height:100%;border-radius:4px"></div>'
-          + '</div></div>'
-        : '';
-      const localStyle = local === '—' ? 'color:var(--g400);font-style:italic' : '';
-      const uptimeColor = s.status === 'online' ? 'var(--success)' : 'var(--danger)';
-
-      return '<div class="sw-card">'
-        + '<div class="sw-card-header" style="background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px">'
-          + '<div style="width:36px;height:36px;border-radius:8px;background:' + bg + ';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">' + ico + '</div>'
-          + '<div style="flex:1;min-width:0;margin-left:10px">'
-            + '<div style="font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + hostname + '</div>'
-            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">' + marcaModelo + '</div>'
-          + '</div>'
-          + swStatusHtml(s.status)
-        + '</div>'
-        + '<div class="sw-card-body">'
-          + '<div class="mdm-card-field"><span class="lbl">IP</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:11px">' + (s.ip || '—') + '</span></div>'
-          + '<div class="mdm-card-field"><span class="lbl">Local</span><span class="val" style="' + localStyle + '">' + local + '</span></div>'
-          + '<div class="mdm-card-field"><span class="lbl">Uptime</span><span class="val" style="color:' + uptimeColor + '">⏱ ' + (s.uptime || '—') + '</span></div>'
-          + '<div class="mdm-card-field"><span class="lbl">Firmware</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:10.5px">' + (s.firmware || '—') + '</span></div>'
-          + portasBar
-        + '</div>'
-        + '<div class="sw-card-ports"><div style="display:flex;flex-wrap:wrap;gap:2px">' + renderPortMinimap(s) + '</div></div>'
-        + '<div class="sw-card-actions">'
-          + '<button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSwitch(\'' + s.id + '\')">⚙️ Gerenciar</button>'
-          + '<button class="mdm-action-btn mab-info" onclick="abrirHistSwitch(\'' + s.id + '\')">📜 Histórico</button>'
-          + '<button class="mdm-action-btn mab-success" onclick="openModal(\'modal-novo-chamado\')">🎫 Chamado</button>'
-          + '<button class="mdm-action-btn mab-warning" onclick="swActionDirect(\'ping\',\'' + s.id + '\')">📶 Ping</button>'
-          + '<button class="mdm-action-btn mab-dark" onclick="swActionDirect(\'ssh\',\'' + s.id + '\')">🖥️ SSH</button>'
-          + '<button class="mdm-action-btn mab-violet" onclick="swActionDirect(\'backup-config\',\'' + s.id + '\')">💾 Backup</button>'
-        + '</div>'
-      + '</div>';
-    }).join('') || '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
+      return `<div class='sw-card'>
+        <div class='sw-card-header' style='background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px'>
+          <div style='width:36px;height:36px;border-radius:8px;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>\${ico}</div>
+          <div style='flex:1;min-width:0;margin-left:10px'>
+            <div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>\${hostname}</div>
+            <div style='font-size:10.5px;color:#94A3B8;margin-top:2px'>\${marcaModelo}</div>
+          </div>
+          \${swStatusHtml(s.status)}
+        </div>
+        <div class='sw-card-body'>
+          <div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>\${s.ip||'—'}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Local</span><span class='val' style='\${local==='—'?'color:var(--g400);font-style:italic':''}'>\${local}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:\${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ \${s.uptime||'—'}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>\${s.firmware||'—'}</span></div>
+          \${s.tipo!=='ap'&&s.tipo!=='firewall'?\`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: \${portasLabel}</span><span>\${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:\${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:\${pct}%;height:100%;border-radius:4px'></div></div></div>\`:''}
+        </div>
+        <div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>\${renderPortMinimap(s)}</div></div>
+        <div class='sw-card-actions'>
+          <button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('\${s.id}')">⚙️ Gerenciar</button>
+          <button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('\${s.id}')">📜 Histórico</button>
+          <button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>
+          <button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','\${s.id}')">📶 Ping</button>
+          <button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','\${s.id}')">🖥️ SSH</button>
+          <button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','\${s.id}')">💾 Backup</button>
+        </div>
+      </div>`;
+    }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
   } else {
     const tbody=document.getElementById('sw-table-body');
     if(tbody) tbody.innerHTML=filtered.map(s=>`<tr><td class='td-mono' style='color:var(--accent)'>${s.pat}</td><td style='font-weight:700;font-family:JetBrains Mono,monospace'>${s.hostname}</td><td><span class='tag'>${s.tipo}</span></td><td>${s.marca} ${s.modelo}</td><td class='td-mono' style='color:var(--accent-hi)'>${s.ip}</td><td>${s.local}</td><td>${s.portasUso||0}/${s.totalPortas||0}</td><td class='td-mono' style='font-size:10.5px'>${(s.vlans||[]).map(v=>v.id).join(', ')||'—'}</td><td class='td-mono' style='font-size:10.5px'>${s.firmware||'—'}</td><td style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</td><td>${swStatusHtml(s.status)}</td><td><div class='flex gap-4'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶</button></div></td></tr>`).join('')||'<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum</td></tr>';
