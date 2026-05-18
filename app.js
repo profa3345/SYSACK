@@ -8999,12 +8999,12 @@ function renderSwitches(){
         + '</div>'
         + '<div class="sw-card-ports"><div style="display:flex;flex-wrap:wrap;gap:2px">' + renderPortMinimap(s) + '</div></div>'
         + '<div class="sw-card-actions">'
-          + '<button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSwitch('' + s.id + '')">⚙️ Gerenciar</button>'
-          + '<button class="mdm-action-btn mab-info" onclick="abrirHistSwitch('' + s.id + '')">📜 Histórico</button>'
-          + '<button class="mdm-action-btn mab-success" onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>'
-          + '<button class="mdm-action-btn mab-warning" onclick="swActionDirect('ping','' + s.id + '')">📶 Ping</button>'
-          + '<button class="mdm-action-btn mab-dark" onclick="swActionDirect('ssh','' + s.id + '')">🖥️ SSH</button>'
-          + '<button class="mdm-action-btn mab-violet" onclick="swActionDirect('backup-config','' + s.id + '')">💾 Backup</button>'
+          + '<button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSwitch(\'' + s.id + '\')">⚙️ Gerenciar</button>'
+          + '<button class="mdm-action-btn mab-info" onclick="abrirHistSwitch(\'' + s.id + '\')">📜 Histórico</button>'
+          + '<button class="mdm-action-btn mab-success" onclick="openModal(\'modal-novo-chamado\')">🎫 Chamado</button>'
+          + '<button class="mdm-action-btn mab-warning" onclick="swActionDirect(\'ping\',\'' + s.id + '\')">📶 Ping</button>'
+          + '<button class="mdm-action-btn mab-dark" onclick="swActionDirect(\'ssh\',\'' + s.id + '\')">🖥️ SSH</button>'
+          + '<button class="mdm-action-btn mab-violet" onclick="swActionDirect(\'backup-config\',\'' + s.id + '\')">💾 Backup</button>'
         + '</div>'
       + '</div>';
     }).join('') || '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
