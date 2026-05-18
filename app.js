@@ -728,32 +728,10 @@ function startFirestoreListeners() {
     };
   }
 
-  // Deduplicação: merge por IP (ou id) priorizando registros com mais dados
-  function mergeAtivos(disc, sw) {
-    const merged = (disc||[]).concat(sw||[]);
-    const seen = new Map();
-    merged.forEach(function(a) {
-      const key = a.ip || a.id;
-      if (!seen.has(key)) {
-        seen.set(key, a);
-      } else {
-        const prev = seen.get(key);
-        // Prefere o registro que tem PAT; em empate, mescla campos
-        if (!prev.pat && a.pat) {
-          seen.set(key, Object.assign({}, prev, a));
-        } else if (prev.pat && !a.pat) {
-          seen.set(key, Object.assign({}, a, prev));
-        }
-        // Se ambos têm (ou não têm) PAT, mantém o primeiro
-      }
-    });
-    return Array.from(seen.values());
-  }
-
   // ativos
   db.collection('ativos').onSnapshot(function(snap) {
     STATE._assetsDisc = snap2arr(snap).map(norm);
-    STATE.ativos = mergeAtivos(STATE._assetsDisc, STATE._assetsSw);
+    STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
     console.log('[Banco] ativos:', STATE._assetsDisc.length);
@@ -763,7 +741,7 @@ function startFirestoreListeners() {
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
     STATE.switches  = STATE._assetsSw;
-    STATE.ativos = mergeAtivos(STATE._assetsDisc, STATE._assetsSw);
+    STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
     console.log('[Banco] switches:', STATE._assetsSw.length);
@@ -806,7 +784,35 @@ function startFirestoreListeners() {
     STATE.mobiliario = snap2arr(snap);
   }, function(e){ console.error('[Banco] mobiliario erro:', e.message); });
 
+  // técnicos (A-DSI + Mindworks/terceirizadas) — coleção real no Firestore
+  db.collection('tecnicos').onSnapshot(function(snap) {
+    STATE.tecnicos = snap2arr(snap);
+    console.log('[Banco] tecnicos:', STATE.tecnicos.length);
+  }, function(e){ console.error('[Banco] tecnicos erro:', e.message); });
+
   console.log('[Banco] Listeners iniciados');
+
+  // Renotificação automática de aprovações urgentes — chama a Cloud Function
+  // a cada 4 horas enquanto o app está aberto (complementa o schedule diário)
+  setInterval(function() {
+    const urgentes = (STATE.aprovacoes || []).filter(function(a) {
+      if (a.status !== 'pendente') return false;
+      const criado = a.createdAt ? new Date(a.createdAt.seconds ? a.createdAt.seconds * 1000 : a.createdAt) : null;
+      if (!criado) return false;
+      return (Date.now() - criado.getTime()) > 86400000; // >1 dia
+    });
+    if (!urgentes.length) return;
+    if (window._fs && window._fs.httpsCallable) {
+      const fn = window._fs.httpsCallable('renotificarGestorAprovacoesPendentes');
+      fn({
+        urgentes: urgentes.length,
+        itens: urgentes.slice(0, 10).map(function(a) {
+          const criado = a.createdAt ? new Date(a.createdAt.seconds ? a.createdAt.seconds * 1000 : a.createdAt) : new Date();
+          return { tipo: a.tipo || '—', pat: a.pat || a.ativo || '—', dias: Math.floor((Date.now() - criado.getTime()) / 86400000) };
+        }),
+      }).catch(function() { /* silencioso */ });
+    }
+  }, 4 * 60 * 60 * 1000); // a cada 4h
 }
 
 // ── FIRESTORE WRITE HELPERS ───────────────────────────────────
@@ -867,12 +873,6 @@ const PAGE_LABELS = {
   documentos:'Documentos', lembretes:'Lembretes',
   pesquisas:'Pesquisas Salvas', alertas:'Alertas'
 };
-
-// ─── Utilitário: verifica se uma página está ativa no DOM ────
-function isPageActive(pageId) {
-  var page = document.getElementById('page-' + pageId);
-  return !!(page && page.classList.contains('active'));
-}
 
 // ─── SINGLE goPage + renderPage — NO PATCHES, NO RECURSION ───
 function goPage(id) {
@@ -1119,41 +1119,6 @@ function hostnameFromAtivo(a) {
 
 function updateAtivosTableForComputadores(isComputadores) {
   // Header gerenciado exclusivamente pelo renderAtivos() — não fazer nada aqui
-}
-
-// ─── Exportar tabela de ativos filtrada para CSV ──────────────
-function exportarAtivosCSV() {
-  var q     = (document.getElementById('pat-search')?.value || '').toLowerCase();
-  var fSt   = document.getElementById('pat-filter-status')?.value || '';
-  var tipos = window._ativoFiltroTipo ? window._ativoFiltroTipo.split(',') : [];
-
-  var lista = (STATE.ativos || []).filter(function(a) {
-    if (tipos.length > 0) {
-      var t = (a.tipo || '').toLowerCase();
-      if (!tipos.some(function(ft){ return t.includes(ft) || ft.includes(t); })) return false;
-    }
-    if (fSt && a.status !== fSt) return false;
-    if (q && !(a.pat + ' ' + a.desc + ' ' + a.area + ' ' + (a.resp||'') + ' ' + (a.ip||'')).toLowerCase().includes(q)) return false;
-    return true;
-  });
-
-  var headers = ['PAT','Descrição','Tipo','Área','Responsável','Status','Localização','Hostname','IP'];
-  var rows = lista.map(function(a) {
-    return [
-      a.pat||'', a.desc||'', a.tipo||'', a.area||'', a.resp||'',
-      a.status||'', (a.sala||a.loc||''), (a.hostname||''), (a.ip||'')
-    ].map(function(v){ return '"' + String(v).replace(/"/g,'""') + '"'; }).join(',');
-  });
-
-  var csv  = [headers.join(',')].concat(rows).join('\r\n');
-  var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-  var url  = URL.createObjectURL(blob);
-  var el   = document.createElement('a');
-  el.href  = url;
-  el.download = 'SYSACK_Ativos_' + new Date().toISOString().split('T')[0] + '.csv';
-  el.click();
-  URL.revokeObjectURL(url);
-  showToast('CSV exportado — ' + lista.length + ' ativos', 'success', 2500);
 }
 
 // ============================================================
@@ -2570,14 +2535,22 @@ function salvarRetornoTerc() {
   // TODO Banco: atualizar ativo + criar movimentação + SMTP notificar
 }
 
-function salvarTecnico() {
-  const nome = document.getElementById('tec-nome').value.trim();
+async function salvarTecnico() {
+  const nome    = document.getElementById('tec-nome')?.value?.trim();
+  const empresa = document.getElementById('tec-empresa')?.value || 'terceirizada';
+  const email   = document.getElementById('tec-email')?.value?.trim() || '';
+  const tel     = document.getElementById('tec-tel')?.value?.trim()   || '';
   if (!nome) return showToast('Nome é obrigatório', 'danger');
-  STATE.tecnicos.push({ id:'t'+Date.now(), nome, empresa:document.getElementById('tec-empresa').value, email:document.getElementById('tec-email').value, tel:document.getElementById('tec-tel').value });
-  // TODO Banco: await addDoc(collection(db,'tecnicos'), ...)
-  closeModal('modal-novo-tecnico');
-  renderTecnicos();
-  showToast(`✓ Técnico ${nome} cadastrado!`);
+
+  const novo = { nome, empresa, email, tel, ativo: true, createdAt: new Date() };
+  try {
+    await fsAdd('tecnicos', novo);
+    closeModal('modal-novo-tecnico');
+    showToast(`✓ Técnico ${nome} cadastrado!`, 'success');
+    // renderTecnicos() será chamado automaticamente pelo onSnapshot
+  } catch(e) {
+    showToast('Erro ao salvar técnico: ' + e.message, 'error');
+  }
 }
 
 // ============================================================
@@ -6218,109 +6191,256 @@ setInterval(verificarAprovacoesPendentes, 60 * 60 * 1000);
 // EMPRESA TERCEIRIZADA — Controle de retorno e alertas
 // ════════════════════════════════════════════════════════════
 
+// ── ETAPA 1: Técnico Mindworks marca que devolveu ────────────────
 function marcarRetornoTerceirizada(tercId) {
   const terc = (STATE.terceirizadaAtivos || []).find(t => t.id === tercId);
   if (!terc) return;
 
+  // Se já marcado pela Mindworks, abre etapa 2 (confirmação A-DSI)
+  if (terc.etapa === 'aguardando-confirmacao-adsi' || terc.retornoMindworks) {
+    confirmarRecebimentoAdsi(tercId);
+    return;
+  }
+
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
   modal.innerHTML = `
-    <div style="background:var(--g0,#fff);border-radius:12px;padding:24px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <h3 style="margin:0 0 16px;font-size:16px">📦 Registrar Retorno — ${escapeHtml(terc.pat||terc.ativo||'Ativo')}</h3>
+    <div style="background:var(--g0,#fff);border-radius:12px;padding:24px;max-width:460px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#1E40AF">
+        <strong>📤 Etapa 1 de 2 — Técnico Mindworks</strong><br>
+        Marque aqui que o equipamento foi entregue fisicamente. A A-DSI precisará confirmar o recebimento.
+      </div>
+      <h3 style="margin:0 0 16px;font-size:16px">📦 Registrar Devolução — ${escapeHtml(terc.pat||terc.ativo||'Ativo')}</h3>
       <div class="form-group">
-        <label class="form-label">Data de retorno</label>
+        <label class="form-label">Data de entrega</label>
         <input type="date" id="mw-data-ret" class="form-control" value="${new Date().toISOString().split('T')[0]}">
       </div>
       <div class="form-group">
-        <label class="form-label">Destino após retorno</label>
-        <select id="mw-destino-ret" class="form-control" onchange="mwToggleDestino(this.value)">
-          <option value="adsi">Retornou para A-DSI (em uso)</option>
-          <option value="santa-clara">Enviar para Santa Clara/Depósito TI</option>
-          <option value="reutilizada">Reutilizar em novo local</option>
-          <option value="leilao">Encaminhar para Leilão / Pregão</option>
-        </select>
-      </div>
-      <div id="mw-dest-sc" style="display:none" class="form-group">
-        <label class="form-label">Local em Santa Clara</label>
-        <input class="form-control" id="mw-sc-local" placeholder="Prateleira, sala...">
-      </div>
-      <div id="mw-dest-reut" style="display:none">
-        <div class="form-group">
-          <label class="form-label">Novo local de uso</label>
-          <input class="form-control" id="mw-reut-local" placeholder="Ex: TI / 1º Andar / Estação 05">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Será reutilizada por</label>
-          <select class="form-control" id="mw-reut-uso">
-            <option value="usuario">Usuário específico</option>
-            <option value="grupo">Grupo de usuários</option>
-            <option value="compartilhado">Compartilhado</option>
-          </select>
-        </div>
+        <label class="form-label">Nome do técnico Mindworks responsável</label>
+        <input class="form-control" id="mw-tec-nome" placeholder="Nome completo" value="${escapeHtml(CURRENT_USER?.nome||'')}">
       </div>
       <div class="form-group">
-        <label class="form-label">Observações</label>
-        <textarea class="form-control" id="mw-obs" rows="2" placeholder="Condições de retorno, observações..."></textarea>
+        <label class="form-label">Observações / Condições do equipamento</label>
+        <textarea class="form-control" id="mw-obs" rows="2" placeholder="Ex: Substituído HD, testado, funcionando..."></textarea>
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
         <button class="btn btn-ghost" onclick="this.closest('[style*=fixed]').remove()">Cancelar</button>
-        <button class="btn btn-success" onclick="confirmarRetornoTerceirizada('${tercId}',this)">✓ Confirmar Retorno</button>
+        <button class="btn btn-primary" onclick="mwEtapa1Confirmar('${tercId}',this)">📤 Confirmar entrega à A-DSI</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
 }
 
+window.mwEtapa1Confirmar = async function(tercId, btn) {
+  const dataRet  = document.getElementById('mw-data-ret')?.value;
+  const tecNome  = document.getElementById('mw-tec-nome')?.value?.trim();
+  const obs      = document.getElementById('mw-obs')?.value?.trim();
+  if (!tecNome) return showToast('Informe o nome do técnico Mindworks', 'warning');
+
+  setButtonLoading(btn, true, 'Registrando...');
+  try {
+    // Chama Cloud Function — etapa 1
+    const fn = window._fs?.httpsCallable
+      ? window._fs.httpsCallable('registrarRetornoMindworks')
+      : null;
+
+    if (fn) {
+      await fn({ tercId, dataRetorno: dataRet, obs, tecnicoNome: tecNome });
+    } else {
+      // Fallback direto ao Firestore se Functions indisponível
+      await fsUpdate('terceirizadaAtivos', tercId, {
+        etapa:              'aguardando-confirmacao-adsi',
+        retornoMindworks:   true,
+        dataRetornoMw:      dataRet,
+        obsMindworks:       obs || '',
+        tecnicoMwNome:      tecNome,
+      });
+    }
+
+    btn.closest('[style*=fixed]')?.remove();
+    showToast('✅ Devolução registrada! A A-DSI precisa confirmar o recebimento.', 'success', 6000);
+    renderTerceirizada?.();
+  } catch(e) {
+    setButtonLoading(btn, false);
+    showToast('Erro: ' + e.message, 'error');
+  }
+};
+
+// ── ETAPA 2: Técnico A-DSI confirma recebimento e decide destino ─
+function confirmarRecebimentoAdsi(tercId) {
+  const terc = (STATE.terceirizadaAtivos || []).find(t => t.id === tercId);
+  if (!terc) return;
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;overflow-y:auto';
+  modal.innerHTML = `
+    <div style="background:var(--g0,#fff);border-radius:12px;padding:24px;max-width:520px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:20px auto">
+      <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#166534">
+        <strong>✅ Etapa 2 de 2 — Técnico A-DSI</strong><br>
+        Confirme o recebimento físico do equipamento e defina o destino final.
+      </div>
+      <h3 style="margin:0 0 4px;font-size:16px">📦 Confirmar Recebimento — ${escapeHtml(terc.pat||terc.ativo||'Ativo')}</h3>
+      <p style="font-size:12px;color:var(--g500);margin:0 0 16px">Devolvido por: <strong>${escapeHtml(terc.tecnicoMwNome||'Mindworks')}</strong> em ${terc.dataRetornoMw||'—'}</p>
+
+      <div class="form-group">
+        <label class="form-label">Data de recebimento pela A-DSI</label>
+        <input type="date" id="adsi-data-rec" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+      <div class="form-group">
+        <label class="form-label fw-700">A máquina será:</label>
+        <select id="adsi-destino" class="form-control" onchange="adsiToggleDestino(this.value)">
+          <option value="">Selecione o destino...</option>
+          <option value="reutilizada">🔄 Reutilizada internamente</option>
+          <option value="santa-clara">📦 Enviada para Santa Clara / Depósito TI</option>
+          <option value="leilao">🏛️ Encaminhada para Leilão</option>
+          <option value="descarte">♻️ Descarte (lixo eletrônico)</option>
+        </select>
+      </div>
+
+      <!-- REUTILIZADA -->
+      <div id="adsi-reut" style="display:none;border-left:3px solid var(--success);padding-left:14px">
+        <div class="form-group">
+          <label class="form-label req">Nova localização</label>
+          <input class="form-control" id="adsi-reut-local" placeholder="Ex: Sala 205, Recepção...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mudança de nomenclatura?</label>
+          <div class="radio-group">
+            <label class="radio-opt"><input type="radio" name="adsi-nomenclatura" value="nao" checked onclick="document.getElementById('adsi-novo-nome-wrap').style.display='none'"> Não</label>
+            <label class="radio-opt"><input type="radio" name="adsi-nomenclatura" value="sim" onclick="document.getElementById('adsi-novo-nome-wrap').style.display=''"> Sim</label>
+          </div>
+        </div>
+        <div id="adsi-novo-nome-wrap" style="display:none" class="form-group">
+          <label class="form-label req">Novo nome / hostname</label>
+          <input class="form-control" id="adsi-novo-nome" placeholder="Ex: PC-RECEPCAO-01">
+        </div>
+        <div class="form-group">
+          <label class="form-label req">Será utilizada por:</label>
+          <div class="radio-group">
+            <label class="radio-opt"><input type="radio" name="adsi-uso" value="usuario" onclick="adsiToggleUso('usuario')"> Usuário específico</label>
+            <label class="radio-opt"><input type="radio" name="adsi-uso" value="grupo"   onclick="adsiToggleUso('grupo')"> Grupo de usuários</label>
+          </div>
+        </div>
+        <div id="adsi-uso-usuario" style="display:none" class="form-group">
+          <label class="form-label req">Nome do usuário</label>
+          <input class="form-control" id="adsi-usuario" placeholder="Nome completo">
+        </div>
+        <div id="adsi-uso-grupo" style="display:none" class="form-group">
+          <label class="form-label req">Grupo / Setor</label>
+          <input class="form-control" id="adsi-grupo" placeholder="Ex: Recepção, Sala de Reuniões...">
+        </div>
+      </div>
+
+      <!-- SANTA CLARA -->
+      <div id="adsi-sc" style="display:none;border-left:3px solid var(--violet);padding-left:14px">
+        <div class="form-group">
+          <label class="form-label req">Localização em Santa Clara</label>
+          <input class="form-control" id="adsi-sc-local" placeholder="Ex: Rack 3, Prateleira B, Sala 102...">
+        </div>
+        <div class="form-group">
+          <label class="form-label req">Foto do local de armazenamento</label>
+          <div class="photo-zone" onclick="document.getElementById('adsi-sc-foto-in').click()" style="cursor:pointer">
+            <div style="font-size:20px;margin-bottom:4px">📷</div>
+            <p style="font-size:11px;color:var(--g500)">Clique para adicionar foto (obrigatório)</p>
+          </div>
+          <input type="file" id="adsi-sc-foto-in" accept="image/*" style="display:none" onchange="adsiPreviewFoto(this)">
+          <div id="adsi-sc-foto-prev"></div>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:12px">
+        <label class="form-label">Observações</label>
+        <textarea class="form-control" id="adsi-obs" rows="2" placeholder="Condições do equipamento, observações..."></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+        <button class="btn btn-ghost" onclick="this.closest('[style*=fixed]').remove()">Cancelar</button>
+        <button class="btn btn-success" onclick="adsiEtapa2Confirmar('${tercId}',this)">✅ Confirmar recebimento e destino</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+window.adsiToggleDestino = function(val) {
+  document.getElementById('adsi-reut').style.display = val === 'reutilizada'  ? '' : 'none';
+  document.getElementById('adsi-sc').style.display   = val === 'santa-clara'  ? '' : 'none';
+};
+window.adsiToggleUso = function(val) {
+  document.getElementById('adsi-uso-usuario').style.display = val === 'usuario' ? '' : 'none';
+  document.getElementById('adsi-uso-grupo').style.display   = val === 'grupo'   ? '' : 'none';
+};
+window.adsiPreviewFoto = function(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const prev = document.getElementById('adsi-sc-foto-prev');
+    if (prev) prev.innerHTML = `<img src="${e.target.result}" style="max-width:100%;border-radius:8px;margin-top:8px">`;
+    window._adsiScFotoBase64 = e.target.result;
+  };
+  reader.readAsDataURL(file);
+};
+
+window.adsiEtapa2Confirmar = async function(tercId, btn) {
+  const destino     = document.getElementById('adsi-destino')?.value;
+  const dataRec     = document.getElementById('adsi-data-rec')?.value;
+  const obs         = document.getElementById('adsi-obs')?.value?.trim();
+  const tecNome     = CURRENT_USER?.nome || 'Técnico A-DSI';
+
+  if (!destino) return showToast('Selecione o destino da máquina', 'warning');
+
+  const payload = {
+    tercId, destino, dataRecebimento: dataRec,
+    obs, tecnicoAdsiNome: tecNome,
+  };
+
+  if (destino === 'reutilizada') {
+    payload.reutLocal        = document.getElementById('adsi-reut-local')?.value?.trim();
+    payload.reutNomenclatura = document.querySelector('input[name="adsi-nomenclatura"]:checked')?.value || 'nao';
+    payload.reutNovoNome     = document.getElementById('adsi-novo-nome')?.value?.trim();
+    payload.reutUsoPor       = document.querySelector('input[name="adsi-uso"]:checked')?.value || 'grupo';
+    payload.reutUsuario      = document.getElementById('adsi-usuario')?.value?.trim();
+    payload.reutGrupo        = document.getElementById('adsi-grupo')?.value?.trim();
+    if (!payload.reutLocal) return showToast('Informe a nova localização', 'warning');
+    if (!payload.reutUsoPor) return showToast('Informe quem usará a máquina', 'warning');
+  }
+
+  if (destino === 'santa-clara') {
+    payload.scLocal   = document.getElementById('adsi-sc-local')?.value?.trim();
+    payload.scFotoUrl = window._adsiScFotoBase64 || '';
+    if (!payload.scLocal) return showToast('Informe o local em Santa Clara', 'warning');
+  }
+
+  setButtonLoading(btn, true, 'Confirmando...');
+  try {
+    const fn = window._fs?.httpsCallable
+      ? window._fs.httpsCallable('confirmarRecebimentoAdsi')
+      : null;
+
+    if (fn) {
+      await fn(payload);
+    } else {
+      // Fallback direto
+      await fsUpdate('terceirizadaAtivos', tercId, {
+        etapa: 'concluido', retornado: true, confirmadoAdsi: true,
+        dataRecebimento: dataRec, destinoFinal: destino,
+        tecnicoAdsiNome: tecNome, obsAdsi: obs || '',
+      });
+    }
+
+    btn.closest('[style*=fixed]')?.remove();
+    window._adsiScFotoBase64 = null;
+    showToast('✅ Recebimento confirmado! Histórico atualizado.', 'success', 5000);
+    renderTerceirizada?.();
+  } catch(e) {
+    setButtonLoading(btn, false);
+    showToast('Erro: ' + e.message, 'error');
+  }
+};
+
 window.mwToggleDestino = function(val) {
   document.getElementById('mw-dest-sc').style.display   = val === 'santa-clara' ? '' : 'none';
   document.getElementById('mw-dest-reut').style.display = val === 'reutilizada'  ? '' : 'none';
 };
-
-async function confirmarRetornoTerceirizada(tercId, btn) {
-  const terc = (STATE.terceirizadaAtivos || []).find(t => t.id === tercId);
-  if (!terc) return;
-
-  const dataRet = document.getElementById('mw-data-ret')?.value;
-  const destino = document.getElementById('mw-destino-ret')?.value;
-  const scLocal = document.getElementById('mw-sc-local')?.value?.trim();
-  const reutLoc = document.getElementById('mw-reut-local')?.value?.trim();
-  const obs     = document.getElementById('mw-obs')?.value?.trim();
-
-  setButtonLoading(btn, true, 'Salvando...');
-
-  terc.retornado       = true;
-  terc.dataRetorno     = dataRet;
-  terc.destinoRetorno  = destino;
-  terc.obs             = obs;
-  terc.status          = 'retornado';
-
-  await fsUpdate('terceirizadaAtivos', tercId, {
-    retornado: true, dataRetorno: dataRet,
-    destinoRetorno: destino, obs, status: 'retornado',
-  });
-
-  // Executa destino
-  if (destino === 'santa-clara' && scLocal) {
-    const scItem = {
-      id: 'SC-' + Date.now(), pat: terc.pat || terc.ativo,
-      local: scLocal, dataEntrada: dataRet, status: 'armazenado',
-      origemTerceirizada: true, tercId,
-    };
-    if (!STATE.scAtivos) STATE.scAtivos = [];
-    STATE.scAtivos.unshift(scItem);
-    await fsAdd('scAtivos', scItem);
-  }
-  if (destino === 'reutilizada' && reutLoc) {
-    const ativo = (STATE.ativos || []).find(a => a.pat === (terc.pat || terc.ativo));
-    if (ativo) {
-      ativo.local = reutLoc;
-      await fsUpdate('ativos', ativo.id, { local: reutLoc, status: 'ativo' });
-    }
-  }
-
-  btn.closest('[style*=fixed]')?.remove();
-  renderTerceirizada?.();
-  showToast('✅ Retorno da Empresa Terceirizada registrado!', 'success', 4000);
-}
 
 // Verifica prazos da Empresa Terceirizada — roda a cada hora
 function verificarPrazosTerceirizada() {
@@ -6518,7 +6638,12 @@ function gerarRelTerceirizada(inicio, fim) {
       <td style="font-size:12px">${t.prazoRetorno||'—'}</td>
       <td style="font-weight:700;color:${diasAtraso>0?'var(--danger)':'var(--g400)'}">${diasAtraso > 0 ? diasAtraso + 'd' : '—'}</td>
       <td><span class="badge ${t.retornado?'badge-success':'badge-warning'}" style="font-size:10px">${t.retornado?'Devolvida':'Aguardando'}</span></td>
-      <td>${!t.retornado ? `<button class="btn btn-success btn-xs" onclick="marcarRetornoTerceirizada('${t.id}')">Registrar retorno</button>` : ''}</td>
+      <td>${!t.retornado
+        ? (t.etapa === 'aguardando-confirmacao-adsi'
+            ? `<button class="btn btn-warning btn-xs" onclick="confirmarRecebimentoAdsi('${t.id}')">✅ Confirmar recebimento (A-DSI)</button>`
+            : `<button class="btn btn-success btn-xs" onclick="marcarRetornoTerceirizada('${t.id}')">↩ Registrar retorno</button>`)
+        : ''
+      }</td>
     </tr>`;
   }).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--g400)">Nenhum registro na Empresa Terceirizada</td></tr>';
 }
