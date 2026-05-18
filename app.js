@@ -5832,6 +5832,74 @@ function arAbrirInventario(agentId) {
       `<tr><td style="padding:7px 0;color:var(--g500);font-size:12px;width:140px">${escapeHtml(k)}</td>` +
       `<td style="padding:7px 0;font-size:13px;font-weight:500;color:${(v||'').includes('INATIVO') ? 'var(--danger)' : 'inherit'}">${escapeHtml(String(v))}</td></tr>`
     ).join('') + '</table>';
+
+  // ── Painel de monitores/periféricos conectados ───────────────
+  renderMonitoresConectados(ativo);
+}
+
+// ─── Monitores/Periféricos conectados ao ativo ───────────────────
+async function renderMonitoresConectados(ativo) {
+  const container = document.getElementById('ar-monitores-section');
+  if (!container) return;
+
+  let monitores = [];
+  if (ativo.monitoresConectados) {
+    try {
+      monitores = typeof ativo.monitoresConectados === 'string'
+        ? JSON.parse(ativo.monitoresConectados)
+        : (Array.isArray(ativo.monitoresConectados) ? ativo.monitoresConectados : []);
+    } catch(e) { monitores = []; }
+  }
+
+  if (!monitores.length) {
+    container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--g400);font-size:12px"><div style="font-size:20px;margin-bottom:6px">🖥️</div>Nenhum monitor detectado. O SysackClient coleta automaticamente a cada 5 min.</div>';
+    return;
+  }
+
+  // Carrega histórico de cada monitor via Cloud Function
+  const rowsHtml = [];
+  for (const m of monitores) {
+    let hist = [];
+    if (m.serial && window._fs?.httpsCallable) {
+      try {
+        const res = await window._fs.httpsCallable('getHistoricoMonitor')({ serial: m.serial });
+        hist = res.data?.historico || [];
+      } catch(e) {}
+    }
+
+    const histHtml = hist.length > 1
+      ? '<details style="margin-top:8px"><summary style="font-size:11px;color:var(--accent);cursor:pointer">📋 Histórico de movimentações (' + hist.length + ')</summary>'
+        + '<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">'
+        + hist.map(function(h,i) {
+            return '<div style="display:flex;gap:8px;align-items:center;font-size:11px;padding:4px 8px;background:' + (i===0?'var(--accent-l)':'var(--g50)') + ';border-radius:6px">'
+              + '<span style="color:var(--g400);white-space:nowrap">' + (h.data ? new Date(h.data).toLocaleDateString('pt-BR') : '—') + '</span>'
+              + '<span style="font-weight:' + (i===0?'700':'400') + ';color:' + (i===0?'var(--accent)':'var(--g700)') + '">' + escapeHtml(h.pat||'—') + '</span>'
+              + '<span style="color:var(--g400)">' + escapeHtml(h.area||'—') + '</span>'
+              + (i===0 ? '<span style="background:#059669;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px">atual</span>' : '')
+              + '</div>';
+          }).join('')
+        + '</div></details>'
+      : '';
+
+    rowsHtml.push(
+      '<div style="background:var(--g50,#F8FAFC);border:1px solid var(--g200);border-radius:10px;padding:12px 14px;margin-bottom:8px">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+          + '<span style="font-size:20px">🖥️</span>'
+          + '<div>'
+            + '<div style="font-size:13px;font-weight:700">' + escapeHtml((m.fabricante||'') + ' ' + (m.modelo||'Monitor')) + '</div>'
+            + '<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: ' + escapeHtml(m.serial||'—') + '</div>'
+          + '</div>'
+        + '</div>'
+        + '<span style="background:#EFF6FF;color:#2563EB;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px">Conectado</span>'
+      + '</div>'
+      + (hist.length > 1 ? '<div style="font-size:11px;color:var(--g500);margin-bottom:4px">Já esteve em <strong>' + (hist.length-1) + '</strong> computador(es) anteriormente</div>' : '')
+      + histHtml
+      + '</div>'
+    );
+  }
+
+  container.innerHTML = rowsHtml.join('');
 }
 
 // ── AÇÕES RÁPIDAS ─────────────────────────────────────────────
@@ -8319,6 +8387,27 @@ Try {
     Try { $av = Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct | Select-Object -First 1; $avNome = $av.displayName } Catch { $avNome = "" }
     Try { $bl = (Get-BitLockerVolume -MountPoint "C:" -ErrorAction Stop).ProtectionStatus -eq "On" } Catch { $bl = $null }
 
+    # Coleta monitores conectados via WMI
+    $monitoresConectados = @()
+    Try {
+        $wmiMonitores = Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction Stop
+        ForEach ($m in $wmiMonitores) {
+            $fabricante = If ($m.ManufacturerName) { [System.Text.Encoding]::ASCII.GetString($m.ManufacturerName).Trim([char]0).Trim() } Else { "" }
+            $produto    = If ($m.UserFriendlyName)  { [System.Text.Encoding]::ASCII.GetString($m.UserFriendlyName).Trim([char]0).Trim()  } Else { "" }
+            $serial     = If ($m.SerialNumberID)    { [System.Text.Encoding]::ASCII.GetString($m.SerialNumberID).Trim([char]0).Trim()    } Else { "" }
+            If ($serial -and $serial -ne "0") {
+                $monitoresConectados += @{
+                    fabricante = $fabricante
+                    modelo     = $produto
+                    serial     = $serial
+                    conectadoEm = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                }
+            }
+        }
+    } Catch {}
+    $monitoresJson = $monitoresConectados | ConvertTo-Json -Compress -Depth 3
+    If (-not $monitoresJson) { $monitoresJson = "[]" }
+
     $fields = @{
         status=ConvertTo-FSField($status); reachable=ConvertTo-FSField($true)
         cpuPct=ConvertTo-FSField([int]$cpu); memPct=ConvertTo-FSField($memPct)
@@ -8330,6 +8419,8 @@ Try {
         bitlockerAtivo=ConvertTo-FSField($bl); syncSource=ConvertTo-FSField("sysack-client")
         clientVersion=ConvertTo-FSField($cfg.ClientVersion); updatedAt=ConvertTo-FSField((Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"))
         lastSeen=ConvertTo-FSField((Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"))
+        monitoresConectados=ConvertTo-FSField($monitoresJson)
+        qtdMonitores=ConvertTo-FSField($monitoresConectados.Count)
     }
 
     # Tenta achar o ativo pelo serial ou hostname
