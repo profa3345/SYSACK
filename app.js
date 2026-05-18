@@ -777,6 +777,7 @@ function startFirestoreListeners() {
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     renderDashboard();
     nbUpdate('nb-ativos', STATE.ativos.length);
+    nbUpdate('nb-servidores', identificarServidores(STATE.ativos).length);
     console.log('[Banco] ativos:', STATE._assetsDisc.length);
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
@@ -826,18 +827,6 @@ function startFirestoreListeners() {
   db.collection('mobiliario').onSnapshot(function(snap) {
     STATE.mobiliario = snap2arr(snap);
   }, function(e){ console.error('[Banco] mobiliario erro:', e.message); });
-
-  // monitor_historico — histórico de movimentação de monitores
-  db.collection('monitor_historico').orderBy('data','desc').limit(500).onSnapshot(function(snap) {
-    STATE.monitorHistorico = snap2arr(snap);
-  }, function(e){ console.error('[Banco] monitorHistorico erro:', e.message); });
-
-  // monitores cadastrados manualmente (complementa os detectados via WMI)
-  db.collection('monitores').onSnapshot(function(snap) {
-    STATE.monitoresCadastrados = snap2arr(snap);
-    renderMonitoresKPI();
-    console.log('[Banco] monitores:', STATE.monitoresCadastrados.length);
-  }, function(e){ console.error('[Banco] monitores erro:', e.message); });
 
   // organograma_unidades — sincronizado pelo agent.js a cada 5 min
   db.collection('organograma_unidades').onSnapshot(function(snap) {
@@ -952,7 +941,7 @@ function renderPage(id) {
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
     'organograma':   () => renderOrganograma(),
-    'monitores':     () => renderMonitores(),
+    'servidores':    () => renderServidores(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -8843,391 +8832,456 @@ function renderSelfService() {
 // EMPREGADOS & AUSÊNCIAS
 // ════════════════════════════════════════════════════════════
 
-// ─── GESTÃO DE MONITORES ─────────────────────────────────────────
-let _monitorAtualSerial = null; // serial do monitor sendo editado
-let _monitorCameraStream = null; // stream da câmera ativa
+// ─── PAT SERVIDOR — atribuição por câmera, foto, voz ou digitação ──
+let _srvPatAtivoId = null;
+let _srvPatStream   = null;
+let _srvPatValor    = null;
+let _srvPatTab      = 'digitar';
 
-// Coleta todos os monitores: detectados via WMI + cadastrados manualmente
-function coletarTodosMonitores() {
-  const wmi = []; // monitores detectados pelo SysackClient em cada ativo
-  (STATE.ativos || []).forEach(function(ativo) {
-    if (!ativo.monitoresConectados) return;
-    let mons = [];
-    try {
-      mons = typeof ativo.monitoresConectados === 'string'
-        ? JSON.parse(ativo.monitoresConectados)
-        : (Array.isArray(ativo.monitoresConectados) ? ativo.monitoresConectados : []);
-    } catch(e) {}
-    mons.forEach(function(m) {
-      if (!m.serial) return;
-      // Cruza com histórico para ver quantas vezes se moveu
-      const hist = (STATE.monitorHistorico || []).filter(h => h.serial === m.serial);
-      // Cruza com cadastro manual para pegar PAT
-      const cadastro = (STATE.monitoresCadastrados || []).find(c => c.serial === m.serial);
-      wmi.push({
-        serial:      m.serial,
-        fabricante:  m.fabricante || '',
-        modelo:      m.modelo || '',
-        pat:         cadastro?.pat || m.pat || '',
-        local:       cadastro?.local || ativo.sala || ativo.loc || '',
-        pcAtual:     ativo.hostname || ativo.ip || ativo.desc || '—',
-        pcPat:       ativo.pat || '',
-        pcId:        ativo.id || '',
-        area:        ativo.area || '',
-        qtdMovimentos: hist.length,
-        detectadoWMI: true,
-        cadastroId:  cadastro?.id || null,
-        obs:         cadastro?.obs || '',
-      });
-    });
-  });
+function abrirPatServidor(ativoId, hostname) {
+  _srvPatAtivoId = ativoId;
+  _srvPatValor   = null;
 
-  // Monitores cadastrados manualmente mas não detectados via WMI
-  (STATE.monitoresCadastrados || []).forEach(function(c) {
-    if (wmi.find(m => m.serial === c.serial)) return; // já está
-    const hist = (STATE.monitorHistorico || []).filter(h => h.serial === c.serial);
-    wmi.push({
-      serial:       c.serial || '',
-      fabricante:   c.fabricante || '',
-      modelo:       c.modelo || '',
-      pat:          c.pat || '',
-      local:        c.local || '',
-      pcAtual:      c.pcVinculado || '—',
-      pcPat:        '',
-      pcId:         '',
-      area:         c.area || '',
-      qtdMovimentos: hist.length,
-      detectadoWMI: false,
-      cadastroId:   c.id,
-      obs:          c.obs || '',
-      tamanho:      c.tamanho || '',
-    });
-  });
+  // Info do servidor no topo do modal
+  const info = document.getElementById('srv-pat-info');
+  if (info) info.textContent = '🖥️ ' + (hostname || ativoId);
 
-  return wmi;
+  // Limpa todos os campos
+  const inp = document.getElementById('srv-pat-digitar-input');
+  if (inp) inp.value = '';
+  document.getElementById('srv-pat-digitar-feedback').textContent = 'Digite o número da plaqueta de patrimônio';
+  document.getElementById('srv-pat-foto-preview').style.display = 'none';
+  document.getElementById('srv-pat-voz-resultado').style.display = 'none';
+  document.getElementById('srv-pat-voz-btn-area').style.display = '';
+  document.getElementById('srv-pat-confirmacao').style.display = 'none';
+  document.getElementById('srv-pat-salvar-btn').disabled = true;
+
+  // Ativa aba de digitação por padrão
+  srvPatTab('digitar', document.querySelector('.srv-pat-tab'));
+  openModal('modal-pat-servidor');
 }
 
-function renderMonitoresKPI() {
-  const todos   = coletarTodosMonitores();
-  const semPat  = todos.filter(m => !m.pat);
-  const comPat  = todos.filter(m => !!m.pat);
-  const movidos = todos.filter(m => m.qtdMovimentos > 1);
-
-  const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  sv('mon-kpi-total',   todos.length);
-  sv('mon-kpi-sem-pat', semPat.length);
-  sv('mon-kpi-com-pat', comPat.length);
-  sv('mon-kpi-movidos', movidos.length);
-  nbUpdate('nb-monitores-sem-pat', semPat.length);
+function fecharModalPatServidor() {
+  srvPatPararCamera();
+  closeModal('modal-pat-servidor');
 }
 
-function renderMonitores() {
-  renderMonitoresKPI();
-  const q      = (document.getElementById('mon-search')?.value || '').toLowerCase();
-  const fSt    = document.getElementById('mon-filter-status')?.value || '';
-  const grid   = document.getElementById('mon-grid');
-  if (!grid) return;
+function srvPatTab(tab, el) {
+  _srvPatTab = tab;
+  ['digitar','camera','foto','voz'].forEach(t => {
+    document.getElementById('srv-pat-panel-' + t).style.display = t === tab ? '' : 'none';
+  });
+  document.querySelectorAll('.srv-pat-tab').forEach(b => {
+    b.style.background = 'transparent';
+    b.style.color = 'var(--g500)';
+    b.style.boxShadow = 'none';
+  });
+  if (el) {
+    el.style.background = '#fff';
+    el.style.color = 'var(--g900)';
+    el.style.boxShadow = '0 1px 3px rgba(0,0,0,.1)';
+  }
+  // Para câmera ao trocar de aba
+  if (tab !== 'camera') srvPatPararCamera();
+}
 
-  let todos = coletarTodosMonitores();
+function srvPatValidar(val) {
+  const limpo = (val || '').replace(/[^0-9A-Za-z\-]/g, '').trim();
+  const feedback = document.getElementById('srv-pat-digitar-feedback');
+  const btn = document.getElementById('srv-pat-salvar-btn');
+  if (limpo.length >= 2) {
+    _srvPatValor = limpo;
+    srvPatMostrarConfirmacao(limpo);
+    if (btn) btn.disabled = false;
+    if (feedback) { feedback.textContent = '✅ PAT: ' + limpo; feedback.style.color = 'var(--success)'; }
+  } else {
+    _srvPatValor = null;
+    document.getElementById('srv-pat-confirmacao').style.display = 'none';
+    if (btn) btn.disabled = true;
+    if (feedback) { feedback.textContent = 'Digite o número da plaqueta de patrimônio'; feedback.style.color = 'var(--g400)'; }
+  }
+}
 
-  // Filtros
-  if (q) todos = todos.filter(m =>
-    (m.serial||'').toLowerCase().includes(q) ||
-    (m.pat||'').toLowerCase().includes(q) ||
-    (m.modelo||'').toLowerCase().includes(q) ||
-    (m.fabricante||'').toLowerCase().includes(q) ||
-    (m.pcAtual||'').toLowerCase().includes(q) ||
-    (m.area||'').toLowerCase().includes(q)
-  );
-  if (fSt === 'sem-pat')  todos = todos.filter(m => !m.pat);
-  if (fSt === 'com-pat')  todos = todos.filter(m => !!m.pat);
-  if (fSt === 'movido')   todos = todos.filter(m => m.qtdMovimentos > 1);
+function srvPatMostrarConfirmacao(pat) {
+  const box = document.getElementById('srv-pat-confirmacao');
+  const val = document.getElementById('srv-pat-valor-confirmado');
+  if (box) box.style.display = '';
+  if (val) val.textContent = pat;
+  const btn = document.getElementById('srv-pat-salvar-btn');
+  if (btn) btn.disabled = false;
+}
 
-  if (!todos.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🖥️</div><div style="font-weight:600">Nenhum monitor encontrado</div><div style="font-size:12px;margin-top:6px">Os monitores são detectados automaticamente pelo SysackClient a cada 5 min</div></div>';
+// ── Câmera ────────────────────────────────────────────────────────
+async function srvPatIniciarCamera() {
+  const video  = document.getElementById('srv-pat-video');
+  const status = document.getElementById('srv-pat-camera-status');
+  if (!video) return;
+  try {
+    _srvPatStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = _srvPatStream;
+    if (status) status.textContent = 'Câmera ativa — buscando código...';
+    srvPatDecodeLoop(video, status);
+  } catch(e) {
+    if (status) status.textContent = '❌ Câmera indisponível: ' + e.message;
+  }
+}
+
+function srvPatPararCamera() {
+  if (_srvPatStream) {
+    _srvPatStream.getTracks().forEach(t => t.stop());
+    _srvPatStream = null;
+  }
+}
+
+async function srvPatDecodeLoop(video, status) {
+  try {
+    const ZXing = await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/esm/index.min.js').catch(() => null);
+    if (!ZXing) {
+      if (status) status.textContent = '⚠️ Scanner indisponível — tire uma foto ou digite manualmente';
+      return;
+    }
+    const decoder = new ZXing.BrowserMultiFormatReader();
+    decoder.decodeFromVideoElement(video, function(result, err) {
+      if (result) {
+        srvPatPararCamera();
+        const code = result.getText().replace(/[^0-9A-Za-z\-]/g, '');
+        if (status) status.textContent = '✅ Lido: ' + code;
+        _srvPatValor = code;
+        srvPatMostrarConfirmacao(code);
+        // Preenche também o campo de digitação
+        const inp = document.getElementById('srv-pat-digitar-input');
+        if (inp) inp.value = code;
+      }
+    });
+  } catch(e) {
+    if (status) status.textContent = 'Erro no scanner: ' + e.message;
+  }
+}
+
+// ── Foto ──────────────────────────────────────────────────────────
+async function srvPatLerFoto(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const prev   = document.getElementById('srv-pat-foto-preview');
+  const img    = document.getElementById('srv-pat-foto-img');
+  const status = document.getElementById('srv-pat-foto-status');
+
+  if (prev) prev.style.display = '';
+  if (img)  img.src = URL.createObjectURL(file);
+  if (status) status.textContent = '🔍 Tentando ler código...';
+
+  try {
+    const ZXing = await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/esm/index.min.js').catch(() => null);
+    if (ZXing) {
+      const image = new Image();
+      image.src = img.src;
+      image.onload = async function() {
+        try {
+          const decoder = new ZXing.BrowserMultiFormatReader();
+          const result  = await decoder.decodeFromImageElement(image);
+          const code    = result.getText().replace(/[^0-9A-Za-z\-]/g, '');
+          if (status) { status.textContent = '✅ PAT detectado: ' + code; status.style.color = 'var(--success)'; }
+          _srvPatValor = code;
+          srvPatMostrarConfirmacao(code);
+        } catch(e) {
+          // QR/barcode não encontrado — tenta Gemini Vision
+          srvPatGeminiVision(file, status);
+        }
+      };
+    } else {
+      srvPatGeminiVision(file, status);
+    }
+  } catch(e) {
+    srvPatGeminiVision(file, status);
+  }
+}
+
+async function srvPatGeminiVision(file, status) {
+  if (status) status.textContent = '🤖 Analisando plaqueta com IA...';
+  try {
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      const b64 = e.target.result.split(',')[1];
+      if (window._fs?.httpsCallable) {
+        const res = await window._fs.httpsCallable('extrairPATdaFoto')({ imageBase64: b64 });
+        const pat = res.data?.pat;
+        if (pat) {
+          if (status) { status.textContent = '✅ PAT detectado pela IA: ' + pat; status.style.color = 'var(--success)'; }
+          _srvPatValor = pat;
+          srvPatMostrarConfirmacao(pat);
+        } else {
+          if (status) status.textContent = '⚠️ Não detectado automaticamente. Troque para a aba "Digitar" e informe o PAT.';
+        }
+      } else {
+        if (status) status.textContent = '⚠️ Informe o PAT manualmente na aba "Digitar".';
+      }
+    };
+    reader.readAsDataURL(file);
+  } catch(e) {
+    if (status) status.textContent = '⚠️ Erro na análise. Use a aba "Digitar".';
+  }
+}
+
+// ── Voz ──────────────────────────────────────────────────────────
+function srvPatIniciarVoz() {
+  const btn    = document.getElementById('srv-pat-voz-btn');
+  const status = document.getElementById('srv-pat-voz-status');
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    if (status) status.textContent = '❌ Reconhecimento de voz não suportado neste browser. Use Chrome.';
     return;
   }
 
-  grid.innerHTML = todos.map(function(m) {
-    const temPat = !!m.pat;
-    const bordeCor = temPat ? 'var(--success)' : '#F59E0B';
-    const badgePat = temPat
-      ? '<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">✅ PAT: ' + escapeHtml(m.pat) + '</span>'
-      : '<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">⚠️ Sem PAT</span>';
-    const wmiChip = m.detectadoWMI
-      ? '<span style="background:#EFF6FF;color:#2563EB;font-size:10px;padding:1px 6px;border-radius:8px">🔍 WMI</span>'
-      : '<span style="background:var(--g100);color:var(--g500);font-size:10px;padding:1px 6px;border-radius:8px">✏️ Manual</span>';
+  const rec = new SpeechRecognition();
+  rec.lang = 'pt-BR';
+  rec.continuous = false;
+  rec.interimResults = false;
+  rec.maxAlternatives = 3;
 
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;padding:0;overflow:hidden;border-top:3px solid ' + bordeCor + ';transition:transform .15s" onmouseover="this.style.marginTop=\'-3px\'" onmouseout="this.style.marginTop=\'\'">'
-      + '<div style="padding:14px 16px 10px">'
-        + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">'
-          + '<div style="display:flex;align-items:center;gap:10px">'
-            + '<div style="font-size:28px">🖥️</div>'
-            + '<div>'
-              + '<div style="font-size:14px;font-weight:700">' + escapeHtml((m.fabricante||'') + ' ' + (m.modelo||'Monitor')) + '</div>'
-              + '<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: ' + escapeHtml(m.serial||'—') + '</div>'
-            + '</div>'
-          + '</div>'
-          + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
-            + badgePat
-            + wmiChip
-          + '</div>'
-        + '</div>'
+  if (btn) { btn.style.background = '#DC2626'; btn.style.animation = 'pulse 1s infinite'; }
+  if (status) status.textContent = '🔴 Ouvindo... fale o número do patrimônio';
 
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:10px">'
-          + '<div><span style="color:var(--g400)">PC atual:</span> <span style="font-weight:600">' + escapeHtml(m.pcAtual) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Área:</span> <span style="font-weight:600">' + escapeHtml(m.area||'—') + '</span></div>'
-          + '<div><span style="color:var(--g400)">Local:</span> <span>' + escapeHtml(m.local||'—') + '</span></div>'
-          + '<div><span style="color:var(--g400)">Movimentações:</span> <span style="color:' + (m.qtdMovimentos > 1 ? '#D97706' : 'var(--g700)') + ';font-weight:600">' + m.qtdMovimentos + '</span></div>'
-        + '</div>'
-      + '</div>'
+  rec.onresult = function(event) {
+    if (btn) { btn.style.background = 'var(--accent)'; btn.style.animation = ''; }
+    // Pega a melhor alternativa
+    let texto = event.results[0][0].transcript;
+    // Converte palavras em números se necessário
+    texto = texto.replace(/\s+/g, '');
+    const numeros = {
+      'zero':'0','um':'1','uma':'1','dois':'2','duas':'2','três':'3','quatro':'4',
+      'cinco':'5','seis':'6','sete':'7','oito':'8','nove':'9','dez':'10'
+    };
+    let resultado = texto;
+    Object.entries(numeros).forEach(([palavra, num]) => {
+      resultado = resultado.replace(new RegExp(palavra, 'gi'), num);
+    });
+    resultado = resultado.replace(/[^0-9A-Za-z\-]/g, '').trim();
 
-      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        + '<button onclick="abrirAtribuirPATMonitor(\'' + escapeHtml(m.serial) + '\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:' + (temPat ? 'var(--g500)' : 'var(--accent)') + ';cursor:pointer;border-right:0.5px solid var(--g100)">'
-          + (temPat ? '✏️ Alterar PAT' : '🏷️ Atribuir PAT') + '</button>'
-        + '<button onclick="abrirHistoricoMonitorCard(\'' + escapeHtml(m.serial) + '\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📋 Histórico</button>'
-        + '<button onclick="abrirChamadoParaMonitor(\'' + escapeHtml(m.pat||m.serial) + '\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">🎫 Chamado</button>'
-      + '</div>'
-    + '</div>';
-  }).join('');
+    if (resultado.length >= 2) {
+      _srvPatValor = resultado;
+      document.getElementById('srv-pat-voz-btn-area').style.display = 'none';
+      const resDiv = document.getElementById('srv-pat-voz-resultado');
+      const patDiv = document.getElementById('srv-pat-voz-pat');
+      if (resDiv) resDiv.style.display = '';
+      if (patDiv) patDiv.textContent  = resultado;
+      if (status) status.textContent  = '✅ PAT reconhecido!';
+      srvPatMostrarConfirmacao(resultado);
+    } else {
+      if (status) status.textContent = '⚠️ Não entendi. Tente novamente ou use outra forma.';
+      if (btn) btn.style.background = 'var(--accent)';
+    }
+  };
+
+  rec.onerror = function(e) {
+    if (btn) { btn.style.background = 'var(--accent)'; btn.style.animation = ''; }
+    if (status) status.textContent = '❌ Erro: ' + e.error + '. Tente novamente.';
+  };
+
+  rec.start();
 }
 
-// ── Atribuir PAT ao monitor ──────────────────────────────────────
-function abrirAtribuirPATMonitor(serial) {
-  _monitorAtualSerial = serial;
-  const m = coletarTodosMonitores().find(x => x.serial === serial);
-  if (!m) return;
-
-  const info = document.getElementById('mon-pat-info');
-  if (info) {
-    info.innerHTML = '<div style="display:flex;gap:12px;align-items:center">'
-      + '<span style="font-size:24px">🖥️</span>'
-      + '<div>'
-        + '<div style="font-weight:700">' + escapeHtml((m.fabricante||'') + ' ' + (m.modelo||'Monitor')) + '</div>'
-        + '<div style="font-family:monospace;font-size:11px;color:var(--g500)">S/N: ' + escapeHtml(serial) + '</div>'
-        + '<div style="font-size:12px;color:var(--g600)">PC atual: ' + escapeHtml(m.pcAtual) + ' · Área: ' + escapeHtml(m.area||'—') + '</div>'
-        + (m.pat ? '<div style="margin-top:4px;font-size:12px;color:#D97706">PAT atual: <strong>' + escapeHtml(m.pat) + '</strong></div>' : '')
-      + '</div>'
-    + '</div>';
-  }
-
-  const inp = document.getElementById('mon-pat-input');
-  if (inp) { inp.value = m.pat || ''; }
-  document.getElementById('mon-camera-area').style.display = 'none';
-  document.getElementById('mon-foto-preview').style.display = 'none';
-  document.getElementById('mon-pat-obs').value = m.obs || '';
-
-  const btn = document.getElementById('mon-pat-confirmar-btn');
-  if (btn) btn.disabled = !(m.pat);
-
-  openModal('modal-atribuir-pat-monitor');
+function srvPatReiniciarVoz() {
+  _srvPatValor = null;
+  document.getElementById('srv-pat-voz-resultado').style.display = 'none';
+  document.getElementById('srv-pat-voz-btn-area').style.display  = '';
+  document.getElementById('srv-pat-voz-status').textContent = 'Clique e fale o número do patrimônio';
+  document.getElementById('srv-pat-confirmacao').style.display = 'none';
+  document.getElementById('srv-pat-salvar-btn').disabled = true;
 }
 
-function monPatInputChange(val) {
-  const btn = document.getElementById('mon-pat-confirmar-btn');
-  if (btn) btn.disabled = !val || val.trim().length < 2;
-}
+// ── Salvar PAT no ativo ───────────────────────────────────────────
+async function confirmarPatServidor() {
+  const pat = _srvPatValor;
+  const id  = _srvPatAtivoId;
+  if (!pat || !id) return showToast('PAT não definido', 'warning');
 
-async function confirmarPatMonitor() {
-  const pat = document.getElementById('mon-pat-input')?.value?.trim();
-  const obs = document.getElementById('mon-pat-obs')?.value?.trim() || '';
-  const serial = _monitorAtualSerial;
-  if (!pat || !serial) return showToast('Informe o PAT', 'warning');
-
-  const btn = document.getElementById('mon-pat-confirmar-btn');
+  const btn = document.getElementById('srv-pat-salvar-btn');
   setButtonLoading(btn, true, 'Salvando...');
 
   try {
-    const m = coletarTodosMonitores().find(x => x.serial === serial);
-    const agora = new Date().toISOString();
+    await fsUpdate('ativos', id, {
+      pat,
+      updatedAt: new Date().toISOString(),
+    });
 
-    if (m?.cadastroId) {
-      // Atualiza cadastro existente
-      await fsUpdate('monitores', m.cadastroId, { pat, obs, updatedAt: agora });
-    } else {
-      // Cria novo cadastro
-      await fsAdd('monitores', {
-        serial, pat, obs,
-        fabricante: m?.fabricante || '',
-        modelo:     m?.modelo || '',
-        local:      m?.local || '',
-        area:       m?.area || '',
-        pcVinculado: m?.pcAtual || '',
-        createdAt:  agora,
-        updatedAt:  agora,
-        syncSource: 'sysack-manual',
-      }, STATE.monitoresCadastrados);
-    }
-
-    // Atualiza o campo monitoresConectados no ativo vinculado
-    if (m?.pcId) {
-      const ativo = (STATE.ativos || []).find(a => a.id === m.pcId);
-      if (ativo && ativo.monitoresConectados) {
-        let mons = [];
-        try { mons = JSON.parse(ativo.monitoresConectados); } catch(e) {}
-        mons = mons.map(function(x) { return x.serial === serial ? {...x, pat} : x; });
-        await fsUpdate('ativos', m.pcId, { monitoresConectados: JSON.stringify(mons) });
+    // Grava no histórico imutável do ativo
+    if (window._fs?.httpsCallable) {
+      const ativo = (STATE.ativos||[]).find(a => a.id === id);
+      if (ativo?.id) {
+        window._fs.httpsCallable('adicionarNotaHistorico')({
+          ativoId: id,
+          nota: 'PAT ' + pat + ' atribuído manualmente ao servidor físico ' + (ativo.hostname||id) + ' por ' + (CURRENT_USER?.nome||'Técnico') + '.',
+          tipo: 'atualizacao',
+        }).catch(() => {});
       }
     }
 
-    closeModal('modal-atribuir-pat-monitor');
-    fecharCameraMonitor();
-    showToast('✅ PAT ' + pat + ' atribuído ao monitor ' + serial, 'success', 4000);
-    renderMonitores();
+    fecharModalPatServidor();
+    showToast('✅ PAT ' + pat + ' atribuído ao servidor!', 'success', 4000);
+    renderServidores();
   } catch(e) {
-    showToast('Erro: ' + e.message, 'error');
+    showToast('Erro ao salvar: ' + e.message, 'error');
   } finally {
     setButtonLoading(btn, false);
   }
 }
 
-// ── Câmera para leitura da plaqueta de patrimônio ────────────────
-async function abrirCameraMonitorPAT() {
-  const area = document.getElementById('mon-camera-area');
-  const video = document.getElementById('mon-camera-video');
-  if (!area || !video) return;
+// ─── SERVIDORES ───────────────────────────────────────────────────
+// Identifica servidores pelo hostname: SERV* = físico, VSERV* = virtual
+// Inclui também ativos com tipo 'servidor' ou 'server-linux'
 
-  try {
-    _monitorCameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
-    video.srcObject = _monitorCameraStream;
-    area.style.display = '';
-    document.getElementById('mon-foto-preview').style.display = 'none';
-  } catch(e) {
-    showToast('Câmera não disponível: ' + e.message, 'error');
+let _srvTab = 'todos';
+
+function isFisicoServidor(a) {
+  const hn = (a.hostname || a.desc || '').toUpperCase();
+  return hn.startsWith('SERV') && !hn.startsWith('VSERV');
+}
+
+function isVirtualServidor(a) {
+  const hn = (a.hostname || a.desc || '').toUpperCase();
+  return hn.startsWith('VSERV');
+}
+
+function isServidor(a) {
+  const hn   = (a.hostname || a.desc || '').toUpperCase();
+  const tipo = (a.tipo || '').toLowerCase();
+  return hn.startsWith('SERV') || hn.startsWith('VSERV')
+      || tipo === 'servidor' || tipo === 'server-linux';
+}
+
+function identificarServidores(ativos) {
+  return (ativos || []).filter(isServidor);
+}
+
+function srvTab(tab, el) {
+  _srvTab = tab;
+  document.querySelectorAll('.srv-tab-btn').forEach(b => b.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderServidores();
+}
+
+function renderServidores() {
+  const q       = (document.getElementById('srv-search')?.value || '').toLowerCase();
+  const fTipo   = document.getElementById('srv-filter-tipo')?.value || '';
+  const fStatus = document.getElementById('srv-filter-status')?.value || '';
+
+  let lista = identificarServidores(STATE.ativos);
+
+  if (fTipo === 'fisico'  || _srvTab === 'fisico')  lista = lista.filter(isFisicoServidor);
+  if (fTipo === 'virtual' || _srvTab === 'virtual')  lista = lista.filter(isVirtualServidor);
+  if (fStatus) lista = lista.filter(a => (a.status||'').toLowerCase() === fStatus);
+  if (q) lista = lista.filter(a =>
+    (a.hostname||'').toLowerCase().includes(q) ||
+    (a.ip||'').toLowerCase().includes(q) ||
+    (a.desc||'').toLowerCase().includes(q) ||
+    (a.area||'').toLowerCase().includes(q) ||
+    (a.pat||'').toLowerCase().includes(q)
+  );
+
+  const todos    = identificarServidores(STATE.ativos);
+  const fisicos  = todos.filter(isFisicoServidor);
+  const virtuais = todos.filter(isVirtualServidor);
+  const online   = todos.filter(a => (a.status||'').toLowerCase() === 'online' || a.reachable === true);
+  const offline  = todos.filter(a => ['offline','critico'].includes((a.status||'').toLowerCase()));
+
+  const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  sv('srv-kpi-total',    todos.length);
+  sv('srv-kpi-fisicos',  fisicos.length);
+  sv('srv-kpi-virtuais', virtuais.length);
+  sv('srv-kpi-online',   online.length);
+  sv('srv-kpi-offline',  offline.length);
+  nbUpdate('nb-servidores', todos.length);
+
+  const grid = document.getElementById('srv-grid');
+  if (!grid) return;
+
+  if (!lista.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)">'
+      + '<div style="font-size:40px;margin-bottom:12px">🖥️</div>'
+      + '<div style="font-weight:600">Nenhum servidor encontrado</div>'
+      + '<div style="font-size:12px;margin-top:6px">Servidores físicos: hostname SERV* · Virtuais: hostname VSERV*</div>'
+      + '</div>';
+    return;
   }
-}
 
-function fecharCameraMonitor() {
-  if (_monitorCameraStream) {
-    _monitorCameraStream.getTracks().forEach(t => t.stop());
-    _monitorCameraStream = null;
+  lista.sort(function(a,b) {
+    const ord = {critico:0,offline:1,alerta:2,online:3,ativo:4};
+    const sa = ord[(a.status||'').toLowerCase()] ?? 5;
+    const sb = ord[(b.status||'').toLowerCase()] ?? 5;
+    if (sa !== sb) return sa - sb;
+    return (a.hostname||a.desc||'').localeCompare(b.hostname||b.desc||'');
+  });
+
+  function metricBar(label, val, danger, warn) {
+    if (val == null) return '';
+    const cor = val >= danger ? '#DC2626' : val >= warn ? '#D97706' : '#059669';
+    return '<div style="margin-bottom:5px">'
+      + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px">'
+        + '<span>' + label + '</span><span style="font-weight:700;color:' + cor + '">' + val + '%</span>'
+      + '</div>'
+      + '<div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden">'
+        + '<div style="background:' + cor + ';width:' + Math.min(val,100) + '%;height:100%;border-radius:3px"></div>'
+      + '</div></div>';
   }
-  const area = document.getElementById('mon-camera-area');
-  if (area) area.style.display = 'none';
-}
 
-async function capturarFotoPatMonitor() {
-  const video  = document.getElementById('mon-camera-video');
-  const canvas = document.getElementById('mon-camera-canvas');
-  const prev   = document.getElementById('mon-foto-preview');
-  const img    = document.getElementById('mon-foto-img');
-  const status = document.getElementById('mon-ocr-status');
-  if (!video || !canvas) return;
+  grid.innerHTML = lista.map(function(a) {
+    const hn      = a.hostname || a.desc || a.ip || '—';
+    const isVirt  = isVirtualServidor(a);
+    const isFis   = isFisicoServidor(a);
+    const tLabel  = isVirt ? '☁️ Virtual' : '🖥️ Físico';
+    const tColor  = isVirt ? '#7C3AED' : '#2563EB';
+    const st      = (a.status||'desconhecido').toLowerCase();
+    const stColor = st==='online'||a.reachable ? '#059669' : st==='critico' ? '#DC2626' : st==='offline' ? '#6B7280' : '#D97706';
+    const stLabel = st==='online'||a.reachable ? 'Online' : st==='critico' ? 'Crítico' : st==='offline' ? 'Offline' : st.charAt(0).toUpperCase()+st.slice(1);
+    const cpu     = a.cpuPct != null ? a.cpuPct : null;
+    const mem     = a.memPct != null ? a.memPct : null;
+    const disco   = a.discoC_livrePct != null ? Math.round(100 - a.discoC_livrePct) : null;
+    const uptime  = a.uptimeHoras != null ? (a.uptimeHoras >= 24 ? Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h' : Math.round(a.uptimeHoras)+'h') : null;
+    const lastSeen = a.lastSeen ? new Date(a.lastSeen.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleString('pt-BR') : '—';
 
-  canvas.width  = video.videoWidth  || 640;
-  canvas.height = video.videoHeight || 480;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-
-  img.src = dataUrl;
-  prev.style.display = '';
-  fecharCameraMonitor();
-  status.textContent = '🔍 Analisando plaqueta com IA...';
-
-  // Envia para Cloud Function que usa Gemini Vision para extrair o PAT
-  try {
-    if (window._fs?.httpsCallable) {
-      const res = await window._fs.httpsCallable('extrairPATdaFoto')({ imageBase64: dataUrl.split(',')[1] });
-      const pat = res.data?.pat;
-      if (pat) {
-        document.getElementById('mon-pat-input').value = pat;
-        monPatInputChange(pat);
-        status.textContent = '✅ PAT detectado: ' + pat;
-        status.style.color = 'var(--success)';
-        showToast('PAT detectado pela câmera: ' + pat, 'success', 3000);
-      } else {
-        status.textContent = '⚠️ Não foi possível detectar automaticamente. Digite o PAT manualmente.';
-        status.style.color = 'var(--warning)';
-      }
-    } else {
-      status.textContent = '⚠️ Digite o PAT manualmente.';
-    }
-  } catch(e) {
-    status.textContent = '⚠️ Erro na análise. Digite o PAT manualmente.';
-    status.style.color = 'var(--warning)';
-  }
-}
-
-// ── Histórico de movimentações do monitor ─────────────────────────
-async function abrirHistoricoMonitorCard(serial) {
-  const hist = (STATE.monitorHistorico || []).filter(h => h.serial === serial);
-  const m = coletarTodosMonitores().find(x => x.serial === serial);
-
-  const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
-  modal.className = 'modal-dyn';
-  modal.innerHTML = '<div style="background:var(--panel,#fff);border-radius:14px;padding:0;max-width:520px;width:92%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
-    + '<div style="padding:16px 20px;border-bottom:1px solid var(--line,#e2e8f0);display:flex;align-items:center;justify-content:space-between">'
-      + '<div><div style="font-weight:700;font-size:15px">📋 Histórico — ' + escapeHtml((m?.fabricante||'') + ' ' + (m?.modelo||'Monitor')) + '</div>'
-      + '<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: ' + escapeHtml(serial) + (m?.pat ? ' · PAT: ' + escapeHtml(m.pat) : '') + '</div></div>'
-      + '<button onclick="this.closest(\'.modal-dyn\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--g400)">✕</button>'
-    + '</div>'
-    + '<div style="padding:16px 20px;overflow-y:auto;flex:1">'
-      + (hist.length
-        ? hist.map(function(h, i) {
-            return '<div style="display:flex;gap:12px;padding:10px 0;border-bottom:0.5px solid var(--g100)'
-              + (i === 0 ? ';background:var(--accent-l);margin:-1px -4px;padding:10px 4px;border-radius:6px' : '') + '">'
-              + '<div style="width:8px;height:8px;border-radius:50%;background:' + (i===0?'var(--accent)':'var(--g300)') + ';margin-top:5px;flex-shrink:0"></div>'
-              + '<div style="flex:1">'
-                + '<div style="font-size:13px;font-weight:' + (i===0?'700':'500') + ';color:' + (i===0?'var(--accent)':'var(--g700)') + '">'
-                  + escapeHtml(h.pat||'—') + ' — ' + escapeHtml(h.host||'—')
-                  + (i===0 ? ' <span style="background:#059669;color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;margin-left:4px">atual</span>' : '')
-                + '</div>'
-                + '<div style="font-size:11px;color:var(--g500)">' + escapeHtml(h.area||'—') + ' · ' + (h.data ? new Date(h.data).toLocaleString('pt-BR') : '—') + '</div>'
-              + '</div>'
-            + '</div>';
-          }).join('')
-        : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhuma movimentação registrada ainda</div>')
-    + '</div>'
-  + '</div>';
-  document.body.appendChild(modal);
-}
-
-// ── Chamado rápido para monitor ────────────────────────────────────
-function abrirChamadoParaMonitor(patOuSerial) {
-  openModal('modal-novo-chamado');
-  setTimeout(function() {
-    const el = document.getElementById('ch-patrimonio');
-    if (el) { el.value = patOuSerial; }
-    const tipo = document.getElementById('ch-tipo');
-    if (tipo) tipo.value = 'problema';
-  }, 100);
-}
-
-// ── Cadastro manual de monitor ─────────────────────────────────────
-async function salvarMonitorManual() {
-  const serial = document.getElementById('mon-man-serial')?.value?.trim();
-  if (!serial) return showToast('Número de série é obrigatório', 'warning');
-
-  const dados = {
-    serial,
-    pat:        document.getElementById('mon-man-pat')?.value?.trim() || '',
-    fabricante: document.getElementById('mon-man-fab')?.value?.trim() || '',
-    modelo:     document.getElementById('mon-man-modelo')?.value?.trim() || '',
-    tamanho:    document.getElementById('mon-man-tam')?.value?.trim() || '',
-    local:      document.getElementById('mon-man-local')?.value?.trim() || '',
-    pcVinculado: document.getElementById('mon-man-pc')?.value?.trim() || '',
-    obs:        document.getElementById('mon-man-obs')?.value?.trim() || '',
-    createdAt:  new Date().toISOString(),
-    syncSource: 'sysack-manual',
-  };
-
-  try {
-    await fsAdd('monitores', dados, STATE.monitoresCadastrados);
-    closeModal('modal-monitor-manual');
-    showToast('✅ Monitor cadastrado!', 'success');
-    renderMonitores();
-  } catch(e) {
-    showToast('Erro: ' + e.message, 'error');
-  }
-}
-
-function abrirCadastroMonitorManual() {
-  ['mon-man-serial','mon-man-pat','mon-man-fab','mon-man-modelo','mon-man-tam','mon-man-local','mon-man-pc','mon-man-obs']
-    .forEach(function(id) { const el=document.getElementById(id); if(el) el.value=''; });
-  openModal('modal-monitor-manual');
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tColor+'">'
+      + '<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
+        + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
+          + '<span style="font-size:22px;flex-shrink:0">'+(isVirt?'☁️':'🖥️')+'</span>'
+          + '<div style="min-width:0">'
+            + '<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
+            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(a.area||'—')+'</div>'
+          + '</div>'
+        + '</div>'
+        + '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
+          + '<span style="background:'+stColor+'22;color:'+stColor+';border:1px solid '+stColor+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+stLabel+'</span>'
+          + '<span style="background:'+tColor+'22;color:'+tColor+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+tLabel+'</span>'
+        + '</div>'
+      + '</div>'
+      + '<div style="padding:14px 16px">'
+        + (cpu!=null||mem!=null||disco!=null
+          ? metricBar('CPU',cpu,90,70)+metricBar('Memória',mem,90,80)+metricBar('Disco C:',disco,95,85)
+          : '<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Métricas indisponíveis — agente não instalado</div>')
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:8px">'
+          + '<div>'
+            + (isVirt
+              ? '<span style="color:var(--g400)">PAT:</span> <span style="background:#F3F4F6;color:var(--g400);font-size:10px;padding:1px 6px;border-radius:8px">N/A — Virtual</span>'
+              : (a.pat
+                  ? '<span style="color:var(--g400)">PAT:</span> <span style="font-family:monospace;font-weight:700;color:var(--accent)">' + escapeHtml(a.pat) + '</span>'
+                  + ' <button data-id="' + escapeHtml(a.id) + '" data-hn="' + escapeHtml(hn) + '" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="font-size:10px;background:#FEF3C7;color:#92400E;border:none;padding:1px 6px;border-radius:8px;cursor:pointer;font-weight:600">✏️ Alterar</button>'
+                  : '<button data-id="' + escapeHtml(a.id) + '" data-hn="' + escapeHtml(hn) + '" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="background:#FEF3C7;color:#92400E;border:none;padding:3px 10px;border-radius:8px;cursor:pointer;font-weight:700;font-size:11px">🏷️ Atribuir PAT</button>'))
+          + '</div>'
+          + '<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').split(' ').slice(0,3).join(' '))+'</span></div>'
+          + '<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(uptime||'—')+'</span></div>'
+          + '<div><span style="color:var(--g400)">Último contato:</span> <span style="font-size:10px">'+lastSeen+'</span></div>'
+          + (a.usuarioLogado ? '<div style="grid-column:1/-1"><span style="color:var(--g400)">Usuário:</span> <span>'+escapeHtml(a.usuarioLogado)+'</span></div>' : '')
+        + '</div>'
+      + '</div>'
+      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        + '<button onclick="abrirHistorico(\'' + escapeHtml(a.pat||a.id) + '\')" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
+        + '<button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        + '<button data-sid="' + escapeHtml(a.id) + '" onclick="swActionDirect(\'ping\',this.dataset.sid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
+      + '</div>'
+    + '</div>';
+  }).join('');
 }
 
 // ─── ORGANOGRAMA ─────────────────────────────────────────────────
@@ -17100,4 +17154,9 @@ function monSetView(view) {
     }
     if (typeof _prev === 'function') return _prev(id, val);
   };
-})();
+})();      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        + '<button data-hist="' + escapeHtml(a.pat||a.id) + '" onclick="abrirHistorico(this.dataset.hist)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
+        + '<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        + '<button data-aid="' + escapeHtml(a.id) + '" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
+      + '</div>'
+    + '</div>';
