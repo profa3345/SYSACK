@@ -784,67 +784,7 @@ function startFirestoreListeners() {
     STATE.mobiliario = snap2arr(snap);
   }, function(e){ console.error('[Banco] mobiliario erro:', e.message); });
 
-  // scAtivos — Santa Clara: listener em tempo real, atualiza card automaticamente
-  db.collection('scAtivos').onSnapshot(function(snap) {
-    STATE.scAtivos = snap2arr(snap);
-    var page = document.getElementById('page-santa-clara');
-    if (page && page.classList.contains('active') && typeof renderSantaClara === 'function') renderSantaClara();
-    console.log('[Banco] scAtivos:', STATE.scAtivos.length);
-  }, function(e){ console.error('[Banco] scAtivos erro:', e.message); });
-
-  // terceirizadaAtivos — Mindworks: listener em tempo real
-  db.collection('terceirizadaAtivos').onSnapshot(function(snap) {
-    STATE.terceirizadaAtivos = snap2arr(snap);
-    var hoje = new Date(); hoje.setHours(0,0,0,0);
-    STATE.terceirizadaAtivos.forEach(function(t) {
-      if (!t.dataEnvio) return;
-      var envio = new Date(t.dataEnvio); envio.setHours(0,0,0,0);
-      var dias = 0, d = new Date(envio);
-      while (d <= hoje) { var dow = d.getDay(); if (dow !== 0 && dow !== 6) dias++; d.setDate(d.getDate()+1); }
-      t.diasUteis = dias;
-    });
-    var page = document.getElementById('page-terceirizada');
-    if (page && page.classList.contains('active') && typeof renderTerceirizada === 'function') renderTerceirizada();
-    var overdue = STATE.terceirizadaAtivos.filter(function(t){ return !t.retornado && t.diasUteis > 10; });
-    nbUpdate('nb-terc', overdue.length);
-    console.log('[Banco] terceirizadaAtivos:', STATE.terceirizadaAtivos.length);
-  }, function(e){ console.error('[Banco] terceirizadaAtivos erro:', e.message); });
-
-  // movimentacoes — histórico: listener em tempo real
-  db.collection('movimentacoes').orderBy('data', 'desc').limit(500).onSnapshot(function(snap) {
-    STATE.movimentacoes = snap2arr(snap);
-    console.log('[Banco] movimentacoes:', STATE.movimentacoes.length);
-  }, function(e){ console.error('[Banco] movimentacoes erro:', e.message); });
-
-  // técnicos — A-DSI + Mindworks
-  db.collection('tecnicos').onSnapshot(function(snap) {
-    STATE.tecnicos = snap2arr(snap);
-    console.log('[Banco] tecnicos:', STATE.tecnicos.length);
-  }, function(e){ console.error('[Banco] tecnicos erro:', e.message); });
-
-  // eventos detectados pelo Event Engine
-  db.collection('eventos_detectados').orderBy('detecEm', 'desc').limit(100).onSnapshot(function(snap) {
-    STATE.eventosDetectados = snap2arr(snap);
-  }, function(e){ console.error('[Banco] eventosDetectados erro:', e.message); });
-
   console.log('[Banco] Listeners iniciados');
-
-  // Renotifica gestor sobre aprovações pendentes a cada 4h
-  setInterval(function() {
-    var urgentes = (STATE.aprovacoes || []).filter(function(a) {
-      if (a.status !== 'pendente') return false;
-      var criado = a.createdAt ? new Date(a.createdAt.seconds ? a.createdAt.seconds*1000 : a.createdAt) : null;
-      return criado && (Date.now() - criado.getTime()) > 86400000;
-    });
-    if (!urgentes.length || !window._fs || !window._fs.httpsCallable) return;
-    window._fs.httpsCallable('renotificarGestorAprovacoesPendentes')({
-      urgentes: urgentes.length,
-      itens: urgentes.slice(0,10).map(function(a) {
-        var criado = a.createdAt ? new Date(a.createdAt.seconds ? a.createdAt.seconds*1000 : a.createdAt) : new Date();
-        return { tipo: a.tipo||'—', pat: a.pat||a.ativo||'—', dias: Math.floor((Date.now()-criado.getTime())/86400000) };
-      }),
-    }).catch(function(){});
-  }, 4 * 60 * 60 * 1000);
 }
 
 // ── FIRESTORE WRITE HELPERS ───────────────────────────────────
@@ -6118,166 +6058,64 @@ async function recusarMovimentacao(aprovId) {
 }
 
 async function executarMovimentacaoAprovada(aprov) {
-  const det    = aprov.detalhes || {};
-  const pat    = det.patAntigo  || aprov.pat || '—';
-  const gestor = CURRENT_USER?.nome || 'Gestor';
-  const agora  = new Date().toISOString().split('T')[0];
+  const det = aprov.detalhes || {};
 
-  // ── Helper: grava histórico imutável no ativo ───────────────
-  async function gravarHistoricoAtivo(titulo, desc, dot) {
-    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
-    if (!ativo?.id || !window._fs?.httpsCallable) return;
-    try {
-      await window._fs.httpsCallable('adicionarNotaHistorico')({
-        ativoId: ativo.id,
-        nota:    desc,
-        tipo:    dot === 'violet' ? 'transferencia' : dot === 'orange' ? 'transferencia' : 'atualizacao',
-      });
-    } catch(e) { console.warn('[Histórico]', e.message); }
-  }
-
-  // ── Helper: grava na coleção movimentacoes ──────────────────
-  async function gravarMovimentacao(de, para, tipo) {
-    const mov = {
-      pat, ativo: det.descAtivo || pat,
-      tipo, de, para,
-      chamadoId:    aprov.chamadoId || '',
-      tecnico:      gestor,
-      aprovadoPor:  gestor,
-      status:       'aprovado',
-      data:         new Date(),
-    };
-    await fsAdd('movimentacoes', mov, STATE.movimentacoes);
-  }
-
-  // ── Mindworks ───────────────────────────────────────────────
   if (det.destino === 'mindworks') {
-    const dataRecolh = det.dataRecolhimento || agora;
+    // Registra na lista de terceirizadas com prazo
+    const dataRecolh = det.dataRecolhimento || new Date().toISOString().split('T')[0];
     const prazo      = det.prazoTerceirizada || 10;
     const vencimento = calcularDiasUteis(new Date(dataRecolh), prazo);
-    const tecNome    = getTecNome(det.tecnicoTerceirizada) || '—';
 
     const tercItem = {
-      chamadoId:      aprov.chamadoId,
-      pat,
-      ativo:          det.descAtivo || pat,
-      tecnicoId:      det.tecnicoTerceirizada || '',
-      tecnicoTerc:    det.tecnicoTerceirizada || '',
-      tecnicoMwNome:  tecNome,
-      tecnicoEmail:   '',
-      dataEnvio:      dataRecolh,
-      prazoRetorno:   vencimento.toISOString().split('T')[0],
+      id:            'TERC-' + Date.now(),
+      chamadoId:     aprov.chamadoId,
+      pat:           det.patAntigo || aprov.pat,
+      ativo:         det.patAntigo || aprov.pat,
+      tecnicoId:     det.tecnicoTerceirizada || '',
+      dataEnvio:     dataRecolh,
+      prazoRetorno:  vencimento.toISOString().split('T')[0],
       prazoUteisTotal: prazo,
-      status:         'aguardando-retorno',
-      retornado:      false,
-      diasUteis:      0,
-      etapa:          'aguardando-retorno',
+      status:        'aguardando-retorno',
+      retornado:     false,
+      diasUteis:     0,
     };
-    await fsAdd('terceirizadaAtivos', tercItem, STATE.terceirizadaAtivos);
-    await gravarMovimentacao('A-DSI', 'Mindworks — ' + tecNome, 'Terceirizada');
-    await gravarHistoricoAtivo(
-      'Enviado para Mindworks (aprovado pelo gestor)',
-      `Técnico: ${tecNome} · Prazo: ${vencimento.toISOString().split('T')[0]} · Chamado: ${aprov.chamadoId||'—'}`,
-      'orange'
-    );
-
-    // Atualiza status do ativo
-    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
-    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'manut', updatedAt: new Date().toISOString() });
-
-    // Alerta técnico Mindworks sobre prazo (5 dias a partir do envio)
-    if (window._fs?.httpsCallable) {
-      window._fs.httpsCallable('alertarPrazoTerceirizada')({
-        tercId: 'novo', pat,
-        prazoRetorno: vencimento.toISOString().split('T')[0],
-        diasRestantes: prazo,
-        tecnicoNome:  tecNome,
-        chamadoId:    aprov.chamadoId || '',
-      }).catch(() => {});
-    }
-
-    showToast('📤 Máquina registrada na Mindworks · Prazo: ' + prazo + ' dias úteis', 'info', 5000);
+    if (!STATE.terceirizadaAtivos) STATE.terceirizadaAtivos = [];
+    STATE.terceirizadaAtivos.unshift(tercItem);
+    await fsAdd('terceirizadaAtivos', tercItem);
+    showToast('📦 Máquina registrada na Empresa Terceirizada com prazo de ' + prazo + ' dias úteis.', 'info', 5000);
   }
 
-  // ── Santa Clara ─────────────────────────────────────────────
   if (det.destino === 'santa-clara') {
     const scItem = {
-      chamadoId:    aprov.chamadoId || '',
-      pat,
-      ativo:        det.descAtivo || pat,
-      desc:         det.descAtivo || pat,
-      local:        det.scLocal   || '',
-      loc:          det.scLocal   || '',
-      fotoUrl:      det.scFoto    || '',
-      foto:         det.scFoto    || '',
-      dataEntrada:  agora,
-      status:       'armazenado',
-      aprovadoPor:  gestor,
-      historicoLocais: [{
-        local:   det.scLocal || '',
-        fotoUrl: det.scFoto  || '',
-        data:    new Date().toISOString(),
-        tecnico: gestor,
-      }],
+      id:        'SC-' + Date.now(),
+      chamadoId: aprov.chamadoId,
+      pat:       det.patAntigo || aprov.pat,
+      local:     det.scLocal || '',
+      foto:      '', // upload da foto é feito separadamente
+      dataEntrada: new Date().toISOString().split('T')[0],
+      status:    'armazenado',
     };
-    await fsAdd('scAtivos', scItem, STATE.scAtivos);
-    await gravarMovimentacao('A-DSI', 'Santa Clara — ' + (det.scLocal || '—'), 'Santa Clara');
-    await gravarHistoricoAtivo(
-      'Enviado para Santa Clara (aprovado pelo gestor)',
-      `Local: ${det.scLocal || '—'} · Chamado: ${aprov.chamadoId || '—'} · Aprovado por: ${gestor}`,
-      'violet'
-    );
-
-    // Atualiza status do ativo
-    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
-    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'sc', loc: det.scLocal || '', updatedAt: new Date().toISOString() });
-
-    showToast('📦 Máquina registrada em Santa Clara: ' + (det.scLocal || '—'), 'success', 5000);
+    if (!STATE.scAtivos) STATE.scAtivos = [];
+    STATE.scAtivos.unshift(scItem);
+    await fsAdd('scAtivos', scItem);
+    showToast('📦 Máquina registrada em Santa Clara: ' + det.scLocal, 'info', 5000);
   }
 
-  // ── Reutilizada ─────────────────────────────────────────────
   if (det.destino === 'reutilizada') {
-    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
-    if (ativo?.id) {
-      const updateData = {
-        status:    'ativo',
-        local:     det.reutLocal   || ativo.local,
-        resp:      det.reutUsuario || det.reutGrupo || ativo.resp,
-        updatedAt: new Date().toISOString(),
-      };
-      if (det.reutNomenclatura === 'sim' && det.reutNovoNome) {
-        updateData.desc     = det.reutNovoNome;
-        updateData.hostname = det.reutNovoNome;
+    // Atualiza localização do ativo no sistema
+    if (det.patNovo || det.patAntigo) {
+      const pat = det.patNovo || det.patAntigo;
+      const ativo = (STATE.ativos || []).find(a => a.pat === pat);
+      if (ativo) {
+        if (det.reutLocal)  ativo.local = det.reutLocal;
+        if (det.reutNome)   ativo.desc  = det.reutNome;
+        if (det.reutTipoUso) ativo.tipoUso = det.reutTipoUso;
+        await fsUpdate('ativos', ativo.id, {
+          local: det.reutLocal, desc: det.reutNome || ativo.desc,
+          tipoUso: det.reutTipoUso, updatedAt: new Date().toISOString(),
+        });
       }
-      if (det.reutTipoUso) updateData.tipoUso = det.reutTipoUso;
-      await fsUpdate('ativos', ativo.id, updateData);
     }
-    await gravarMovimentacao('—', det.reutLocal || '—', 'Reutilização Interna');
-    await gravarHistoricoAtivo(
-      'Reutilizado internamente (aprovado pelo gestor)',
-      `Novo local: ${det.reutLocal || '—'} · Uso: ${det.reutTipoUso === 'usuario' ? det.reutUsuario : det.reutGrupo || '—'}` +
-      (det.reutNomenclatura === 'sim' ? ` · Novo nome: ${det.reutNovoNome || '—'}` : ''),
-      'green'
-    );
-    showToast('🔄 Máquina reutilizada: ' + (det.reutLocal || '—'), 'success', 4000);
-  }
-
-  // ── Descarte ────────────────────────────────────────────────
-  if (det.destino === 'descarte') {
-    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
-    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'descarte', updatedAt: new Date().toISOString() });
-    await gravarMovimentacao('A-DSI', 'Descarte', 'Descarte');
-    await gravarHistoricoAtivo('Encaminhado para descarte (aprovado pelo gestor)', `Motivo: ${det.descarteMotivo || '—'}`, 'red');
-    showToast('♻️ Máquina encaminhada para descarte', 'info', 4000);
-  }
-
-  // ── Leilão ──────────────────────────────────────────────────
-  if (det.destino === 'leilao') {
-    const ativo = (STATE.ativos || []).find(a => a.pat === pat);
-    if (ativo?.id) await fsUpdate('ativos', ativo.id, { status: 'leilao', updatedAt: new Date().toISOString() });
-    await gravarMovimentacao('A-DSI', 'Leilão/Pregão', 'Leilão');
-    await gravarHistoricoAtivo('Encaminhado para leilão (aprovado pelo gestor)', `Processo: ${det.leilaoProcesso || '—'}`, 'violet');
-    showToast('🏛️ Máquina encaminhada para leilão', 'info', 4000);
   }
 }
 
@@ -9131,33 +8969,45 @@ function renderSwitches(){
       const marcaModelo= [s.marca, s.modelo].filter(v => v && v !== 'undefined').join(' ') || '—';
       const local      = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
       const portasLabel= (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0)+'/'+s.totalPortas : '—/—';
-      return `<div class='sw-card'>
-        <div class='sw-card-header' style='background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px'>
-          <div style='width:36px;height:36px;border-radius:8px;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>\${ico}</div>
-          <div style='flex:1;min-width:0;margin-left:10px'>
-            <div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>\${hostname}</div>
-            <div style='font-size:10.5px;color:#94A3B8;margin-top:2px'>\${marcaModelo}</div>
-          </div>
-          \${swStatusHtml(s.status)}
-        </div>
-        <div class='sw-card-body'>
-          <div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>\${s.ip||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Local</span><span class='val' style='\${local==='—'?'color:var(--g400);font-style:italic':''}'>\${local}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:\${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ \${s.uptime||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>\${s.firmware||'—'}</span></div>
-          \${s.tipo!=='ap'&&s.tipo!=='firewall'?\`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: \${portasLabel}</span><span>\${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:\${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:\${pct}%;height:100%;border-radius:4px'></div></div></div>\`:''}
-        </div>
-        <div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>\${renderPortMinimap(s)}</div></div>
-        <div class='sw-card-actions'>
-          <button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('\${s.id}')">⚙️ Gerenciar</button>
-          <button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('\${s.id}')">📜 Histórico</button>
-          <button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>
-          <button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','\${s.id}')">📶 Ping</button>
-          <button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','\${s.id}')">🖥️ SSH</button>
-          <button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','\${s.id}')">💾 Backup</button>
-        </div>
-      </div>`;
-    }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
+      // Build card HTML using string concatenation to avoid nested template literal escaping issues
+      const portasBar = s.tipo !== 'ap' && s.tipo !== 'firewall'
+        ? '<div style="margin-top:8px">'
+          + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px">'
+          + '<span>Portas: ' + portasLabel + '</span><span>' + pct + '%</span></div>'
+          + '<div style="background:var(--g200);border-radius:4px;height:5px;overflow:hidden">'
+          + '<div style="background:' + (pct > 85 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--success)') + ';width:' + pct + '%;height:100%;border-radius:4px"></div>'
+          + '</div></div>'
+        : '';
+      const localStyle = local === '—' ? 'color:var(--g400);font-style:italic' : '';
+      const uptimeColor = s.status === 'online' ? 'var(--success)' : 'var(--danger)';
+
+      return '<div class="sw-card">'
+        + '<div class="sw-card-header" style="background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px">'
+          + '<div style="width:36px;height:36px;border-radius:8px;background:' + bg + ';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">' + ico + '</div>'
+          + '<div style="flex:1;min-width:0;margin-left:10px">'
+            + '<div style="font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + hostname + '</div>'
+            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">' + marcaModelo + '</div>'
+          + '</div>'
+          + swStatusHtml(s.status)
+        + '</div>'
+        + '<div class="sw-card-body">'
+          + '<div class="mdm-card-field"><span class="lbl">IP</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:11px">' + (s.ip || '—') + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Local</span><span class="val" style="' + localStyle + '">' + local + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Uptime</span><span class="val" style="color:' + uptimeColor + '">⏱ ' + (s.uptime || '—') + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Firmware</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:10.5px">' + (s.firmware || '—') + '</span></div>'
+          + portasBar
+        + '</div>'
+        + '<div class="sw-card-ports"><div style="display:flex;flex-wrap:wrap;gap:2px">' + renderPortMinimap(s) + '</div></div>'
+        + '<div class="sw-card-actions">'
+          + '<button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSwitch('' + s.id + '')">⚙️ Gerenciar</button>'
+          + '<button class="mdm-action-btn mab-info" onclick="abrirHistSwitch('' + s.id + '')">📜 Histórico</button>'
+          + '<button class="mdm-action-btn mab-success" onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>'
+          + '<button class="mdm-action-btn mab-warning" onclick="swActionDirect('ping','' + s.id + '')">📶 Ping</button>'
+          + '<button class="mdm-action-btn mab-dark" onclick="swActionDirect('ssh','' + s.id + '')">🖥️ SSH</button>'
+          + '<button class="mdm-action-btn mab-violet" onclick="swActionDirect('backup-config','' + s.id + '')">💾 Backup</button>'
+        + '</div>'
+      + '</div>';
+    }).join('') || '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
   } else {
     const tbody=document.getElementById('sw-table-body');
     if(tbody) tbody.innerHTML=filtered.map(s=>`<tr><td class='td-mono' style='color:var(--accent)'>${s.pat}</td><td style='font-weight:700;font-family:JetBrains Mono,monospace'>${s.hostname}</td><td><span class='tag'>${s.tipo}</span></td><td>${s.marca} ${s.modelo}</td><td class='td-mono' style='color:var(--accent-hi)'>${s.ip}</td><td>${s.local}</td><td>${s.portasUso||0}/${s.totalPortas||0}</td><td class='td-mono' style='font-size:10.5px'>${(s.vlans||[]).map(v=>v.id).join(', ')||'—'}</td><td class='td-mono' style='font-size:10.5px'>${s.firmware||'—'}</td><td style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</td><td>${swStatusHtml(s.status)}</td><td><div class='flex gap-4'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶</button></div></td></tr>`).join('')||'<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum</td></tr>';
