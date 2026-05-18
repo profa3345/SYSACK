@@ -350,6 +350,8 @@ window.initFCM = async function() {
     };
 
     document.getElementById('fb-offline-bar')?.remove();
+    // Limpa fila offline corrompida ao conectar
+    setTimeout(limparFilaOfflineCorrempida, 2000);
     console.log('[Banco] ✓ Conectado — sysack-829e2');
     showToast('🗄️ Banco de Dados conectado', 'success');
 
@@ -494,6 +496,33 @@ async function offlineEnqueue(tipo, col, docId, data) {
   }
 }
 
+// Limpa operações corrompidas da fila offline (col vazia ou inválida)
+async function limparFilaOfflineCorrempida() {
+  try {
+    const db = await getOfflineDB();
+    const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+    const store = tx.objectStore(OFFLINE_STORE);
+    const ops = await new Promise((res, rej) => {
+      const req = store.getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror   = () => rej(req.error);
+    });
+    let removidas = 0;
+    for (const op of ops) {
+      if (!op.col || typeof op.col !== 'string' || op.col.trim() === '') {
+        store.delete(op.id);
+        removidas++;
+      }
+    }
+    if (removidas > 0) {
+      console.warn('[OfflineQueue] ' + removidas + ' operação(ões) corrompida(s) removida(s) automaticamente');
+      atualizarBannerOffline();
+    }
+  } catch(e) {
+    console.warn('[OfflineQueue] Erro ao limpar fila:', e.message);
+  }
+}
+
 // Conta operações pendentes
 async function offlineCount() {
   try {
@@ -533,8 +562,16 @@ async function offlineSync() {
       if (op.blobKeys?.length) {
         data = await offlineRestaurarBlobs(data);
       }
+      // Valida col antes de tentar sync — evita n.indexOf crash
+      if (!op.col || typeof op.col !== 'string' || op.col.trim() === '') {
+        console.warn('[OfflineSync] Operação com col inválida descartada:', op);
+        const tx2 = db.transaction(OFFLINE_STORE, 'readwrite');
+        tx2.objectStore(OFFLINE_STORE).delete(op.id);
+        erros++;
+        continue;
+      }
       if (op.tipo === 'add') {
-        await fsAdd(op.col, data);
+        await fsAdd(op.col, data, null, true); // _fromSync=true evita reenfileirar
       } else if (op.tipo === 'update' && op.docId) {
         await fsUpdate(op.col, op.docId, data);
       }
@@ -637,7 +674,13 @@ const COLS_COM_FILA_OFFLINE = new Set([
   'alertas_rede', 'empregados',
 ]);
 
-async function fsAdd(col, data, localArr) {
+async function fsAdd(col, data, localArr, _fromSync = false) {
+  // Valida col — evita crash no Firestore com coleção inválida
+  if (!col || typeof col !== 'string' || col.trim() === '') {
+    console.error('[Banco] fsAdd: col inválida:', col);
+    return null;
+  }
+
   if (FB_READY && db && window._fs) {
     try {
       const { collection, addDoc, serverTimestamp } = window._fs;
@@ -652,8 +695,8 @@ async function fsAdd(col, data, localArr) {
     } catch (err) { console.error('[Banco] fsAdd:', err); }
   }
 
-  // Offline: enfileira se a coleção suporta fila offline
-  if (COLS_COM_FILA_OFFLINE.has(col)) {
+  // Offline: enfileira — mas NUNCA reenfileira se já veio da fila (evita loop)
+  if (!_fromSync && COLS_COM_FILA_OFFLINE.has(col)) {
     // Enfileira tudo — fotos são salvas no blob store separado
     await offlineEnqueue('add', col, null, data);
     // Atualiza STATE local imediatamente para UX fluida
