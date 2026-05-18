@@ -191,7 +191,7 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
     <div class="sb-group" id="grp-ativos">
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="computador,workstation,notebook,desktop"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="9" height="7" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M11 7h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Computadores</a>
-      <a class="nav-i nav-sub" data-page="ativos" data-tipo="monitor"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M6 13h4M8 13v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Monitores</a>
+      <a class="nav-i nav-sub" data-page="monitores"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M6 13h4M8 13v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Monitores <span class="nav-badge" id="nb-monitores-sem-pat">0</span></a>
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="servidor,server-linux"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Servidores</a>
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="switch,router,ap,firewall,access point"><svg viewBox="0 0 16 16" fill="none"><circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M6 8h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Dispositivos de rede</a>
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="outro,rack,storage,appliance,ups,camera"><svg viewBox="0 0 16 16" fill="none"><path d="M5 2h6l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1Z" stroke="currentColor" stroke-width="1.4"/></svg>Dispositivos</a>
@@ -2704,17 +2704,6 @@ window.dispatchEvent(new Event('firebase-ready'));
           <button class="close-btn" onclick="closeModal('modal-ar-inventario')">X</button>
         </div>
         <div class="modal-body" id="ar-inv-body" style="max-height:70vh;overflow-y:auto"></div>
-
-        <!-- Monitores/Periféricos conectados -->
-        <div style="margin-top:16px;border-top:1px solid var(--g100);padding-top:14px">
-          <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;display:flex;align-items:center;gap:8px">
-            🖥️ Monitores Conectados
-            <span style="font-size:10px;font-weight:400;color:var(--g400);text-transform:none">detectados via WMI · atualizado a cada 5 min</span>
-          </div>
-          <div id="ar-monitores-section">
-            <div style="padding:12px;text-align:center;color:var(--g400);font-size:12px">Carregando...</div>
-          </div>
-        </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="closeModal('modal-ar-inventario')">Fechar</button>
           <button class="btn btn-primary" onclick="closeModal('modal-ar-inventario');arAbrirViewer(STATE_AGENTS.list.find(a=>a.hostname===document.getElementById('ar-inv-title').textContent)?.id)">
@@ -3054,6 +3043,122 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <!-- EMPREGADOS & AUSÊNCIAS -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- MONITORES                                               -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="page" id="page-monitores">
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Gestão de Monitores</h2>
+          <p class="text-sm text-muted">Monitores detectados automaticamente + cadastro de patrimônio</p>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap">
+          <input class="form-control" id="mon-search" style="width:220px;margin:0" placeholder="🔍 Serial, PAT, modelo, PC..." oninput="renderMonitores()">
+          <select class="form-control" id="mon-filter-status" style="width:160px;margin:0" onchange="renderMonitores()">
+            <option value="">Todos</option>
+            <option value="sem-pat">⚠️ Sem PAT</option>
+            <option value="com-pat">✅ Com PAT</option>
+            <option value="movido">🔄 Movimentados</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="abrirCadastroMonitorManual()">+ Cadastrar Monitor</button>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+        <div class="stat-card blue">  <div class="stat-label">Detectados</div>     <div class="stat-value" id="mon-kpi-total">—</div></div>
+        <div class="stat-card red">   <div class="stat-label">Sem patrimônio</div> <div class="stat-value" id="mon-kpi-sem-pat">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Com patrimônio</div> <div class="stat-value" id="mon-kpi-com-pat">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Movimentados</div>   <div class="stat-value" id="mon-kpi-movidos">—</div></div>
+      </div>
+
+      <!-- Grid de monitores -->
+      <div id="mon-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px"></div>
+    </div>
+
+    <!-- Modal: atribuir PAT ao monitor -->
+    <div class="modal-overlay" id="modal-atribuir-pat-monitor">
+      <div class="modal" style="max-width:500px">
+        <div class="modal-header">
+          <h3>🏷️ Atribuir Patrimônio ao Monitor</h3>
+          <button class="close-btn" onclick="closeModal('modal-atribuir-pat-monitor')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="mon-pat-info" style="background:var(--g50);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px"></div>
+
+          <div class="form-group">
+            <label class="form-label fw-700">Número de Patrimônio (PAT)</label>
+            <div style="display:flex;gap:8px">
+              <input class="form-control" id="mon-pat-input" placeholder="Ex: 78625" style="flex:1;font-size:16px;font-weight:700;font-family:monospace"
+                oninput="monPatInputChange(this.value)" onkeydown="if(event.key==='Enter') confirmarPatMonitor()">
+              <button class="btn btn-secondary" onclick="abrirCameraMonitorPAT()" title="Ler PAT pela câmera do celular">📷</button>
+            </div>
+            <div style="font-size:11px;color:var(--g400);margin-top:4px">Digite, leia pelo código QR/barras ou use a câmera para escanear a plaqueta</div>
+          </div>
+
+          <!-- Preview da câmera -->
+          <div id="mon-camera-area" style="display:none;margin-bottom:16px">
+            <div style="background:#000;border-radius:10px;overflow:hidden;position:relative;aspect-ratio:4/3;max-height:260px">
+              <video id="mon-camera-video" style="width:100%;height:100%;object-fit:cover" playsinline autoplay muted></video>
+              <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+                <div style="width:200px;height:80px;border:2px solid #2563EB;border-radius:6px;box-shadow:0 0 0 4000px rgba(0,0,0,.4)"></div>
+              </div>
+              <div style="position:absolute;bottom:10px;left:0;right:0;text-align:center;color:#fff;font-size:11px">Aponte para a plaqueta de patrimônio</div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn btn-primary btn-sm" style="flex:1" onclick="capturarFotoPatMonitor()">📸 Capturar</button>
+              <button class="btn btn-ghost btn-sm" onclick="fecharCameraMonitor()">Cancelar</button>
+            </div>
+            <canvas id="mon-camera-canvas" style="display:none"></canvas>
+          </div>
+
+          <!-- Preview da foto capturada -->
+          <div id="mon-foto-preview" style="display:none;margin-bottom:16px">
+            <img id="mon-foto-img" style="width:100%;border-radius:8px;border:1px solid var(--g200)">
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mon-foto-preview').style.display='none';document.getElementById('mon-pat-input').value=''">🔄 Nova foto</button>
+              <div id="mon-ocr-status" style="font-size:12px;color:var(--g500);padding:6px 0"></div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Observação (opcional)</label>
+            <input class="form-control" id="mon-pat-obs" placeholder="Ex: monitor da recepção...">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-atribuir-pat-monitor')">Cancelar</button>
+          <button class="btn btn-primary" id="mon-pat-confirmar-btn" onclick="confirmarPatMonitor()" disabled>✅ Atribuir PAT</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: cadastro manual de monitor -->
+    <div class="modal-overlay" id="modal-monitor-manual">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+          <h3>+ Cadastrar Monitor Manualmente</h3>
+          <button class="close-btn" onclick="closeModal('modal-monitor-manual')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="grid-2">
+            <div class="form-group"><label class="form-label req">Número de Série</label><input class="form-control" id="mon-man-serial" placeholder="S/N do monitor"></div>
+            <div class="form-group"><label class="form-label">Patrimônio (PAT)</label><input class="form-control" id="mon-man-pat" placeholder="Ex: 78625"></div>
+            <div class="form-group"><label class="form-label">Fabricante</label><input class="form-control" id="mon-man-fab" placeholder="Ex: Dell, LG, Samsung"></div>
+            <div class="form-group"><label class="form-label">Modelo</label><input class="form-control" id="mon-man-modelo" placeholder="Ex: P2422H"></div>
+            <div class="form-group"><label class="form-label">Tamanho (pol.)</label><input class="form-control" id="mon-man-tam" placeholder="Ex: 24"></div>
+            <div class="form-group"><label class="form-label">Localização</label><input class="form-control" id="mon-man-local" placeholder="Ex: Sala 205"></div>
+          </div>
+          <div class="form-group"><label class="form-label">PC vinculado (hostname/PAT)</label><input class="form-control" id="mon-man-pc" placeholder="Hostname ou PAT do computador"></div>
+          <div class="form-group"><label class="form-label">Observação</label><textarea class="form-control" id="mon-man-obs" rows="2"></textarea></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-monitor-manual')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarMonitorManual()">✅ Cadastrar</button>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="page-empregados">
       <div class="flex items-center justify-between mb-20">
         <div>
