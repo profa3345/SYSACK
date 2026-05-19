@@ -4898,11 +4898,7 @@ function renderAssistenciaRemota() {
       </td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
-      <td style="font-size:12px;color:var(--g600)">
-        ${escapeHtml(a.usuarioLogado||'—')}
-        ${a.vpnAtiva ? '<span style="font-size:10px;background:#EFF6FF;color:#1D4ED8;padding:1px 5px;border-radius:6px;margin-left:4px" title="' + escapeHtml(a.vpnNome||'VPN') + '">🔒 VPN</span>' : ''}
-        ${(!a.naRedeCorp && !a.dcAlcanca && !a.vpnAtiva && a.status==='online') ? '<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:1px 5px;border-radius:6px;margin-left:4px" title="DC inacessível — máquina fora da rede">⚠️ Sem rede</span>' : ''}
-      </td>
+      <td style="font-size:12px;color:var(--g600)">${escapeHtml(a.usuarioLogado||'—')}</td>
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
@@ -4911,16 +4907,7 @@ function renderAssistenciaRemota() {
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')"
-            ${ a.status!=='online'
-               ? 'disabled title="Agente offline"'
-               : (!a.naRedeCorp && !a.dcAlcanca && !a.vpnAtiva && !a.fortiClientAtivo)
-                 ? 'style="background:#D97706" title="Fora da rede — peça ao usuário conectar ao FortiClient VPN"'
-                 : '' }>🖥️ ${
-            (!a.naRedeCorp && !a.dcAlcanca && !a.vpnAtiva && a.status==='online')
-              ? '⚠️ Acessar'
-              : '🖥️ Acessar'
-          }</button>
+          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" ${a.status!=='online'?'disabled title="Agente offline"':''}>🖥️ Acessar</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')">📋 Info</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')">📦</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarPatches('${a.id}','${escapeHtml(a.hostname||a.id)}')">🔒</button>
@@ -4931,213 +4918,50 @@ function renderAssistenciaRemota() {
 }
 
 // ── ABRIR REMOTE VIEWER ───────────────────────────────────────
-// ─── ACESSO REMOTO — entrada por credenciais AD ──────────────────────────────
-
 async function arAbrirViewer(agentId) {
-  const agente = STATE_AGENTS.list.find(a => a.id === agentId)
-              || (STATE.ativos||[]).find(a => a.id === agentId);
+  const agente = STATE_AGENTS.list.find(a => a.id === agentId);
   if (!agente) return showToast('Agente não encontrado', 'warning');
-  const online = agente.status === 'online' || agente.reachable;
-  if (!online) return showToast('Máquina offline', 'danger');
-  _arMostrarModalCreds(agentId, agente);
-}
+  if (agente.status !== 'online') return showToast('Agente offline — não é possível conectar', 'danger');
 
-function _arMostrarModalCreds(agentId, agente) {
-  document.getElementById('modal-ar-creds')?.remove();
-  const hostname  = agente.hostname || agentId;
-  const ip        = agente.ip || '';
-  const loginSug  = (CURRENT_USER?.email || '').split('@')[0].toLowerCase();
+  showToast('Iniciando sessão remota com ' + (agente.hostname || agentId) + '...', 'info', 3000);
 
-  // ── Status de rede da máquina alvo ───────────────────────────────────────────
-  const dcAlcanca  = agente.dcAlcanca         || false;
-  const dcMs       = agente.dcLatenciaMs      || null;
-  const vpnAtiva   = agente.vpnAtiva          || false;
-  const vpnNome    = agente.vpnNome           || '';
-  const fortiAtivo = agente.fortiClientAtivo  || false;
-  const naRedeCorp = agente.naRedeCorp        || dcAlcanca || vpnAtiva;
-  // IP em faixa interna da CESAN (10.x, 172.16-31.x, 192.168.x)
-  const ipInterno  = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(ip||'');
-
-  // Determina ícone + texto + aviso com base no status de rede
-  let netIcon, netTxt, netCor, netAviso = null, bloquear = false;
-  if (dcAlcanca) {
-    netIcon = '✅'; netCor = '#059669';
-    netTxt  = 'Na rede corporativa' + (dcMs != null ? ' · DC ' + dcMs + 'ms' : '');
-  } else if (vpnAtiva) {
-    netIcon = '🔒'; netCor = '#2563EB';
-    netTxt  = 'VPN ativa' + (vpnNome ? ' — ' + vpnNome : '');
-  } else if (fortiAtivo) {
-    netIcon = '⚠️'; netCor = '#D97706';
-    netTxt  = 'FortiClient instalado · VPN desconectada';
-    netAviso = 'Peça ao usuário que conecte a VPN da CESAN no FortiClient antes de continuar. Sem VPN o AD não consegue validar as credenciais e a sessão RDP vai falhar.';
-    bloquear = true;
-  } else if (ipInterno) {
-    netIcon = '✅'; netCor = '#059669';
-    netTxt  = 'IP corporativo (' + ip + ')';
-  } else {
-    netIcon = '❌'; netCor = '#DC2626';
-    netTxt  = 'Fora da rede · DC inacessível';
-    netAviso = 'A máquina está fora da rede da CESAN e sem VPN. O RDP com NLA exige o DC para validar as credenciais — a sessão não vai abrir. Peça ao usuário conectar ao FortiClient VPN e tente novamente.';
-    bloquear = true;
-  }
-
-  // Bloco HTML do status de rede (inserido no modal)
-  const redeBlock =
-    '<div style="display:flex;align-items:center;gap:8px;background:' + (bloquear ? '#FEF2F2' : '#F0FDF4')
-    + ';border:1px solid ' + (bloquear ? '#FECACA' : '#BBF7D0') + ';border-radius:8px;padding:9px 12px;font-size:12px">'
-      + '<span style="font-size:14px">' + netIcon + '</span>'
-      + '<div>'
-        + '<div style="font-weight:700;color:' + netCor + '">' + escapeHtml(netTxt) + '</div>'
-        + (netAviso
-          ? '<div style="color:#7F1D1D;margin-top:3px;line-height:1.5">' + escapeHtml(netAviso) + '</div>'
-          : '')
-      + '</div>'
-    + '</div>';
-
-  const modal = document.createElement('div');
-  modal.id    = 'modal-ar-creds';
-  modal.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
-
-  modal.innerHTML =
-    '<div style="background:var(--panel,#fff);border-radius:16px;max-width:440px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden">'
-
-      // Header escuro
-      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:20px 24px;display:flex;align-items:center;gap:14px">'
-        +'<div style="width:44px;height:44px;border-radius:12px;background:#1D4ED8;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">🔐</div>'
-        +'<div>'
-          +'<div style="color:#F1F5F9;font-weight:800;font-size:15px">Acesso Remoto — Active Directory</div>'
-          +'<div style="color:#94A3B8;font-size:12px;margin-top:3px;font-family:monospace">'+escapeHtml(hostname)+(ip?' · '+escapeHtml(ip):'')+'</div>'
-        +'</div>'
-      +'</div>'
-
-      // Info + status de rede
-      +'<div style="padding:16px 24px 0;display:flex;flex-direction:column;gap:8px">'
-        +'<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:10px 14px;font-size:12px;color:#1E40AF;line-height:1.6">'
-          +'Use seu <strong>login e senha do Windows</strong> (mesmos do computador/Outlook).<br>'
-          +'As credenciais autenticam via <strong>RDP com NLA</strong> na máquina alvo — não são armazenadas.'
-        +'</div>'
-        // Status de rede da máquina alvo (VPN / DC)
-        + redeBlock
-      +'</div>'
-
-      // Campos
-      +'<div style="padding:20px 24px">'
-
-        // Usuário
-        +'<div class="form-group" style="margin-bottom:16px">'
-          +'<label class="form-label" style="font-weight:700;margin-bottom:8px">Usuário do Active Directory</label>'
-          +'<div style="display:flex;border:1px solid var(--g300,#cbd5e1);border-radius:8px;overflow:hidden;background:var(--panel,#fff)" id="ar-user-box">'
-            // CESAN\ fixo — não editável
-            +'<div style="background:var(--g100,#f1f5f9);padding:10px 14px;font-size:14px;font-weight:800;color:var(--g700,#374151);border-right:1px solid var(--g200,#e2e8f0);display:flex;align-items:center;white-space:nowrap;font-family:monospace;letter-spacing:.02em;user-select:none">CESAN\\</div>'
-            // Só o login
-            +'<input id="ar-login" type="text" style="flex:1;border:none;outline:none;padding:10px 12px;font-size:14px;font-weight:600;font-family:monospace;background:transparent;color:var(--g900,#111)" placeholder="seu.login" autocomplete="username" spellcheck="false" autocapitalize="none" autocorrect="off" value="'+escapeHtml(loginSug)+'">'
-          +'</div>'
-          +'<div style="font-size:11px;color:var(--g400,#9ca3af);margin-top:5px">Digite apenas o login, sem CESAN\\ nem @cesan.com.br</div>'
-        +'</div>'
-
-        // Senha
-        +'<div class="form-group" style="margin-bottom:8px">'
-          +'<label class="form-label" style="font-weight:700;margin-bottom:8px">Senha</label>'
-          +'<div style="position:relative">'
-            +'<input id="ar-senha" type="password" style="width:100%;box-sizing:border-box;padding:10px 44px 10px 12px;font-size:14px;border:1px solid var(--g300,#cbd5e1);border-radius:8px;outline:none;background:var(--panel,#fff);color:var(--g900,#111)" placeholder="Senha do Windows / Outlook" autocomplete="current-password">'
-            +'<button type="button" id="ar-eye" onclick="_arOlho()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;color:var(--g400,#9ca3af);padding:4px" title="Mostrar/ocultar senha">👁</button>'
-          +'</div>'
-          +'<div style="font-size:11px;color:var(--g400,#9ca3af);margin-top:5px">A mesma senha do computador — sem formato especial</div>'
-        +'</div>'
-
-        // Erro
-        +'<div id="ar-erro" style="display:none;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 14px;font-size:12px;color:#DC2626;margin-top:4px"></div>'
-
-      +'</div>'
-
-      // Footer
-      +'<div style="padding:0 24px 20px;display:flex;gap:10px;justify-content:flex-end">'
-        +'<button onclick="document.getElementById(&quot;modal-ar-creds&quot;).remove()" class="btn btn-ghost">Cancelar</button>'
-        +'<button id="btn-ar-ok" data-aid="'+escapeHtml(agentId)+'" onclick="_arConectar(this.dataset.aid)" class="btn btn-primary" style="min-width:150px" '+(bloquear?'disabled title="Máquina sem rede corporativa — peça ao usuário conectar ao FortiClient VPN"':'')+'>🖥️ Conectar via RDP</button>'
-      +'</div>'
-
-    +'</div>';
-
-  document.body.appendChild(modal);
-
-  // Foca na senha se login já veio sugerido, senão no login
-  setTimeout(() => {
-    (loginSug ? document.getElementById('ar-senha') : document.getElementById('ar-login'))?.focus();
-  }, 80);
-
-  // Enter no login → pula para senha; Enter na senha → conectar
-  document.getElementById('ar-login')?.addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('ar-senha')?.focus(); });
-  document.getElementById('ar-senha')?.addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('btn-ar-ok')?.click(); });
-}
-
-function _arOlho() {
-  const i=document.getElementById('ar-senha'), b=document.getElementById('ar-eye');
-  if (!i) return;
-  const ok = i.type==='password';
-  i.type = ok?'text':'password';
-  if (b) b.textContent = ok?'🙈':'👁';
-}
-
-async function _arConectar(agentId) {
-  const login = document.getElementById('ar-login')?.value?.trim();
-  const senha  = document.getElementById('ar-senha')?.value;
-  const erro   = document.getElementById('ar-erro');
-  const btn    = document.getElementById('btn-ar-ok');
-
-  if (!login) { if (erro){erro.style.display='';erro.textContent='Informe seu login AD.';} document.getElementById('ar-login')?.focus(); return; }
-  if (!senha)  { if (erro){erro.style.display='';erro.textContent='Informe sua senha.';} document.getElementById('ar-senha')?.focus(); return; }
-  if (login.includes('\\')||login.includes('@')) {
-    if (erro){erro.style.display='';erro.textContent='Digite só o login, sem CESAN\\ nem @cesan.com.br. O domínio já está pré-configurado.';}
-    document.getElementById('ar-login')?.focus(); return;
-  }
-
-  if (btn){btn.disabled=true;btn.textContent='Iniciando...';}
-
-  // Remove modal imediatamente — senha some da tela
-  document.getElementById('modal-ar-creds')?.remove();
-
-  const agente   = STATE_AGENTS.list.find(a=>a.id===agentId)||(STATE.ativos||[]).find(a=>a.id===agentId);
-  const hostname = agente?.hostname || agentId;
-  const dominio  = 'CESAN';
-
-  // Captura credenciais por closure antes de qualquer await
-  const _login = login;
-  const _senha = senha;
-
-  showToast('🔐 Conectando em ' + hostname + ' como CESAN\\' + _login + '...', 'info', 5000);
-
-  // Cria sessão no Firestore SEM a senha
+  // Cria sessão no Banco
   let sessaoId;
   try {
-    const doc = await fsAdd('sessoes_remotas', {
-      agentId, hostname, ip: agente?.ip||'',
-      iniciadorUid: CURRENT_USER?.uid||'', iniciadorNome: CURRENT_USER?.nome||'',
-      adLogin: _login, dominio,
-      status: 'iniciando', tipo: 'rdp-guacamole',
-      criadoEm: new Date().toISOString(),
+    const sessaoDoc = await fsAdd('sessoes_remotas', {
+      agentId,
+      hostname:      agente.hostname || agentId,
+      ip:            agente.ip || '',
+      iniciadorUid:  CURRENT_USER?.uid || '',
+      iniciadorNome: CURRENT_USER?.nome || '',
+      status:        'iniciando',
+      tipo:          'websocket',
+      createdAt:     new Date().toISOString(),
     });
-    sessaoId = doc?.name?.split('/').pop() || 'sess_'+Date.now();
-  } catch { sessaoId = 'sess_'+Date.now(); }
+    sessaoId = sessaoDoc?.name?.split('/').pop() || 'sess_' + Date.now();
+  } catch {
+    sessaoId = 'sess_' + Date.now();
+  }
 
-  // Envia comando ao cliente Windows (sem senha)
-  await arEnviarComando(agentId, 'iniciar_acesso_remoto', { sessaoId, port:3389 }, 'Sessão RDP via SYSACK');
+  // Envia comando para o agente iniciar o tunnel WebSocket
+  await arEnviarComando(agentId, 'iniciar_acesso_remoto', {
+    sessaoId, port: 9000,
+  }, 'Sessão de acesso remoto via SYSACK');
 
-  auditLog('REMOTE_ACCESS_START', 'agents', agentId, 'computador', { hostname, sessaoId, ip:agente?.ip, adLogin:_login });
+  // Audit log
+  auditLog('REMOTE_ACCESS_START', 'agents', agentId, 'computador', {
+    hostname: agente.hostname, sessaoId, ip: agente.ip,
+  });
 
-  // Abre viewer com credenciais em memória (closure)
-  setTimeout(() => iniciarViewerRemoto(agentId, sessaoId, agente, { adUser:_login, adPass:_senha, dominio }), 2000);
+  // Abre o viewer após 2s (tempo para o agente iniciar o tunnel)
+  setTimeout(() => iniciarViewerRemoto(agentId, sessaoId, agente), 2000);
 }
 
-
 // ── REMOTE VIEWER (embeds direto no SYSACK) ───────────────────
-function iniciarViewerRemoto(agentId, sessaoId, agente, adCreds) {
+function iniciarViewerRemoto(agentId, sessaoId, agente) {
   const hostname = agente?.hostname || agentId;
-  const wsPort   = agente?.webSocketPort || 9001;
-  const wsIp     = agente?.ip || agente?.lanIP || 'localhost';
-  // Credenciais AD em closure — nunca gravadas, usadas só para o handshake RDP
-  const _adUser  = adCreds?.adUser  || '';
-  const _adPass  = adCreds?.adPass  || '';
-  const _dom     = adCreds?.dominio || 'CESAN';
+  const wsPort   = agente?.webSocketPort || 9000;
+  const wsIp     = agente?.ip || 'localhost';
 
   // Remove viewer anterior se houver
   document.getElementById('remote-viewer-overlay')?.remove();
@@ -8193,78 +8017,32 @@ function copiarCmdInstall() {
 }
 
 function baixarInstaladorAgente() {
-  // Gera o script de instalacao do agente desktop
-  const script = `# SYSACK Agent Desktop Installer
-# Execute como Administrador
-param([switch]$Install,[switch]$Remove,[switch]$Status)
-$ErrorActionPreference = 'Stop'
-$InstallDir  = 'C:\Program Files\SYSACK\agent-desktop'
-$ServiceName = 'SYSACKAgentDesktop'
-$NodeUrl     = 'https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi'
+  // Gera um pacote ZIP com o wizard visual (Instalar-SysackClient.bat + .ps1)
+  // O usuário só precisa clicar duas vezes no .bat — ele cuida do resto
+  const fbProject = (typeof FB_PROJECT !== 'undefined') ? FB_PROJECT : 'sysack-829e2';
+  const relayUrl  = (window.__SYSACK_CONFIG__?.relayUrl) || 'wss://sysack-relay.run.app';
 
-If ($Install) {
-  Write-Host 'Instalando SYSACK Agent Desktop...' -ForegroundColor Cyan
-  
-  # Verifica/instala Node.js
-  If (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Host 'Baixando Node.js...'
-    $tmp = "$env:TEMP\node-setup.msi"
-    Invoke-WebRequest -Uri $NodeUrl -OutFile $tmp -UseBasicParsing
-    Start-Process msiexec -ArgumentList "/i $tmp /quiet /norestart" -Wait
-    Remove-Item $tmp -Force
-    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH','Machine')
-    Write-Host 'Node.js instalado' -ForegroundColor Green
-  }
-  
-  # Cria diretório
-  New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-  
-  # Cria package.json
-  @{ name='sysack-agent-desktop'; version='2.0.0'; main='agent.js'; dependencies=@{ ws='8.16.0' } } |
-    ConvertTo-Json | Set-Content "$InstallDir\package.json"
-  
-  # Cria config
-  @{ firebaseProjectId='sysack-829e2'; firebaseApiKey='SUA_API_KEY'; agentId=$env:COMPUTERNAME; webSocketPort=9000 } |
-    ConvertTo-Json | Set-Content "$InstallDir\config.json"
-  
-  # Baixa o agente principal do SYSACK
-  Invoke-WebRequest -Uri "https://sysack.vercel.app/agent-desktop.js" -OutFile "$InstallDir\agent.js" -UseBasicParsing -ErrorAction SilentlyContinue
-  
-  # Instala dependências
-  Push-Location $InstallDir; npm install --production --silent; Pop-Location
-  
-  # Cria serviço Windows
-  $node = (Get-Command node).Path
-  sc.exe create $ServiceName binPath= "\"$node\" \"$InstallDir\agent.js\"" start= auto DisplayName= "SYSACK Agent Desktop" | Out-Null
-  sc.exe description $ServiceName "SYSACK - Gerenciamento remoto de computadores" | Out-Null
-  sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
-  Start-Service -Name $ServiceName
-  
-  Write-Host '================================================' -ForegroundColor Green
-  Write-Host 'SYSACK Agent Desktop instalado com sucesso!' -ForegroundColor Green
-  Write-Host "O computador $env:COMPUTERNAME aparecera no SYSACK em ~30s" -ForegroundColor Green
-  Write-Host '================================================' -ForegroundColor Green
-}
+  // Os instaladores estão pré-compilados no servidor SYSACK
+  // Baixa os 2 arquivos necessários: .ps1 (wizard) + .bat (launcher)
+  const base = 'https://sysack.vercel.app/installer';
 
-If ($Remove) {
-  Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
-  sc.exe delete $ServiceName | Out-Null
-  Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
-  Write-Host 'SYSACK Agent Desktop removido.' -ForegroundColor Yellow
-}
 
-If ($Status) {
-  $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
-  Write-Host "Status: $($svc?.Status ?? 'NAO INSTALADO')" -ForegroundColor $(If ($svc?.Status -eq 'Running') {'Green'} Else {'Red'})
-  Get-Content "$InstallDir\agent.log" -Tail 20 -ErrorAction SilentlyContinue
-}`;
+  // Gera os dois arquivos separadamente (não pode criar .zip no browser sem lib)
+  // Baixa o .ps1 primeiro, depois o .bat
+  // Baixa os arquivos do servidor
+  const a1 = document.createElement('a');
+  a1.href = base + '/SysackClient-Installer.ps1';
+  a1.download = 'SysackClient-Installer.ps1';
+  a1.click();
 
-  const blob = new Blob([script], { type:'text/plain;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = 'Install-SysackAgentDesktop.ps1'; a.click();
-  URL.revokeObjectURL(url);
-  showToast('Instalador baixado! Execute como Administrador no PC alvo.', 'success', 5000);
+  setTimeout(() => {
+    const a2 = document.createElement('a');
+    a2.href = base + '/Instalar-SysackClient.bat';
+    a2.download = 'Instalar-SysackClient.bat';
+    a2.click();
+  }, 800);
+
+  showToast('📦 Dois arquivos baixados! Coloque na mesma pasta e clique duas vezes no .bat', 'success', 8000);
   closeModal('modal-ar-download');
 }
 
