@@ -763,7 +763,13 @@ function startFirestoreListeners() {
       pat:    d.pat    || d.patrimonio || '',
       // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
       desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      tipo:   d.tipo   || 'workstation',
+      // NBK* no hostname → notebook; SERV*/VSERV* → servidor/server-linux
+      tipo:   (() => {
+        const hn = (d.hostname || d.sysName || d.nome || d.desc || '').toUpperCase();
+        if (/^NBK/i.test(hn)) return 'notebook';
+        if (d.tipo) return d.tipo;
+        return 'workstation';
+      })(),
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
       status: d.status || (d.reachable ? 'ativo' : 'offline'),
@@ -940,8 +946,6 @@ function renderPage(id) {
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
     'organograma':   () => renderOrganograma(),
-    'servidores':    () => renderServidores(),
-    'monitores':     () => renderMonitores(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -1075,12 +1079,17 @@ function renderAtivos() {
   }
 
   const lista = STATE.ativos.filter(a => {
-    // Exclui servidores da lista geral (têm aba própria)
-    // salvo se o filtro ativo for especificamente para servidor
-    const filtrandoServidor = _ativoFiltroTipo && (_ativoFiltroTipo.includes('servidor') || _ativoFiltroTipo.includes('server-linux'));
-    if (!filtrandoServidor && typeof isServidor === 'function' && isServidor(a)) return false;
+    // NBK* no hostname → força tipo notebook para fins de filtro
+    const nomeAtivo = (a.hostname || a.desc || a.nome || '').toUpperCase();
+    const ehNotebook = /^NBK/i.test(nomeAtivo);
+    if (ehNotebook && a.tipo !== 'notebook') {
+      // Atualiza tipo local para filtro funcionar (não grava no Firestore)
+      a._tipoEfetivo = 'notebook';
+    } else {
+      a._tipoEfetivo = a.tipo || '';
+    }
     if (tipos.length > 0) {
-      const t = (a.tipo || '').toLowerCase();
+      const t = (a._tipoEfetivo || a.tipo || '').toLowerCase();
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
@@ -2803,9 +2812,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const tabMap = {
           'computador,workstation,notebook,desktop': 1,
           'notebook': 2,
-          'switch,router,ap,firewall': 4,
+          'monitor': 3,
           'switch,router,ap,firewall,access point': 4,
-          'printer,impressora,ups,camera': 6,
+          'servidor,server-linux': 5,
+          'outro,rack,storage,appliance,ups,camera': 6,
+          'impressora,printer': 6,
+          'software': 6,
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
@@ -9013,283 +9025,6 @@ function filtrarEmpregadosModal() {
           ${e.ramal ? `<div style="font-size:11px;color:var(--g500);flex-shrink:0">📞 ${escapeHtml(e.ramal)}</div>` : ''}
         </div>`).join('')
     : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum empregado encontrado</div>';
-}
-
-
-// ═══════════════════════════════════════════════════════════════
-// DETECÇÃO DE SERVIDORES
-// Regra: qualquer hostname contendo "serv" (case-insensitive)
-//   - Com "v" imediatamente antes de "serv" → Virtual (VSERV, VMSERVER)
-//   - Sem "v" antes → Físico (SERV-DC01, DSERV-BRI, ARA-SERV01)
-// ═══════════════════════════════════════════════════════════════
-
-function _srvNome(a) {
-  const candidatos = [a.hostname, a.sysName, a.nome, a.desc, a.name, a.pat, a.sysDescr];
-  for (const c of candidatos) {
-    const s = (c || '').trim();
-    if (s && s.toUpperCase() !== (a.ip||'').toUpperCase() && s.length > 2) return s;
-  }
-  return '';
-}
-
-function _contemServ(nome) {
-  return /serv/i.test(nome || '');
-}
-
-function _contemVServ(nome) {
-  // V imediatamente antes de SERV, ou VMSERVER
-  return /vserv|vmserver/i.test(nome || '');
-}
-
-function isFisicoServidor(a) {
-  const hn = _srvNome(a);
-  const tipo = (a.tipo || '').toLowerCase();
-  return (_contemServ(hn) && !_contemVServ(hn))
-      || (tipo === 'servidor' && !_contemVServ(hn));
-}
-
-function isVirtualServidor(a) {
-  const hn = _srvNome(a);
-  const tipo = (a.tipo || '').toLowerCase();
-  return _contemVServ(hn) || tipo === 'server-linux';
-}
-
-function isServidor(a) {
-  const hn = _srvNome(a);
-  const tipo = (a.tipo || '').toLowerCase();
-  return _contemServ(hn) || tipo === 'servidor' || tipo === 'server-linux';
-}
-
-function identificarServidores(ativos) {
-  return (ativos || []).filter(isServidor);
-}
-
-let _srvTab = 'todos';
-
-function srvTab(tab, el) {
-  _srvTab = tab;
-  document.querySelectorAll('.srv-tab-btn').forEach(b => {
-    b.style.background = 'transparent'; b.style.color = 'var(--g500)'; b.style.boxShadow = 'none';
-  });
-  if (el) { el.style.background = '#fff'; el.style.color = 'var(--g900)'; el.style.boxShadow = '0 1px 3px rgba(0,0,0,.1)'; }
-  renderServidores();
-}
-
-function renderServidores() {
-  const q       = (document.getElementById('srv-search')?.value || '').toLowerCase();
-  const fTipo   = document.getElementById('srv-filter-tipo')?.value || '';
-  const fStatus = document.getElementById('srv-filter-status')?.value || '';
-
-  let lista = identificarServidores(STATE.ativos);
-  if (fTipo === 'fisico'  || _srvTab === 'fisico')  lista = lista.filter(isFisicoServidor);
-  if (fTipo === 'virtual' || _srvTab === 'virtual')  lista = lista.filter(isVirtualServidor);
-  if (fStatus) lista = lista.filter(a => (a.status||'').toLowerCase() === fStatus);
-  if (q) lista = lista.filter(a =>
-    ['hostname','ip','desc','area','pat','sysName'].some(f => (a[f]||'').toLowerCase().includes(q))
-  );
-
-  const todos = identificarServidores(STATE.ativos);
-  const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  sv('srv-kpi-total',    todos.length);
-  sv('srv-kpi-fisicos',  todos.filter(isFisicoServidor).length);
-  sv('srv-kpi-virtuais', todos.filter(isVirtualServidor).length);
-  sv('srv-kpi-online',   todos.filter(a => a.reachable || (a.status||'').toLowerCase() === 'online').length);
-  sv('srv-kpi-offline',  todos.filter(a => ['offline','critico'].includes((a.status||'').toLowerCase())).length);
-  nbUpdate('nb-servidores', todos.length);
-
-  const grid = document.getElementById('srv-grid');
-  if (!grid) return;
-
-  if (!lista.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)">'
-      + '<div style="font-size:40px;margin-bottom:12px">🖥️</div>'
-      + '<div style="font-weight:600">Nenhum servidor encontrado</div>'
-      + '<div style="font-size:12px;margin-top:6px">Identificados por hostname contendo "serv" · Físicos: SERV*, DSERV* · Virtuais: VSERV*, VMSERVER*</div>'
-      + '</div>';
-    return;
-  }
-
-  lista.sort(function(a, b) {
-    const ord = {critico:0, offline:1, alerta:2, online:3, ativo:4};
-    const sa = ord[(a.status||'').toLowerCase()] ?? 5;
-    const sb = ord[(b.status||'').toLowerCase()] ?? 5;
-    if (sa !== sb) return sa - sb;
-    return (_srvNome(a)||'').localeCompare(_srvNome(b)||'');
-  });
-
-  function metricBar(label, val, danger, warn) {
-    if (val == null) return '';
-    const cor = val >= danger ? '#DC2626' : val >= warn ? '#D97706' : '#059669';
-    return '<div style="margin-bottom:5px">'
-      + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>' + label + '</span><span style="font-weight:700;color:' + cor + '">' + val + '%</span></div>'
-      + '<div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:' + cor + ';width:' + Math.min(val,100) + '%;height:100%;border-radius:3px"></div></div>'
-      + '</div>';
-  }
-
-  grid.innerHTML = lista.map(function(a) {
-    const hn      = _srvNome(a) || a.ip || '—';
-    const isVirt  = isVirtualServidor(a);
-    const tLabel  = isVirt ? '☁️ Virtual' : '🖥️ Físico';
-    const tColor  = isVirt ? '#7C3AED' : '#2563EB';
-    const st      = (a.status || 'desconhecido').toLowerCase();
-    const stColor = (st === 'online' || a.reachable) ? '#059669' : st === 'critico' ? '#DC2626' : st === 'offline' ? '#6B7280' : '#D97706';
-    const stLabel = (st === 'online' || a.reachable) ? 'Online' : st.charAt(0).toUpperCase() + st.slice(1);
-    const cpu     = a.cpuPct != null ? a.cpuPct : null;
-    const mem     = a.memPct != null ? a.memPct : null;
-    const disco   = a.discoC_livrePct != null ? Math.round(100 - a.discoC_livrePct) : null;
-    const uptime  = a.uptimeHoras != null
-      ? (a.uptimeHoras >= 24 ? Math.floor(a.uptimeHoras/24) + 'd ' + Math.round(a.uptimeHoras%24) + 'h' : Math.round(a.uptimeHoras) + 'h')
-      : null;
-    const lastSeen = a.lastSeen
-      ? new Date(a.lastSeen.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleString('pt-BR')
-      : '—';
-    const patSection = isVirt
-      ? '<span style="background:#F3F4F6;color:var(--g400);font-size:10px;padding:1px 6px;border-radius:8px">N/A — Virtual</span>'
-      : (a.pat
-          ? '<span style="font-family:monospace;font-weight:700;color:var(--accent)">' + escapeHtml(a.pat) + '</span>'
-            + ' <button data-id="' + escapeHtml(a.id) + '" data-hn="' + escapeHtml(hn) + '" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="font-size:10px;background:#FEF3C7;color:#92400E;border:none;padding:1px 6px;border-radius:8px;cursor:pointer;font-weight:600">✏️</button>'
-          : '<button data-id="' + escapeHtml(a.id) + '" data-hn="' + escapeHtml(hn) + '" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="background:#FEF3C7;color:#92400E;border:none;padding:3px 10px;border-radius:8px;cursor:pointer;font-weight:700;font-size:11px">🏷️ Atribuir PAT</button>');
-
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid ' + tColor + '">'
-      + '<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
-          + '<span style="font-size:22px;flex-shrink:0">' + (isVirt ? '☁️' : '🖥️') + '</span>'
-          + '<div style="min-width:0">'
-            + '<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(hn) + '</div>'
-            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">' + escapeHtml(a.ip||'—') + ' · ' + escapeHtml(a.area||'—') + '</div>'
-          + '</div>'
-        + '</div>'
-        + '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
-          + '<span style="background:' + stColor + '22;color:' + stColor + ';border:1px solid ' + stColor + '44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">' + stLabel + '</span>'
-          + '<span style="background:' + tColor + '22;color:' + tColor + ';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">' + tLabel + '</span>'
-        + '</div>'
-      + '</div>'
-      + '<div style="padding:14px 16px">'
-        + (cpu != null || mem != null || disco != null
-            ? metricBar('CPU', cpu, 90, 70) + metricBar('Memória', mem, 90, 80) + metricBar('Disco C:', disco, 95, 85)
-            : '<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Métricas indisponíveis</div>')
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:8px">'
-          + '<div><span style="color:var(--g400)">PAT: </span>' + patSection + '</div>'
-          + '<div><span style="color:var(--g400)">OS:</span> <span>' + escapeHtml((a.osNome||'—').split(' ').slice(0,3).join(' ')) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">' + (uptime||'—') + '</span></div>'
-          + '<div><span style="color:var(--g400)">Último contato:</span> <span style="font-size:10px">' + lastSeen + '</span></div>'
-        + '</div>'
-      + '</div>'
-      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        + '<button data-pid="' + escapeHtml(a.pat||a.id) + '" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
-        + '<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
-        + '<button data-aid="' + escapeHtml(a.id) + '" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
-      + '</div>'
-    + '</div>';
-  }).join('');
-}
-
-// PAT Servidor
-let _srvPatAtivoId=null, _srvPatStream=null, _srvPatValor=null;
-
-function abrirPatServidor(ativoId, hostname) {
-  _srvPatAtivoId=ativoId; _srvPatValor=null;
-  const info=document.getElementById('srv-pat-info');
-  if(info) info.textContent='🖥️ '+(hostname||ativoId);
-  const a=(STATE.ativos||[]).find(x=>x.id===ativoId);
-  const inp=document.getElementById('srv-pat-digitar-input'); if(inp) inp.value=a?.pat||'';
-  ['srv-pat-confirmacao'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
-  document.getElementById('srv-pat-salvar-btn').disabled=true;
-  srvPatTab('digitar', document.querySelector('.srv-pat-tab'));
-  openModal('modal-pat-servidor');
-}
-
-function fecharModalPatServidor(){srvPatPararCamera();closeModal('modal-pat-servidor');}
-
-function srvPatTab(tab, el) {
-  ['digitar','camera','foto','voz'].forEach(t=>{const p=document.getElementById('srv-pat-panel-'+t);if(p)p.style.display=t===tab?'':'none';});
-  document.querySelectorAll('.srv-pat-tab').forEach(b=>{b.style.background='transparent';b.style.color='var(--g500)';b.style.boxShadow='none';});
-  if(el){el.style.background='#fff';el.style.color='var(--g900)';el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)';}
-  if(tab!=='camera') srvPatPararCamera();
-}
-
-function srvPatValidar(val) {
-  const limpo=(val||'').replace(/[^0-9A-Za-z\-]/g,'').trim();
-  const btn=document.getElementById('srv-pat-salvar-btn');
-  if(limpo.length>=2){_srvPatValor=limpo;srvPatMostrarConfirmacao(limpo);if(btn)btn.disabled=false;}
-  else{_srvPatValor=null;const box=document.getElementById('srv-pat-confirmacao');if(box)box.style.display='none';if(btn)btn.disabled=true;}
-}
-
-function srvPatMostrarConfirmacao(pat) {
-  const box=document.getElementById('srv-pat-confirmacao'),val=document.getElementById('srv-pat-valor-confirmado');
-  if(box)box.style.display='';if(val)val.textContent=pat;
-  const btn=document.getElementById('srv-pat-salvar-btn');if(btn)btn.disabled=false;
-}
-
-async function srvPatIniciarCamera() {
-  const video=document.getElementById('srv-pat-video'),area=document.getElementById('srv-pat-camera-area');
-  if(area)area.style.display='';
-  try{_srvPatStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=_srvPatStream;}
-  catch(e){showToast('Câmera indisponível: '+e.message,'error');}
-}
-function srvPatPararCamera(){if(_srvPatStream){_srvPatStream.getTracks().forEach(t=>t.stop());_srvPatStream=null;}const a=document.getElementById('srv-pat-camera-area');if(a)a.style.display='none';}
-
-async function srvPatLerFoto(input) {
-  const file=input.files?.[0];if(!file)return;
-  const prev=document.getElementById('srv-pat-foto-preview'),img=document.getElementById('srv-pat-foto-img'),status=document.getElementById('srv-pat-foto-status');
-  if(prev)prev.style.display='';if(img)img.src=URL.createObjectURL(file);if(status)status.textContent='🤖 Analisando...';
-  const reader=new FileReader();
-  reader.onload=async function(e){
-    const b64=e.target.result.split(',')[1];
-    if(window._fs?.httpsCallable){
-      try{const res=await window._fs.httpsCallable('extrairPATdaFoto')({imageBase64:b64});const pat=res.data?.pat;
-        if(pat){if(status){status.textContent='✅ PAT: '+pat;status.style.color='var(--success)';}srvPatMostrarConfirmacao(pat);}
-        else if(status)status.textContent='⚠️ Não detectado. Digite na aba Digitar.';}
-      catch(e){if(status)status.textContent='⚠️ Erro. Use a aba Digitar.';}
-    } else if(status)status.textContent='⚠️ Use a aba Digitar.';
-  };
-  reader.readAsDataURL(file);
-}
-
-function srvPatIniciarVoz() {
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const status=document.getElementById('srv-pat-voz-status');
-  if(!SR){if(status)status.textContent='❌ Não suportado. Use Chrome.';return;}
-  const rec=new SR();rec.lang='pt-BR';rec.continuous=false;rec.interimResults=false;
-  if(status)status.textContent='🔴 Ouvindo...';
-  rec.onresult=function(e){
-    let txt=e.results[0][0].transcript.replace(/\s+/g,'');
-    const nums={'zero':'0','um':'1','uma':'1','dois':'2','duas':'2','três':'3','quatro':'4','cinco':'5','seis':'6','sete':'7','oito':'8','nove':'9'};
-    Object.entries(nums).forEach(([p,n])=>{txt=txt.replace(new RegExp(p,'gi'),n);});
-    const resultado=txt.replace(/[^0-9A-Za-z\-]/g,'').trim();
-    if(resultado.length>=2){
-      _srvPatValor=resultado;
-      const r=document.getElementById('srv-pat-voz-resultado'),p=document.getElementById('srv-pat-voz-pat'),ba=document.getElementById('srv-pat-voz-btn-area');
-      if(ba)ba.style.display='none';if(r)r.style.display='';if(p)p.textContent=resultado;
-      srvPatMostrarConfirmacao(resultado);
-    } else if(status)status.textContent='⚠️ Não entendi. Tente novamente.';
-  };
-  rec.onerror=function(e){if(status)status.textContent='❌ '+e.error;};
-  rec.start();
-}
-
-function srvPatReiniciarVoz(){
-  _srvPatValor=null;
-  const r=document.getElementById('srv-pat-voz-resultado'),b=document.getElementById('srv-pat-voz-btn-area'),c=document.getElementById('srv-pat-confirmacao'),btn=document.getElementById('srv-pat-salvar-btn');
-  if(r)r.style.display='none';if(b)b.style.display='';if(c)c.style.display='none';if(btn)btn.disabled=true;
-  const s=document.getElementById('srv-pat-voz-status');if(s)s.textContent='Clique e fale o número';
-}
-
-async function confirmarPatServidor() {
-  const pat=_srvPatValor,id=_srvPatAtivoId;
-  if(!pat||!id)return showToast('PAT não definido','warning');
-  const btn=document.getElementById('srv-pat-salvar-btn');
-  setButtonLoading(btn,true,'Salvando...');
-  try{
-    await fsUpdate('ativos',id,{pat,updatedAt:new Date().toISOString()});
-    const ativo=(STATE.ativos||[]).find(a=>a.id===id);
-    if(ativo&&window._fs?.httpsCallable)
-      window._fs.httpsCallable('adicionarNotaHistorico')({ativoId:id,nota:'PAT '+pat+' atribuído ao servidor '+(ativo.hostname||id),tipo:'atualizacao'}).catch(()=>{});
-    fecharModalPatServidor();
-    showToast('✅ PAT '+pat+' atribuído!','success',4000);
-    renderServidores();
-  }catch(e){showToast('Erro: '+e.message,'error');}
-  finally{setButtonLoading(btn,false);}
 }
 
 function renderEmpregados() {
