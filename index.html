@@ -175,7 +175,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       IA &amp; Insights
       <span style="font-size:9px;font-weight:800;background:linear-gradient(135deg,#2563EB,#7C3AED);color:#fff;padding:1px 6px;border-radius:10px;margin-left:auto">NEW</span>
-    </a>
+    <span class="nav-badge" id="nb-alertas-ia">0</span></a>
     <a class="nav-i" data-page="exec-dashboard" title="Dashboard Executivo">
       <svg viewBox="0 0 16 16" fill="none"><path d="M2 12V8l4-4 3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14" cy="3" r="1.5" fill="currentColor" opacity=".5"/></svg>
       Dashboard Executivo
@@ -191,11 +191,11 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
     <div class="sb-group" id="grp-ativos">
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="computador,workstation,notebook,desktop"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="9" height="7" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M11 7h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Computadores</a>
-      <a class="nav-i nav-sub" data-page="ativos" data-tipo="monitor"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M6 13h4M8 13v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Monitores</a>
-      <a class="nav-i nav-sub" data-page="ativos" data-tipo="servidor,server-linux"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Servidores</a>
-      <a class="nav-i nav-sub" data-page="ativos" data-tipo="switch,router,ap,firewall,access point"><svg viewBox="0 0 16 16" fill="none"><circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M6 8h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Dispositivos de rede</a>
+      <a class="nav-i nav-sub" data-page="monitores"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M6 13h4M8 13v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Monitores</a>
+      <a class="nav-i nav-sub" data-page="servidores"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Servidores</a>
+      <a class="nav-i nav-sub" data-page="ativos" data-tipo="switch,router,ap,access point"><svg viewBox="0 0 16 16" fill="none"><circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M6 8h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Dispositivos de rede</a>
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="outro,rack,storage,appliance,ups,camera"><svg viewBox="0 0 16 16" fill="none"><path d="M5 2h6l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1Z" stroke="currentColor" stroke-width="1.4"/></svg>Dispositivos</a>
-      <a class="nav-i nav-sub" data-page="ativos" data-tipo="impressora,printer"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M5 7h6M5 10h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Impressoras</a>
+      <a class="nav-i nav-sub" data-page="impressoras"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M5 7h6M5 10h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Impressoras</a>
       <a class="nav-i nav-sub" data-page="assistencia-remota">
         <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 11v2M11 11v2M3 13h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 6.5h2M9 6.5h2M5 8.5h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
         Assist. Remota
@@ -210,6 +210,10 @@ window.dispatchEvent(new Event('firebase-ready'));
         <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2" fill="currentColor"/><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1" opacity=".4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         Monitor de Rede
         <span class="nav-badge" id="nb-monitor-critico">0</span>
+      </a>
+      <a class="nav-i nav-sub" data-page="firewalls">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M1 6h14M5 6v8M5 9h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Firewalls <span class="nav-badge" id="nb-firewalls">0</span>
       </a>
       <a class="nav-i nav-sub" data-page="topologia">
         <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="2" cy="3" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="14" cy="3" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="2" cy="13" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="14" cy="13" r="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M3 4l4 3M9 9l3 3M13 4l-4 3M7 9l-3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -239,9 +243,9 @@ window.dispatchEvent(new Event('firebase-ready'));
         <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 6h3M4 8.5h5M10 6h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 12v2M11 12v2M3 14h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         Mapa de Ativos
         <span style="font-size:9px;font-weight:800;background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:1px 6px;border-radius:10px;margin-left:auto">MAP</span>
-      </a>
+      <span class="nav-badge" id="nb-ativos">0</span></a>
       <a class="nav-i nav-sub" data-page="movimentacoes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M5 7l2 2 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Movimentações<span class="nav-badge o" id="nb-mov">0</span></a>
-      <a class="nav-i nav-sub" data-page="aprovacoes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Aprovações<span class="nav-badge" id="nb-aprov">0</span></a>
+      <a class="nav-i nav-sub" data-page="aprovacoes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Aprovações<span class="nav-badge" id="nb-aprov">0</span><span class="nav-badge" id="nb-aprovacoes">0</span></a>
     </div>
     <!-- GERÊNCIA -->
     <div class="sb-group-header" onclick="toggleSbGroup('grp-gerencia')">
@@ -269,7 +273,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         <svg viewBox="0 0 16 16" fill="none"><circle cx="6" cy="4.5" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="11" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M1 13c0-2.5 2-4 5-4s5 1.5 5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11 9.5c1.5.3 3 1.3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
         Empregados
         <span class="nav-badge" id="nb-ausentes">0</span>
-      </a>
+      <span class="nav-badge" id="nb-emp">0</span></a>
       <a class="nav-i nav-sub" data-page="lembretes"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 1v3M11 1v3M2 7h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Lembretes</a>
       <a class="nav-i nav-sub" data-page="kb"><svg viewBox="0 0 16 16" fill="none"><path d="M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1Z" stroke="currentColor" stroke-width="1.4"/><path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Base de Conhecimento</a>
       <a class="nav-i nav-sub" data-page="pesquisas"><svg viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5L13 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Pesquisas salvas</a>
@@ -2302,14 +2306,13 @@ window.dispatchEvent(new Event('firebase-ready'));
               <th>Computador</th>
               <th>IP</th>
               <th>Sistema Operacional</th>
-              <th>Usuário Logado</th>
+              <th>Usuário / Rede</th>
               <th>CPU</th>
               <th>RAM</th>
-              <th>Disco C:</th><th>Outros Discos</th>
+              <th>Disco C:</th>
               <th>Uptime</th>
-              <th>Versão Agente</th>
               <th>Último contato</th>
-              <th style="width:180px">Ações</th>
+              <th style="width:190px">Ações</th>
             </tr></thead>
             <tbody id="ar-tbody">
               <tr><td colspan="12" style="text-align:center;padding:40px;color:var(--g400)">
@@ -3047,54 +3050,66 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <!-- EMPREGADOS & AUSÊNCIAS -->
-    <!-- TOPOLOGIA DE REDE -->
+    <!-- PÁGINA: FIREWALLS -->
+    <div class="page" id="page-firewalls">
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🔥 Firewalls</h2>
+          <p class="text-sm text-muted">Dispositivos de segurança detectados via SNMP (Fortinet, pfSense)</p>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap">
+          <input class="form-control" id="fw-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP, modelo..." oninput="renderFirewalls()">
+          <select class="form-control" id="fw-filter-status" style="width:140px;margin:0" onchange="renderFirewalls()">
+            <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option><option value="alerta">Alerta</option>
+          </select>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+        <div class="stat-card blue">  <div class="stat-label">Total</div>    <div class="stat-value" id="fw-kpi-total">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Online</div>   <div class="stat-value" id="fw-kpi-online">—</div></div>
+        <div class="stat-card red">   <div class="stat-label">Offline</div>  <div class="stat-value" id="fw-kpi-offline">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Sem SNMP</div> <div class="stat-value" id="fw-kpi-sem-snmp">—</div></div>
+      </div>
+      <div id="fw-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px"></div>
+    </div>
+
+    <!-- PÁGINA: TOPOLOGIA -->
     <div class="page" id="page-topologia">
       <div class="flex items-center justify-between mb-16" style="flex-wrap:wrap;gap:12px">
         <div>
           <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🗺️ Topologia de Rede</h2>
-          <p class="text-sm text-muted">Mapa físico da rede via LLDP/CDP — atualizado a cada ciclo do agente</p>
+          <p class="text-sm text-muted">Mapa físico via LLDP/CDP — atualizado a cada ciclo do agente</p>
         </div>
         <div class="flex gap-8" style="flex-wrap:wrap;align-items:center">
           <select id="topo-filter-area" class="form-control" style="width:180px;margin:0" onchange="renderTopologia()">
             <option value="">Todas as áreas</option>
           </select>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-ghost btn-sm" onclick="topoZoom(1.2)" title="Zoom +">🔍+</button>
-            <button class="btn btn-ghost btn-sm" onclick="topoZoom(0.8)" title="Zoom -">🔍-</button>
-            <button class="btn btn-ghost btn-sm" onclick="topoReset()" title="Resetar">⟳</button>
-            <button class="btn btn-ghost btn-sm" onclick="topoExportar()" title="Exportar PNG">📥 PNG</button>
-          </div>
-          <div style="display:flex;gap:12px;font-size:11px;align-items:center;color:var(--g500)">
-            <span>🟩 Online</span><span>🟥 Offline</span><span>🟨 Alerta</span>
-            <span style="border-top:2px solid #2563EB;width:24px;display:inline-block"></span>LLDP
-            <span style="border-top:2px dashed #94A3B8;width:24px;display:inline-block"></span>Inferido
+            <button class="btn btn-ghost btn-sm" onclick="topoZoom(1.2)">🔍+</button>
+            <button class="btn btn-ghost btn-sm" onclick="topoZoom(0.8)">🔍−</button>
+            <button class="btn btn-ghost btn-sm" onclick="topoReset()">⟳</button>
+            <button class="btn btn-ghost btn-sm" onclick="topoExportar()">📥 SVG</button>
           </div>
         </div>
       </div>
-
-      <!-- KPIs -->
       <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">
         <div class="stat-card blue">  <div class="stat-label">Dispositivos</div><div class="stat-value" id="topo-kpi-total">—</div></div>
-        <div class="stat-card violet"><div class="stat-label">Links LLDP</div>  <div class="stat-value" id="topo-kpi-links">—</div></div>
-        <div class="stat-card green"> <div class="stat-label">Online</div>       <div class="stat-value" id="topo-kpi-online">—</div></div>
-        <div class="stat-card red">   <div class="stat-label">Offline</div>      <div class="stat-value" id="topo-kpi-offline">—</div></div>
-        <div class="stat-card orange"><div class="stat-label">Sem LLDP</div>     <div class="stat-value" id="topo-kpi-sem-lldp">—</div></div>
+        <div class="stat-card violet"><div class="stat-label">Links LLDP</div> <div class="stat-value" id="topo-kpi-links">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Online</div>     <div class="stat-value" id="topo-kpi-online">—</div></div>
+        <div class="stat-card red">   <div class="stat-label">Offline</div>    <div class="stat-value" id="topo-kpi-offline">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Sem LLDP</div>   <div class="stat-value" id="topo-kpi-sem-lldp">—</div></div>
       </div>
-
-      <!-- Canvas de topologia -->
-      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:14px;overflow:hidden;position:relative">
-        <!-- Toolbar de camadas -->
-        <div style="padding:10px 16px;border-bottom:1px solid var(--g100);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:14px;overflow:hidden">
+        <div style="padding:10px 16px;border-bottom:1px solid var(--g100);display:flex;gap:8px;flex-wrap:wrap">
           <span style="font-size:11px;font-weight:600;color:var(--g500)">MOSTRAR:</span>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-fw"     checked onchange="renderTopologia()"> 🔥 Firewalls</label>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-rt"     checked onchange="renderTopologia()"> 🌐 Roteadores</label>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-sw"     checked onchange="renderTopologia()"> 🔀 Switches</label>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-ap"     checked onchange="renderTopologia()"> 📡 APs</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-fw"  checked onchange="renderTopologia()"> 🔥 Firewalls</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-rt"  checked onchange="renderTopologia()"> 🌐 Roteadores</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-sw"  checked onchange="renderTopologia()"> 🔀 Switches</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-ap"  checked onchange="renderTopologia()"> 📡 APs</label>
           <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-labels" checked onchange="renderTopologia()"> 🏷️ Labels</label>
           <div style="margin-left:auto;font-size:11px;color:var(--g400)" id="topo-last-update"></div>
         </div>
-        <!-- SVG viewport com pan/zoom -->
-        <div id="topo-container" style="width:100%;height:620px;overflow:hidden;cursor:grab;position:relative;background:radial-gradient(circle at 50% 50%, #f8fafc 0%, #f1f5f9 100%)">
+        <div id="topo-container" style="width:100%;height:620px;overflow:hidden;cursor:grab;position:relative;background:radial-gradient(circle at 50% 50%,#f8fafc,#f1f5f9)">
           <svg id="topo-svg" style="width:100%;height:100%" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
@@ -3113,8 +3128,6 @@ window.dispatchEvent(new Event('firebase-ready'));
           </svg>
         </div>
       </div>
-
-      <!-- Painel de detalhes do nó selecionado -->
       <div id="topo-detail-panel" style="display:none;background:var(--panel,#fff);border:0.5px solid var(--line);border-radius:12px;padding:16px 20px;margin-top:12px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">
           <div>
@@ -3126,6 +3139,59 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div id="topo-detail-body" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;font-size:12px"></div>
         <div id="topo-detail-links" style="margin-top:12px"></div>
       </div>
+    </div>
+
+    <!-- PÁGINA: SERVIDORES -->
+    <div class="page" id="page-servidores">
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Servidores</h2>
+          <p class="text-sm text-muted">Servidores físicos e virtuais identificados pelo hostname (SERV*, VSERV*)</p>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap">
+          <div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px">
+            <button class="srv-tab-btn" style="background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('todos',this)">Todos</button>
+            <button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('fisico',this)">🖥️ Físicos</button>
+            <button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('virtual',this)">☁️ Virtuais</button>
+          </div>
+          <input class="form-control" id="srv-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP, área..." oninput="renderServidores()">
+          <select class="form-control" id="srv-filter-status" style="width:140px;margin:0" onchange="renderServidores()">
+            <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option><option value="critico">Crítico</option>
+          </select>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
+        <div class="stat-card blue">   <div class="stat-label">Total</div>    <div class="stat-value" id="srv-kpi-total">—</div></div>
+        <div class="stat-card gray">   <div class="stat-label">Físicos</div>  <div class="stat-value" id="srv-kpi-fisicos">—</div></div>
+        <div class="stat-card violet"> <div class="stat-label">Virtuais</div> <div class="stat-value" id="srv-kpi-virtuais">—</div></div>
+        <div class="stat-card green">  <div class="stat-label">Online</div>   <div class="stat-value" id="srv-kpi-online">—</div></div>
+        <div class="stat-card red">    <div class="stat-label">Offline</div>  <div class="stat-value" id="srv-kpi-offline">—</div></div>
+      </div>
+      <div id="srv-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px"></div>
+    </div>
+
+    <!-- PÁGINA: MONITORES -->
+    <div class="page" id="page-monitores">
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Monitores</h2>
+          <p class="text-sm text-muted">Detectados via WMI (WmiMonitorID) em cada estação com agente instalado</p>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap">
+          <input class="form-control" id="mon-search" style="width:220px;margin:0" placeholder="🔍 Serial, PAT, modelo, PC..." oninput="renderMonitores()">
+          <select class="form-control" id="mon-filter-status" style="width:160px;margin:0" onchange="renderMonitores()">
+            <option value="">Todos</option><option value="sem-pat">Sem PAT</option><option value="com-pat">Com PAT</option><option value="movido">Movidos</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="abrirCadastroMonitorManual()">+ Cadastrar manual</button>
+        </div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+        <div class="stat-card blue">  <div class="stat-label">Total</div>    <div class="stat-value" id="mon-kpi-total">—</div></div>
+        <div class="stat-card red">   <div class="stat-label">Sem PAT</div>  <div class="stat-value" id="mon-kpi-sem-pat">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Com PAT</div>  <div class="stat-value" id="mon-kpi-com-pat">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Movidos</div>  <div class="stat-value" id="mon-kpi-movidos">—</div></div>
+      </div>
+      <div id="mon-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px"></div>
     </div>
 
     <div class="page" id="page-empregados">

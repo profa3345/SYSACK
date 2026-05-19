@@ -940,7 +940,6 @@ function renderPage(id) {
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
     'organograma':   () => renderOrganograma(),
-    'topologia':     () => renderTopologia(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -4899,7 +4898,11 @@ function renderAssistenciaRemota() {
       </td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
-      <td style="font-size:12px;color:var(--g600)">${escapeHtml(a.usuarioLogado||'—')}</td>
+      <td style="font-size:12px;color:var(--g600)">
+        ${escapeHtml(a.usuarioLogado||'—')}
+        ${a.vpnAtiva ? '<span style="font-size:10px;background:#EFF6FF;color:#1D4ED8;padding:1px 5px;border-radius:6px;margin-left:4px" title="' + escapeHtml(a.vpnNome||'VPN') + '">🔒 VPN</span>' : ''}
+        ${(!a.naRedeCorp && !a.dcAlcanca && !a.vpnAtiva && a.status==='online') ? '<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:1px 5px;border-radius:6px;margin-left:4px" title="DC inacessível — máquina fora da rede">⚠️ Sem rede</span>' : ''}
+      </td>
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
@@ -4908,7 +4911,16 @@ function renderAssistenciaRemota() {
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" ${a.status!=='online'?'disabled title="Agente offline"':''}>🖥️ Acessar</button>
+          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')"
+            ${ a.status!=='online'
+               ? 'disabled title="Agente offline"'
+               : (!a.naRedeCorp && !a.dcAlcanca && !a.vpnAtiva && !a.fortiClientAtivo)
+                 ? 'style="background:#D97706" title="Fora da rede — peça ao usuário conectar ao FortiClient VPN"'
+                 : '' }>🖥️ ${
+            (!a.naRedeCorp && !a.dcAlcanca && !a.vpnAtiva && a.status==='online')
+              ? '⚠️ Acessar'
+              : '🖥️ Acessar'
+          }</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')">📋 Info</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')">📦</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarPatches('${a.id}','${escapeHtml(a.hostname||a.id)}')">🔒</button>
@@ -4919,50 +4931,213 @@ function renderAssistenciaRemota() {
 }
 
 // ── ABRIR REMOTE VIEWER ───────────────────────────────────────
+// ─── ACESSO REMOTO — entrada por credenciais AD ──────────────────────────────
+
 async function arAbrirViewer(agentId) {
-  const agente = STATE_AGENTS.list.find(a => a.id === agentId);
+  const agente = STATE_AGENTS.list.find(a => a.id === agentId)
+              || (STATE.ativos||[]).find(a => a.id === agentId);
   if (!agente) return showToast('Agente não encontrado', 'warning');
-  if (agente.status !== 'online') return showToast('Agente offline — não é possível conectar', 'danger');
-
-  showToast('Iniciando sessão remota com ' + (agente.hostname || agentId) + '...', 'info', 3000);
-
-  // Cria sessão no Banco
-  let sessaoId;
-  try {
-    const sessaoDoc = await fsAdd('sessoes_remotas', {
-      agentId,
-      hostname:      agente.hostname || agentId,
-      ip:            agente.ip || '',
-      iniciadorUid:  CURRENT_USER?.uid || '',
-      iniciadorNome: CURRENT_USER?.nome || '',
-      status:        'iniciando',
-      tipo:          'websocket',
-      createdAt:     new Date().toISOString(),
-    });
-    sessaoId = sessaoDoc?.name?.split('/').pop() || 'sess_' + Date.now();
-  } catch {
-    sessaoId = 'sess_' + Date.now();
-  }
-
-  // Envia comando para o agente iniciar o tunnel WebSocket
-  await arEnviarComando(agentId, 'iniciar_acesso_remoto', {
-    sessaoId, port: 9000,
-  }, 'Sessão de acesso remoto via SYSACK');
-
-  // Audit log
-  auditLog('REMOTE_ACCESS_START', 'agents', agentId, 'computador', {
-    hostname: agente.hostname, sessaoId, ip: agente.ip,
-  });
-
-  // Abre o viewer após 2s (tempo para o agente iniciar o tunnel)
-  setTimeout(() => iniciarViewerRemoto(agentId, sessaoId, agente), 2000);
+  const online = agente.status === 'online' || agente.reachable;
+  if (!online) return showToast('Máquina offline', 'danger');
+  _arMostrarModalCreds(agentId, agente);
 }
 
-// ── REMOTE VIEWER (embeds direto no SYSACK) ───────────────────
-function iniciarViewerRemoto(agentId, sessaoId, agente) {
+function _arMostrarModalCreds(agentId, agente) {
+  document.getElementById('modal-ar-creds')?.remove();
+  const hostname  = agente.hostname || agentId;
+  const ip        = agente.ip || '';
+  const loginSug  = (CURRENT_USER?.email || '').split('@')[0].toLowerCase();
+
+  // ── Status de rede da máquina alvo ───────────────────────────────────────────
+  const dcAlcanca  = agente.dcAlcanca         || false;
+  const dcMs       = agente.dcLatenciaMs      || null;
+  const vpnAtiva   = agente.vpnAtiva          || false;
+  const vpnNome    = agente.vpnNome           || '';
+  const fortiAtivo = agente.fortiClientAtivo  || false;
+  const naRedeCorp = agente.naRedeCorp        || dcAlcanca || vpnAtiva;
+  // IP em faixa interna da CESAN (10.x, 172.16-31.x, 192.168.x)
+  const ipInterno  = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(ip||'');
+
+  // Determina ícone + texto + aviso com base no status de rede
+  let netIcon, netTxt, netCor, netAviso = null, bloquear = false;
+  if (dcAlcanca) {
+    netIcon = '✅'; netCor = '#059669';
+    netTxt  = 'Na rede corporativa' + (dcMs != null ? ' · DC ' + dcMs + 'ms' : '');
+  } else if (vpnAtiva) {
+    netIcon = '🔒'; netCor = '#2563EB';
+    netTxt  = 'VPN ativa' + (vpnNome ? ' — ' + vpnNome : '');
+  } else if (fortiAtivo) {
+    netIcon = '⚠️'; netCor = '#D97706';
+    netTxt  = 'FortiClient instalado · VPN desconectada';
+    netAviso = 'Peça ao usuário que conecte a VPN da CESAN no FortiClient antes de continuar. Sem VPN o AD não consegue validar as credenciais e a sessão RDP vai falhar.';
+    bloquear = true;
+  } else if (ipInterno) {
+    netIcon = '✅'; netCor = '#059669';
+    netTxt  = 'IP corporativo (' + ip + ')';
+  } else {
+    netIcon = '❌'; netCor = '#DC2626';
+    netTxt  = 'Fora da rede · DC inacessível';
+    netAviso = 'A máquina está fora da rede da CESAN e sem VPN. O RDP com NLA exige o DC para validar as credenciais — a sessão não vai abrir. Peça ao usuário conectar ao FortiClient VPN e tente novamente.';
+    bloquear = true;
+  }
+
+  // Bloco HTML do status de rede (inserido no modal)
+  const redeBlock =
+    '<div style="display:flex;align-items:center;gap:8px;background:' + (bloquear ? '#FEF2F2' : '#F0FDF4')
+    + ';border:1px solid ' + (bloquear ? '#FECACA' : '#BBF7D0') + ';border-radius:8px;padding:9px 12px;font-size:12px">'
+      + '<span style="font-size:14px">' + netIcon + '</span>'
+      + '<div>'
+        + '<div style="font-weight:700;color:' + netCor + '">' + escapeHtml(netTxt) + '</div>'
+        + (netAviso
+          ? '<div style="color:#7F1D1D;margin-top:3px;line-height:1.5">' + escapeHtml(netAviso) + '</div>'
+          : '')
+      + '</div>'
+    + '</div>';
+
+  const modal = document.createElement('div');
+  modal.id    = 'modal-ar-creds';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+
+  modal.innerHTML =
+    '<div style="background:var(--panel,#fff);border-radius:16px;max-width:440px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden">'
+
+      // Header escuro
+      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:20px 24px;display:flex;align-items:center;gap:14px">'
+        +'<div style="width:44px;height:44px;border-radius:12px;background:#1D4ED8;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">🔐</div>'
+        +'<div>'
+          +'<div style="color:#F1F5F9;font-weight:800;font-size:15px">Acesso Remoto — Active Directory</div>'
+          +'<div style="color:#94A3B8;font-size:12px;margin-top:3px;font-family:monospace">'+escapeHtml(hostname)+(ip?' · '+escapeHtml(ip):'')+'</div>'
+        +'</div>'
+      +'</div>'
+
+      // Info + status de rede
+      +'<div style="padding:16px 24px 0;display:flex;flex-direction:column;gap:8px">'
+        +'<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:10px 14px;font-size:12px;color:#1E40AF;line-height:1.6">'
+          +'Use seu <strong>login e senha do Windows</strong> (mesmos do computador/Outlook).<br>'
+          +'As credenciais autenticam via <strong>RDP com NLA</strong> na máquina alvo — não são armazenadas.'
+        +'</div>'
+        // Status de rede da máquina alvo (VPN / DC)
+        + redeBlock
+      +'</div>'
+
+      // Campos
+      +'<div style="padding:20px 24px">'
+
+        // Usuário
+        +'<div class="form-group" style="margin-bottom:16px">'
+          +'<label class="form-label" style="font-weight:700;margin-bottom:8px">Usuário do Active Directory</label>'
+          +'<div style="display:flex;border:1px solid var(--g300,#cbd5e1);border-radius:8px;overflow:hidden;background:var(--panel,#fff)" id="ar-user-box">'
+            // CESAN\ fixo — não editável
+            +'<div style="background:var(--g100,#f1f5f9);padding:10px 14px;font-size:14px;font-weight:800;color:var(--g700,#374151);border-right:1px solid var(--g200,#e2e8f0);display:flex;align-items:center;white-space:nowrap;font-family:monospace;letter-spacing:.02em;user-select:none">CESAN\\</div>'
+            // Só o login
+            +'<input id="ar-login" type="text" style="flex:1;border:none;outline:none;padding:10px 12px;font-size:14px;font-weight:600;font-family:monospace;background:transparent;color:var(--g900,#111)" placeholder="seu.login" autocomplete="username" spellcheck="false" autocapitalize="none" autocorrect="off" value="'+escapeHtml(loginSug)+'">'
+          +'</div>'
+          +'<div style="font-size:11px;color:var(--g400,#9ca3af);margin-top:5px">Digite apenas o login, sem CESAN\\ nem @cesan.com.br</div>'
+        +'</div>'
+
+        // Senha
+        +'<div class="form-group" style="margin-bottom:8px">'
+          +'<label class="form-label" style="font-weight:700;margin-bottom:8px">Senha</label>'
+          +'<div style="position:relative">'
+            +'<input id="ar-senha" type="password" style="width:100%;box-sizing:border-box;padding:10px 44px 10px 12px;font-size:14px;border:1px solid var(--g300,#cbd5e1);border-radius:8px;outline:none;background:var(--panel,#fff);color:var(--g900,#111)" placeholder="Senha do Windows / Outlook" autocomplete="current-password">'
+            +'<button type="button" id="ar-eye" onclick="_arOlho()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;color:var(--g400,#9ca3af);padding:4px" title="Mostrar/ocultar senha">👁</button>'
+          +'</div>'
+          +'<div style="font-size:11px;color:var(--g400,#9ca3af);margin-top:5px">A mesma senha do computador — sem formato especial</div>'
+        +'</div>'
+
+        // Erro
+        +'<div id="ar-erro" style="display:none;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 14px;font-size:12px;color:#DC2626;margin-top:4px"></div>'
+
+      +'</div>'
+
+      // Footer
+      +'<div style="padding:0 24px 20px;display:flex;gap:10px;justify-content:flex-end">'
+        +'<button onclick="document.getElementById(&quot;modal-ar-creds&quot;).remove()" class="btn btn-ghost">Cancelar</button>'
+        +'<button id="btn-ar-ok" data-aid="'+escapeHtml(agentId)+'" onclick="_arConectar(this.dataset.aid)" class="btn btn-primary" style="min-width:150px" '+(bloquear?'disabled title="Máquina sem rede corporativa — peça ao usuário conectar ao FortiClient VPN"':'')+'>🖥️ Conectar via RDP</button>'
+      +'</div>'
+
+    +'</div>';
+
+  document.body.appendChild(modal);
+
+  // Foca na senha se login já veio sugerido, senão no login
+  setTimeout(() => {
+    (loginSug ? document.getElementById('ar-senha') : document.getElementById('ar-login'))?.focus();
+  }, 80);
+
+  // Enter no login → pula para senha; Enter na senha → conectar
+  document.getElementById('ar-login')?.addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('ar-senha')?.focus(); });
+  document.getElementById('ar-senha')?.addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('btn-ar-ok')?.click(); });
+}
+
+function _arOlho() {
+  const i=document.getElementById('ar-senha'), b=document.getElementById('ar-eye');
+  if (!i) return;
+  const ok = i.type==='password';
+  i.type = ok?'text':'password';
+  if (b) b.textContent = ok?'🙈':'👁';
+}
+
+async function _arConectar(agentId) {
+  const login = document.getElementById('ar-login')?.value?.trim();
+  const senha  = document.getElementById('ar-senha')?.value;
+  const erro   = document.getElementById('ar-erro');
+  const btn    = document.getElementById('btn-ar-ok');
+
+  if (!login) { if (erro){erro.style.display='';erro.textContent='Informe seu login AD.';} document.getElementById('ar-login')?.focus(); return; }
+  if (!senha)  { if (erro){erro.style.display='';erro.textContent='Informe sua senha.';} document.getElementById('ar-senha')?.focus(); return; }
+  if (login.includes('\\')||login.includes('@')) {
+    if (erro){erro.style.display='';erro.textContent='Digite só o login, sem CESAN\\ nem @cesan.com.br. O domínio já está pré-configurado.';}
+    document.getElementById('ar-login')?.focus(); return;
+  }
+
+  if (btn){btn.disabled=true;btn.textContent='Iniciando...';}
+
+  // Remove modal imediatamente — senha some da tela
+  document.getElementById('modal-ar-creds')?.remove();
+
+  const agente   = STATE_AGENTS.list.find(a=>a.id===agentId)||(STATE.ativos||[]).find(a=>a.id===agentId);
   const hostname = agente?.hostname || agentId;
-  const wsPort   = agente?.webSocketPort || 9000;
-  const wsIp     = agente?.ip || 'localhost';
+  const dominio  = 'CESAN';
+
+  // Captura credenciais por closure antes de qualquer await
+  const _login = login;
+  const _senha = senha;
+
+  showToast('🔐 Conectando em ' + hostname + ' como CESAN\\' + _login + '...', 'info', 5000);
+
+  // Cria sessão no Firestore SEM a senha
+  let sessaoId;
+  try {
+    const doc = await fsAdd('sessoes_remotas', {
+      agentId, hostname, ip: agente?.ip||'',
+      iniciadorUid: CURRENT_USER?.uid||'', iniciadorNome: CURRENT_USER?.nome||'',
+      adLogin: _login, dominio,
+      status: 'iniciando', tipo: 'rdp-guacamole',
+      criadoEm: new Date().toISOString(),
+    });
+    sessaoId = doc?.name?.split('/').pop() || 'sess_'+Date.now();
+  } catch { sessaoId = 'sess_'+Date.now(); }
+
+  // Envia comando ao cliente Windows (sem senha)
+  await arEnviarComando(agentId, 'iniciar_acesso_remoto', { sessaoId, port:3389 }, 'Sessão RDP via SYSACK');
+
+  auditLog('REMOTE_ACCESS_START', 'agents', agentId, 'computador', { hostname, sessaoId, ip:agente?.ip, adLogin:_login });
+
+  // Abre viewer com credenciais em memória (closure)
+  setTimeout(() => iniciarViewerRemoto(agentId, sessaoId, agente, { adUser:_login, adPass:_senha, dominio }), 2000);
+}
+
+
+// ── REMOTE VIEWER (embeds direto no SYSACK) ───────────────────
+function iniciarViewerRemoto(agentId, sessaoId, agente, adCreds) {
+  const hostname = agente?.hostname || agentId;
+  const wsPort   = agente?.webSocketPort || 9001;
+  const wsIp     = agente?.ip || agente?.lanIP || 'localhost';
+  // Credenciais AD em closure — nunca gravadas, usadas só para o handshake RDP
+  const _adUser  = adCreds?.adUser  || '';
+  const _adPass  = adCreds?.adPass  || '';
+  const _dom     = adCreds?.dominio || 'CESAN';
 
   // Remove viewer anterior se houver
   document.getElementById('remote-viewer-overlay')?.remove();
@@ -9011,542 +9186,6 @@ function filtrarEmpregadosModal() {
           ${e.ramal ? `<div style="font-size:11px;color:var(--g500);flex-shrink:0">📞 ${escapeHtml(e.ramal)}</div>` : ''}
         </div>`).join('')
     : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum empregado encontrado</div>';
-}
-
-
-// ═══════════════════════════════════════════════════════════════
-// TOPOLOGIA DE REDE — D3-force layout com dados LLDP/CDP
-// ═══════════════════════════════════════════════════════════════
-
-let _topoZoom   = 1;
-let _topoOffset = { x: 0, y: 0 };
-let _topoDrag   = null;
-let _topoNodes  = [];
-let _topoLinks  = [];
-let _topoSimTimeout = null;
-let _topoPositions  = {}; // persiste posições entre re-renders
-
-// Ícones e cores por tipo
-const TOPO_ICONS = { firewall:'🔥', router:'🌐', switch:'🔀', 'switch-acesso':'🔀', 'switch-core':'🔀', 'switch-distribuicao':'🔀', ap:'📡', ups:'🔋', workstation:'💻', notebook:'💻', servidor:'🗄️', 'server-linux':'🐧' };
-const TOPO_COLORS = { firewall:'#7C3AED', router:'#EA580C', 'switch-core':'#0F172A', 'switch-distribuicao':'#1E40AF', 'switch-acesso':'#2563EB', switch:'#2563EB', ap:'#0891B2', ups:'#65A30D', default:'#64748B' };
-const TOPO_LAYER = { firewall:0, router:1, 'switch-core':2, 'switch-distribuicao':2, switch:3, 'switch-acesso':3, ap:4, ups:5, default:6 };
-
-function topoGetColor(tipo, status) {
-  const st = (status||'').toLowerCase();
-  if (st === 'offline') return '#EF4444';
-  if (st === 'alerta' || st === 'critico') return '#F59E0B';
-  return TOPO_COLORS[tipo] || TOPO_COLORS.default;
-}
-
-function topoGetLayer(tipo) { return TOPO_LAYER[tipo] ?? TOPO_LAYER.default; }
-
-function buildTopoGraph() {
-  const fArea    = document.getElementById('topo-filter-area')?.value || '';
-  const showFw   = document.getElementById('topo-show-fw')?.checked !== false;
-  const showRt   = document.getElementById('topo-show-rt')?.checked !== false;
-  const showSw   = document.getElementById('topo-show-sw')?.checked !== false;
-  const showAp   = document.getElementById('topo-show-ap')?.checked !== false;
-
-  const tipoAllowed = new Set();
-  if (showFw) tipoAllowed.add('firewall');
-  if (showRt) { tipoAllowed.add('router'); }
-  if (showSw) { tipoAllowed.add('switch'); tipoAllowed.add('switch-acesso'); tipoAllowed.add('switch-core'); tipoAllowed.add('switch-distribuicao'); }
-  if (showAp) tipoAllowed.add('ap');
-
-  // Coleta todos os dispositivos de rede
-  const devs = (STATE.switches || []).filter(d => {
-    const t = (d.tipo||'').toLowerCase();
-    if (!tipoAllowed.has(t)) return false;
-    if (fArea && d.area !== fArea && d.sigla !== fArea) return false;
-    return true;
-  });
-
-  // Nodes
-  const nodeMap = {};
-  const nodes = devs.map(d => {
-    const id = d.id || d.ip;
-    const tipo = (d.tipo||'switch').toLowerCase();
-    const node = {
-      id,
-      ip:      d.ip || '',
-      label:   d.hostname || d.sysName || d.name || d.ip || '—',
-      tipo,
-      status:  d.status || (d.reachable ? 'online' : 'offline'),
-      area:    d.area || d.sigla || '',
-      local:   d.local || d.sysLocation || '',
-      latency: d.latencyMs || 0,
-      uptime:  d.uptimeH || 0,
-      ifNum:   d.ifNumber || 0,
-      hasSnmp: d.hasSnmp || false,
-      lldpVizinhos: d.lldpVizinhos || [],
-      layer:   topoGetLayer(tipo),
-      raw:     d,
-      // Mantém posição calculada anteriormente
-      x: _topoPositions[id]?.x ?? null,
-      y: _topoPositions[id]?.y ?? null,
-    };
-    nodeMap[id] = node;
-    nodeMap[d.ip] = node; // índice por IP também
-    if (d.hostname) nodeMap[d.hostname.toLowerCase()] = node;
-    if (d.sysName)  nodeMap[d.sysName.toLowerCase()]  = node;
-    return node;
-  });
-
-  // Links via LLDP/CDP
-  const links = [];
-  const linkSet = new Set();
-
-  devs.forEach(d => {
-    const fromId = d.id || d.ip;
-    const vizinhos = d.lldpVizinhos || [];
-
-    vizinhos.forEach(v => {
-      // Tenta encontrar o nó de destino pelo hostname ou IP
-      const remKey = (v.remoteHost||'').toLowerCase();
-      const toNode = nodeMap[remKey] || nodeMap[v.remoteIp] || null;
-      if (!toNode) return; // vizinho não está no nosso inventário
-
-      const toId = toNode.id;
-      const key  = [fromId, toId].sort().join('→');
-      if (linkSet.has(key)) return; // evita duplicatas
-      linkSet.add(key);
-
-      links.push({
-        source:     fromId,
-        target:     toId,
-        localPort:  v.localPort  || '',
-        remotePort: v.remotePort || '',
-        protocolo:  v.protocolo  || 'LLDP',
-        real:       true,
-      });
-    });
-  });
-
-  // Links inferidos por área (quando não há LLDP)
-  // Agrupa switches da mesma área e os liga ao roteador/firewall da área
-  if (links.length === 0 || devs.some(d => !d.lldpVizinhos?.length)) {
-    const byArea = {};
-    nodes.forEach(n => {
-      const key = n.area || 'geral';
-      if (!byArea[key]) byArea[key] = { fw:[], rt:[], sw:[], ap:[] };
-      const t = n.tipo;
-      if (t === 'firewall') byArea[key].fw.push(n);
-      else if (t === 'router') byArea[key].rt.push(n);
-      else if (t.includes('switch')) byArea[key].sw.push(n);
-      else if (t === 'ap') byArea[key].ap.push(n);
-    });
-
-    Object.values(byArea).forEach(area => {
-      const uplinks = [...area.fw, ...area.rt];
-      // switches → roteador/firewall
-      area.sw.forEach(sw => {
-        uplinks.forEach(up => {
-          const key = [sw.id, up.id].sort().join('→');
-          if (!linkSet.has(key)) {
-            linkSet.add(key);
-            links.push({ source: sw.id, target: up.id, real: false, protocolo: 'Inferido' });
-          }
-        });
-        // APs → switches
-        area.ap.forEach(ap => {
-          const key = [ap.id, sw.id].sort().join('→');
-          if (!linkSet.has(key)) {
-            linkSet.add(key);
-            links.push({ source: ap.id, target: sw.id, real: false, protocolo: 'Inferido' });
-          }
-        });
-      });
-    });
-  }
-
-  return { nodes, links, nodeMap };
-}
-
-function forceLayout(nodes, links, width, height) {
-  // Simple force-directed layout (sem D3 — implementado do zero)
-  const ITERATIONS = 200;
-  const K  = Math.sqrt((width * height) / Math.max(nodes.length, 1));
-  const cx = width / 2, cy = height / 2;
-
-  // Inicializa posições por camada se não tiver posição salva
-  const layers = {};
-  nodes.forEach(n => {
-    if (n.x === null || n.y === null) {
-      if (!layers[n.layer]) layers[n.layer] = [];
-      layers[n.layer].push(n);
-    }
-  });
-
-  const maxLayer = Math.max(...Object.keys(layers).map(Number), 0);
-  Object.entries(layers).forEach(([layer, ns]) => {
-    const ly = layer === '0' ? cy * 0.2 : (Number(layer) / (maxLayer + 1)) * height * 0.85 + height * 0.08;
-    ns.forEach((n, i) => {
-      const spread = (ns.length - 1) * 120;
-      n.x = cx - spread / 2 + i * (spread / Math.max(ns.length - 1, 1));
-      n.y = ly;
-      n.vx = 0; n.vy = 0;
-    });
-  });
-  nodes.forEach(n => { if (!n.vx) { n.vx = 0; n.vy = 0; } });
-
-  // Build adjacency for force calc
-  const adjMap = {};
-  links.forEach(l => {
-    if (!adjMap[l.source]) adjMap[l.source] = new Set();
-    if (!adjMap[l.target]) adjMap[l.target] = new Set();
-    adjMap[l.source].add(l.target);
-    adjMap[l.target].add(l.source);
-  });
-
-  const nodeById = {};
-  nodes.forEach(n => nodeById[n.id] = n);
-
-  for (let iter = 0; iter < ITERATIONS; iter++) {
-    const alpha = 1 - iter / ITERATIONS;
-
-    // Repulsão entre todos os pares
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i], b = nodes[j];
-        let dx = b.x - a.x, dy = b.y - a.y;
-        const dist = Math.max(Math.sqrt(dx*dx + dy*dy), 0.1);
-        const force = (K * K) / dist * alpha;
-        const fx = (dx/dist) * force, fy = (dy/dist) * force;
-        a.vx -= fx; a.vy -= fy;
-        b.vx += fx; b.vy += fy;
-      }
-    }
-
-    // Atração pelos links
-    links.forEach(l => {
-      const a = nodeById[l.source], b = nodeById[l.target];
-      if (!a || !b) return;
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const dist = Math.max(Math.sqrt(dx*dx + dy*dy), 0.1);
-      const idealDist = K * (l.real ? 1.5 : 2.5);
-      const force = (dist - idealDist) / dist * 0.3 * alpha;
-      const fx = dx * force, fy = dy * force;
-      a.vx += fx; a.vy += fy;
-      b.vx -= fx; b.vy -= fy;
-    });
-
-    // Gravidade para o centro
-    nodes.forEach(n => {
-      n.vx += (cx - n.x) * 0.01 * alpha;
-      n.vy += (cy - n.y) * 0.01 * alpha;
-    });
-
-    // Aplica velocidade + damping
-    nodes.forEach(n => {
-      if (n._pinned) return; // nós fixados pelo usuário
-      n.vx *= 0.8; n.vy *= 0.8;
-      n.x += n.vx; n.y += n.vy;
-      // Mantém dentro dos limites
-      const pad = 60;
-      n.x = Math.max(pad, Math.min(width - pad, n.x));
-      n.y = Math.max(pad, Math.min(height - pad, n.y));
-    });
-  }
-
-  // Persiste posições
-  nodes.forEach(n => { _topoPositions[n.id] = { x: n.x, y: n.y }; });
-}
-
-function renderTopologia() {
-  const container = document.getElementById('topo-container');
-  const svg       = document.getElementById('topo-svg');
-  if (!svg || !container) return;
-
-  const W = container.clientWidth  || 900;
-  const H = container.clientHeight || 620;
-
-  const { nodes, links } = buildTopoGraph();
-
-  // Atualiza dropdown de áreas
-  const fAreaSel = document.getElementById('topo-filter-area');
-  if (fAreaSel) {
-    const areas = [...new Set((STATE.switches||[]).map(d => d.area||d.sigla||'').filter(Boolean))].sort();
-    fAreaSel.innerHTML = '<option value="">Todas as áreas</option>'
-      + areas.map(a => '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>').join('');
-  }
-
-  // KPIs
-  const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  const allDevs = STATE.switches || [];
-  sv('topo-kpi-total',    nodes.length);
-  sv('topo-kpi-links',    links.filter(l => l.real).length);
-  sv('topo-kpi-online',   nodes.filter(n => n.status==='online'||n.status==='ativo').length);
-  sv('topo-kpi-offline',  nodes.filter(n => n.status==='offline').length);
-  sv('topo-kpi-sem-lldp', nodes.filter(n => !n.lldpVizinhos?.length).length);
-
-  const lastUpd = document.getElementById('topo-last-update');
-  if (lastUpd) lastUpd.textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-
-  if (!nodes.length) {
-    svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#94A3B8" font-size="14">Nenhum dispositivo de rede encontrado</text>';
-    return;
-  }
-
-  // Calcula layout
-  forceLayout(nodes, links, W, H);
-
-  const nodeById = {};
-  nodes.forEach(n => nodeById[n.id] = n);
-
-  const showLabels = document.getElementById('topo-show-labels')?.checked !== false;
-  const R = 28; // raio do nó
-
-  // ── Renderiza links ───────────────────────────────────────────
-  const gLinks = document.getElementById('topo-g-links');
-  const gNodes = document.getElementById('topo-g-nodes');
-  const gLabels= document.getElementById('topo-g-labels');
-  gLinks.innerHTML = ''; gNodes.innerHTML = ''; gLabels.innerHTML = '';
-
-  links.forEach(l => {
-    const a = nodeById[l.source], b = nodeById[l.target];
-    if (!a || !b) return;
-    const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
-    const color    = l.real ? '#2563EB' : '#CBD5E1';
-    const dashArr  = l.real ? 'none' : '5,4';
-    const marker   = l.real ? 'url(#arrowBlue)' : 'url(#arrowGray)';
-    const opacity  = l.real ? 0.7 : 0.4;
-    const strokeW  = l.real ? 2 : 1.5;
-
-    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-    line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
-    line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
-    line.setAttribute('stroke', color);
-    line.setAttribute('stroke-width', strokeW);
-    line.setAttribute('stroke-dasharray', dashArr);
-    line.setAttribute('opacity', opacity);
-    line.setAttribute('marker-end', marker);
-    gLinks.appendChild(line);
-
-    // Label do link com porta
-    if (l.real && showLabels && l.localPort) {
-      const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
-      txt.setAttribute('x', midX); txt.setAttribute('y', midY - 4);
-      txt.setAttribute('text-anchor','middle');
-      txt.setAttribute('font-size','9');
-      txt.setAttribute('fill','#64748B');
-      txt.setAttribute('pointer-events','none');
-      txt.textContent = l.localPort + (l.remotePort ? '↔'+l.remotePort : '');
-      gLabels.appendChild(txt);
-    }
-  });
-
-  // ── Renderiza nós ─────────────────────────────────────────────
-  nodes.forEach(n => {
-    const color = topoGetColor(n.tipo, n.status);
-    const online = n.status === 'online' || n.status === 'ativo';
-    const icon  = TOPO_ICONS[n.tipo] || '🔌';
-    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-    g.setAttribute('transform', 'translate(' + n.x + ',' + n.y + ')');
-    g.setAttribute('cursor','pointer');
-    g.setAttribute('data-id', n.id);
-
-    // Anel de status
-    if (n.status === 'offline') {
-      const ring = document.createElementNS('http://www.w3.org/2000/svg','circle');
-      ring.setAttribute('r', R + 4);
-      ring.setAttribute('fill', 'none');
-      ring.setAttribute('stroke', '#EF4444');
-      ring.setAttribute('stroke-width', 2);
-      ring.setAttribute('stroke-dasharray', '4,3');
-      ring.setAttribute('opacity', 0.7);
-      g.appendChild(ring);
-    }
-
-    // Círculo principal
-    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
-    circle.setAttribute('r', R);
-    circle.setAttribute('fill', color);
-    circle.setAttribute('filter', 'url(#shadow)');
-    circle.setAttribute('opacity', online ? 1 : 0.55);
-    g.appendChild(circle);
-
-    // Ícone emoji
-    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
-    txt.setAttribute('text-anchor','middle');
-    txt.setAttribute('dominant-baseline','central');
-    txt.setAttribute('font-size','16');
-    txt.setAttribute('pointer-events','none');
-    txt.setAttribute('y', 1);
-    txt.textContent = icon;
-    g.appendChild(txt);
-
-    // Indicador LLDP
-    if (n.lldpVizinhos?.length) {
-      const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
-      dot.setAttribute('cx', R - 6); dot.setAttribute('cy', -(R - 6));
-      dot.setAttribute('r', 5);
-      dot.setAttribute('fill', '#10B981');
-      dot.setAttribute('stroke', '#fff');
-      dot.setAttribute('stroke-width', 1.5);
-      g.appendChild(dot);
-    }
-
-    // Label hostname
-    if (showLabels) {
-      const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
-      lbl.setAttribute('text-anchor','middle');
-      lbl.setAttribute('y', R + 14);
-      lbl.setAttribute('font-size','10');
-      lbl.setAttribute('fill','#334155');
-      lbl.setAttribute('font-weight','600');
-      lbl.setAttribute('pointer-events','none');
-      const labelText = n.label.length > 14 ? n.label.slice(0,13)+'…' : n.label;
-      lbl.textContent = labelText;
-      gLabels.appendChild(Object.assign(document.createElementNS('http://www.w3.org/2000/svg','text'), {
-        ...lbl
-      }));
-      // Re-create properly
-      const lbl2 = document.createElementNS('http://www.w3.org/2000/svg','text');
-      lbl2.setAttribute('x', n.x); lbl2.setAttribute('y', n.y + R + 14);
-      lbl2.setAttribute('text-anchor','middle');
-      lbl2.setAttribute('font-size','10');
-      lbl2.setAttribute('fill','#334155');
-      lbl2.setAttribute('font-weight','600');
-      lbl2.setAttribute('pointer-events','none');
-      lbl2.textContent = labelText;
-      gLabels.appendChild(lbl2);
-
-      // Sub-label: área
-      if (n.area) {
-        const sub = document.createElementNS('http://www.w3.org/2000/svg','text');
-        sub.setAttribute('x', n.x); sub.setAttribute('y', n.y + R + 25);
-        sub.setAttribute('text-anchor','middle');
-        sub.setAttribute('font-size','8.5');
-        sub.setAttribute('fill','#94A3B8');
-        sub.setAttribute('pointer-events','none');
-        sub.textContent = n.area;
-        gLabels.appendChild(sub);
-      }
-    }
-
-    // Hover e clique
-    g.addEventListener('mouseenter', () => {
-      circle.setAttribute('r', R + 3);
-      circle.setAttribute('opacity', 1);
-    });
-    g.addEventListener('mouseleave', () => {
-      circle.setAttribute('r', R);
-      circle.setAttribute('opacity', online ? 1 : 0.55);
-    });
-    g.addEventListener('click', () => topoShowDetail(n));
-
-    gNodes.appendChild(g);
-  });
-
-  // ── Pan & Zoom ────────────────────────────────────────────────
-  topoSetupPanZoom(container, svg);
-}
-
-function topoShowDetail(n) {
-  const panel = document.getElementById('topo-detail-panel');
-  if (!panel) return;
-  panel.style.display = '';
-  document.getElementById('topo-detail-name').textContent = n.label;
-  document.getElementById('topo-detail-sub').textContent  = n.tipo.toUpperCase() + ' · ' + n.ip + (n.area ? ' · ' + n.area : '');
-
-  const fields = [
-    ['Status',    n.status || '—'],
-    ['IP',        n.ip || '—'],
-    ['Área',      n.area || '—'],
-    ['Local',     n.local || '—'],
-    ['Latência',  n.latency ? n.latency.toFixed(1) + 'ms' : '—'],
-    ['Uptime',    n.uptime ? (n.uptime >= 24 ? Math.floor(n.uptime/24) + 'd' : Math.round(n.uptime) + 'h') : '—'],
-    ['Interfaces',n.ifNum || '—'],
-    ['SNMP',      n.hasSnmp ? '✅ Sim' : '❌ Não'],
-    ['Links LLDP',n.lldpVizinhos?.length || 0],
-    ['Protocolo', n.lldpVizinhos?.[0]?.protocolo || '—'],
-  ];
-
-  document.getElementById('topo-detail-body').innerHTML = fields.map(([k,v]) =>
-    '<div style="background:var(--g50);border-radius:8px;padding:8px 10px">'
-    + '<div style="font-size:10px;color:var(--g400);font-weight:600;margin-bottom:2px">' + k + '</div>'
-    + '<div style="font-size:12px;font-weight:700;color:var(--g800)">' + escapeHtml(String(v)) + '</div>'
-    + '</div>'
-  ).join('');
-
-  // Vizinhos LLDP
-  const linksDiv = document.getElementById('topo-detail-links');
-  if (n.lldpVizinhos?.length) {
-    linksDiv.innerHTML = '<div style="font-size:11px;font-weight:700;color:var(--g500);margin-bottom:8px">🔗 VIZINHOS ' + (n.lldpVizinhos[0].protocolo||'LLDP') + '</div>'
-      + '<div style="display:flex;flex-wrap:wrap;gap:6px">'
-      + n.lldpVizinhos.map(v =>
-          '<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:6px 10px;font-size:11px">'
-          + '<span style="font-weight:700;color:#1D4ED8">' + escapeHtml(v.remoteHost||v.remoteIp||'?') + '</span>'
-          + (v.localPort ? '<span style="color:#64748B"> · ' + escapeHtml(v.localPort) + '↔' + escapeHtml(v.remotePort||'?') + '</span>' : '')
-          + '</div>'
-        ).join('')
-      + '</div>';
-  } else {
-    linksDiv.innerHTML = '<div style="font-size:11px;color:var(--g400)">⚠️ Sem dados LLDP/CDP — vizinhos não detectados neste dispositivo</div>';
-  }
-}
-
-// Pan & zoom via mouse/touch
-function topoSetupPanZoom(container, svg) {
-  // Remove listeners anteriores clonando o elemento
-  const newContainer = container.cloneNode(false);
-  while (container.firstChild) newContainer.appendChild(container.firstChild);
-  container.parentNode.replaceChild(newContainer, container);
-
-  let isDragging = false, startX, startY, startOX, startOY;
-
-  newContainer.addEventListener('mousedown', e => {
-    if (e.target.closest('g[data-id]')) return; // clique em nó
-    isDragging = true;
-    startX = e.clientX; startY = e.clientY;
-    startOX = _topoOffset.x; startOY = _topoOffset.y;
-    newContainer.style.cursor = 'grabbing';
-  });
-  window.addEventListener('mousemove', e => {
-    if (!isDragging) return;
-    _topoOffset.x = startOX + (e.clientX - startX);
-    _topoOffset.y = startOY + (e.clientY - startY);
-    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
-    svg.style.transformOrigin = '0 0';
-  });
-  window.addEventListener('mouseup', () => { isDragging = false; newContainer.style.cursor = 'grab'; });
-
-  newContainer.addEventListener('wheel', e => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    _topoZoom = Math.max(0.3, Math.min(3, _topoZoom * delta));
-    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
-    svg.style.transformOrigin = '0 0';
-  }, { passive: false });
-}
-
-function topoZoom(factor) {
-  _topoZoom = Math.max(0.3, Math.min(3, _topoZoom * factor));
-  const svg = document.getElementById('topo-svg');
-  if (svg) {
-    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
-    svg.style.transformOrigin = '0 0';
-  }
-}
-
-function topoReset() {
-  _topoZoom = 1; _topoOffset = { x:0, y:0 }; _topoPositions = {};
-  const svg = document.getElementById('topo-svg');
-  if (svg) { svg.style.transform = ''; }
-  renderTopologia();
-}
-
-function topoExportar() {
-  const svg = document.getElementById('topo-svg');
-  if (!svg) return;
-  const blob = new Blob([svg.outerHTML], { type:'image/svg+xml' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'topologia-rede-' + new Date().toISOString().split('T')[0] + '.svg';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('Topologia exportada em SVG', 'success', 2500);
 }
 
 function renderEmpregados() {
