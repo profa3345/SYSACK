@@ -763,7 +763,6 @@ function startFirestoreListeners() {
       pat:    d.pat    || d.patrimonio || '',
       // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
       desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      // Auto-detecção por hostname: NBK* → notebook
       tipo: (() => {
         const hn = (d.hostname || d.sysName || d.nome || d.desc || '').toUpperCase();
         if (/^NBK/i.test(hn)) return 'notebook';
@@ -1080,7 +1079,6 @@ function renderAtivos() {
   }
 
   const lista = STATE.ativos.filter(a => {
-    // Exclui servidores da lista geral (têm aba própria)
     const filtrandoServidor = _ativoFiltroTipo && (_ativoFiltroTipo.includes('servidor') || _ativoFiltroTipo.includes('server-linux'));
     if (!filtrandoServidor && typeof isServidor === 'function' && isServidor(a)) return false;
     if (tipos.length > 0) {
@@ -2807,7 +2805,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const tabMap = {
           'computador,workstation,notebook,desktop': 1,
           'notebook': 2,
-          // Monitores (3) e Servidores (5) → páginas dedicadas, não mapear
           'switch,router,ap,firewall': 4,
           'switch,router,ap,firewall,access point': 4,
           'printer,impressora,ups,camera': 6,
@@ -9019,6 +9016,323 @@ function filtrarEmpregadosModal() {
         </div>`).join('')
     : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum empregado encontrado</div>';
 }
+
+
+// ═══════════════════════════════════════════════════════════════
+// DETECÇÃO DE SERVIDORES
+// ═══════════════════════════════════════════════════════════════
+
+function _srvNome(a) {
+  const candidatos = [a.hostname, a.sysName, a.nome, a.desc, a.name, a.pat];
+  for (const c of candidatos) {
+    const s = (c || '').trim();
+    if (s && s.toUpperCase() !== (a.ip||'').toUpperCase() && s.length > 2) return s;
+  }
+  return '';
+}
+
+function _contemServ(nome) { return /serv/i.test(nome || ''); }
+function _contemVServ(nome) { return /vserv|vmserver/i.test(nome || ''); }
+
+function isFisicoServidor(a) {
+  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
+  return (_contemServ(hn) && !_contemVServ(hn)) || (tipo === 'servidor' && !_contemVServ(hn));
+}
+
+function isVirtualServidor(a) {
+  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
+  return _contemVServ(hn) || tipo === 'server-linux';
+}
+
+function isServidor(a) {
+  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
+  return _contemServ(hn) || tipo === 'servidor' || tipo === 'server-linux';
+}
+
+function identificarServidores(ativos) { return (ativos||[]).filter(isServidor); }
+
+let _srvTab = 'todos';
+
+function srvTab(tab, el) {
+  _srvTab = tab;
+  document.querySelectorAll('.srv-tab-btn').forEach(b => { b.style.background='transparent'; b.style.color='var(--g500)'; b.style.boxShadow='none'; });
+  if (el) { el.style.background='#fff'; el.style.color='var(--g900)'; el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)'; }
+  renderServidores();
+}
+
+function renderServidores() {
+  const q = (document.getElementById('srv-search')?.value||'').toLowerCase();
+  const fTipo = document.getElementById('srv-filter-tipo')?.value||'';
+  const fStatus = document.getElementById('srv-filter-status')?.value||'';
+  let lista = identificarServidores(STATE.ativos);
+  if (fTipo==='fisico'  || _srvTab==='fisico')  lista = lista.filter(isFisicoServidor);
+  if (fTipo==='virtual' || _srvTab==='virtual')  lista = lista.filter(isVirtualServidor);
+  if (fStatus) lista = lista.filter(a => (a.status||'').toLowerCase()===fStatus);
+  if (q) lista = lista.filter(a => ['hostname','ip','desc','area','pat','sysName'].some(f => (a[f]||'').toLowerCase().includes(q)));
+
+  const todos = identificarServidores(STATE.ativos);
+  const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  sv('srv-kpi-total',    todos.length);
+  sv('srv-kpi-fisicos',  todos.filter(isFisicoServidor).length);
+  sv('srv-kpi-virtuais', todos.filter(isVirtualServidor).length);
+  sv('srv-kpi-online',   todos.filter(a => a.reachable||(a.status||'').toLowerCase()==='online').length);
+  sv('srv-kpi-offline',  todos.filter(a => ['offline','critico'].includes((a.status||'').toLowerCase())).length);
+  nbUpdate('nb-servidores', todos.length);
+
+  const grid = document.getElementById('srv-grid');
+  if (!grid) return;
+
+  if (!lista.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)">'
+      +'<div style="font-size:40px;margin-bottom:12px">🖥️</div>'
+      +'<div style="font-weight:600">Nenhum servidor encontrado</div>'
+      +'<div style="font-size:12px;margin-top:6px">Identificados por hostname contendo "serv" · Físicos: SERV*, DSERV* · Virtuais: VSERV*, VMSERVER*</div>'
+      +'</div>';
+    return;
+  }
+
+  lista.sort((a,b) => {
+    const ord={critico:0,offline:1,alerta:2,online:3,ativo:4};
+    const sa=ord[(a.status||'').toLowerCase()]??5, sb=ord[(b.status||'').toLowerCase()]??5;
+    return sa!==sb ? sa-sb : (_srvNome(a)||'').localeCompare(_srvNome(b)||'');
+  });
+
+  function metricBar(label,val,danger,warn) {
+    if (val==null) return '';
+    const cor=val>=danger?'#DC2626':val>=warn?'#D97706':'#059669';
+    return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>'+label+'</span><span style="font-weight:700;color:'+cor+'">'+val+'%</span></div><div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+cor+';width:'+Math.min(val,100)+'%;height:100%;border-radius:3px"></div></div></div>';
+  }
+
+  grid.innerHTML = lista.map(function(a) {
+    const hn = _srvNome(a)||a.ip||'—';
+    const isVirt = isVirtualServidor(a);
+    const tLabel = isVirt?'☁️ Virtual':'🖥️ Físico', tColor=isVirt?'#7C3AED':'#2563EB';
+    const st=(a.status||'desconhecido').toLowerCase();
+    const stColor=(st==='online'||a.reachable)?'#059669':st==='critico'?'#DC2626':st==='offline'?'#6B7280':'#D97706';
+    const stLabel=(st==='online'||a.reachable)?'Online':st.charAt(0).toUpperCase()+st.slice(1);
+    const uptime=a.uptimeHoras!=null?(a.uptimeHoras>=24?Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h':Math.round(a.uptimeHoras)+'h'):null;
+    const lastSeen=a.lastSeen?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen).toLocaleString('pt-BR'):'—';
+    const patSection = isVirt
+      ? '<span style="background:#F3F4F6;color:var(--g400);font-size:10px;padding:1px 6px;border-radius:8px">N/A — Virtual</span>'
+      : (a.pat
+          ? '<span style="font-family:monospace;font-weight:700;color:var(--accent)">'+escapeHtml(a.pat)+'</span> <button data-id="'+escapeHtml(a.id)+'" data-hn="'+escapeHtml(hn)+'" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="font-size:10px;background:#FEF3C7;color:#92400E;border:none;padding:1px 6px;border-radius:8px;cursor:pointer">✏️</button>'
+          : '<button data-id="'+escapeHtml(a.id)+'" data-hn="'+escapeHtml(hn)+'" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="background:#FEF3C7;color:#92400E;border:none;padding:3px 10px;border-radius:8px;cursor:pointer;font-weight:700;font-size:11px">🏷️ Atribuir PAT</button>');
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tColor+'">'
+      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
+        +'<div style="display:flex;gap:10px;align-items:flex-start;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(isVirt?'☁️':'🖥️')+'</span>'
+          +'<div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
+          +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(a.area||'—')+'</div></div></div>'
+        +'<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
+          +'<span style="background:'+stColor+'22;color:'+stColor+';border:1px solid '+stColor+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+stLabel+'</span>'
+          +'<span style="background:'+tColor+'22;color:'+tColor+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+tLabel+'</span>'
+        +'</div></div>'
+      +'<div style="padding:14px 16px">'
+        +(a.cpuPct!=null||a.memPct!=null?metricBar('CPU',a.cpuPct,90,70)+metricBar('Memória',a.memPct,90,80):'<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Métricas indisponíveis</div>')
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:8px">'
+          +'<div><span style="color:var(--g400)">PAT: </span>'+patSection+'</div>'
+          +'<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').split(' ').slice(0,3).join(' '))+'</span></div>'
+          +'<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(uptime||'—')+'</span></div>'
+          +'<div><span style="color:var(--g400)">Último contato:</span> <span style="font-size:10px">'+lastSeen+'</span></div>'
+        +'</div></div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button data-pid="'+escapeHtml(a.pat||a.id)+'" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
+        +'<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        +'<button data-aid="'+escapeHtml(a.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
+      +'</div></div>';
+  }).join('');
+}
+
+// PAT Servidor
+let _srvPatAtivoId=null, _srvPatStream=null, _srvPatValor=null;
+function abrirPatServidor(ativoId, hostname) {
+  _srvPatAtivoId=ativoId; _srvPatValor=null;
+  const info=document.getElementById('srv-pat-info'); if(info) info.textContent='🖥️ '+(hostname||ativoId);
+  const a=(STATE.ativos||[]).find(x=>x.id===ativoId);
+  const inp=document.getElementById('srv-pat-digitar-input'); if(inp) inp.value=a?.pat||'';
+  const box=document.getElementById('srv-pat-confirmacao'); if(box) box.style.display='none';
+  const btn=document.getElementById('srv-pat-salvar-btn'); if(btn) btn.disabled=true;
+  srvPatTab('digitar', document.querySelector('.srv-pat-tab'));
+  openModal('modal-pat-servidor');
+}
+function fecharModalPatServidor(){srvPatPararCamera();closeModal('modal-pat-servidor');}
+function srvPatTab(tab,el){
+  ['digitar','camera','foto','voz'].forEach(t=>{const p=document.getElementById('srv-pat-panel-'+t);if(p)p.style.display=t===tab?'':'none';});
+  document.querySelectorAll('.srv-pat-tab').forEach(b=>{b.style.background='transparent';b.style.color='var(--g500)';b.style.boxShadow='none';});
+  if(el){el.style.background='#fff';el.style.color='var(--g900)';el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)';}
+  if(tab!=='camera') srvPatPararCamera();
+}
+function srvPatValidar(val){
+  const limpo=(val||'').replace(/[^0-9A-Za-z-]/g,'').trim();
+  const btn=document.getElementById('srv-pat-salvar-btn');
+  if(limpo.length>=2){_srvPatValor=limpo;srvPatMostrarConfirmacao(limpo);if(btn)btn.disabled=false;}
+  else{_srvPatValor=null;const b=document.getElementById('srv-pat-confirmacao');if(b)b.style.display='none';if(btn)btn.disabled=true;}
+}
+function srvPatMostrarConfirmacao(pat){
+  const b=document.getElementById('srv-pat-confirmacao'),v=document.getElementById('srv-pat-valor-confirmado');
+  if(b)b.style.display='';if(v)v.textContent=pat;
+  const btn=document.getElementById('srv-pat-salvar-btn');if(btn)btn.disabled=false;
+}
+async function srvPatIniciarCamera(){
+  const video=document.getElementById('srv-pat-video'),area=document.getElementById('srv-pat-camera-area');
+  if(area)area.style.display='';
+  try{_srvPatStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=_srvPatStream;}
+  catch(e){showToast('Câmera indisponível','error');}
+}
+function srvPatPararCamera(){if(_srvPatStream){_srvPatStream.getTracks().forEach(t=>t.stop());_srvPatStream=null;}const a=document.getElementById('srv-pat-camera-area');if(a)a.style.display='none';}
+async function srvPatLerFoto(input){
+  const file=input.files?.[0];if(!file)return;
+  const prev=document.getElementById('srv-pat-foto-preview'),img=document.getElementById('srv-pat-foto-img'),st=document.getElementById('srv-pat-foto-status');
+  if(prev)prev.style.display='';if(img)img.src=URL.createObjectURL(file);if(st)st.textContent='🤖 Analisando...';
+  const r=new FileReader();r.onload=async function(e){
+    const b64=e.target.result.split(',')[1];
+    if(window._fs?.httpsCallable){try{const res=await window._fs.httpsCallable('extrairPATdaFoto')({imageBase64:b64});const pat=res.data?.pat;
+      if(pat){if(st){st.textContent='✅ PAT: '+pat;st.style.color='var(--success)';}srvPatMostrarConfirmacao(pat);}
+      else if(st)st.textContent='⚠️ Não detectado. Use a aba Digitar.';}catch(e){if(st)st.textContent='⚠️ Erro.';}}
+    else if(st)st.textContent='⚠️ Use a aba Digitar.';
+  };r.readAsDataURL(file);
+}
+function srvPatIniciarVoz(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition,st=document.getElementById('srv-pat-voz-status');
+  if(!SR){if(st)st.textContent='❌ Use Chrome.';return;}
+  const rec=new SR();rec.lang='pt-BR';rec.continuous=false;rec.interimResults=false;
+  if(st)st.textContent='🔴 Ouvindo...';
+  rec.onresult=function(e){
+    let txt=e.results[0][0].transcript.replace(/\s+/g,'');
+    const nums={zero:'0',um:'1',uma:'1',dois:'2',duas:'2',tres:'3',quatro:'4',cinco:'5',seis:'6',sete:'7',oito:'8',nove:'9'};
+    Object.entries(nums).forEach(([p,n])=>{txt=txt.replace(new RegExp(p,'gi'),n);});
+    const r=txt.replace(/[^0-9A-Za-z-]/g,'').trim();
+    if(r.length>=2){_srvPatValor=r;
+      const rd=document.getElementById('srv-pat-voz-resultado'),pd=document.getElementById('srv-pat-voz-pat'),ba=document.getElementById('srv-pat-voz-btn-area');
+      if(ba)ba.style.display='none';if(rd)rd.style.display='';if(pd)pd.textContent=r;
+      srvPatMostrarConfirmacao(r);
+    }else if(st)st.textContent='⚠️ Tente novamente.';
+  };rec.onerror=function(e){if(st)st.textContent='❌ '+e.error;};rec.start();
+}
+function srvPatReiniciarVoz(){
+  _srvPatValor=null;
+  const r=document.getElementById('srv-pat-voz-resultado'),b=document.getElementById('srv-pat-voz-btn-area'),c=document.getElementById('srv-pat-confirmacao'),btn=document.getElementById('srv-pat-salvar-btn');
+  if(r)r.style.display='none';if(b)b.style.display='';if(c)c.style.display='none';if(btn)btn.disabled=true;
+  const s=document.getElementById('srv-pat-voz-status');if(s)s.textContent='Clique e fale o número';
+}
+async function confirmarPatServidor(){
+  const pat=_srvPatValor,id=_srvPatAtivoId;
+  if(!pat||!id)return showToast('PAT não definido','warning');
+  const btn=document.getElementById('srv-pat-salvar-btn');setButtonLoading(btn,true,'Salvando...');
+  try{
+    await fsUpdate('ativos',id,{pat,updatedAt:new Date().toISOString()});
+    const ativo=(STATE.ativos||[]).find(a=>a.id===id);
+    if(ativo&&window._fs?.httpsCallable)window._fs.httpsCallable('adicionarNotaHistorico')({ativoId:id,nota:'PAT '+pat+' atribuído ao servidor '+(ativo.hostname||id),tipo:'atualizacao'}).catch(()=>{});
+    fecharModalPatServidor();showToast('✅ PAT '+pat+' atribuído!','success',4000);renderServidores();
+  }catch(e){showToast('Erro: '+e.message,'error');}finally{setButtonLoading(btn,false);}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MONITORES
+// ═══════════════════════════════════════════════════════════════
+
+let _monitorAtualSerial=null, _monitorCameraStream=null;
+
+function coletarTodosMonitores(){
+  const wmi=[];
+  (STATE.ativos||[]).forEach(function(ativo){
+    if(!ativo.monitoresConectados)return;
+    let mons=[];try{mons=typeof ativo.monitoresConectados==='string'?JSON.parse(ativo.monitoresConectados):(Array.isArray(ativo.monitoresConectados)?ativo.monitoresConectados:[]);}catch(e){}
+    mons.forEach(function(m){if(!m.serial)return;const cadastro=(STATE.monitoresCadastrados||[]).find(c=>c.serial===m.serial);
+      wmi.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:cadastro?.pat||m.pat||'',local:cadastro?.local||ativo.sala||ativo.loc||'',pcAtual:ativo.hostname||ativo.ip||ativo.desc||'—',pcPat:ativo.pat||'',pcId:ativo.id||'',area:ativo.area||'',qtdMovimentos:(STATE.monitorHistorico||[]).filter(h=>h.serial===m.serial).length,detectadoWMI:true,cadastroId:cadastro?.id||null,obs:cadastro?.obs||''});});
+  });
+  (STATE.monitoresCadastrados||[]).forEach(function(c){if(wmi.find(m=>m.serial===c.serial))return;
+    wmi.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',local:c.local||'',pcAtual:c.pcVinculado||'—',pcPat:'',pcId:'',area:c.area||'',qtdMovimentos:(STATE.monitorHistorico||[]).filter(h=>h.serial===c.serial).length,detectadoWMI:false,cadastroId:c.id,obs:c.obs||''});});
+  return wmi;
+}
+
+function renderMonitoresKPI(){
+  const todos=coletarTodosMonitores();
+  const sv=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(m=>!m.pat).length);
+  sv('mon-kpi-com-pat',todos.filter(m=>!!m.pat).length);sv('mon-kpi-movidos',todos.filter(m=>m.qtdMovimentos>1).length);
+  nbUpdate('nb-monitores-sem-pat',todos.filter(m=>!m.pat).length);
+}
+
+function renderMonitores(){
+  renderMonitoresKPI();
+  const q=(document.getElementById('mon-search')?.value||'').toLowerCase();
+  const fSt=document.getElementById('mon-filter-status')?.value||'';
+  const grid=document.getElementById('mon-grid');if(!grid)return;
+  let todos=coletarTodosMonitores();
+  if(q)todos=todos.filter(m=>(m.serial||'').toLowerCase().includes(q)||(m.pat||'').toLowerCase().includes(q)||(m.modelo||'').toLowerCase().includes(q)||(m.fabricante||'').toLowerCase().includes(q)||(m.pcAtual||'').toLowerCase().includes(q));
+  if(fSt==='sem-pat')todos=todos.filter(m=>!m.pat);
+  if(fSt==='com-pat')todos=todos.filter(m=>!!m.pat);
+  if(fSt==='movido') todos=todos.filter(m=>m.qtdMovimentos>1);
+  if(!todos.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🖥️</div><div style="font-weight:600">Nenhum monitor encontrado</div><div style="font-size:12px;margin-top:6px">Detectados automaticamente pelo SysackClient</div></div>';return;}
+  grid.innerHTML=todos.map(function(m){
+    const temPat=!!m.pat;
+    const bordeCor=temPat?'var(--success)':'#F59E0B';
+    const badgePat=temPat?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">✅ PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">⚠️ Sem PAT</span>';
+    const wmiChip=m.detectadoWMI?'<span style="background:#EFF6FF;color:#2563EB;font-size:10px;padding:1px 6px;border-radius:8px">🔍 WMI</span>':'<span style="background:var(--g100);color:var(--g500);font-size:10px;padding:1px 6px;border-radius:8px">✏️ Manual</span>';
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+bordeCor+'">'
+      +'<div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">'
+        +'<div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div>'
+          +'<div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div>'
+          +'<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'
+        +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'+badgePat+wmiChip+'</div></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:10px">'
+        +'<div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div>'
+        +'<div><span style="color:var(--g400)">Área:</span> <span>'+escapeHtml(m.area||'—')+'</span></div>'
+      +'</div></div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button data-serial="'+escapeHtml(m.serial)+'" onclick="abrirAtribuirPATMonitor(this.dataset.serial)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(temPat?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(temPat?'✏️ Alterar PAT':'🏷️ Atribuir PAT')+'</button>'
+        +'<button data-val="'+escapeHtml(m.pat||m.serial)+'" onclick="abrirChamadoParaMonitor(this.dataset.val)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">🎫 Chamado</button>'
+      +'</div></div>';
+  }).join('');
+}
+
+function abrirAtribuirPATMonitor(serial){
+  _monitorAtualSerial=serial;
+  const m=coletarTodosMonitores().find(x=>x.serial===serial);if(!m)return;
+  const info=document.getElementById('mon-pat-info');
+  if(info)info.innerHTML='<div style="display:flex;gap:12px;align-items:center"><span style="font-size:24px">🖥️</span><div><div style="font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-family:monospace;font-size:11px;color:var(--g500)">S/N: '+escapeHtml(serial)+'</div></div></div>';
+  const inp=document.getElementById('mon-pat-input');if(inp)inp.value=m.pat||'';
+  ['mon-camera-area','mon-foto-preview'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  document.getElementById('mon-pat-obs').value=m.obs||'';
+  const btn=document.getElementById('mon-pat-confirmar-btn');if(btn)btn.disabled=!m.pat;
+  openModal('modal-atribuir-pat-monitor');
+}
+function monPatInputChange(val){const btn=document.getElementById('mon-pat-confirmar-btn');if(btn)btn.disabled=!val||val.trim().length<2;}
+async function confirmarPatMonitor(){
+  const pat=document.getElementById('mon-pat-input')?.value?.trim(),obs=document.getElementById('mon-pat-obs')?.value?.trim()||'',serial=_monitorAtualSerial;
+  if(!pat||!serial)return showToast('Informe o PAT','warning');
+  const btn=document.getElementById('mon-pat-confirmar-btn');setButtonLoading(btn,true,'Salvando...');
+  try{
+    const m=coletarTodosMonitores().find(x=>x.serial===serial),agora=new Date().toISOString();
+    if(m?.cadastroId){await fsUpdate('monitores',m.cadastroId,{pat,obs,updatedAt:agora});}
+    else{await fsAdd('monitores',{serial,pat,obs,fabricante:m?.fabricante||'',modelo:m?.modelo||'',pcVinculado:m?.pcAtual||'',createdAt:agora,updatedAt:agora,syncSource:'sysack-manual'},STATE.monitoresCadastrados);}
+    closeModal('modal-atribuir-pat-monitor');showToast('✅ PAT atribuído!','success',4000);renderMonitores();
+  }catch(e){showToast('Erro: '+e.message,'error');}finally{setButtonLoading(btn,false);}
+}
+async function abrirCameraMonitorPAT(){
+  const area=document.getElementById('mon-camera-area'),video=document.getElementById('mon-camera-video');if(!area||!video)return;
+  try{_monitorCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=_monitorCameraStream;area.style.display='';}
+  catch(e){showToast('Câmera indisponível','error');}
+}
+function fecharCameraMonitor(){if(_monitorCameraStream){_monitorCameraStream.getTracks().forEach(t=>t.stop());_monitorCameraStream=null;}const a=document.getElementById('mon-camera-area');if(a)a.style.display='none';}
+async function capturarFotoPatMonitor(){
+  const video=document.getElementById('mon-camera-video'),canvas=document.getElementById('mon-camera-canvas');if(!video||!canvas)return;
+  canvas.width=video.videoWidth||640;canvas.height=video.videoHeight||480;canvas.getContext('2d').drawImage(video,0,0);
+  const dataUrl=canvas.toDataURL('image/jpeg',0.85);document.getElementById('mon-foto-img').src=dataUrl;document.getElementById('mon-foto-preview').style.display='';fecharCameraMonitor();
+  const st=document.getElementById('mon-ocr-status');if(st)st.textContent='🔍 Analisando...';
+  try{if(window._fs?.httpsCallable){const res=await window._fs.httpsCallable('extrairPATdaFoto')({imageBase64:dataUrl.split(',')[1]});const pat=res.data?.pat;
+    if(pat){document.getElementById('mon-pat-input').value=pat;monPatInputChange(pat);if(st){st.textContent='✅ PAT: '+pat;st.style.color='var(--success)';}}
+    else if(st)st.textContent='⚠️ Não detectado. Digite manualmente.';}
+  }catch(e){if(st)st.textContent='⚠️ Erro.';}
+}
+function abrirChamadoParaMonitor(patOuSerial){openModal('modal-novo-chamado');setTimeout(function(){const el=document.getElementById('ch-patrimonio');if(el)el.value=patOuSerial;},100);}
+async function salvarMonitorManual(){
+  const serial=document.getElementById('mon-man-serial')?.value?.trim();if(!serial)return showToast('Série obrigatória','warning');
+  const dados={serial,pat:document.getElementById('mon-man-pat')?.value?.trim()||'',fabricante:document.getElementById('mon-man-fab')?.value?.trim()||'',modelo:document.getElementById('mon-man-modelo')?.value?.trim()||'',local:document.getElementById('mon-man-local')?.value?.trim()||'',pcVinculado:document.getElementById('mon-man-pc')?.value?.trim()||'',obs:document.getElementById('mon-man-obs')?.value?.trim()||'',createdAt:new Date().toISOString(),syncSource:'sysack-manual'};
+  try{await fsAdd('monitores',dados,STATE.monitoresCadastrados);closeModal('modal-monitor-manual');showToast('✅ Monitor cadastrado!','success');renderMonitores();}
+  catch(e){showToast('Erro: '+e.message,'error');}
+}
+function abrirCadastroMonitorManual(){['mon-man-serial','mon-man-pat','mon-man-fab','mon-man-modelo','mon-man-local','mon-man-pc','mon-man-obs'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});openModal('modal-monitor-manual');}
 
 function renderEmpregados() {
   const tbody    = document.getElementById('emp-body');
