@@ -763,11 +763,7 @@ function startFirestoreListeners() {
       pat:    d.pat    || d.patrimonio || '',
       // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
       desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      tipo: (() => {
-        const hn = (d.hostname || d.sysName || d.nome || d.desc || '').toUpperCase();
-        if (/^NBK/i.test(hn)) return 'notebook';
-        return d.tipo || 'workstation';
-      })(),
+      tipo:   d.tipo   || 'workstation',
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
       status: d.status || (d.reachable ? 'ativo' : 'offline'),
@@ -944,8 +940,7 @@ function renderPage(id) {
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
     'organograma':   () => renderOrganograma(),
-    'servidores':    () => renderServidores(),
-    'monitores':     () => renderMonitores(),
+    'topologia':     () => renderTopologia(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -1079,8 +1074,6 @@ function renderAtivos() {
   }
 
   const lista = STATE.ativos.filter(a => {
-    const filtrandoServidor = _ativoFiltroTipo && (_ativoFiltroTipo.includes('servidor') || _ativoFiltroTipo.includes('server-linux'));
-    if (!filtrandoServidor && typeof isServidor === 'function' && isServidor(a)) return false;
     if (tipos.length > 0) {
       const t = (a.tipo || '').toLowerCase();
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
@@ -2805,9 +2798,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const tabMap = {
           'computador,workstation,notebook,desktop': 1,
           'notebook': 2,
-          'switch,router,ap,firewall': 4,
+          'monitor': 3,
           'switch,router,ap,firewall,access point': 4,
-          'printer,impressora,ups,camera': 6,
+          'servidor,server-linux': 5,
+          'outro,rack,storage,appliance,ups,camera': 6,
+          'impressora,printer': 6,
+          'software': 6,
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
@@ -9019,320 +9015,539 @@ function filtrarEmpregadosModal() {
 
 
 // ═══════════════════════════════════════════════════════════════
-// DETECÇÃO DE SERVIDORES
+// TOPOLOGIA DE REDE — D3-force layout com dados LLDP/CDP
 // ═══════════════════════════════════════════════════════════════
 
-function _srvNome(a) {
-  const candidatos = [a.hostname, a.sysName, a.nome, a.desc, a.name, a.pat];
-  for (const c of candidatos) {
-    const s = (c || '').trim();
-    if (s && s.toUpperCase() !== (a.ip||'').toUpperCase() && s.length > 2) return s;
+let _topoZoom   = 1;
+let _topoOffset = { x: 0, y: 0 };
+let _topoDrag   = null;
+let _topoNodes  = [];
+let _topoLinks  = [];
+let _topoSimTimeout = null;
+let _topoPositions  = {}; // persiste posições entre re-renders
+
+// Ícones e cores por tipo
+const TOPO_ICONS = { firewall:'🔥', router:'🌐', switch:'🔀', 'switch-acesso':'🔀', 'switch-core':'🔀', 'switch-distribuicao':'🔀', ap:'📡', ups:'🔋', workstation:'💻', notebook:'💻', servidor:'🗄️', 'server-linux':'🐧' };
+const TOPO_COLORS = { firewall:'#7C3AED', router:'#EA580C', 'switch-core':'#0F172A', 'switch-distribuicao':'#1E40AF', 'switch-acesso':'#2563EB', switch:'#2563EB', ap:'#0891B2', ups:'#65A30D', default:'#64748B' };
+const TOPO_LAYER = { firewall:0, router:1, 'switch-core':2, 'switch-distribuicao':2, switch:3, 'switch-acesso':3, ap:4, ups:5, default:6 };
+
+function topoGetColor(tipo, status) {
+  const st = (status||'').toLowerCase();
+  if (st === 'offline') return '#EF4444';
+  if (st === 'alerta' || st === 'critico') return '#F59E0B';
+  return TOPO_COLORS[tipo] || TOPO_COLORS.default;
+}
+
+function topoGetLayer(tipo) { return TOPO_LAYER[tipo] ?? TOPO_LAYER.default; }
+
+function buildTopoGraph() {
+  const fArea    = document.getElementById('topo-filter-area')?.value || '';
+  const showFw   = document.getElementById('topo-show-fw')?.checked !== false;
+  const showRt   = document.getElementById('topo-show-rt')?.checked !== false;
+  const showSw   = document.getElementById('topo-show-sw')?.checked !== false;
+  const showAp   = document.getElementById('topo-show-ap')?.checked !== false;
+
+  const tipoAllowed = new Set();
+  if (showFw) tipoAllowed.add('firewall');
+  if (showRt) { tipoAllowed.add('router'); }
+  if (showSw) { tipoAllowed.add('switch'); tipoAllowed.add('switch-acesso'); tipoAllowed.add('switch-core'); tipoAllowed.add('switch-distribuicao'); }
+  if (showAp) tipoAllowed.add('ap');
+
+  // Coleta todos os dispositivos de rede
+  const devs = (STATE.switches || []).filter(d => {
+    const t = (d.tipo||'').toLowerCase();
+    if (!tipoAllowed.has(t)) return false;
+    if (fArea && d.area !== fArea && d.sigla !== fArea) return false;
+    return true;
+  });
+
+  // Nodes
+  const nodeMap = {};
+  const nodes = devs.map(d => {
+    const id = d.id || d.ip;
+    const tipo = (d.tipo||'switch').toLowerCase();
+    const node = {
+      id,
+      ip:      d.ip || '',
+      label:   d.hostname || d.sysName || d.name || d.ip || '—',
+      tipo,
+      status:  d.status || (d.reachable ? 'online' : 'offline'),
+      area:    d.area || d.sigla || '',
+      local:   d.local || d.sysLocation || '',
+      latency: d.latencyMs || 0,
+      uptime:  d.uptimeH || 0,
+      ifNum:   d.ifNumber || 0,
+      hasSnmp: d.hasSnmp || false,
+      lldpVizinhos: d.lldpVizinhos || [],
+      layer:   topoGetLayer(tipo),
+      raw:     d,
+      // Mantém posição calculada anteriormente
+      x: _topoPositions[id]?.x ?? null,
+      y: _topoPositions[id]?.y ?? null,
+    };
+    nodeMap[id] = node;
+    nodeMap[d.ip] = node; // índice por IP também
+    if (d.hostname) nodeMap[d.hostname.toLowerCase()] = node;
+    if (d.sysName)  nodeMap[d.sysName.toLowerCase()]  = node;
+    return node;
+  });
+
+  // Links via LLDP/CDP
+  const links = [];
+  const linkSet = new Set();
+
+  devs.forEach(d => {
+    const fromId = d.id || d.ip;
+    const vizinhos = d.lldpVizinhos || [];
+
+    vizinhos.forEach(v => {
+      // Tenta encontrar o nó de destino pelo hostname ou IP
+      const remKey = (v.remoteHost||'').toLowerCase();
+      const toNode = nodeMap[remKey] || nodeMap[v.remoteIp] || null;
+      if (!toNode) return; // vizinho não está no nosso inventário
+
+      const toId = toNode.id;
+      const key  = [fromId, toId].sort().join('→');
+      if (linkSet.has(key)) return; // evita duplicatas
+      linkSet.add(key);
+
+      links.push({
+        source:     fromId,
+        target:     toId,
+        localPort:  v.localPort  || '',
+        remotePort: v.remotePort || '',
+        protocolo:  v.protocolo  || 'LLDP',
+        real:       true,
+      });
+    });
+  });
+
+  // Links inferidos por área (quando não há LLDP)
+  // Agrupa switches da mesma área e os liga ao roteador/firewall da área
+  if (links.length === 0 || devs.some(d => !d.lldpVizinhos?.length)) {
+    const byArea = {};
+    nodes.forEach(n => {
+      const key = n.area || 'geral';
+      if (!byArea[key]) byArea[key] = { fw:[], rt:[], sw:[], ap:[] };
+      const t = n.tipo;
+      if (t === 'firewall') byArea[key].fw.push(n);
+      else if (t === 'router') byArea[key].rt.push(n);
+      else if (t.includes('switch')) byArea[key].sw.push(n);
+      else if (t === 'ap') byArea[key].ap.push(n);
+    });
+
+    Object.values(byArea).forEach(area => {
+      const uplinks = [...area.fw, ...area.rt];
+      // switches → roteador/firewall
+      area.sw.forEach(sw => {
+        uplinks.forEach(up => {
+          const key = [sw.id, up.id].sort().join('→');
+          if (!linkSet.has(key)) {
+            linkSet.add(key);
+            links.push({ source: sw.id, target: up.id, real: false, protocolo: 'Inferido' });
+          }
+        });
+        // APs → switches
+        area.ap.forEach(ap => {
+          const key = [ap.id, sw.id].sort().join('→');
+          if (!linkSet.has(key)) {
+            linkSet.add(key);
+            links.push({ source: ap.id, target: sw.id, real: false, protocolo: 'Inferido' });
+          }
+        });
+      });
+    });
   }
-  return '';
+
+  return { nodes, links, nodeMap };
 }
 
-function _contemServ(nome) { return /serv/i.test(nome || ''); }
-function _contemVServ(nome) { return /vserv|vmserver/i.test(nome || ''); }
+function forceLayout(nodes, links, width, height) {
+  // Simple force-directed layout (sem D3 — implementado do zero)
+  const ITERATIONS = 200;
+  const K  = Math.sqrt((width * height) / Math.max(nodes.length, 1));
+  const cx = width / 2, cy = height / 2;
 
-function isFisicoServidor(a) {
-  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
-  return (_contemServ(hn) && !_contemVServ(hn)) || (tipo === 'servidor' && !_contemVServ(hn));
+  // Inicializa posições por camada se não tiver posição salva
+  const layers = {};
+  nodes.forEach(n => {
+    if (n.x === null || n.y === null) {
+      if (!layers[n.layer]) layers[n.layer] = [];
+      layers[n.layer].push(n);
+    }
+  });
+
+  const maxLayer = Math.max(...Object.keys(layers).map(Number), 0);
+  Object.entries(layers).forEach(([layer, ns]) => {
+    const ly = layer === '0' ? cy * 0.2 : (Number(layer) / (maxLayer + 1)) * height * 0.85 + height * 0.08;
+    ns.forEach((n, i) => {
+      const spread = (ns.length - 1) * 120;
+      n.x = cx - spread / 2 + i * (spread / Math.max(ns.length - 1, 1));
+      n.y = ly;
+      n.vx = 0; n.vy = 0;
+    });
+  });
+  nodes.forEach(n => { if (!n.vx) { n.vx = 0; n.vy = 0; } });
+
+  // Build adjacency for force calc
+  const adjMap = {};
+  links.forEach(l => {
+    if (!adjMap[l.source]) adjMap[l.source] = new Set();
+    if (!adjMap[l.target]) adjMap[l.target] = new Set();
+    adjMap[l.source].add(l.target);
+    adjMap[l.target].add(l.source);
+  });
+
+  const nodeById = {};
+  nodes.forEach(n => nodeById[n.id] = n);
+
+  for (let iter = 0; iter < ITERATIONS; iter++) {
+    const alpha = 1 - iter / ITERATIONS;
+
+    // Repulsão entre todos os pares
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.max(Math.sqrt(dx*dx + dy*dy), 0.1);
+        const force = (K * K) / dist * alpha;
+        const fx = (dx/dist) * force, fy = (dy/dist) * force;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+
+    // Atração pelos links
+    links.forEach(l => {
+      const a = nodeById[l.source], b = nodeById[l.target];
+      if (!a || !b) return;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.max(Math.sqrt(dx*dx + dy*dy), 0.1);
+      const idealDist = K * (l.real ? 1.5 : 2.5);
+      const force = (dist - idealDist) / dist * 0.3 * alpha;
+      const fx = dx * force, fy = dy * force;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    });
+
+    // Gravidade para o centro
+    nodes.forEach(n => {
+      n.vx += (cx - n.x) * 0.01 * alpha;
+      n.vy += (cy - n.y) * 0.01 * alpha;
+    });
+
+    // Aplica velocidade + damping
+    nodes.forEach(n => {
+      if (n._pinned) return; // nós fixados pelo usuário
+      n.vx *= 0.8; n.vy *= 0.8;
+      n.x += n.vx; n.y += n.vy;
+      // Mantém dentro dos limites
+      const pad = 60;
+      n.x = Math.max(pad, Math.min(width - pad, n.x));
+      n.y = Math.max(pad, Math.min(height - pad, n.y));
+    });
+  }
+
+  // Persiste posições
+  nodes.forEach(n => { _topoPositions[n.id] = { x: n.x, y: n.y }; });
 }
 
-function isVirtualServidor(a) {
-  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
-  return _contemVServ(hn) || tipo === 'server-linux';
-}
+function renderTopologia() {
+  const container = document.getElementById('topo-container');
+  const svg       = document.getElementById('topo-svg');
+  if (!svg || !container) return;
 
-function isServidor(a) {
-  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
-  return _contemServ(hn) || tipo === 'servidor' || tipo === 'server-linux';
-}
+  const W = container.clientWidth  || 900;
+  const H = container.clientHeight || 620;
 
-function identificarServidores(ativos) { return (ativos||[]).filter(isServidor); }
+  const { nodes, links } = buildTopoGraph();
 
-let _srvTab = 'todos';
+  // Atualiza dropdown de áreas
+  const fAreaSel = document.getElementById('topo-filter-area');
+  if (fAreaSel) {
+    const areas = [...new Set((STATE.switches||[]).map(d => d.area||d.sigla||'').filter(Boolean))].sort();
+    fAreaSel.innerHTML = '<option value="">Todas as áreas</option>'
+      + areas.map(a => '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>').join('');
+  }
 
-function srvTab(tab, el) {
-  _srvTab = tab;
-  document.querySelectorAll('.srv-tab-btn').forEach(b => { b.style.background='transparent'; b.style.color='var(--g500)'; b.style.boxShadow='none'; });
-  if (el) { el.style.background='#fff'; el.style.color='var(--g900)'; el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)'; }
-  renderServidores();
-}
-
-function renderServidores() {
-  const q = (document.getElementById('srv-search')?.value||'').toLowerCase();
-  const fTipo = document.getElementById('srv-filter-tipo')?.value||'';
-  const fStatus = document.getElementById('srv-filter-status')?.value||'';
-  let lista = identificarServidores(STATE.ativos);
-  if (fTipo==='fisico'  || _srvTab==='fisico')  lista = lista.filter(isFisicoServidor);
-  if (fTipo==='virtual' || _srvTab==='virtual')  lista = lista.filter(isVirtualServidor);
-  if (fStatus) lista = lista.filter(a => (a.status||'').toLowerCase()===fStatus);
-  if (q) lista = lista.filter(a => ['hostname','ip','desc','area','pat','sysName'].some(f => (a[f]||'').toLowerCase().includes(q)));
-
-  const todos = identificarServidores(STATE.ativos);
+  // KPIs
   const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  sv('srv-kpi-total',    todos.length);
-  sv('srv-kpi-fisicos',  todos.filter(isFisicoServidor).length);
-  sv('srv-kpi-virtuais', todos.filter(isVirtualServidor).length);
-  sv('srv-kpi-online',   todos.filter(a => a.reachable||(a.status||'').toLowerCase()==='online').length);
-  sv('srv-kpi-offline',  todos.filter(a => ['offline','critico'].includes((a.status||'').toLowerCase())).length);
-  nbUpdate('nb-servidores', todos.length);
+  const allDevs = STATE.switches || [];
+  sv('topo-kpi-total',    nodes.length);
+  sv('topo-kpi-links',    links.filter(l => l.real).length);
+  sv('topo-kpi-online',   nodes.filter(n => n.status==='online'||n.status==='ativo').length);
+  sv('topo-kpi-offline',  nodes.filter(n => n.status==='offline').length);
+  sv('topo-kpi-sem-lldp', nodes.filter(n => !n.lldpVizinhos?.length).length);
 
-  const grid = document.getElementById('srv-grid');
-  if (!grid) return;
+  const lastUpd = document.getElementById('topo-last-update');
+  if (lastUpd) lastUpd.textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
 
-  if (!lista.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)">'
-      +'<div style="font-size:40px;margin-bottom:12px">🖥️</div>'
-      +'<div style="font-weight:600">Nenhum servidor encontrado</div>'
-      +'<div style="font-size:12px;margin-top:6px">Identificados por hostname contendo "serv" · Físicos: SERV*, DSERV* · Virtuais: VSERV*, VMSERVER*</div>'
-      +'</div>';
+  if (!nodes.length) {
+    svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#94A3B8" font-size="14">Nenhum dispositivo de rede encontrado</text>';
     return;
   }
 
-  lista.sort((a,b) => {
-    const ord={critico:0,offline:1,alerta:2,online:3,ativo:4};
-    const sa=ord[(a.status||'').toLowerCase()]??5, sb=ord[(b.status||'').toLowerCase()]??5;
-    return sa!==sb ? sa-sb : (_srvNome(a)||'').localeCompare(_srvNome(b)||'');
+  // Calcula layout
+  forceLayout(nodes, links, W, H);
+
+  const nodeById = {};
+  nodes.forEach(n => nodeById[n.id] = n);
+
+  const showLabels = document.getElementById('topo-show-labels')?.checked !== false;
+  const R = 28; // raio do nó
+
+  // ── Renderiza links ───────────────────────────────────────────
+  const gLinks = document.getElementById('topo-g-links');
+  const gNodes = document.getElementById('topo-g-nodes');
+  const gLabels= document.getElementById('topo-g-labels');
+  gLinks.innerHTML = ''; gNodes.innerHTML = ''; gLabels.innerHTML = '';
+
+  links.forEach(l => {
+    const a = nodeById[l.source], b = nodeById[l.target];
+    if (!a || !b) return;
+    const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+    const color    = l.real ? '#2563EB' : '#CBD5E1';
+    const dashArr  = l.real ? 'none' : '5,4';
+    const marker   = l.real ? 'url(#arrowBlue)' : 'url(#arrowGray)';
+    const opacity  = l.real ? 0.7 : 0.4;
+    const strokeW  = l.real ? 2 : 1.5;
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+    line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+    line.setAttribute('stroke', color);
+    line.setAttribute('stroke-width', strokeW);
+    line.setAttribute('stroke-dasharray', dashArr);
+    line.setAttribute('opacity', opacity);
+    line.setAttribute('marker-end', marker);
+    gLinks.appendChild(line);
+
+    // Label do link com porta
+    if (l.real && showLabels && l.localPort) {
+      const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+      txt.setAttribute('x', midX); txt.setAttribute('y', midY - 4);
+      txt.setAttribute('text-anchor','middle');
+      txt.setAttribute('font-size','9');
+      txt.setAttribute('fill','#64748B');
+      txt.setAttribute('pointer-events','none');
+      txt.textContent = l.localPort + (l.remotePort ? '↔'+l.remotePort : '');
+      gLabels.appendChild(txt);
+    }
   });
 
-  function metricBar(label,val,danger,warn) {
-    if (val==null) return '';
-    const cor=val>=danger?'#DC2626':val>=warn?'#D97706':'#059669';
-    return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>'+label+'</span><span style="font-weight:700;color:'+cor+'">'+val+'%</span></div><div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+cor+';width:'+Math.min(val,100)+'%;height:100%;border-radius:3px"></div></div></div>';
+  // ── Renderiza nós ─────────────────────────────────────────────
+  nodes.forEach(n => {
+    const color = topoGetColor(n.tipo, n.status);
+    const online = n.status === 'online' || n.status === 'ativo';
+    const icon  = TOPO_ICONS[n.tipo] || '🔌';
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('transform', 'translate(' + n.x + ',' + n.y + ')');
+    g.setAttribute('cursor','pointer');
+    g.setAttribute('data-id', n.id);
+
+    // Anel de status
+    if (n.status === 'offline') {
+      const ring = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      ring.setAttribute('r', R + 4);
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke', '#EF4444');
+      ring.setAttribute('stroke-width', 2);
+      ring.setAttribute('stroke-dasharray', '4,3');
+      ring.setAttribute('opacity', 0.7);
+      g.appendChild(ring);
+    }
+
+    // Círculo principal
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('r', R);
+    circle.setAttribute('fill', color);
+    circle.setAttribute('filter', 'url(#shadow)');
+    circle.setAttribute('opacity', online ? 1 : 0.55);
+    g.appendChild(circle);
+
+    // Ícone emoji
+    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('text-anchor','middle');
+    txt.setAttribute('dominant-baseline','central');
+    txt.setAttribute('font-size','16');
+    txt.setAttribute('pointer-events','none');
+    txt.setAttribute('y', 1);
+    txt.textContent = icon;
+    g.appendChild(txt);
+
+    // Indicador LLDP
+    if (n.lldpVizinhos?.length) {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      dot.setAttribute('cx', R - 6); dot.setAttribute('cy', -(R - 6));
+      dot.setAttribute('r', 5);
+      dot.setAttribute('fill', '#10B981');
+      dot.setAttribute('stroke', '#fff');
+      dot.setAttribute('stroke-width', 1.5);
+      g.appendChild(dot);
+    }
+
+    // Label hostname
+    if (showLabels) {
+      const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+      lbl.setAttribute('text-anchor','middle');
+      lbl.setAttribute('y', R + 14);
+      lbl.setAttribute('font-size','10');
+      lbl.setAttribute('fill','#334155');
+      lbl.setAttribute('font-weight','600');
+      lbl.setAttribute('pointer-events','none');
+      const labelText = n.label.length > 14 ? n.label.slice(0,13)+'…' : n.label;
+      lbl.textContent = labelText;
+      gLabels.appendChild(Object.assign(document.createElementNS('http://www.w3.org/2000/svg','text'), {
+        ...lbl
+      }));
+      // Re-create properly
+      const lbl2 = document.createElementNS('http://www.w3.org/2000/svg','text');
+      lbl2.setAttribute('x', n.x); lbl2.setAttribute('y', n.y + R + 14);
+      lbl2.setAttribute('text-anchor','middle');
+      lbl2.setAttribute('font-size','10');
+      lbl2.setAttribute('fill','#334155');
+      lbl2.setAttribute('font-weight','600');
+      lbl2.setAttribute('pointer-events','none');
+      lbl2.textContent = labelText;
+      gLabels.appendChild(lbl2);
+
+      // Sub-label: área
+      if (n.area) {
+        const sub = document.createElementNS('http://www.w3.org/2000/svg','text');
+        sub.setAttribute('x', n.x); sub.setAttribute('y', n.y + R + 25);
+        sub.setAttribute('text-anchor','middle');
+        sub.setAttribute('font-size','8.5');
+        sub.setAttribute('fill','#94A3B8');
+        sub.setAttribute('pointer-events','none');
+        sub.textContent = n.area;
+        gLabels.appendChild(sub);
+      }
+    }
+
+    // Hover e clique
+    g.addEventListener('mouseenter', () => {
+      circle.setAttribute('r', R + 3);
+      circle.setAttribute('opacity', 1);
+    });
+    g.addEventListener('mouseleave', () => {
+      circle.setAttribute('r', R);
+      circle.setAttribute('opacity', online ? 1 : 0.55);
+    });
+    g.addEventListener('click', () => topoShowDetail(n));
+
+    gNodes.appendChild(g);
+  });
+
+  // ── Pan & Zoom ────────────────────────────────────────────────
+  topoSetupPanZoom(container, svg);
+}
+
+function topoShowDetail(n) {
+  const panel = document.getElementById('topo-detail-panel');
+  if (!panel) return;
+  panel.style.display = '';
+  document.getElementById('topo-detail-name').textContent = n.label;
+  document.getElementById('topo-detail-sub').textContent  = n.tipo.toUpperCase() + ' · ' + n.ip + (n.area ? ' · ' + n.area : '');
+
+  const fields = [
+    ['Status',    n.status || '—'],
+    ['IP',        n.ip || '—'],
+    ['Área',      n.area || '—'],
+    ['Local',     n.local || '—'],
+    ['Latência',  n.latency ? n.latency.toFixed(1) + 'ms' : '—'],
+    ['Uptime',    n.uptime ? (n.uptime >= 24 ? Math.floor(n.uptime/24) + 'd' : Math.round(n.uptime) + 'h') : '—'],
+    ['Interfaces',n.ifNum || '—'],
+    ['SNMP',      n.hasSnmp ? '✅ Sim' : '❌ Não'],
+    ['Links LLDP',n.lldpVizinhos?.length || 0],
+    ['Protocolo', n.lldpVizinhos?.[0]?.protocolo || '—'],
+  ];
+
+  document.getElementById('topo-detail-body').innerHTML = fields.map(([k,v]) =>
+    '<div style="background:var(--g50);border-radius:8px;padding:8px 10px">'
+    + '<div style="font-size:10px;color:var(--g400);font-weight:600;margin-bottom:2px">' + k + '</div>'
+    + '<div style="font-size:12px;font-weight:700;color:var(--g800)">' + escapeHtml(String(v)) + '</div>'
+    + '</div>'
+  ).join('');
+
+  // Vizinhos LLDP
+  const linksDiv = document.getElementById('topo-detail-links');
+  if (n.lldpVizinhos?.length) {
+    linksDiv.innerHTML = '<div style="font-size:11px;font-weight:700;color:var(--g500);margin-bottom:8px">🔗 VIZINHOS ' + (n.lldpVizinhos[0].protocolo||'LLDP') + '</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+      + n.lldpVizinhos.map(v =>
+          '<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:6px 10px;font-size:11px">'
+          + '<span style="font-weight:700;color:#1D4ED8">' + escapeHtml(v.remoteHost||v.remoteIp||'?') + '</span>'
+          + (v.localPort ? '<span style="color:#64748B"> · ' + escapeHtml(v.localPort) + '↔' + escapeHtml(v.remotePort||'?') + '</span>' : '')
+          + '</div>'
+        ).join('')
+      + '</div>';
+  } else {
+    linksDiv.innerHTML = '<div style="font-size:11px;color:var(--g400)">⚠️ Sem dados LLDP/CDP — vizinhos não detectados neste dispositivo</div>';
   }
-
-  grid.innerHTML = lista.map(function(a) {
-    const hn = _srvNome(a)||a.ip||'—';
-    const isVirt = isVirtualServidor(a);
-    const tLabel = isVirt?'☁️ Virtual':'🖥️ Físico', tColor=isVirt?'#7C3AED':'#2563EB';
-    const st=(a.status||'desconhecido').toLowerCase();
-    const stColor=(st==='online'||a.reachable)?'#059669':st==='critico'?'#DC2626':st==='offline'?'#6B7280':'#D97706';
-    const stLabel=(st==='online'||a.reachable)?'Online':st.charAt(0).toUpperCase()+st.slice(1);
-    const uptime=a.uptimeHoras!=null?(a.uptimeHoras>=24?Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h':Math.round(a.uptimeHoras)+'h'):null;
-    const lastSeen=a.lastSeen?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen).toLocaleString('pt-BR'):'—';
-    const patSection = isVirt
-      ? '<span style="background:#F3F4F6;color:var(--g400);font-size:10px;padding:1px 6px;border-radius:8px">N/A — Virtual</span>'
-      : (a.pat
-          ? '<span style="font-family:monospace;font-weight:700;color:var(--accent)">'+escapeHtml(a.pat)+'</span> <button data-id="'+escapeHtml(a.id)+'" data-hn="'+escapeHtml(hn)+'" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="font-size:10px;background:#FEF3C7;color:#92400E;border:none;padding:1px 6px;border-radius:8px;cursor:pointer">✏️</button>'
-          : '<button data-id="'+escapeHtml(a.id)+'" data-hn="'+escapeHtml(hn)+'" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="background:#FEF3C7;color:#92400E;border:none;padding:3px 10px;border-radius:8px;cursor:pointer;font-weight:700;font-size:11px">🏷️ Atribuir PAT</button>');
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tColor+'">'
-      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        +'<div style="display:flex;gap:10px;align-items:flex-start;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(isVirt?'☁️':'🖥️')+'</span>'
-          +'<div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
-          +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(a.area||'—')+'</div></div></div>'
-        +'<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
-          +'<span style="background:'+stColor+'22;color:'+stColor+';border:1px solid '+stColor+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+stLabel+'</span>'
-          +'<span style="background:'+tColor+'22;color:'+tColor+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+tLabel+'</span>'
-        +'</div></div>'
-      +'<div style="padding:14px 16px">'
-        +(a.cpuPct!=null||a.memPct!=null?metricBar('CPU',a.cpuPct,90,70)+metricBar('Memória',a.memPct,90,80):'<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Métricas indisponíveis</div>')
-        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:8px">'
-          +'<div><span style="color:var(--g400)">PAT: </span>'+patSection+'</div>'
-          +'<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').split(' ').slice(0,3).join(' '))+'</span></div>'
-          +'<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(uptime||'—')+'</span></div>'
-          +'<div><span style="color:var(--g400)">Último contato:</span> <span style="font-size:10px">'+lastSeen+'</span></div>'
-        +'</div></div>'
-      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        +'<button data-pid="'+escapeHtml(a.pat||a.id)+'" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
-        +'<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
-        +'<button data-aid="'+escapeHtml(a.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
-      +'</div></div>';
-  }).join('');
 }
 
-// PAT Servidor
-let _srvPatAtivoId=null, _srvPatStream=null, _srvPatValor=null;
-function abrirPatServidor(ativoId, hostname) {
-  _srvPatAtivoId=ativoId; _srvPatValor=null;
-  const info=document.getElementById('srv-pat-info'); if(info) info.textContent='🖥️ '+(hostname||ativoId);
-  const a=(STATE.ativos||[]).find(x=>x.id===ativoId);
-  const inp=document.getElementById('srv-pat-digitar-input'); if(inp) inp.value=a?.pat||'';
-  const box=document.getElementById('srv-pat-confirmacao'); if(box) box.style.display='none';
-  const btn=document.getElementById('srv-pat-salvar-btn'); if(btn) btn.disabled=true;
-  srvPatTab('digitar', document.querySelector('.srv-pat-tab'));
-  openModal('modal-pat-servidor');
-}
-function fecharModalPatServidor(){srvPatPararCamera();closeModal('modal-pat-servidor');}
-function srvPatTab(tab,el){
-  ['digitar','camera','foto','voz'].forEach(t=>{const p=document.getElementById('srv-pat-panel-'+t);if(p)p.style.display=t===tab?'':'none';});
-  document.querySelectorAll('.srv-pat-tab').forEach(b=>{b.style.background='transparent';b.style.color='var(--g500)';b.style.boxShadow='none';});
-  if(el){el.style.background='#fff';el.style.color='var(--g900)';el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)';}
-  if(tab!=='camera') srvPatPararCamera();
-}
-function srvPatValidar(val){
-  const limpo=(val||'').replace(/[^0-9A-Za-z-]/g,'').trim();
-  const btn=document.getElementById('srv-pat-salvar-btn');
-  if(limpo.length>=2){_srvPatValor=limpo;srvPatMostrarConfirmacao(limpo);if(btn)btn.disabled=false;}
-  else{_srvPatValor=null;const b=document.getElementById('srv-pat-confirmacao');if(b)b.style.display='none';if(btn)btn.disabled=true;}
-}
-function srvPatMostrarConfirmacao(pat){
-  const b=document.getElementById('srv-pat-confirmacao'),v=document.getElementById('srv-pat-valor-confirmado');
-  if(b)b.style.display='';if(v)v.textContent=pat;
-  const btn=document.getElementById('srv-pat-salvar-btn');if(btn)btn.disabled=false;
-}
-async function srvPatIniciarCamera(){
-  const video=document.getElementById('srv-pat-video'),area=document.getElementById('srv-pat-camera-area');
-  if(area)area.style.display='';
-  try{_srvPatStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=_srvPatStream;}
-  catch(e){showToast('Câmera indisponível','error');}
-}
-function srvPatPararCamera(){if(_srvPatStream){_srvPatStream.getTracks().forEach(t=>t.stop());_srvPatStream=null;}const a=document.getElementById('srv-pat-camera-area');if(a)a.style.display='none';}
-async function srvPatLerFoto(input){
-  const file=input.files?.[0];if(!file)return;
-  const prev=document.getElementById('srv-pat-foto-preview'),img=document.getElementById('srv-pat-foto-img'),st=document.getElementById('srv-pat-foto-status');
-  if(prev)prev.style.display='';if(img)img.src=URL.createObjectURL(file);if(st)st.textContent='🤖 Analisando...';
-  const r=new FileReader();r.onload=async function(e){
-    const b64=e.target.result.split(',')[1];
-    if(window._fs?.httpsCallable){try{const res=await window._fs.httpsCallable('extrairPATdaFoto')({imageBase64:b64});const pat=res.data?.pat;
-      if(pat){if(st){st.textContent='✅ PAT: '+pat;st.style.color='var(--success)';}srvPatMostrarConfirmacao(pat);}
-      else if(st)st.textContent='⚠️ Não detectado. Use a aba Digitar.';}catch(e){if(st)st.textContent='⚠️ Erro.';}}
-    else if(st)st.textContent='⚠️ Use a aba Digitar.';
-  };r.readAsDataURL(file);
-}
-function srvPatIniciarVoz(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition,st=document.getElementById('srv-pat-voz-status');
-  if(!SR){if(st)st.textContent='❌ Use Chrome.';return;}
-  const rec=new SR();rec.lang='pt-BR';rec.continuous=false;rec.interimResults=false;
-  if(st)st.textContent='🔴 Ouvindo...';
-  rec.onresult=function(e){
-    let txt=e.results[0][0].transcript.replace(/\s+/g,'');
-    const nums={zero:'0',um:'1',uma:'1',dois:'2',duas:'2',tres:'3',quatro:'4',cinco:'5',seis:'6',sete:'7',oito:'8',nove:'9'};
-    Object.entries(nums).forEach(([p,n])=>{txt=txt.replace(new RegExp(p,'gi'),n);});
-    const r=txt.replace(/[^0-9A-Za-z-]/g,'').trim();
-    if(r.length>=2){_srvPatValor=r;
-      const rd=document.getElementById('srv-pat-voz-resultado'),pd=document.getElementById('srv-pat-voz-pat'),ba=document.getElementById('srv-pat-voz-btn-area');
-      if(ba)ba.style.display='none';if(rd)rd.style.display='';if(pd)pd.textContent=r;
-      srvPatMostrarConfirmacao(r);
-    }else if(st)st.textContent='⚠️ Tente novamente.';
-  };rec.onerror=function(e){if(st)st.textContent='❌ '+e.error;};rec.start();
-}
-function srvPatReiniciarVoz(){
-  _srvPatValor=null;
-  const r=document.getElementById('srv-pat-voz-resultado'),b=document.getElementById('srv-pat-voz-btn-area'),c=document.getElementById('srv-pat-confirmacao'),btn=document.getElementById('srv-pat-salvar-btn');
-  if(r)r.style.display='none';if(b)b.style.display='';if(c)c.style.display='none';if(btn)btn.disabled=true;
-  const s=document.getElementById('srv-pat-voz-status');if(s)s.textContent='Clique e fale o número';
-}
-async function confirmarPatServidor(){
-  const pat=_srvPatValor,id=_srvPatAtivoId;
-  if(!pat||!id)return showToast('PAT não definido','warning');
-  const btn=document.getElementById('srv-pat-salvar-btn');setButtonLoading(btn,true,'Salvando...');
-  try{
-    await fsUpdate('ativos',id,{pat,updatedAt:new Date().toISOString()});
-    const ativo=(STATE.ativos||[]).find(a=>a.id===id);
-    if(ativo&&window._fs?.httpsCallable)window._fs.httpsCallable('adicionarNotaHistorico')({ativoId:id,nota:'PAT '+pat+' atribuído ao servidor '+(ativo.hostname||id),tipo:'atualizacao'}).catch(()=>{});
-    fecharModalPatServidor();showToast('✅ PAT '+pat+' atribuído!','success',4000);renderServidores();
-  }catch(e){showToast('Erro: '+e.message,'error');}finally{setButtonLoading(btn,false);}
-}
+// Pan & zoom via mouse/touch
+function topoSetupPanZoom(container, svg) {
+  // Remove listeners anteriores clonando o elemento
+  const newContainer = container.cloneNode(false);
+  while (container.firstChild) newContainer.appendChild(container.firstChild);
+  container.parentNode.replaceChild(newContainer, container);
 
-// ═══════════════════════════════════════════════════════════════
-// MONITORES
-// ═══════════════════════════════════════════════════════════════
+  let isDragging = false, startX, startY, startOX, startOY;
 
-let _monitorAtualSerial=null, _monitorCameraStream=null;
-
-function coletarTodosMonitores(){
-  const wmi=[];
-  (STATE.ativos||[]).forEach(function(ativo){
-    if(!ativo.monitoresConectados)return;
-    let mons=[];try{mons=typeof ativo.monitoresConectados==='string'?JSON.parse(ativo.monitoresConectados):(Array.isArray(ativo.monitoresConectados)?ativo.monitoresConectados:[]);}catch(e){}
-    mons.forEach(function(m){if(!m.serial)return;const cadastro=(STATE.monitoresCadastrados||[]).find(c=>c.serial===m.serial);
-      wmi.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:cadastro?.pat||m.pat||'',local:cadastro?.local||ativo.sala||ativo.loc||'',pcAtual:ativo.hostname||ativo.ip||ativo.desc||'—',pcPat:ativo.pat||'',pcId:ativo.id||'',area:ativo.area||'',qtdMovimentos:(STATE.monitorHistorico||[]).filter(h=>h.serial===m.serial).length,detectadoWMI:true,cadastroId:cadastro?.id||null,obs:cadastro?.obs||''});});
+  newContainer.addEventListener('mousedown', e => {
+    if (e.target.closest('g[data-id]')) return; // clique em nó
+    isDragging = true;
+    startX = e.clientX; startY = e.clientY;
+    startOX = _topoOffset.x; startOY = _topoOffset.y;
+    newContainer.style.cursor = 'grabbing';
   });
-  (STATE.monitoresCadastrados||[]).forEach(function(c){if(wmi.find(m=>m.serial===c.serial))return;
-    wmi.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',local:c.local||'',pcAtual:c.pcVinculado||'—',pcPat:'',pcId:'',area:c.area||'',qtdMovimentos:(STATE.monitorHistorico||[]).filter(h=>h.serial===c.serial).length,detectadoWMI:false,cadastroId:c.id,obs:c.obs||''});});
-  return wmi;
+  window.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    _topoOffset.x = startOX + (e.clientX - startX);
+    _topoOffset.y = startOY + (e.clientY - startY);
+    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
+    svg.style.transformOrigin = '0 0';
+  });
+  window.addEventListener('mouseup', () => { isDragging = false; newContainer.style.cursor = 'grab'; });
+
+  newContainer.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    _topoZoom = Math.max(0.3, Math.min(3, _topoZoom * delta));
+    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
+    svg.style.transformOrigin = '0 0';
+  }, { passive: false });
 }
 
-function renderMonitoresKPI(){
-  const todos=coletarTodosMonitores();
-  const sv=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
-  sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(m=>!m.pat).length);
-  sv('mon-kpi-com-pat',todos.filter(m=>!!m.pat).length);sv('mon-kpi-movidos',todos.filter(m=>m.qtdMovimentos>1).length);
-  nbUpdate('nb-monitores-sem-pat',todos.filter(m=>!m.pat).length);
+function topoZoom(factor) {
+  _topoZoom = Math.max(0.3, Math.min(3, _topoZoom * factor));
+  const svg = document.getElementById('topo-svg');
+  if (svg) {
+    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
+    svg.style.transformOrigin = '0 0';
+  }
 }
 
-function renderMonitores(){
-  renderMonitoresKPI();
-  const q=(document.getElementById('mon-search')?.value||'').toLowerCase();
-  const fSt=document.getElementById('mon-filter-status')?.value||'';
-  const grid=document.getElementById('mon-grid');if(!grid)return;
-  let todos=coletarTodosMonitores();
-  if(q)todos=todos.filter(m=>(m.serial||'').toLowerCase().includes(q)||(m.pat||'').toLowerCase().includes(q)||(m.modelo||'').toLowerCase().includes(q)||(m.fabricante||'').toLowerCase().includes(q)||(m.pcAtual||'').toLowerCase().includes(q));
-  if(fSt==='sem-pat')todos=todos.filter(m=>!m.pat);
-  if(fSt==='com-pat')todos=todos.filter(m=>!!m.pat);
-  if(fSt==='movido') todos=todos.filter(m=>m.qtdMovimentos>1);
-  if(!todos.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🖥️</div><div style="font-weight:600">Nenhum monitor encontrado</div><div style="font-size:12px;margin-top:6px">Detectados automaticamente pelo SysackClient</div></div>';return;}
-  grid.innerHTML=todos.map(function(m){
-    const temPat=!!m.pat;
-    const bordeCor=temPat?'var(--success)':'#F59E0B';
-    const badgePat=temPat?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">✅ PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">⚠️ Sem PAT</span>';
-    const wmiChip=m.detectadoWMI?'<span style="background:#EFF6FF;color:#2563EB;font-size:10px;padding:1px 6px;border-radius:8px">🔍 WMI</span>':'<span style="background:var(--g100);color:var(--g500);font-size:10px;padding:1px 6px;border-radius:8px">✏️ Manual</span>';
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+bordeCor+'">'
-      +'<div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">'
-        +'<div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div>'
-          +'<div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div>'
-          +'<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'
-        +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'+badgePat+wmiChip+'</div></div>'
-      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:10px">'
-        +'<div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div>'
-        +'<div><span style="color:var(--g400)">Área:</span> <span>'+escapeHtml(m.area||'—')+'</span></div>'
-      +'</div></div>'
-      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        +'<button data-serial="'+escapeHtml(m.serial)+'" onclick="abrirAtribuirPATMonitor(this.dataset.serial)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(temPat?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(temPat?'✏️ Alterar PAT':'🏷️ Atribuir PAT')+'</button>'
-        +'<button data-val="'+escapeHtml(m.pat||m.serial)+'" onclick="abrirChamadoParaMonitor(this.dataset.val)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">🎫 Chamado</button>'
-      +'</div></div>';
-  }).join('');
+function topoReset() {
+  _topoZoom = 1; _topoOffset = { x:0, y:0 }; _topoPositions = {};
+  const svg = document.getElementById('topo-svg');
+  if (svg) { svg.style.transform = ''; }
+  renderTopologia();
 }
 
-function abrirAtribuirPATMonitor(serial){
-  _monitorAtualSerial=serial;
-  const m=coletarTodosMonitores().find(x=>x.serial===serial);if(!m)return;
-  const info=document.getElementById('mon-pat-info');
-  if(info)info.innerHTML='<div style="display:flex;gap:12px;align-items:center"><span style="font-size:24px">🖥️</span><div><div style="font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-family:monospace;font-size:11px;color:var(--g500)">S/N: '+escapeHtml(serial)+'</div></div></div>';
-  const inp=document.getElementById('mon-pat-input');if(inp)inp.value=m.pat||'';
-  ['mon-camera-area','mon-foto-preview'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
-  document.getElementById('mon-pat-obs').value=m.obs||'';
-  const btn=document.getElementById('mon-pat-confirmar-btn');if(btn)btn.disabled=!m.pat;
-  openModal('modal-atribuir-pat-monitor');
+function topoExportar() {
+  const svg = document.getElementById('topo-svg');
+  if (!svg) return;
+  const blob = new Blob([svg.outerHTML], { type:'image/svg+xml' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'topologia-rede-' + new Date().toISOString().split('T')[0] + '.svg';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Topologia exportada em SVG', 'success', 2500);
 }
-function monPatInputChange(val){const btn=document.getElementById('mon-pat-confirmar-btn');if(btn)btn.disabled=!val||val.trim().length<2;}
-async function confirmarPatMonitor(){
-  const pat=document.getElementById('mon-pat-input')?.value?.trim(),obs=document.getElementById('mon-pat-obs')?.value?.trim()||'',serial=_monitorAtualSerial;
-  if(!pat||!serial)return showToast('Informe o PAT','warning');
-  const btn=document.getElementById('mon-pat-confirmar-btn');setButtonLoading(btn,true,'Salvando...');
-  try{
-    const m=coletarTodosMonitores().find(x=>x.serial===serial),agora=new Date().toISOString();
-    if(m?.cadastroId){await fsUpdate('monitores',m.cadastroId,{pat,obs,updatedAt:agora});}
-    else{await fsAdd('monitores',{serial,pat,obs,fabricante:m?.fabricante||'',modelo:m?.modelo||'',pcVinculado:m?.pcAtual||'',createdAt:agora,updatedAt:agora,syncSource:'sysack-manual'},STATE.monitoresCadastrados);}
-    closeModal('modal-atribuir-pat-monitor');showToast('✅ PAT atribuído!','success',4000);renderMonitores();
-  }catch(e){showToast('Erro: '+e.message,'error');}finally{setButtonLoading(btn,false);}
-}
-async function abrirCameraMonitorPAT(){
-  const area=document.getElementById('mon-camera-area'),video=document.getElementById('mon-camera-video');if(!area||!video)return;
-  try{_monitorCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=_monitorCameraStream;area.style.display='';}
-  catch(e){showToast('Câmera indisponível','error');}
-}
-function fecharCameraMonitor(){if(_monitorCameraStream){_monitorCameraStream.getTracks().forEach(t=>t.stop());_monitorCameraStream=null;}const a=document.getElementById('mon-camera-area');if(a)a.style.display='none';}
-async function capturarFotoPatMonitor(){
-  const video=document.getElementById('mon-camera-video'),canvas=document.getElementById('mon-camera-canvas');if(!video||!canvas)return;
-  canvas.width=video.videoWidth||640;canvas.height=video.videoHeight||480;canvas.getContext('2d').drawImage(video,0,0);
-  const dataUrl=canvas.toDataURL('image/jpeg',0.85);document.getElementById('mon-foto-img').src=dataUrl;document.getElementById('mon-foto-preview').style.display='';fecharCameraMonitor();
-  const st=document.getElementById('mon-ocr-status');if(st)st.textContent='🔍 Analisando...';
-  try{if(window._fs?.httpsCallable){const res=await window._fs.httpsCallable('extrairPATdaFoto')({imageBase64:dataUrl.split(',')[1]});const pat=res.data?.pat;
-    if(pat){document.getElementById('mon-pat-input').value=pat;monPatInputChange(pat);if(st){st.textContent='✅ PAT: '+pat;st.style.color='var(--success)';}}
-    else if(st)st.textContent='⚠️ Não detectado. Digite manualmente.';}
-  }catch(e){if(st)st.textContent='⚠️ Erro.';}
-}
-function abrirChamadoParaMonitor(patOuSerial){openModal('modal-novo-chamado');setTimeout(function(){const el=document.getElementById('ch-patrimonio');if(el)el.value=patOuSerial;},100);}
-async function salvarMonitorManual(){
-  const serial=document.getElementById('mon-man-serial')?.value?.trim();if(!serial)return showToast('Série obrigatória','warning');
-  const dados={serial,pat:document.getElementById('mon-man-pat')?.value?.trim()||'',fabricante:document.getElementById('mon-man-fab')?.value?.trim()||'',modelo:document.getElementById('mon-man-modelo')?.value?.trim()||'',local:document.getElementById('mon-man-local')?.value?.trim()||'',pcVinculado:document.getElementById('mon-man-pc')?.value?.trim()||'',obs:document.getElementById('mon-man-obs')?.value?.trim()||'',createdAt:new Date().toISOString(),syncSource:'sysack-manual'};
-  try{await fsAdd('monitores',dados,STATE.monitoresCadastrados);closeModal('modal-monitor-manual');showToast('✅ Monitor cadastrado!','success');renderMonitores();}
-  catch(e){showToast('Erro: '+e.message,'error');}
-}
-function abrirCadastroMonitorManual(){['mon-man-serial','mon-man-pat','mon-man-fab','mon-man-modelo','mon-man-local','mon-man-pc','mon-man-obs'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});openModal('modal-monitor-manual');}
 
 function renderEmpregados() {
   const tbody    = document.getElementById('emp-body');
