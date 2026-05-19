@@ -191,6 +191,10 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
     <div class="sb-group" id="grp-ativos">
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="computador,workstation,notebook,desktop"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="9" height="7" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M11 7h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Computadores</a>
+      <a class="nav-i nav-sub" data-page="ativos" data-tipo="notebook">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M1 13h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Notebooks
+      </a>
       <a class="nav-i nav-sub" data-page="monitores"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M6 13h4M8 13v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Monitores</a>
       <a class="nav-i nav-sub" data-page="servidores"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Servidores</a>
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="switch,router,ap,firewall,access point"><svg viewBox="0 0 16 16" fill="none"><circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M6 8h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Dispositivos de rede</a>
@@ -750,7 +754,6 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="tab" onclick="filtrarAtivosPorTipo('switch,router,ap,firewall',this)">Rede</div>
         <div class="tab" onclick="goPage('servidores')" style="color:var(--accent)">Servidores ↗</div>
         <div class="tab" onclick="filtrarAtivosPorTipo('printer,impressora,ups,camera',this)">Outros</div>
-        <div class="tab" onclick="mostrarAtivosDisponiveis(this)" style="color:#059669;font-weight:700">♻️ Disponíveis</div>
       </div>
       <div class="card">
         <div class="card-header">
@@ -2857,8 +2860,6 @@ window.dispatchEvent(new Event('firebase-ready'));
         <button class="rel-tab-btn" onclick="relTab('santa-clara')">📍 Santa Clara</button>
         <button class="rel-tab-btn" onclick="relTab('terceirizada')">🔧 Empresa Terceirizada</button>
         <button class="rel-tab-btn" onclick="relTab('vida-ativo')">📋 Vida do Ativo</button>
-        <button class="rel-tab-btn" onclick="relTab('irregulares')" style="color:#DC2626">⚠️ Irregulares</button>
-        <button class="rel-tab-btn" onclick="relTab('desligadas')" style="color:#64748B">💤 Offline</button>
       </div>
 
       <!-- RELATÓRIO: MOVIMENTAÇÕES -->
@@ -2937,44 +2938,6 @@ window.dispatchEvent(new Event('firebase-ready'));
           </div>
         </div>
         <div id="rel-va-result"></div>
-
-      <!-- RELATÓRIO: IRREGULARES -->
-      <div id="rel-tab-irregulares" style="display:none">
-        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
-          <div class="stat-card red">   <div class="stat-label">Sem PAT</div>           <div class="stat-value" id="rel-irr-sem-pat">—</div></div>
-          <div class="stat-card orange"><div class="stat-label">Sem responsável</div>    <div class="stat-value" id="rel-irr-sem-resp">—</div></div>
-          <div class="stat-card yellow"><div class="stat-label">Sem hostname</div>       <div class="stat-value" id="rel-irr-sem-host">—</div></div>
-          <div class="stat-card blue">  <div class="stat-label">Status indefinido</div> <div class="stat-value" id="rel-irr-sem-status">—</div></div>
-        </div>
-        <div class="card">
-          <div class="card-header"><h3>Ativos com pendências cadastrais</h3>
-            <div style="display:flex;gap:8px;align-items:center">
-              <select id="rel-irr-filtro" class="form-control" style="width:180px;margin:0;height:32px;font-size:12px" onchange="gerarRelIrregulares()"><option value="todos">Todos os problemas</option><option value="sem-pat">Sem PAT</option><option value="sem-resp">Sem responsável</option><option value="sem-host">Sem hostname</option><option value="sem-status">Status indefinido</option></select>
-              <button class="btn btn-ghost btn-sm" onclick="exportarIrregularesCSV()">⬇ CSV</button>
-            </div>
-          </div>
-          <div class="table-wrap"><table><thead><tr><th>PAT</th><th>Hostname / IP</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Problema(s)</th><th>Ação</th></tr></thead><tbody id="rel-irr-tbody"></tbody></table></div>
-        </div>
-      </div>
-
-      <!-- RELATÓRIO: OFFLINE -->
-      <div id="rel-tab-desligadas" style="display:none">
-        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
-          <div class="stat-card red">   <div class="stat-label">Offline &gt;5d</div>  <div class="stat-value" id="rel-off-5">—</div></div>
-          <div class="stat-card orange"><div class="stat-label">Offline &gt;15d</div> <div class="stat-value" id="rel-off-15">—</div></div>
-          <div class="stat-card yellow"><div class="stat-label">Offline &gt;30d</div> <div class="stat-value" id="rel-off-30">—</div></div>
-          <div class="stat-card gray">  <div class="stat-label">Sem lastSeen</div>    <div class="stat-value" id="rel-off-sem">—</div></div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-          <label style="font-size:12px;font-weight:600">Offline há mais de:</label>
-          <select id="rel-off-dias" class="form-control" style="width:120px;margin:0;height:32px;font-size:12px" onchange="gerarRelDesligadas()"><option value="5">5 dias</option><option value="10">10 dias</option><option value="15">15 dias</option><option value="30">30 dias</option><option value="60">60 dias</option></select>
-          <button class="btn btn-ghost btn-sm" onclick="exportarDesligadasCSV()">⬇ CSV</button>
-        </div>
-        <div class="card">
-          <div class="card-header"><h3>Máquinas sem contato</h3></div>
-          <div class="table-wrap"><table><thead><tr><th>PAT</th><th>Hostname</th><th>IP</th><th>Área</th><th>Responsável</th><th>Último contato</th><th>Dias offline</th><th>Ação</th></tr></thead><tbody id="rel-off-tbody"></tbody></table></div>
-        </div>
-      </div>
       </div>
 
     </div>
@@ -3087,10 +3050,10 @@ window.dispatchEvent(new Event('firebase-ready'));
     <!-- SERVIDORES -->
     <div class="page" id="page-servidores">
       <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Servidores</h2><p class="text-sm text-muted">Físicos (SERV*) e virtuais (VSERV*) detectados pelo hostname</p></div>
+        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Servidores</h2><p class="text-sm text-muted">Físicos (SERV*) e virtuais (VSERV*) — identificados pelo hostname</p></div>
         <div class="flex gap-8" style="flex-wrap:wrap">
           <input class="form-control" id="srv-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP, área..." oninput="renderServidores()">
-          <select class="form-control" id="srv-filter-tipo" style="width:160px;margin:0" onchange="renderServidores()"><option value="">Todos</option><option value="fisico">🖥️ Físicos (SERV)</option><option value="virtual">☁️ Virtuais (VSERV)</option></select>
+          <select class="form-control" id="srv-filter-tipo" style="width:160px;margin:0" onchange="renderServidores()"><option value="">Todos</option><option value="fisico">🖥️ Físicos</option><option value="virtual">☁️ Virtuais</option></select>
           <select class="form-control" id="srv-filter-status" style="width:140px;margin:0" onchange="renderServidores()"><option value="">Todos os status</option><option value="online">Online</option><option value="offline">Offline</option><option value="critico">Crítico</option></select>
         </div>
       </div>
@@ -3102,7 +3065,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="stat-card red">   <div class="stat-label">Offline/Crítico</div> <div class="stat-value" id="srv-kpi-offline">—</div></div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--g100);padding-bottom:8px">
-        <button class="srv-tab-btn" style="padding:7px 14px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1)" onclick="srvTab('todos',this)">Todos</button>
+        <button class="srv-tab-btn" style="padding:7px 14px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1);color:var(--g900)" onclick="srvTab('todos',this)">Todos</button>
         <button class="srv-tab-btn" style="padding:7px 14px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:transparent;color:var(--g500)" onclick="srvTab('fisico',this)">🖥️ Físicos</button>
         <button class="srv-tab-btn" style="padding:7px 14px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:transparent;color:var(--g500)" onclick="srvTab('virtual',this)">☁️ Virtuais</button>
       </div>
@@ -3122,12 +3085,13 @@ window.dispatchEvent(new Event('firebase-ready'));
             <button class="srv-pat-tab" onclick="srvPatTab('voz',this)" style="flex:1;padding:7px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:transparent;color:var(--g500)">🎤 Voz</button>
           </div>
           <div id="srv-pat-panel-digitar">
-            <div class="form-group"><label class="form-label fw-700">Número de Patrimônio</label><input class="form-control" id="srv-pat-digitar-input" placeholder="Ex: 78625" style="font-size:20px;font-weight:700;font-family:monospace;text-align:center;letter-spacing:2px" oninput="srvPatValidar(this.value)" onkeydown="if(event.key==='Enter') confirmarPatServidor()"><div id="srv-pat-digitar-feedback" style="font-size:11px;margin-top:6px;color:var(--g400);text-align:center">Digite o número da plaqueta de patrimônio</div></div>
+            <div class="form-group"><label class="form-label fw-700">Número de Patrimônio</label>
+            <input class="form-control" id="srv-pat-digitar-input" placeholder="Ex: 78625" style="font-size:20px;font-weight:700;font-family:monospace;text-align:center;letter-spacing:2px" oninput="srvPatValidar(this.value)" onkeydown="if(event.key==='Enter') confirmarPatServidor()">
+            <div id="srv-pat-digitar-feedback" style="font-size:11px;margin-top:6px;color:var(--g400);text-align:center">Digite o número da plaqueta</div></div>
           </div>
           <div id="srv-pat-panel-camera" style="display:none">
-            <div style="background:#000;border-radius:10px;overflow:hidden;position:relative;aspect-ratio:4/3;max-height:260px;margin-bottom:10px" id="srv-pat-camera-area" style="display:none">
+            <div id="srv-pat-camera-area" style="background:#000;border-radius:10px;overflow:hidden;position:relative;aspect-ratio:4/3;max-height:260px;margin-bottom:10px;display:none">
               <video id="srv-pat-video" style="width:100%;height:100%;object-fit:cover" playsinline autoplay muted></video>
-              <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><div style="width:220px;height:90px;border:2px solid #2563EB;border-radius:6px;box-shadow:0 0 0 4000px rgba(0,0,0,.4)"></div></div>
               <div style="position:absolute;top:10px;left:0;right:0;text-align:center"><span style="background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:3px 10px;border-radius:10px" id="srv-pat-camera-status">Aponte para a plaqueta</span></div>
             </div>
             <button class="btn btn-primary" style="width:100%" onclick="srvPatIniciarCamera()">📷 Ativar câmera</button>
@@ -3178,14 +3142,13 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div id="mon-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px"></div>
     </div>
 
-    <!-- Modal: atribuir PAT ao monitor -->
+    <!-- Modal atribuir PAT monitor -->
     <div class="modal-overlay" id="modal-atribuir-pat-monitor">
       <div class="modal" style="max-width:500px">
         <div class="modal-header"><h3>🏷️ Atribuir Patrimônio ao Monitor</h3><button class="close-btn" onclick="closeModal('modal-atribuir-pat-monitor')">✕</button></div>
         <div class="modal-body">
           <div id="mon-pat-info" style="background:var(--g50);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px"></div>
-          <div class="form-group">
-            <label class="form-label fw-700">Número de Patrimônio (PAT)</label>
+          <div class="form-group"><label class="form-label fw-700">Número de Patrimônio</label>
             <div style="display:flex;gap:8px">
               <input class="form-control" id="mon-pat-input" placeholder="Ex: 78625" style="flex:1;font-size:16px;font-weight:700;font-family:monospace" oninput="monPatInputChange(this.value)" onkeydown="if(event.key==='Enter') confirmarPatMonitor()">
               <button class="btn btn-secondary" onclick="abrirCameraMonitorPAT()" title="Câmera">📷</button>
@@ -3194,7 +3157,6 @@ window.dispatchEvent(new Event('firebase-ready'));
           <div id="mon-camera-area" style="display:none;margin-bottom:16px">
             <div style="background:#000;border-radius:10px;overflow:hidden;position:relative;aspect-ratio:4/3;max-height:260px">
               <video id="mon-camera-video" style="width:100%;height:100%;object-fit:cover" playsinline autoplay muted></video>
-              <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><div style="width:200px;height:80px;border:2px solid #2563EB;border-radius:6px;box-shadow:0 0 0 4000px rgba(0,0,0,.4)"></div></div>
             </div>
             <div style="display:flex;gap:8px;margin-top:8px">
               <button class="btn btn-primary btn-sm" style="flex:1" onclick="capturarFotoPatMonitor()">📸 Capturar</button>
@@ -3203,7 +3165,7 @@ window.dispatchEvent(new Event('firebase-ready'));
             <canvas id="mon-camera-canvas" style="display:none"></canvas>
           </div>
           <div id="mon-foto-preview" style="display:none;margin-bottom:16px">
-            <img id="mon-foto-img" style="width:100%;border-radius:8px;border:1px solid var(--g200)">
+            <img id="mon-foto-img" style="width:100%;border-radius:8px">
             <div id="mon-ocr-status" style="font-size:12px;color:var(--g500);margin-top:8px"></div>
           </div>
           <div class="form-group"><label class="form-label">Observação</label><input class="form-control" id="mon-pat-obs" placeholder="Ex: monitor da recepção..."></div>
@@ -3212,18 +3174,18 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
     </div>
 
-    <!-- Modal: cadastro manual de monitor -->
+    <!-- Modal cadastro manual monitor -->
     <div class="modal-overlay" id="modal-monitor-manual">
       <div class="modal" style="max-width:480px">
         <div class="modal-header"><h3>+ Cadastrar Monitor</h3><button class="close-btn" onclick="closeModal('modal-monitor-manual')">✕</button></div>
         <div class="modal-body">
           <div class="grid-2">
-            <div class="form-group"><label class="form-label req">Número de Série</label><input class="form-control" id="mon-man-serial" placeholder="S/N do monitor"></div>
+            <div class="form-group"><label class="form-label req">Série</label><input class="form-control" id="mon-man-serial" placeholder="S/N"></div>
             <div class="form-group"><label class="form-label">PAT</label><input class="form-control" id="mon-man-pat" placeholder="Ex: 78625"></div>
-            <div class="form-group"><label class="form-label">Fabricante</label><input class="form-control" id="mon-man-fab" placeholder="Ex: Dell, LG"></div>
+            <div class="form-group"><label class="form-label">Fabricante</label><input class="form-control" id="mon-man-fab" placeholder="Ex: Dell"></div>
             <div class="form-group"><label class="form-label">Modelo</label><input class="form-control" id="mon-man-modelo" placeholder="Ex: P2422H"></div>
             <div class="form-group"><label class="form-label">Tamanho (pol.)</label><input class="form-control" id="mon-man-tam" placeholder="Ex: 24"></div>
-            <div class="form-group"><label class="form-label">Localização</label><input class="form-control" id="mon-man-local" placeholder="Ex: Sala 205"></div>
+            <div class="form-group"><label class="form-label">Local</label><input class="form-control" id="mon-man-local" placeholder="Ex: Sala 205"></div>
           </div>
           <div class="form-group"><label class="form-label">PC vinculado</label><input class="form-control" id="mon-man-pc" placeholder="Hostname ou PAT"></div>
           <div class="form-group"><label class="form-label">Observação</label><textarea class="form-control" id="mon-man-obs" rows="2"></textarea></div>
@@ -3249,7 +3211,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
       <div id="org-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px"></div>
       <div id="org-modal-setor" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.5);align-items:center;justify-content:center">
-        <div style="background:var(--panel,#fff);border-radius:16px;padding:0;max-width:640px;width:92%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+        <div style="background:var(--panel,#fff);border-radius:16px;max-width:640px;width:92%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
           <div style="padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between">
             <h3 id="org-modal-titulo" style="margin:0;font-size:16px;font-weight:700">Setor</h3>
             <button onclick="document.getElementById('org-modal-setor').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--g400)">✕</button>

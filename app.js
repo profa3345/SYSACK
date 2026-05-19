@@ -763,12 +763,11 @@ function startFirestoreListeners() {
       pat:    d.pat    || d.patrimonio || '',
       // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
       desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      // NBK* no hostname → notebook; SERV*/VSERV* → servidor/server-linux
-      tipo:   (() => {
+      // Auto-detecção por hostname: NBK* → notebook
+      tipo: (() => {
         const hn = (d.hostname || d.sysName || d.nome || d.desc || '').toUpperCase();
         if (/^NBK/i.test(hn)) return 'notebook';
-        if (d.tipo) return d.tipo;
-        return 'workstation';
+        return d.tipo || 'workstation';
       })(),
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
@@ -946,6 +945,8 @@ function renderPage(id) {
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
     'organograma':   () => renderOrganograma(),
+    'servidores':    () => renderServidores(),
+    'monitores':     () => renderMonitores(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -1079,17 +1080,11 @@ function renderAtivos() {
   }
 
   const lista = STATE.ativos.filter(a => {
-    // NBK* no hostname → força tipo notebook para fins de filtro
-    const nomeAtivo = (a.hostname || a.desc || a.nome || '').toUpperCase();
-    const ehNotebook = /^NBK/i.test(nomeAtivo);
-    if (ehNotebook && a.tipo !== 'notebook') {
-      // Atualiza tipo local para filtro funcionar (não grava no Firestore)
-      a._tipoEfetivo = 'notebook';
-    } else {
-      a._tipoEfetivo = a.tipo || '';
-    }
+    // Exclui servidores da lista geral (têm aba própria)
+    const filtrandoServidor = _ativoFiltroTipo && (_ativoFiltroTipo.includes('servidor') || _ativoFiltroTipo.includes('server-linux'));
+    if (!filtrandoServidor && typeof isServidor === 'function' && isServidor(a)) return false;
     if (tipos.length > 0) {
-      const t = (a._tipoEfetivo || a.tipo || '').toLowerCase();
+      const t = (a.tipo || '').toLowerCase();
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
@@ -2812,12 +2807,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const tabMap = {
           'computador,workstation,notebook,desktop': 1,
           'notebook': 2,
-          'monitor': 3,
+          // Monitores (3) e Servidores (5) → páginas dedicadas, não mapear
+          'switch,router,ap,firewall': 4,
           'switch,router,ap,firewall,access point': 4,
-          'servidor,server-linux': 5,
-          'outro,rack,storage,appliance,ups,camera': 6,
-          'impressora,printer': 6,
-          'software': 6,
+          'printer,impressora,ups,camera': 6,
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
