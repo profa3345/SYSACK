@@ -940,6 +940,8 @@ function renderPage(id) {
     'self-service':  () => renderSelfService(),
     'empregados':    () => renderEmpregados(),
     'organograma':   () => renderOrganograma(),
+    'servidores':    () => renderServidores(),
+    'monitores':     () => renderMonitores(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -2797,11 +2799,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const tabMap = {
           'computador,workstation,notebook,desktop': 1,
           'notebook': 2,
-          // índice 3 = Monitores ↗ (página dedicada — não mapear)
           'switch,router,ap,firewall': 4,
           'switch,router,ap,firewall,access point': 4,
           'printer,impressora,ups,camera': 6,
-          // índice 5 = Servidores ↗ (página dedicada — não mapear)
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
@@ -5928,22 +5928,43 @@ function renderMonitorRede() {
       ? fmtRelative(new Date(d.lastSeen?.seconds ? d.lastSeen.seconds*1000 : d.lastSeen))
       : '—';
 
-    // CPU bar
+    // CPU bar — usa cpuPct se disponível; para switches: latência visual
     const cpuBar = d.cpuPct != null
       ? `<div class="mon-bar"><div class="mon-bar-fill ${d.cpuPct>90?'crit':d.cpuPct>70?'warn':'ok'}" style="width:${d.cpuPct}%"></div></div> ${d.cpuPct}%`
-      : '—';
+      : d.latencyMs != null
+        ? (() => {
+            const lat = d.latencyMs;
+            const pct = Math.min(Math.round((lat / 50) * 100), 100);
+            const cls = lat > 20 ? 'crit' : lat > 5 ? 'warn' : 'ok';
+            return `<div class="mon-bar"><div class="mon-bar-fill ${cls}" style="width:${pct}%"></div></div> <span style="font-size:11px;color:var(--g500)">lat ${lat.toFixed(1)}ms</span>`;
+          })()
+        : '—';
 
-    // Temp
+    // Temp — usa tempC se disponível; para switches: uptime como estabilidade
     const tempStr = d.tempC != null
       ? `<span style="color:${d.tempC>75?'#DC2626':d.tempC>60?'#D97706':'#059669'}">${d.tempC}°C</span>`
-      : '—';
+      : d.uptimeH != null
+        ? (() => {
+            const dias = Math.floor(d.uptimeH / 24);
+            const horas = Math.round(d.uptimeH % 24);
+            const label = dias > 0 ? `${dias}d ${horas}h` : `${horas}h`;
+            const cor = d.uptimeH < 1 ? '#DC2626' : d.uptimeH < 24 ? '#D97706' : '#059669';
+            return `<span style="color:${cor};font-size:11.5px" title="Uptime">⏱ ${label}</span>`;
+          })()
+        : '—';
 
-    // Métricas extras
+    // Métricas extras — dados reais disponíveis
     const extras = [];
     if (d.portsUp   != null) extras.push(`${d.portsUp}▲/${d.portsDown||0}▼ portas`);
     if (d.battPct   != null) extras.push(`Bat: ${d.battPct}%`);
     if (d.tonerLevels?.length) extras.push(`Toner: ${Math.min(...d.tonerLevels.map(t=>t.pct))}%`);
     if (d.uptime)              extras.push(`Up: ${d.uptime}`);
+    if (!extras.length) {
+      if (d.ifNumber  > 0)  extras.push(`${d.ifNumber} interfaces`);
+      if (d.hasSnmp)        extras.push('SNMP ✓');
+      const verMatch = (d.sysDescr||'').match(/[Vv]ersion[\s:]+([0-9][^\s,;]{0,20})/);
+      if (verMatch)         extras.push(`v${verMatch[1]}`);
+    }
 
     return `<tr style="cursor:pointer" onclick="abrirMonitorDetalhe('${d.id}','${d._col}')">
       <td style="text-align:center"><span class="mon-dot ${dotClass}"></span></td>
@@ -9011,6 +9032,616 @@ function filtrarEmpregadosModal() {
     : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum empregado encontrado</div>';
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// SERVIDORES — identifica por hostname SERV* (físico) VSERV* (virtual)
+// ═══════════════════════════════════════════════════════════════
+
+let _srvTab = 'todos';
+
+function _srvNome(a) {
+  const candidatos = [a.hostname, a.sysName, a.nome, a.desc, a.name, a.pat, a.sysDescr];
+  for (const c of candidatos) {
+    const s = (c || '').trim().toUpperCase();
+    if (s && s !== (a.ip||'').toUpperCase() && s.length > 2) return s;
+  }
+  return '';
+}
+
+function isFisicoServidor(a) {
+  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
+  return (hn.startsWith('SERV') && !hn.startsWith('VSERV')) || (tipo === 'servidor' && !hn.startsWith('VSERV'));
+}
+
+function isVirtualServidor(a) {
+  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
+  return hn.startsWith('VSERV') || tipo === 'server-linux';
+}
+
+function isServidor(a) {
+  const hn = _srvNome(a), tipo = (a.tipo||'').toLowerCase();
+  return hn.startsWith('SERV') || hn.startsWith('VSERV') || tipo === 'servidor' || tipo === 'server-linux';
+}
+
+function identificarServidores(ativos) { return (ativos||[]).filter(isServidor); }
+
+function srvTab(tab, el) {
+  _srvTab = tab;
+  document.querySelectorAll('.srv-tab-btn').forEach(b => { b.style.background='transparent'; b.style.color='var(--g500)'; b.style.boxShadow='none'; });
+  if (el) { el.style.background='#fff'; el.style.color='var(--g900)'; el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)'; }
+  renderServidores();
+}
+
+function renderServidores() {
+  const q = (document.getElementById('srv-search')?.value||'').toLowerCase();
+  const fTipo = document.getElementById('srv-filter-tipo')?.value || '';
+  const fStatus = document.getElementById('srv-filter-status')?.value || '';
+  let lista = identificarServidores(STATE.ativos);
+  if (fTipo === 'fisico'  || _srvTab === 'fisico')  lista = lista.filter(isFisicoServidor);
+  if (fTipo === 'virtual' || _srvTab === 'virtual')  lista = lista.filter(isVirtualServidor);
+  if (fStatus) lista = lista.filter(a => (a.status||'').toLowerCase() === fStatus);
+  if (q) lista = lista.filter(a => ['hostname','ip','desc','area','pat'].some(f => (a[f]||'').toLowerCase().includes(q)));
+
+  const todos = identificarServidores(STATE.ativos);
+  const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  sv('srv-kpi-total',    todos.length);
+  sv('srv-kpi-fisicos',  todos.filter(isFisicoServidor).length);
+  sv('srv-kpi-virtuais', todos.filter(isVirtualServidor).length);
+  sv('srv-kpi-online',   todos.filter(a => a.reachable||((a.status||'').toLowerCase()==='online')).length);
+  sv('srv-kpi-offline',  todos.filter(a => ['offline','critico'].includes((a.status||'').toLowerCase())).length);
+  nbUpdate('nb-servidores', todos.length);
+
+  const grid = document.getElementById('srv-grid');
+  if (!grid) return;
+  if (!lista.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🖥️</div><div style="font-weight:600">Nenhum servidor encontrado</div><div style="font-size:12px;margin-top:6px">Servidores físicos: hostname SERV* · Virtuais: hostname VSERV*</div></div>';
+    return;
+  }
+  lista.sort(function(a,b) {
+    const ord={critico:0,offline:1,alerta:2,online:3,ativo:4};
+    return (ord[(a.status||'').toLowerCase()]??5) - (ord[(b.status||'').toLowerCase()]??5) || (_srvNome(a)||'').localeCompare(_srvNome(b)||'');
+  });
+
+  function metricBar(label, val, danger, warn) {
+    if (val==null) return '';
+    const cor = val>=danger?'#DC2626':val>=warn?'#D97706':'#059669';
+    return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>'+label+'</span><span style="font-weight:700;color:'+cor+'">'+val+'%</span></div><div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+cor+';width:'+Math.min(val,100)+'%;height:100%;border-radius:3px"></div></div></div>';
+  }
+
+  grid.innerHTML = lista.map(function(a) {
+    const hn = _srvNome(a) || a.ip || '—';
+    const isVirt = isVirtualServidor(a), isFis = isFisicoServidor(a);
+    const tLabel = isVirt ? '☁️ Virtual' : '🖥️ Físico';
+    const tColor = isVirt ? '#7C3AED' : '#2563EB';
+    const st = (a.status||'desconhecido').toLowerCase();
+    const stColor = (st==='online'||a.reachable) ? '#059669' : st==='critico' ? '#DC2626' : st==='offline' ? '#6B7280' : '#D97706';
+    const stLabel = (st==='online'||a.reachable) ? 'Online' : st==='critico' ? 'Crítico' : st==='offline' ? 'Offline' : st.charAt(0).toUpperCase()+st.slice(1);
+    const cpu = a.cpuPct!=null ? a.cpuPct : null;
+    const mem = a.memPct!=null ? a.memPct : null;
+    const disco = a.discoC_livrePct!=null ? Math.round(100-a.discoC_livrePct) : null;
+    const uptime = a.uptimeHoras!=null ? (a.uptimeHoras>=24 ? Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h' : Math.round(a.uptimeHoras)+'h') : null;
+    const lastSeen = a.lastSeen ? new Date(a.lastSeen.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleString('pt-BR') : '—';
+    const patSection = isVirt
+      ? '<span style="background:#F3F4F6;color:var(--g400);font-size:10px;padding:1px 6px;border-radius:8px">N/A — Virtual</span>'
+      : (a.pat
+          ? '<span style="font-family:monospace;font-weight:700;color:var(--accent)">'+escapeHtml(a.pat)+'</span> <button data-id="'+escapeHtml(a.id)+'" data-hn="'+escapeHtml(hn)+'" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="font-size:10px;background:#FEF3C7;color:#92400E;border:none;padding:1px 6px;border-radius:8px;cursor:pointer;font-weight:600">✏️</button>'
+          : '<button data-id="'+escapeHtml(a.id)+'" data-hn="'+escapeHtml(hn)+'" onclick="abrirPatServidor(this.dataset.id,this.dataset.hn)" style="background:#FEF3C7;color:#92400E;border:none;padding:3px 10px;border-radius:8px;cursor:pointer;font-weight:700;font-size:11px">🏷️ Atribuir PAT</button>');
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tColor+'">'
+      + '<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
+        + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(isVirt?'☁️':'🖥️')+'</span>'
+          + '<div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
+          + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(a.area||'—')+'</div></div></div>'
+        + '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
+          + '<span style="background:'+stColor+'22;color:'+stColor+';border:1px solid '+stColor+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+stLabel+'</span>'
+          + '<span style="background:'+tColor+'22;color:'+tColor+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+tLabel+'</span>'
+        + '</div></div>'
+      + '<div style="padding:14px 16px">'
+        + (cpu!=null||mem!=null||disco!=null ? metricBar('CPU',cpu,90,70)+metricBar('Memória',mem,90,80)+metricBar('Disco C:',disco,95,85) : '<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Métricas indisponíveis</div>')
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:8px">'
+          + '<div><span style="color:var(--g400)">PAT: </span>'+patSection+'</div>'
+          + '<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').split(' ').slice(0,3).join(' '))+'</span></div>'
+          + '<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(uptime||'—')+'</span></div>'
+          + '<div><span style="color:var(--g400)">Último contato:</span> <span style="font-size:10px">'+lastSeen+'</span></div>'
+        + '</div></div>'
+      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        + '<button data-pid="'+escapeHtml(a.pat||a.id)+'" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
+        + '<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        + '<button data-aid="'+escapeHtml(a.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
+      + '</div></div>';
+  }).join('');
+}
+
+// PAT Servidor — atribuição por digitação, câmera, foto ou voz
+let _srvPatAtivoId=null, _srvPatStream=null, _srvPatValor=null;
+
+function abrirPatServidor(ativoId, hostname) {
+  _srvPatAtivoId = ativoId; _srvPatValor = null;
+  const info = document.getElementById('srv-pat-info');
+  if (info) info.textContent = '🖥️ ' + (hostname||ativoId);
+  const inp = document.getElementById('srv-pat-digitar-input');
+  if (inp) { const a=(STATE.ativos||[]).find(x=>x.id===ativoId); inp.value=a?.pat||''; }
+  ['srv-pat-camera-area','srv-pat-foto-preview','srv-pat-confirmacao'].forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
+  const btn=document.getElementById('srv-pat-salvar-btn'); if(btn) btn.disabled=true;
+  srvPatTab('digitar', document.querySelector('.srv-pat-tab'));
+  openModal('modal-pat-servidor');
+}
+
+function fecharModalPatServidor() { srvPatPararCamera(); closeModal('modal-pat-servidor'); }
+
+function srvPatTab(tab, el) {
+  ['digitar','camera','foto','voz'].forEach(t => { const p=document.getElementById('srv-pat-panel-'+t); if(p) p.style.display=t===tab?'':'none'; });
+  document.querySelectorAll('.srv-pat-tab').forEach(b => { b.style.background='transparent'; b.style.color='var(--g500)'; b.style.boxShadow='none'; });
+  if (el) { el.style.background='#fff'; el.style.color='var(--g900)'; el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)'; }
+  if (tab !== 'camera') srvPatPararCamera();
+}
+
+function srvPatValidar(val) {
+  const limpo = (val||'').replace(/[^0-9A-Za-z\-]/g,'').trim();
+  const btn = document.getElementById('srv-pat-salvar-btn');
+  if (limpo.length >= 2) { _srvPatValor=limpo; srvPatMostrarConfirmacao(limpo); if(btn) btn.disabled=false; }
+  else { _srvPatValor=null; const box=document.getElementById('srv-pat-confirmacao'); if(box) box.style.display='none'; if(btn) btn.disabled=true; }
+}
+
+function srvPatMostrarConfirmacao(pat) {
+  const box=document.getElementById('srv-pat-confirmacao'), val=document.getElementById('srv-pat-valor-confirmado');
+  if(box) box.style.display=''; if(val) val.textContent=pat;
+  const btn=document.getElementById('srv-pat-salvar-btn'); if(btn) btn.disabled=false;
+}
+
+async function srvPatIniciarCamera() {
+  const video=document.getElementById('srv-pat-video'), status=document.getElementById('srv-pat-camera-status');
+  const area=document.getElementById('srv-pat-camera-area'); if(area) area.style.display='';
+  try {
+    _srvPatStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    video.srcObject = _srvPatStream;
+    if(status) status.textContent='Câmera ativa — buscando código...';
+  } catch(e) { if(status) status.textContent='❌ Câmera indisponível: '+e.message; }
+}
+
+function srvPatPararCamera() {
+  if(_srvPatStream) { _srvPatStream.getTracks().forEach(t=>t.stop()); _srvPatStream=null; }
+  const area=document.getElementById('srv-pat-camera-area'); if(area) area.style.display='none';
+}
+
+async function srvPatLerFoto(input) {
+  const file=input.files?.[0]; if(!file) return;
+  const prev=document.getElementById('srv-pat-foto-preview'), img=document.getElementById('srv-pat-foto-img'), status=document.getElementById('srv-pat-foto-status');
+  if(prev) prev.style.display=''; if(img) img.src=URL.createObjectURL(file);
+  if(status) status.textContent='🤖 Analisando plaqueta com IA...';
+  try {
+    const reader=new FileReader();
+    reader.onload=async function(e) {
+      const b64=e.target.result.split(',')[1];
+      if(window._fs?.httpsCallable) {
+        const res=await window._fs.httpsCallable('extrairPATdaFoto')({imageBase64:b64});
+        const pat=res.data?.pat;
+        if(pat) { if(status){status.textContent='✅ PAT detectado: '+pat;status.style.color='var(--success)';} _srvPatValor=pat; srvPatMostrarConfirmacao(pat); }
+        else { if(status) status.textContent='⚠️ Não detectado. Digite na aba "Digitar".'; }
+      } else { if(status) status.textContent='⚠️ Use a aba "Digitar".'; }
+    };
+    reader.readAsDataURL(file);
+  } catch(e) { if(status) status.textContent='⚠️ Erro na análise.'; }
+}
+
+function srvPatIniciarVoz() {
+  const btn=document.getElementById('srv-pat-voz-btn'), status=document.getElementById('srv-pat-voz-status');
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR) { if(status) status.textContent='❌ Reconhecimento de voz não suportado. Use Chrome.'; return; }
+  const rec=new SR(); rec.lang='pt-BR'; rec.continuous=false; rec.interimResults=false;
+  if(btn) { btn.style.background='#DC2626'; }
+  if(status) status.textContent='🔴 Ouvindo... fale o número';
+  rec.onresult=function(event) {
+    if(btn) btn.style.background='var(--accent)';
+    let texto=event.results[0][0].transcript.replace(/\s+/g,'');
+    const nums={'zero':'0','um':'1','uma':'1','dois':'2','duas':'2','três':'3','quatro':'4','cinco':'5','seis':'6','sete':'7','oito':'8','nove':'9'};
+    Object.entries(nums).forEach(([p,n]) => { texto=texto.replace(new RegExp(p,'gi'),n); });
+    const resultado=texto.replace(/[^0-9A-Za-z\-]/g,'').trim();
+    if(resultado.length>=2) {
+      _srvPatValor=resultado;
+      const resDiv=document.getElementById('srv-pat-voz-resultado'), patDiv=document.getElementById('srv-pat-voz-pat');
+      const btnArea=document.getElementById('srv-pat-voz-btn-area');
+      if(btnArea) btnArea.style.display='none'; if(resDiv) resDiv.style.display=''; if(patDiv) patDiv.textContent=resultado;
+      srvPatMostrarConfirmacao(resultado);
+    } else { if(status) status.textContent='⚠️ Não entendi. Tente novamente.'; }
+  };
+  rec.onerror=function(e) { if(btn) btn.style.background='var(--accent)'; if(status) status.textContent='❌ Erro: '+e.error; };
+  rec.start();
+}
+
+function srvPatReiniciarVoz() {
+  _srvPatValor=null;
+  const r=document.getElementById('srv-pat-voz-resultado'), b=document.getElementById('srv-pat-voz-btn-area'), c=document.getElementById('srv-pat-confirmacao'), btn=document.getElementById('srv-pat-salvar-btn');
+  if(r) r.style.display='none'; if(b) b.style.display=''; if(c) c.style.display='none'; if(btn) btn.disabled=true;
+  document.getElementById('srv-pat-voz-status').textContent='Clique e fale o número do patrimônio';
+}
+
+async function confirmarPatServidor() {
+  const pat=_srvPatValor, id=_srvPatAtivoId;
+  if(!pat||!id) return showToast('PAT não definido','warning');
+  const btn=document.getElementById('srv-pat-salvar-btn');
+  setButtonLoading(btn,true,'Salvando...');
+  try {
+    await fsUpdate('ativos',id,{pat,updatedAt:new Date().toISOString()});
+    if(window._fs?.httpsCallable) {
+      const ativo=(STATE.ativos||[]).find(a=>a.id===id);
+      if(ativo) window._fs.httpsCallable('adicionarNotaHistorico')({ativoId:id,nota:'PAT '+pat+' atribuído ao servidor '+(ativo.hostname||id)+' por '+(CURRENT_USER?.nome||'Técnico')+'.',tipo:'atualizacao'}).catch(()=>{});
+    }
+    fecharModalPatServidor();
+    showToast('✅ PAT '+pat+' atribuído!','success',4000);
+    renderServidores();
+  } catch(e) { showToast('Erro: '+e.message,'error'); }
+  finally { setButtonLoading(btn,false); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MONITORES — detectados via WMI pelo SysackClient
+// ═══════════════════════════════════════════════════════════════
+
+let _monitorAtualSerial=null, _monitorCameraStream=null;
+
+function coletarTodosMonitores() {
+  const wmi=[];
+  (STATE.ativos||[]).forEach(function(ativo) {
+    if(!ativo.monitoresConectados) return;
+    let mons=[];
+    try { mons=typeof ativo.monitoresConectados==='string' ? JSON.parse(ativo.monitoresConectados) : (Array.isArray(ativo.monitoresConectados)?ativo.monitoresConectados:[]); } catch(e) {}
+    mons.forEach(function(m) {
+      if(!m.serial) return;
+      const cadastro=(STATE.monitoresCadastrados||[]).find(c=>c.serial===m.serial);
+      wmi.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:cadastro?.pat||m.pat||'',local:cadastro?.local||ativo.sala||ativo.loc||'',pcAtual:ativo.hostname||ativo.ip||ativo.desc||'—',pcPat:ativo.pat||'',pcId:ativo.id||'',area:ativo.area||'',qtdMovimentos:(STATE.monitorHistorico||[]).filter(h=>h.serial===m.serial).length,detectadoWMI:true,cadastroId:cadastro?.id||null,obs:cadastro?.obs||''});
+    });
+  });
+  (STATE.monitoresCadastrados||[]).forEach(function(c) {
+    if(wmi.find(m=>m.serial===c.serial)) return;
+    wmi.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',local:c.local||'',pcAtual:c.pcVinculado||'—',pcPat:'',pcId:'',area:c.area||'',qtdMovimentos:(STATE.monitorHistorico||[]).filter(h=>h.serial===c.serial).length,detectadoWMI:false,cadastroId:c.id,obs:c.obs||''});
+  });
+  return wmi;
+}
+
+function renderMonitoresKPI() {
+  const todos=coletarTodosMonitores();
+  const sv=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('mon-kpi-total',todos.length); sv('mon-kpi-sem-pat',todos.filter(m=>!m.pat).length);
+  sv('mon-kpi-com-pat',todos.filter(m=>!!m.pat).length); sv('mon-kpi-movidos',todos.filter(m=>m.qtdMovimentos>1).length);
+  nbUpdate('nb-monitores-sem-pat',todos.filter(m=>!m.pat).length);
+}
+
+function renderMonitores() {
+  renderMonitoresKPI();
+  const q=(document.getElementById('mon-search')?.value||'').toLowerCase();
+  const fSt=document.getElementById('mon-filter-status')?.value||'';
+  const grid=document.getElementById('mon-grid'); if(!grid) return;
+  let todos=coletarTodosMonitores();
+  if(q) todos=todos.filter(m=>(m.serial||'').toLowerCase().includes(q)||(m.pat||'').toLowerCase().includes(q)||(m.modelo||'').toLowerCase().includes(q)||(m.fabricante||'').toLowerCase().includes(q)||(m.pcAtual||'').toLowerCase().includes(q)||(m.area||'').toLowerCase().includes(q));
+  if(fSt==='sem-pat') todos=todos.filter(m=>!m.pat);
+  if(fSt==='com-pat') todos=todos.filter(m=>!!m.pat);
+  if(fSt==='movido')  todos=todos.filter(m=>m.qtdMovimentos>1);
+  if(!todos.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🖥️</div><div style="font-weight:600">Nenhum monitor encontrado</div></div>'; return; }
+  grid.innerHTML=todos.map(function(m) {
+    const temPat=!!m.pat;
+    const bordeCor=temPat?'var(--success)':'#F59E0B';
+    const badgePat=temPat?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">✅ PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">⚠️ Sem PAT</span>';
+    const wmiChip=m.detectadoWMI?'<span style="background:#EFF6FF;color:#2563EB;font-size:10px;padding:1px 6px;border-radius:8px">🔍 WMI</span>':'<span style="background:var(--g100);color:var(--g500);font-size:10px;padding:1px 6px;border-radius:8px">✏️ Manual</span>';
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+bordeCor+'">'
+      +'<div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">'
+        +'<div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div>'
+          +'<div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div>'
+          +'<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'
+        +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'+badgePat+wmiChip+'</div></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:10px">'
+        +'<div><span style="color:var(--g400)">PC atual:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div>'
+        +'<div><span style="color:var(--g400)">Área:</span> <span style="font-weight:600">'+escapeHtml(m.area||'—')+'</span></div>'
+        +'<div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.local||'—')+'</span></div>'
+        +'<div><span style="color:var(--g400)">Movimentações:</span> <span style="color:'+(m.qtdMovimentos>1?'#D97706':'var(--g700)')+';font-weight:600">'+m.qtdMovimentos+'</span></div>'
+      +'</div></div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button data-serial="'+escapeHtml(m.serial)+'" onclick="abrirAtribuirPATMonitor(this.dataset.serial)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(temPat?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(temPat?'✏️ Alterar PAT':'🏷️ Atribuir PAT')+'</button>'
+        +'<button data-serial="'+escapeHtml(m.serial)+'" onclick="abrirHistoricoMonitorCard(this.dataset.serial)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📋 Histórico</button>'
+        +'<button data-val="'+escapeHtml(m.pat||m.serial)+'" onclick="abrirChamadoParaMonitor(this.dataset.val)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">🎫 Chamado</button>'
+      +'</div></div>';
+  }).join('');
+}
+
+function abrirAtribuirPATMonitor(serial) {
+  _monitorAtualSerial=serial;
+  const m=coletarTodosMonitores().find(x=>x.serial===serial);
+  if(!m) return;
+  const info=document.getElementById('mon-pat-info');
+  if(info) info.innerHTML='<div style="display:flex;gap:12px;align-items:center"><span style="font-size:24px">🖥️</span><div><div style="font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-family:monospace;font-size:11px;color:var(--g500)">S/N: '+escapeHtml(serial)+'</div><div style="font-size:12px;color:var(--g600)">PC: '+escapeHtml(m.pcAtual)+' · Área: '+escapeHtml(m.area||'—')+'</div>'+(m.pat?'<div style="font-size:12px;color:#D97706">PAT atual: <strong>'+escapeHtml(m.pat)+'</strong></div>':'')+'</div></div>';
+  const inp=document.getElementById('mon-pat-input'); if(inp) inp.value=m.pat||'';
+  ['mon-camera-area','mon-foto-preview'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  document.getElementById('mon-pat-obs').value=m.obs||'';
+  const btn=document.getElementById('mon-pat-confirmar-btn'); if(btn) btn.disabled=!m.pat;
+  openModal('modal-atribuir-pat-monitor');
+}
+
+function monPatInputChange(val) { const btn=document.getElementById('mon-pat-confirmar-btn'); if(btn) btn.disabled=!val||val.trim().length<2; }
+
+async function confirmarPatMonitor() {
+  const pat=document.getElementById('mon-pat-input')?.value?.trim();
+  const obs=document.getElementById('mon-pat-obs')?.value?.trim()||'';
+  const serial=_monitorAtualSerial;
+  if(!pat||!serial) return showToast('Informe o PAT','warning');
+  const btn=document.getElementById('mon-pat-confirmar-btn');
+  setButtonLoading(btn,true,'Salvando...');
+  try {
+    const m=coletarTodosMonitores().find(x=>x.serial===serial);
+    const agora=new Date().toISOString();
+    if(m?.cadastroId) { await fsUpdate('monitores',m.cadastroId,{pat,obs,updatedAt:agora}); }
+    else { await fsAdd('monitores',{serial,pat,obs,fabricante:m?.fabricante||'',modelo:m?.modelo||'',local:m?.local||'',area:m?.area||'',pcVinculado:m?.pcAtual||'',createdAt:agora,updatedAt:agora,syncSource:'sysack-manual'},STATE.monitoresCadastrados); }
+    if(m?.pcId) {
+      const ativo=(STATE.ativos||[]).find(a=>a.id===m.pcId);
+      if(ativo?.monitoresConectados) {
+        let mons=[]; try{mons=JSON.parse(ativo.monitoresConectados);}catch(e){}
+        mons=mons.map(x=>x.serial===serial?{...x,pat}:x);
+        await fsUpdate('ativos',m.pcId,{monitoresConectados:JSON.stringify(mons)});
+      }
+    }
+    closeModal('modal-atribuir-pat-monitor');
+    showToast('✅ PAT '+pat+' atribuído ao monitor '+serial,'success',4000);
+    renderMonitores();
+  } catch(e) { showToast('Erro: '+e.message,'error'); }
+  finally { setButtonLoading(btn,false); }
+}
+
+async function abrirCameraMonitorPAT() {
+  const area=document.getElementById('mon-camera-area'), video=document.getElementById('mon-camera-video');
+  if(!area||!video) return;
+  try {
+    _monitorCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    video.srcObject=_monitorCameraStream; area.style.display='';
+    document.getElementById('mon-foto-preview').style.display='none';
+  } catch(e) { showToast('Câmera indisponível: '+e.message,'error'); }
+}
+
+function fecharCameraMonitor() {
+  if(_monitorCameraStream){_monitorCameraStream.getTracks().forEach(t=>t.stop());_monitorCameraStream=null;}
+  const area=document.getElementById('mon-camera-area'); if(area) area.style.display='none';
+}
+
+async function capturarFotoPatMonitor() {
+  const video=document.getElementById('mon-camera-video'), canvas=document.getElementById('mon-camera-canvas');
+  const prev=document.getElementById('mon-foto-preview'), img=document.getElementById('mon-foto-img'), status=document.getElementById('mon-ocr-status');
+  if(!video||!canvas) return;
+  canvas.width=video.videoWidth||640; canvas.height=video.videoHeight||480;
+  canvas.getContext('2d').drawImage(video,0,0);
+  const dataUrl=canvas.toDataURL('image/jpeg',0.85);
+  img.src=dataUrl; prev.style.display=''; fecharCameraMonitor();
+  status.textContent='🔍 Analisando com IA...';
+  try {
+    if(window._fs?.httpsCallable) {
+      const res=await window._fs.httpsCallable('extrairPATdaFoto')({imageBase64:dataUrl.split(',')[1]});
+      const pat=res.data?.pat;
+      if(pat) { document.getElementById('mon-pat-input').value=pat; monPatInputChange(pat); status.textContent='✅ PAT: '+pat; status.style.color='var(--success)'; }
+      else { status.textContent='⚠️ Não detectado. Digite manualmente.'; }
+    }
+  } catch(e) { status.textContent='⚠️ Erro. Digite manualmente.'; }
+}
+
+function abrirHistoricoMonitorCard(serial) {
+  const hist=(STATE.monitorHistorico||[]).filter(h=>h.serial===serial);
+  const m=coletarTodosMonitores().find(x=>x.serial===serial);
+  const modal=document.createElement('div');
+  modal.className='modal-dyn';
+  modal.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
+  modal.innerHTML='<div style="background:var(--panel,#fff);border-radius:14px;padding:0;max-width:520px;width:92%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between">'
+      +'<div><div style="font-weight:700">📋 Histórico — '+escapeHtml((m?.fabricante||'')+' '+(m?.modelo||'Monitor'))+'</div>'
+      +'<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(serial)+(m?.pat?' · PAT: '+escapeHtml(m.pat):'')+'</div></div>'
+      +'<button onclick="this.closest(\'.modal-dyn\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--g400)">✕</button>'
+    +'</div>'
+    +'<div style="padding:16px 20px;overflow-y:auto;flex:1">'
+      +(hist.length ? hist.map(function(h,i){return '<div style="display:flex;gap:12px;padding:10px 0;border-bottom:0.5px solid var(--g100)">'
+        +'<div style="width:8px;height:8px;border-radius:50%;background:'+(i===0?'var(--accent)':'var(--g300)')+';margin-top:5px;flex-shrink:0"></div>'
+        +'<div><div style="font-size:13px;font-weight:'+(i===0?'700':'500')+'">'+escapeHtml(h.pat||'—')+' — '+escapeHtml(h.host||'—')+(i===0?' <span style="background:#059669;color:#fff;font-size:9px;padding:1px 6px;border-radius:8px">atual</span>':'')+'</div>'
+        +'<div style="font-size:11px;color:var(--g500)">'+escapeHtml(h.area||'—')+' · '+(h.data?new Date(h.data).toLocaleString('pt-BR'):'—')+'</div></div></div>';}).join('')
+        : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhuma movimentação registrada</div>')
+    +'</div></div>';
+  document.body.appendChild(modal);
+}
+
+function abrirChamadoParaMonitor(patOuSerial) {
+  openModal('modal-novo-chamado');
+  setTimeout(function(){const el=document.getElementById('ch-patrimonio');if(el)el.value=patOuSerial;},100);
+}
+
+async function salvarMonitorManual() {
+  const serial=document.getElementById('mon-man-serial')?.value?.trim();
+  if(!serial) return showToast('Número de série é obrigatório','warning');
+  const dados={serial,pat:document.getElementById('mon-man-pat')?.value?.trim()||'',fabricante:document.getElementById('mon-man-fab')?.value?.trim()||'',modelo:document.getElementById('mon-man-modelo')?.value?.trim()||'',tamanho:document.getElementById('mon-man-tam')?.value?.trim()||'',local:document.getElementById('mon-man-local')?.value?.trim()||'',pcVinculado:document.getElementById('mon-man-pc')?.value?.trim()||'',obs:document.getElementById('mon-man-obs')?.value?.trim()||'',createdAt:new Date().toISOString(),syncSource:'sysack-manual'};
+  try { await fsAdd('monitores',dados,STATE.monitoresCadastrados); closeModal('modal-monitor-manual'); showToast('✅ Monitor cadastrado!','success'); renderMonitores(); }
+  catch(e) { showToast('Erro: '+e.message,'error'); }
+}
+
+function abrirCadastroMonitorManual() {
+  ['mon-man-serial','mon-man-pat','mon-man-fab','mon-man-modelo','mon-man-tam','mon-man-local','mon-man-pc','mon-man-obs'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  openModal('modal-monitor-manual');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RELATÓRIOS EXTRAS — Irregulares e Offline
+// ═══════════════════════════════════════════════════════════════
+
+function gerarRelIrregulares() {
+  const filtro=document.getElementById('rel-irr-filtro')?.value||'todos';
+  const ativos=STATE.ativos||[];
+  const sv=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  const semPat=ativos.filter(a=>!a.pat||a.pat.trim()==='');
+  const semResp=ativos.filter(a=>!a.resp||a.resp.trim()===''||a.resp==='—');
+  const semHost=ativos.filter(a=>(['computador','workstation','notebook','desktop'].includes((a.tipo||'').toLowerCase()))&&(!a.hostname||a.hostname===a.ip||a.hostname.trim()===''));
+  const semStatus=ativos.filter(a=>!a.status||a.status==='pendente'||a.status==='');
+  sv('rel-irr-sem-pat',semPat.length); sv('rel-irr-sem-resp',semResp.length); sv('rel-irr-sem-host',semHost.length); sv('rel-irr-sem-status',semStatus.length);
+  const seen=new Set(), irregulares=[];
+  ativos.forEach(a=>{
+    const problemas=[];
+    if(!a.pat||a.pat.trim()==='') problemas.push('Sem PAT');
+    if(!a.resp||a.resp.trim()===''||a.resp==='—') problemas.push('Sem responsável');
+    if(['computador','workstation','notebook','desktop'].includes((a.tipo||'').toLowerCase())&&(!a.hostname||a.hostname===a.ip||a.hostname.trim()==='')) problemas.push('Sem hostname');
+    if(!a.status||a.status==='pendente'||a.status==='') problemas.push('Status indefinido');
+    if(!problemas.length) return;
+    if(filtro==='sem-pat'&&!problemas.includes('Sem PAT')) return;
+    if(filtro==='sem-resp'&&!problemas.includes('Sem responsável')) return;
+    if(filtro==='sem-host'&&!problemas.includes('Sem hostname')) return;
+    if(filtro==='sem-status'&&!problemas.includes('Status indefinido')) return;
+    if(!seen.has(a.id)){seen.add(a.id);irregulares.push({a,problemas});}
+  });
+  const tbody=document.getElementById('rel-irr-tbody'); if(!tbody) return;
+  if(!irregulares.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">✅ Nenhum ativo irregular</td></tr>';return;}
+  tbody.innerHTML=irregulares.map(({a,problemas})=>{
+    const cor=problemas.includes('Sem PAT')?'#DC2626':'#D97706';
+    return `<tr><td class="td-mono" style="color:var(--accent)">${escapeHtml(a.pat||'—')}</td><td style="font-size:12px">${escapeHtml(a.hostname||a.ip||'—')}</td><td><span class="tag" style="font-size:10px">${escapeHtml(a.tipo||'—')}</span></td><td style="font-size:12px">${escapeHtml(a.area||'—')}</td><td style="font-size:12px">${escapeHtml(a.resp||'—')}</td><td>${statusAtivoHtml(a.status)}</td><td style="font-size:11px">${problemas.map(p=>`<span style="background:${cor}22;color:${cor};padding:2px 6px;border-radius:10px;font-weight:600;font-size:10px;margin:1px;display:inline-block">${p}</span>`).join('')}</td><td><button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${escapeHtml(a.pat||a.id)}')">📜</button></td></tr>`;
+  }).join('');
+}
+
+function calcDiasOffline(a) {
+  if(!a.lastSeen) return 0;
+  const ls=new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen);
+  if(isNaN(ls.getTime())) return 0;
+  return Math.floor((Date.now()-ls.getTime())/86400000);
+}
+
+function gerarRelDesligadas() {
+  const minDias=parseInt(document.getElementById('rel-off-dias')?.value||'5');
+  const todos=STATE.ativos||[];
+  const sv=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('rel-off-5',todos.filter(a=>calcDiasOffline(a)>=5).length);
+  sv('rel-off-15',todos.filter(a=>calcDiasOffline(a)>=15).length);
+  sv('rel-off-30',todos.filter(a=>calcDiasOffline(a)>=30).length);
+  sv('rel-off-sem',todos.filter(a=>!a.lastSeen&&['computador','workstation','notebook'].includes((a.tipo||'').toLowerCase())).length);
+  const filtrados=todos.filter(a=>calcDiasOffline(a)>=minDias).sort((a,b)=>calcDiasOffline(b)-calcDiasOffline(a));
+  const tbody=document.getElementById('rel-off-tbody'); if(!tbody) return;
+  if(!filtrados.length){tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">✅ Nenhuma máquina offline há mais de ${minDias} dias</td></tr>`;return;}
+  tbody.innerHTML=filtrados.map(a=>{
+    const dias=calcDiasOffline(a);
+    const cor=dias>=30?'#DC2626':dias>=15?'#D97706':'#6B7280';
+    const ls=a.lastSeen?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen).toLocaleDateString('pt-BR'):'—';
+    return `<tr><td class="td-mono" style="color:var(--accent)">${escapeHtml(a.pat||'—')}</td><td style="font-family:monospace;font-size:12px">${escapeHtml(a.hostname||'—')}</td><td style="font-family:monospace;font-size:11px;color:var(--g500)">${escapeHtml(a.ip||'—')}</td><td style="font-size:12px">${escapeHtml(a.area||'—')}</td><td style="font-size:12px">${escapeHtml(a.resp||'—')}</td><td style="font-size:12px">${ls}</td><td style="font-weight:700;color:${cor}">${dias}d</td><td><button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${escapeHtml(a.pat||a.id)}')">📜</button></td></tr>`;
+  }).join('');
+}
+
+function exportarIrregularesCSV() {
+  const ativos=STATE.ativos||[];
+  const linhas=[];
+  ativos.forEach(a=>{
+    const problemas=[];
+    if(!a.pat||a.pat.trim()==='') problemas.push('Sem PAT');
+    if(!a.resp||a.resp.trim()===''||a.resp==='—') problemas.push('Sem responsável');
+    if(['computador','workstation','notebook','desktop'].includes((a.tipo||'').toLowerCase())&&(!a.hostname||a.hostname===a.ip)) problemas.push('Sem hostname');
+    if(!a.status||a.status==='pendente') problemas.push('Status indefinido');
+    if(problemas.length) linhas.push({a,problemas});
+  });
+  const csv=[['PAT','Hostname','IP','Tipo','Área','Responsável','Status','Problemas'].join(','),...linhas.map(({a,problemas})=>[a.pat||'',a.hostname||'',a.ip||'',a.tipo||'',a.area||'',a.resp||'',a.status||'',problemas.join(' | ')].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','))].join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const el=document.createElement('a'); el.href=url; el.download='SYSACK_Irregulares_'+new Date().toISOString().split('T')[0]+'.csv'; el.click(); URL.revokeObjectURL(url);
+  showToast('CSV exportado','success',2500);
+}
+
+function exportarDesligadasCSV() {
+  const minDias=parseInt(document.getElementById('rel-off-dias')?.value||'5');
+  const filtrados=(STATE.ativos||[]).filter(a=>calcDiasOffline(a)>=minDias).sort((a,b)=>calcDiasOffline(b)-calcDiasOffline(a));
+  const csv=[['PAT','Hostname','IP','Área','Responsável','Último contato','Dias offline'].join(','),...filtrados.map(a=>{const ls=a.lastSeen?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen).toLocaleDateString('pt-BR'):'—';return[a.pat||'',a.hostname||'',a.ip||'',a.area||'',a.resp||'',ls,calcDiasOffline(a)].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');})].join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const el=document.createElement('a'); el.href=url; el.download='SYSACK_Offline_'+new Date().toISOString().split('T')[0]+'.csv'; el.click(); URL.revokeObjectURL(url);
+  showToast('CSV exportado','success',2500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DISPONÍVEIS PARA REUSO
+// ═══════════════════════════════════════════════════════════════
+
+function mostrarAtivosDisponiveis(tabEl) {
+  document.querySelectorAll('#ativos-tabs .tab').forEach(t=>t.classList.remove('active'));
+  if(tabEl) tabEl.classList.add('active');
+  const section=document.getElementById('ativos-disponiveis-section');
+  const tabelaCard=document.querySelector('#page-ativos .card');
+  if(section) section.style.display='';
+  if(tabelaCard) tabelaCard.style.display='none';
+  renderAtivosDisponiveis();
+}
+
+function renderAtivosDisponiveis() {
+  const disponiveis=(STATE.ativos||[]).filter(a=>a.status==='disponivel'||a.status==='estoque');
+  const badge=document.getElementById('disp-count-badge'); if(badge) badge.textContent=disponiveis.length;
+  const grid=document.getElementById('disp-grid'); if(!grid) return;
+  if(!disponiveis.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">✅</div><div style="font-weight:600">Nenhum ativo disponível para reuso</div></div>';return;}
+  const tipoIcon={'computador':'🖥️','workstation':'🖥️','notebook':'💻','monitor':'🖥','switch':'🔀','ap':'📶','servidor':'🗄️','impressora':'🖨️','ups':'🔋'};
+  grid.innerHTML=disponiveis.map(a=>{
+    const ico=tipoIcon[(a.tipo||'').toLowerCase()]||'📦';
+    const dias=a.updatedAt?Math.floor((Date.now()-new Date(a.updatedAt.seconds?a.updatedAt.seconds*1000:a.updatedAt).getTime())/86400000):null;
+    return '<div style="background:var(--panel,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;padding:16px;border-top:3px solid #059669">'
+      +'<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="font-size:28px">'+ico+'</div><span style="background:#F0FDF4;color:#059669;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px">♻️ Disponível</span></div>'
+      +'<div style="font-family:monospace;font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px">'+escapeHtml(a.pat||'Sem PAT')+'</div>'
+      +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">'+escapeHtml(a.desc||a.hostname||a.ip||'—')+'</div>'
+      +(a.sala||a.loc?'<div style="font-size:11px;color:var(--g500);margin-bottom:8px">📍 '+escapeHtml(a.sala||a.loc)+'</div>':'')
+      +(dias!==null?'<div style="font-size:11px;color:'+(dias>30?'#DC2626':'#D97706')+';margin-bottom:8px">Disponível há '+dias+' dias</div>':'')
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+        +'<button class="btn btn-primary btn-xs" data-aid="'+escapeHtml(a.id)+'" data-pat="'+escapeHtml(a.pat||a.id)+'" onclick="abrirAtribuirAtivo(this.dataset.aid,this.dataset.pat)" style="flex:1">+ Atribuir</button>'
+        +'<button class="btn btn-ghost btn-xs" data-pid="'+escapeHtml(a.pat||a.id)+'" onclick="abrirHistorico(this.dataset.pid)">📜</button>'
+      +'</div></div>';
+  }).join('');
+}
+
+async function abrirAtribuirAtivo(ativoId, pat) {
+  const modal=document.createElement('div');
+  modal.className='modal-dyn';
+  modal.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
+  modal.innerHTML='<div style="background:var(--g0,#fff);border-radius:12px;padding:24px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<h3 style="margin:0 0 16px;font-size:16px">➕ Atribuir Ativo — '+escapeHtml(pat)+'</h3>'
+    +'<div class="form-group"><label class="form-label req">Responsável</label><input class="form-control" id="atrib-resp" placeholder="Nome do usuário ou área"></div>'
+    +'<div class="form-group"><label class="form-label req">Nova localização</label><input class="form-control" id="atrib-local" placeholder="Sala, setor, andar..."></div>'
+    +'<div class="form-group"><label class="form-label">Observação</label><textarea class="form-control" id="atrib-obs" rows="2"></textarea></div>'
+    +'<div style="background:#FEF3C7;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400E;margin-bottom:14px">⚠️ Esta movimentação precisará de aprovação do gestor.</div>'
+    +'<div style="display:flex;gap:10px;justify-content:flex-end">'
+      +'<button class="btn btn-ghost" onclick="this.closest(\'.modal-dyn\').remove()">Cancelar</button>'
+      +'<button class="btn btn-primary" data-aid="'+escapeHtml(ativoId)+'" data-pat="'+escapeHtml(pat)+'" onclick="confirmarAtribuicao(this.dataset.aid,this.dataset.pat,this)">✓ Atribuir</button>'
+    +'</div></div>';
+  document.body.appendChild(modal);
+}
+
+async function confirmarAtribuicao(ativoId, pat, btn) {
+  const resp=document.getElementById('atrib-resp')?.value?.trim();
+  const local=document.getElementById('atrib-local')?.value?.trim();
+  const obs=document.getElementById('atrib-obs')?.value?.trim();
+  if(!resp||!local) return showToast('Responsável e localização são obrigatórios','warning');
+  setButtonLoading(btn,true,'Enviando...');
+  try {
+    const aprov={tipo:'Atribuição de Ativo Disponível',pat,ativo:pat,solicitante:CURRENT_USER?.nome||'—',solicitanteId:CURRENT_USER?.uid||'',detalhes:{destino:'reutilizada',patAntigo:pat,reutLocal:local,reutUsoPor:'usuario',reutUsuario:resp,reutNomenclatura:'nao',obs},status:'pendente',createdAt:new Date().toISOString()};
+    const id=await fsAdd('aprovacoes',aprov,STATE.aprovacoes);
+    if(id&&window._fs?.httpsCallable) window._fs.httpsCallable('notificarGestorAprovacao')({aprovacaoId:id,tipo:aprov.tipo,pat,solicitante:aprov.solicitante}).catch(()=>{});
+    btn.closest('.modal-dyn')?.remove();
+    showToast('✅ Solicitação enviada ao gestor!','success',5000);
+    renderAtivosDisponiveis();
+  } catch(e) { showToast('Erro: '+e.message,'error'); }
+  finally { setButtonLoading(btn,false); }
+}
+
+function exportarDisponiveisCSV() {
+  const lista=(STATE.ativos||[]).filter(a=>a.status==='disponivel'||a.status==='estoque');
+  const csv=[['PAT','Descrição','Tipo','Série','Fabricante','Localização','Área','Dias disponível'].join(','),...lista.map(a=>{const dias=a.updatedAt?Math.floor((Date.now()-new Date(a.updatedAt.seconds?a.updatedAt.seconds*1000:a.updatedAt).getTime())/86400000):'—';return[a.pat||'',a.desc||a.hostname||'',a.tipo||'',a.serie||'',a.fab||'',a.sala||a.loc||'',a.area||'',dias].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');})].join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const el=document.createElement('a'); el.href=url; el.download='SYSACK_Disponiveis_'+new Date().toISOString().split('T')[0]+'.csv'; el.click(); URL.revokeObjectURL(url);
+  showToast('CSV exportado','success',2500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FILA OFFLINE — limpeza de operações corrompidas
+// ═══════════════════════════════════════════════════════════════
+
+async function limparFilaOfflineCorrempida() {
+  try {
+    const idb=await getOfflineDB();
+    const tx=idb.transaction(OFFLINE_STORE,'readwrite');
+    const store=tx.objectStore(OFFLINE_STORE);
+    const ops=await new Promise((res,rej)=>{const req=store.getAll();req.onsuccess=()=>res(req.result||[]);req.onerror=()=>rej(req.error);});
+    let removidas=0;
+    for(const op of ops){if(!op.col||typeof op.col!=='string'||op.col.trim()===''){store.delete(op.id);removidas++;}}
+    if(removidas>0){console.warn('[OfflineQueue] '+removidas+' operação(ões) corrompida(s) removida(s)');atualizarBannerOffline?.();}
+  } catch(e){console.warn('[OfflineQueue] Erro ao limpar fila:',e.message);}
+}
+
 function renderEmpregados() {
   const tbody    = document.getElementById('emp-body');
   if (!tbody) return;
@@ -9197,42 +9828,47 @@ function renderSwitches(){
   if(currentSwView==='cards'){
     const grid=document.getElementById('sw-cards-grid');
     if(!grid) return;
-    grid.innerHTML=filtered.map(s=>{
-      const pct=Math.round(((s.portasUso||0)/(s.totalPortas||1))*100)||0;
-      const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
-      const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#1E293B';
-      // Fallbacks seguros para campos que podem vir undefined do Firestore
-      const hostname   = s.hostname || s.sysName || s.name || s.host || s.ip || '—';
-      const marcaModelo= [s.marca, s.modelo].filter(v => v && v !== 'undefined').join(' ') || '—';
-      const local      = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
-      const portasLabel= (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0)+'/'+s.totalPortas : '—/—';
-      return `<div class='sw-card'>
-        <div class='sw-card-header' style='background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px'>
-          <div style='width:36px;height:36px;border-radius:8px;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>\${ico}</div>
-          <div style='flex:1;min-width:0;margin-left:10px'>
-            <div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>\${hostname}</div>
-            <div style='font-size:10.5px;color:#94A3B8;margin-top:2px'>\${marcaModelo}</div>
-          </div>
-          \${swStatusHtml(s.status)}
-        </div>
-        <div class='sw-card-body'>
-          <div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>\${s.ip||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Local</span><span class='val' style='\${local==='—'?'color:var(--g400);font-style:italic':''}'>\${local}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:\${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ \${s.uptime||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>\${s.firmware||'—'}</span></div>
-          \${s.tipo!=='ap'&&s.tipo!=='firewall'?\`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: \${portasLabel}</span><span>\${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:\${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:\${pct}%;height:100%;border-radius:4px'></div></div></div>\`:''}
-        </div>
-        <div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>\${renderPortMinimap(s)}</div></div>
-        <div class='sw-card-actions'>
-          <button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('\${s.id}')">⚙️ Gerenciar</button>
-          <button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('\${s.id}')">📜 Histórico</button>
-          <button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>
-          <button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','\${s.id}')">📶 Ping</button>
-          <button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','\${s.id}')">🖥️ SSH</button>
-          <button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','\${s.id}')">💾 Backup</button>
-        </div>
-      </div>`;
-    }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
+    grid.innerHTML = filtered.map(function(s) {
+      const pct         = Math.round(((s.portasUso||0) / (s.totalPortas||1)) * 100) || 0;
+      const ico         = {'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo] || '🔌';
+      const bg          = {'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo] || '#1E293B';
+      const hostname    = s.hostname || s.sysName || s.name || s.host || s.ip || '—';
+      const marcaModelo = [s.marca, s.modelo].filter(function(v){ return v && v !== 'undefined'; }).join(' ') || '—';
+      const local       = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
+      const portasLabel = (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0) + '/' + s.totalPortas : '—/—';
+      const localStyle  = local === '—' ? 'color:var(--g400);font-style:italic' : '';
+      const uptimeColor = s.status === 'online' ? 'var(--success)' : 'var(--danger)';
+      const pctColor    = pct > 85 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--success)';
+      const portasBar   = (s.tipo !== 'ap' && s.tipo !== 'firewall')
+        ? '<div style="margin-top:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Portas: ' + portasLabel + '</span><span>' + pct + '%</span></div><div style="background:var(--g200);border-radius:4px;height:5px;overflow:hidden"><div style="background:' + pctColor + ';width:' + pct + '%;height:100%;border-radius:4px"></div></div></div>'
+        : '';
+      return '<div class="sw-card">'
+        + '<div class="sw-card-header" style="background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px">'
+          + '<div style="width:36px;height:36px;border-radius:8px;background:' + bg + ';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">' + ico + '</div>'
+          + '<div style="flex:1;min-width:0;margin-left:10px">'
+            + '<div style="font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(hostname) + '</div>'
+            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">' + escapeHtml(marcaModelo) + '</div>'
+          + '</div>'
+          + swStatusHtml(s.status)
+        + '</div>'
+        + '<div class="sw-card-body">'
+          + '<div class="mdm-card-field"><span class="lbl">IP</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:11px">' + escapeHtml(s.ip||'—') + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Local</span><span class="val" style="' + localStyle + '">' + escapeHtml(local) + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Uptime</span><span class="val" style="color:' + uptimeColor + '">⏱ ' + escapeHtml(s.uptime||'—') + '</span></div>'
+          + '<div class="mdm-card-field"><span class="lbl">Firmware</span><span class="val" style="font-family:JetBrains Mono,monospace;font-size:10.5px">' + escapeHtml(s.firmware||'—') + '</span></div>'
+          + portasBar
+        + '</div>'
+        + '<div class="sw-card-ports"><div style="display:flex;flex-wrap:wrap;gap:2px">' + renderPortMinimap(s) + '</div></div>'
+        + '<div class="sw-card-actions">'
+          + '<button class="mdm-action-btn mab-gray" data-sid="' + escapeHtml(s.id) + '" onclick="abrirGerenciarSwitch(this.dataset.sid)">⚙️ Gerenciar</button>'
+          + '<button class="mdm-action-btn mab-info" data-sid="' + escapeHtml(s.id) + '" onclick="abrirHistSwitch(this.dataset.sid)">📜 Histórico</button>'
+          + '<button class="mdm-action-btn mab-success" onclick="openModal(&quot;modal-novo-chamado&quot;)">🎫 Chamado</button>'
+          + '<button class="mdm-action-btn mab-warning" data-sid="' + escapeHtml(s.id) + '" onclick="swActionDirect(&quot;ping&quot;,this.dataset.sid)">📶 Ping</button>'
+          + '<button class="mdm-action-btn mab-dark" data-sid="' + escapeHtml(s.id) + '" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.sid)">🖥️ SSH</button>'
+          + '<button class="mdm-action-btn mab-violet" data-sid="' + escapeHtml(s.id) + '" onclick="swActionDirect(&quot;backup-config&quot;,this.dataset.sid)">💾 Backup</button>'
+        + '</div>'
+      + '</div>';
+    }).join('') || '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
   } else {
     const tbody=document.getElementById('sw-table-body');
     if(tbody) tbody.innerHTML=filtered.map(s=>`<tr><td class='td-mono' style='color:var(--accent)'>${s.pat}</td><td style='font-weight:700;font-family:JetBrains Mono,monospace'>${s.hostname}</td><td><span class='tag'>${s.tipo}</span></td><td>${s.marca} ${s.modelo}</td><td class='td-mono' style='color:var(--accent-hi)'>${s.ip}</td><td>${s.local}</td><td>${s.portasUso||0}/${s.totalPortas||0}</td><td class='td-mono' style='font-size:10.5px'>${(s.vlans||[]).map(v=>v.id).join(', ')||'—'}</td><td class='td-mono' style='font-size:10.5px'>${s.firmware||'—'}</td><td style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</td><td>${swStatusHtml(s.status)}</td><td><div class='flex gap-4'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶</button></div></td></tr>`).join('')||'<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum</td></tr>';
@@ -9877,7 +10513,7 @@ if (!STATE.baixasPatrimoniais) STATE.baixasPatrimoniais = [];
 
 // ── RENDER PRINCIPAL ──────────────────────────────────────────
 function renderPatrimonio() {
-  const q      = document.getElementById('pat-search')?.value?.toLowerCase() || '';
+  const q      = document.getElementById('patrimonio-search')?.value?.toLowerCase() || '';
   const fCat   = document.getElementById('pat-filter-cat')?.value   || '';
   const fSt    = document.getElementById('pat-filter-status')?.value || '';
 
@@ -12557,7 +13193,7 @@ function patPopularGerencias() {
 function patColetarFiltros() {
   return {
     pat:       (document.getElementById('pat-filter-pat')?.value     || '').replace(/[^0-9]/g,'').trim(),
-    texto:     (document.getElementById('pat-search')?.value         || '').toLowerCase().trim(),
+    texto:     (document.getElementById('patrimonio-search')?.value  || '').toLowerCase().trim(),
     tipo:      (document.getElementById('pat-filter-tipo')?.value    || '').toLowerCase(),
     cat:       (document.getElementById('pat-filter-cat')?.value     || ''),
     gerencia:  (document.getElementById('pat-filter-gerencia')?.value|| '').toLowerCase().trim(),
@@ -12574,7 +13210,7 @@ function patColetarFiltros() {
 }
 
 function patLimparFiltros() {
-  ['pat-filter-pat','pat-search',
+  ['pat-filter-pat','patrimonio-search',
    'pat-filter-tipo','pat-filter-cat','pat-filter-gerencia',
    'pat-filter-empregado','pat-filter-nf','pat-filter-status',
    'pat-filter-dt-ini','pat-filter-dt-fim',
