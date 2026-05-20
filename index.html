@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202605201745 -->
+<!-- build: 202605201811 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -3065,8 +3065,78 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <div class="page" id="page-servidores">
-      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Servidores</h2></div><div class="flex gap-8" style="flex-wrap:wrap"><div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px"><button class="srv-tab-btn" style="background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('todos',this)">Todos</button><button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('fisico',this)">🖥️ Físicos</button><button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('virtual',this)">☁️ Virtuais</button></div><input class="form-control" id="srv-search" style="width:220px;margin:0" placeholder="🔍 Hostname..." oninput="renderServidores()"><select class="form-control" id="srv-filter-status" style="width:140px;margin:0" onchange="renderServidores()"><option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option></select></div></div>
-      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px"><div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="srv-kpi-total">—</div></div><div class="stat-card gray"><div class="stat-label">Físicos</div><div class="stat-value" id="srv-kpi-fisicos">—</div></div><div class="stat-card violet"><div class="stat-label">Virtuais</div><div class="stat-value" id="srv-kpi-virtuais">—</div></div><div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="srv-kpi-online">—</div></div><div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="srv-kpi-offline">—</div></div></div>
+      <!-- Header -->
+      <div class="flex items-center justify-between mb-16" style="flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Servidores</h2>
+          <p class="text-sm text-muted">Físicos: SERV* · Virtuais: VSERV*, VMSERVER* · Descobertos via SNMP/ping</p>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap;align-items:center">
+          <div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px">
+            <button class="srv-tab-btn" style="background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1);border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('todos',this)">Todos</button>
+            <button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('fisico',this)">🖥️ Físicos</button>
+            <button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('virtual',this)">☁️ Virtuais</button>
+          </div>
+          <input class="form-control" id="srv-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP, OS..." oninput="renderServidores()">
+          <select class="form-control" id="srv-filter-status" style="width:140px;margin:0" onchange="window._srvFiltroKpi=this.value;renderServidores()">
+            <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- KPIs clicáveis -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px">
+        <div class="stat-card blue" style="cursor:default">
+          <div class="stat-label">Total</div>
+          <div class="stat-value" id="srv-kpi-total">—</div>
+        </div>
+        <div class="stat-card gray" style="cursor:default">
+          <div class="stat-label">Físicos</div>
+          <div class="stat-value" id="srv-kpi-fisicos">—</div>
+        </div>
+        <div class="stat-card violet" style="cursor:default">
+          <div class="stat-label">Virtuais</div>
+          <div class="stat-value" id="srv-kpi-virtuais">—</div>
+        </div>
+        <div id="srv-kpi-online-card" class="stat-card green" style="cursor:pointer;transition:outline .15s" onclick="window._srvFiltroKpi=window._srvFiltroKpi==='online'?'':'online';document.getElementById('srv-filter-status').value=window._srvFiltroKpi||'';renderServidores();" title="Clique para filtrar online">
+          <div class="stat-label">Online ↗</div>
+          <div class="stat-value" id="srv-kpi-online">—</div>
+        </div>
+        <div id="srv-kpi-offline-card" class="stat-card red" style="cursor:pointer;transition:outline .15s" onclick="window._srvFiltroKpi=window._srvFiltroKpi==='offline'?'':'offline';document.getElementById('srv-filter-status').value=window._srvFiltroKpi||'';renderServidores();" title="Clique para filtrar offline">
+          <div class="stat-label">Offline ↗</div>
+          <div class="stat-value" id="srv-kpi-offline">—</div>
+        </div>
+      </div>
+
+      <!-- Gráfico de visão geral -->
+      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:14px;padding:20px 24px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--g900)">Distribuição dos Servidores</div>
+            <div style="font-size:11.5px;color:var(--g400);margin-top:2px">Status atual · Físicos vs Virtuais · Por localidade</div>
+          </div>
+          <div style="display:flex;gap:16px;font-size:11.5px">
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#059669;display:inline-block"></span>Online</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#DC2626;display:inline-block"></span>Offline</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#7C3AED;display:inline-block"></span>Virtual</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#2563EB;display:inline-block"></span>Físico</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+          <!-- Barra de status -->
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--g500);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Status</div>
+            <div id="srv-chart-status" style="height:120px;display:flex;flex-direction:column;justify-content:center;gap:8px"></div>
+          </div>
+          <!-- Barra físico/virtual -->
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--g500);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Tipo</div>
+            <div id="srv-chart-tipo" style="height:120px;display:flex;flex-direction:column;justify-content:center;gap:8px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grid de cards -->
       <div id="srv-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px"></div>
     </div>
 

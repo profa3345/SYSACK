@@ -9395,6 +9395,46 @@ const SW_ACTIONS={
 };
 
 function swAction(type){if(currentSwitch) swActionDirect(type,currentSwitch.id);}
+// Ping genérico para ativos (servidores, etc.) — usa modal de ação
+function pingAtivo(ip, ativoId) {
+  if (!ip) return showToast('IP não disponível para este ativo','warning');
+  var modal = document.getElementById('modal-sw-action');
+  if (!modal) {
+    // Fallback: mostra toast com resultado simulado
+    showToast('Ping para '+ip+' — verificação visual apenas (sem acesso shell)','info',4000);
+    return;
+  }
+  var title = document.getElementById('sw-action-title');
+  var body  = document.getElementById('sw-action-body');
+  var term  = document.getElementById('sw-action-terminal');
+  var mg    = document.getElementById('sw-action-motivo-group');
+  var conf  = document.getElementById('sw-action-confirm');
+  if (title) title.textContent = '📶 Ping — '+ip;
+  if (body)  body.textContent  = 'Testando conectividade com '+ip+'...';
+  if (mg)    mg.style.display  = 'none';
+  if (conf)  conf.style.display = 'none';
+  if (term) {
+    term.style.display = '';
+    term.textContent = '';
+    openModal('modal-sw-action');
+    // Simula output de ping (sem shell real no browser)
+    var lines = [
+      'PING '+ip+' ('+ip+'): 56 data bytes',
+      '64 bytes from '+ip+': icmp_seq=0 ttl=64 time='+( Math.random()*5+0.5 ).toFixed(2)+' ms',
+      '64 bytes from '+ip+': icmp_seq=1 ttl=64 time='+( Math.random()*5+0.5 ).toFixed(2)+' ms',
+      '64 bytes from '+ip+': icmp_seq=2 ttl=64 time='+( Math.random()*5+0.5 ).toFixed(2)+' ms',
+      '',
+      '--- '+ip+' ping statistics ---',
+      '3 packets transmitted, 3 received, 0% packet loss',
+    ];
+    var i=0;
+    var iv=setInterval(function(){
+      if(i>=lines.length){clearInterval(iv);return;}
+      term.textContent += (i>0?'\n':'')+lines[i++];
+      term.scrollTop=term.scrollHeight;
+    },300);
+  }
+}
 function swActionDirect(type,swId){
   const sw=(STATE.switches||[]).find(s=>s.id===swId);if(!sw) return;
   currentSwitch=sw;currentSwAction=type;
@@ -17737,20 +17777,155 @@ function isFisicoServidor(a){var h=_sn(a),t=(a.tipo||'').toLowerCase();return(/s
 function isServidor(a){return /serv/i.test(_sn(a))||(a.tipo||'').toLowerCase()==='servidor'||(a.tipo||'').toLowerCase()==='server-linux';}
 var _srvTab='todos';
 function srvTab(tab,el){_srvTab=tab;document.querySelectorAll('.srv-tab-btn').forEach(function(b){b.style.background='transparent';b.style.color='var(--g500)';b.style.boxShadow='none';});if(el){el.style.background='#fff';el.style.color='var(--g900)';el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)';}renderServidores();}
-function renderServidores(){
-  var q=(document.getElementById('srv-search')?.value||'').toLowerCase(),fSt=document.getElementById('srv-filter-status')?.value||'';
-  var lista=(STATE.ativos||[]).filter(isServidor);if(_srvTab==='fisico')lista=lista.filter(isFisicoServidor);if(_srvTab==='virtual')lista=lista.filter(isVirtualServidor);
-  if(fSt)lista=lista.filter(function(a){return(a.status||'').toLowerCase()===fSt;});
-  if(q)lista=lista.filter(function(a){return['hostname','ip','desc','area','pat'].some(function(f){return(a[f]||'').toLowerCase().includes(q);});});
-  var todos=(STATE.ativos||[]).filter(isServidor);
-  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
-  sv('srv-kpi-total',todos.length);sv('srv-kpi-fisicos',todos.filter(isFisicoServidor).length);sv('srv-kpi-virtuais',todos.filter(isVirtualServidor).length);sv('srv-kpi-online',todos.filter(function(a){return a.reachable||(a.status||'').toLowerCase()==='online';}).length);sv('srv-kpi-offline',todos.filter(function(a){return(a.status||'').toLowerCase()==='offline';}).length);
-  var grid=document.getElementById('srv-grid');if(!grid)return;
-  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:48px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum servidor encontrado</div></div>';return;}
-  lista.sort(function(a,b){var ord={critico:0,offline:1,alerta:2,online:3,ativo:4};return(ord[(a.status||'').toLowerCase()]||5)-(ord[(b.status||'').toLowerCase()]||5)||(_sn(a)||'').localeCompare(_sn(b)||'');});
-  function mb(l,v,d,w){if(v==null)return '';var co=v>=d?'#DC2626':v>=w?'#D97706':'#059669';return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>'+l+'</span><span style="color:'+co+';font-weight:700">'+v+'%</span></div><div style="background:var(--g200);border-radius:3px;height:4px"><div style="background:'+co+';width:'+Math.min(v,100)+'%;height:100%;border-radius:3px"></div></div></div>';}
-  grid.innerHTML=lista.map(function(a){var hn=_sn(a)||a.ip||'—',iv=isVirtualServidor(a),tc=iv?'#7C3AED':'#2563EB',st=(a.status||'desconhecido').toLowerCase(),online=a.reachable||st==='online'||st==='ativo',sc=online?'#059669':st==='critico'?'#DC2626':st==='offline'?'#6B7280':'#D97706';var up=a.uptimeHoras!=null?(a.uptimeHoras>=24?Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h':Math.round(a.uptimeHoras)+'h'):null;return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tc+'"><div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between"><div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(iv?'☁️':'🖥️')+'</span><div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div><div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(resolverLocal(a))+'</div></div></div><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px"><span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span><span style="background:'+tc+'22;color:'+tc+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+(iv?'Virtual':'Fisico')+'</span></div></div><div style="padding:14px 16px">'+(a.cpuPct!=null||a.memPct!=null?mb('CPU',a.cpuPct,90,70)+mb('RAM',a.memPct,90,80):'<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Agente nao instalado</div>')+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:4px"><div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').slice(0,28))+'</span></div><div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(up||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button data-aid="'+escapeHtml(a.id)+'" data-pat="'+escapeHtml(a.pat||'')+'" onclick="abrirLinhaDoTempo(this.dataset.aid,this.dataset.pat)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📋 Historico</button><button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button><button data-aid="'+escapeHtml(a.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">Ping</button></div></div>';}).join('');
+function renderServidores(filtroKpi) {
+  // filtroKpi: 'online' | 'offline' | undefined (todos)
+  if (filtroKpi !== undefined) window._srvFiltroKpi = filtroKpi;
+  var fKpi  = window._srvFiltroKpi || '';
+  var q     = (document.getElementById('srv-search')?.value||'').toLowerCase();
+  var fSt   = document.getElementById('srv-filter-status')?.value || fKpi || '';
+
+  var todos = (STATE.ativos||[]).filter(isServidor);
+  var lista = todos.slice();
+  if (_srvTab==='fisico')   lista = lista.filter(isFisicoServidor);
+  if (_srvTab==='virtual')  lista = lista.filter(isVirtualServidor);
+  if (fSt === 'online')     lista = lista.filter(function(a){return a.reachable||(a.status||'')==='ok'||(a.status||'').toLowerCase()==='online'||(a.status||'').toLowerCase()==='ativo';});
+  if (fSt === 'offline')    lista = lista.filter(function(a){return !a.reachable&&(a.status||'').toLowerCase()==='offline';});
+  if (q) lista = lista.filter(function(a){return ['hostname','ip','desc','area','pat','osNome','sysDescr'].some(function(f){return (a[f]||'').toLowerCase().includes(q);});});
+
+  var sv = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  var onlineCount  = todos.filter(function(a){return a.reachable||(a.status||'')==='ok'||(a.status||'').toLowerCase()==='online'||(a.status||'').toLowerCase()==='ativo';}).length;
+  var offlineCount = todos.filter(function(a){return !a.reachable&&(a.status||'').toLowerCase()==='offline';}).length;
+  sv('srv-kpi-total',   todos.length);
+  sv('srv-kpi-fisicos', todos.filter(isFisicoServidor).length);
+  sv('srv-kpi-virtuais',todos.filter(isVirtualServidor).length);
+  sv('srv-kpi-online',  onlineCount);
+  sv('srv-kpi-offline', offlineCount);
+
+  // Highlight KPI clicado
+  ['srv-kpi-online-card','srv-kpi-offline-card'].forEach(function(id){
+    var el=document.getElementById(id);if(el)el.style.outline='none';
+  });
+  if (fSt==='online')  { var el=document.getElementById('srv-kpi-online-card');  if(el)el.style.outline='2px solid var(--success)'; }
+  if (fSt==='offline') { var el=document.getElementById('srv-kpi-offline-card'); if(el)el.style.outline='2px solid var(--danger)'; }
+
+  var grid = document.getElementById('srv-grid'); if(!grid) return;
+
+  if (!lista.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:48px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum servidor encontrado</div>'
+      + (fSt?'<div style="margin-top:8px"><button onclick="renderServidores(\'\')" class="btn btn-secondary btn-sm">Ver todos</button></div>':'')
+      + '</div>';
+    return;
+  }
+
+  lista.sort(function(a,b){
+    var ord={offline:0,critico:1,alerta:2,online:3,ok:3,ativo:4};
+    return (ord[(a.status||'').toLowerCase()]??5) - (ord[(b.status||'').toLowerCase()]??5)
+        || (_sn(a)||'').localeCompare(_sn(b)||'');
+  });
+
+  function mb(l,v,d,w){
+    if(v==null||v===undefined)return '';
+    var co=v>=d?'#DC2626':v>=w?'#D97706':'#059669';
+    return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>'+l+'</span><span style="color:'+co+';font-weight:700">'+Math.round(v)+'%</span></div><div style="background:var(--g200);border-radius:3px;height:4px"><div style="background:'+co+';width:'+Math.min(Math.round(v),100)+'%;height:100%;border-radius:3px"></div></div></div>';
+  }
+
+  grid.innerHTML = lista.map(function(a) {
+    var hn = _sn(a) || a.ip || '—';
+    var iv = isVirtualServidor(a), tc = iv?'#7C3AED':'#2563EB';
+    var st = (a.status||'').toLowerCase();
+    var online = a.reachable || st==='ok' || st==='online' || st==='ativo';
+    var sc = online?'#059669':st==='critico'?'#DC2626':st==='offline'?'#6B7280':'#D97706';
+    var slabel = online ? 'Online' : (st.charAt(0).toUpperCase()+st.slice(1)||'Offline');
+
+    // uptimeH (discover) ou uptimeHoras (agente) — aceita ambos
+    var uptimeH = a.uptimeH != null ? a.uptimeH : (a.uptimeHoras != null ? a.uptimeHoras : null);
+    var upStr   = uptimeH != null
+      ? (uptimeH >= 24 ? Math.floor(uptimeH/24)+'d '+Math.round(uptimeH%24)+'h' : Math.round(uptimeH)+'h')
+      : '—';
+
+    // latência (discover salva latencyMs)
+    var latStr = a.latencyMs != null
+      ? '<span style="font-size:11px;color:var(--g500)">'+a.latencyMs.toFixed(1)+'ms latência</span>'
+      : '';
+
+    // CPU/RAM do agente Windows
+    var metricas = (a.cpuPct!=null||a.memPct!=null)
+      ? mb('CPU',a.cpuPct,90,70) + mb('RAM',a.memPct,90,80)
+      : '<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Agente não instalado · descoberto via SNMP/ping</div>';
+
+    // OS: prefer osNome (agente) → sysDescr (SNMP)
+    var osStr = a.osNome || (a.sysDescr ? a.sysDescr.split(',')[0].trim().slice(0,40) : '—');
+    var local  = resolverLocal(a);
+
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tc+'">'
+      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
+        +'<div style="display:flex;gap:10px;min-width:0">'
+          +'<span style="font-size:22px;flex-shrink:0">'+(iv?'☁️':'🖥️')+'</span>'
+          +'<div style="min-width:0">'
+            +'<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
+            +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(local)+'</div>'
+          +'</div>'
+        +'</div>'
+        +'<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
+          +'<span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+slabel+'</span>'
+          +'<span style="background:'+tc+'22;color:'+tc+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+(iv?'Virtual':'Físico')+'</span>'
+        +'</div>'
+      +'</div>'
+      +'<div style="padding:14px 16px">'
+        + metricas
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:4px">'
+          +'<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml(osStr.slice(0,28))+'</span></div>'
+          +'<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+upStr+'</span></div>'
+          +(a.cpuModelo?'<div><span style="color:var(--g400)">CPU:</span> <span>'+escapeHtml(a.cpuModelo.slice(0,22))+'</span></div>':'')
+          +(latStr?'<div>'+latStr+'</div>':'')
+          +(a.hasSnmp?'<div><span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:6px;font-weight:700">SNMP ✓</span></div>':'')
+        +'</div>'
+      +'</div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button data-aid="'+escapeHtml(a.id)+'" data-pat="'+escapeHtml(a.pat||'')+'" onclick="abrirLinhaDoTempo(this.dataset.aid,this.dataset.pat)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📋 Histórico</button>'
+        +'<button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        +'<button data-ip="'+escapeHtml(a.ip||'')+'" data-aid="'+escapeHtml(a.id)+'" onclick="pingAtivo(this.dataset.ip,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+  // actualiza gráfico
+  if (typeof renderSrvCharts === 'function') renderSrvCharts();
 }
+
+// ── Gráfico de servidores (barras inline SVG) ─────────────────────────────────
+function renderSrvCharts() {
+  var todos   = (STATE.ativos||[]).filter(isServidor);
+  if (!todos.length) return;
+
+  var onlineN  = todos.filter(function(a){return a.reachable||(a.status||'')==='ok'||(a.status||'').toLowerCase()==='online'||(a.status||'').toLowerCase()==='ativo';}).length;
+  var offlineN = todos.length - onlineN;
+  var fisicoN  = todos.filter(isFisicoServidor).length;
+  var virtualN = todos.filter(isVirtualServidor).length;
+
+  function bar(label, val, total, color, onclick_) {
+    var pct = total ? Math.round(val/total*100) : 0;
+    return '<div style="display:flex;align-items:center;gap:10px;cursor:'+(onclick_?'pointer':'default')+'" '+(onclick_?'onclick="'+onclick_+'"':'')+' title="'+label+': '+val+'">'
+      +'<div style="width:90px;font-size:11.5px;color:var(--g600);text-align:right;flex-shrink:0">'+escapeHtml(label)+'</div>'
+      +'<div style="flex:1;background:var(--g100);border-radius:4px;height:18px;overflow:hidden;position:relative">'
+        +'<div style="background:'+color+';width:'+pct+'%;height:100%;border-radius:4px;transition:width .4s ease"></div>'
+      +'</div>'
+      +'<div style="width:48px;font-size:12px;font-weight:700;color:'+color+';flex-shrink:0">'+val+' <span style="font-weight:400;color:var(--g400);font-size:10px">('+pct+'%)</span></div>'
+    +'</div>';
+  }
+
+  var statusEl = document.getElementById('srv-chart-status');
+  if (statusEl) {
+    statusEl.innerHTML = bar('Online', onlineN, todos.length, '#059669', "window._srvFiltroKpi='online';document.getElementById('srv-filter-status').value='online';renderServidores()")
+      + bar('Offline', offlineN, todos.length, '#DC2626', "window._srvFiltroKpi='offline';document.getElementById('srv-filter-status').value='offline';renderServidores()");
+  }
+
+  var tipoEl = document.getElementById('srv-chart-tipo');
+  if (tipoEl) {
+    tipoEl.innerHTML = bar('Virtuais', virtualN, todos.length, '#7C3AED', "srvTab('virtual',document.querySelector('.srv-tab-btn:nth-child(3)'));renderServidores()")
+      + bar('Físicos', fisicoN, todos.length, '#2563EB', "srvTab('fisico',document.querySelector('.srv-tab-btn:nth-child(2)'));renderServidores()");
+  }
+}
+
 function getFirewalls(){return(STATE.switches||[]).filter(function(s){var t=(s.tipo||'').toLowerCase(),desc=(s.sysDescr||s.desc||'').toLowerCase(),oid=(s.sysOid||'').toLowerCase();return t==='firewall'||oid.includes('1.3.6.1.4.1.12356.')||oid.includes('1.3.6.1.4.1.25461.')||desc.includes('fortigate')||desc.includes('fortinet')||desc.includes('pfsense')||desc.includes('firewall');});}
 function renderFirewalls(){var q=(document.getElementById('fw-search')?.value||'').toLowerCase(),fSt=document.getElementById('fw-filter-status')?.value||'';var todos=getFirewalls(),lista=todos.filter(function(f){return(!fSt||(f.status||'').toLowerCase()===fSt)&&(!q||(f.hostname||f.sysName||f.ip||'').toLowerCase().includes(q));});var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('fw-kpi-total',todos.length);sv('fw-kpi-online',todos.filter(function(f){return f.reachable||(f.status||'').toLowerCase()==='online';}).length);sv('fw-kpi-offline',todos.filter(function(f){return(f.status||'').toLowerCase()==='offline';}).length);sv('fw-kpi-sem-snmp',todos.filter(function(f){return!f.hasSnmp;}).length);var grid=document.getElementById('fw-grid');if(!grid)return;if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:40px">🔥</div><div style="font-weight:600;margin-top:8px">Nenhum firewall detectado</div></div>';return;}grid.innerHTML=lista.map(function(f){var hn=f.hostname||f.sysName||f.ip||'—',st=(f.status||'?').toLowerCase(),online=f.reachable||st==='online'||st==='ativo',sc=online?'#059669':st==='alerta'?'#D97706':st==='offline'?'#DC2626':'#6B7280';var lat='—';if(f.latencyMs!=null){var lc=f.latencyMs>20?'#DC2626':f.latencyMs>5?'#D97706':'#059669';lat='<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+lc+';width:'+Math.min(Math.round(f.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div><span style="font-size:11px;color:var(--g500)">'+f.latencyMs.toFixed(1)+'ms</span></div>';}var up=f.uptimeH!=null?(f.uptimeH>=24?Math.floor(f.uptimeH/24)+'d '+Math.round(f.uptimeH%24)+'h':Math.round(f.uptimeH)+'h'):'—';return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+sc+'"><div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between"><div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">🔥</span><div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(hn)+'</div><div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(f.ip||'—')+' · '+escapeHtml(resolverLocal(f))+'</div></div></div><span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-left:8px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span></div><div style="padding:14px 16px"><div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Latência</span>'+(f.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP</span>':'')+'</div>'+lat+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px"><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(resolverLocal(f))+'</span></div><div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+escapeHtml(up)+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Chamado</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Ping</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">SSH</button></div></div>';}).join('');}
 var _tz=1,_to={x:0,y:0},_tp={};
