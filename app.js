@@ -783,7 +783,7 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
-  db.collection('impressoras').onSnapshot(function(snap){STATE.impressorasDisc=snap2arr(snap).map(norm);console.log('[Banco] impressoras:',STATE.impressorasDisc.length);},function(e){console.error('[Banco] impressoras:',e.message);});
+  db.collection('impressoras').onSnapshot(function(snap){STATE.impressorasDisc=snap2arr(snap).map(norm);console.log('[Banco] impressoras:',STATE.impressorasDisc.length);_debounce('impressoras-render',function(){if(isPageActive('impressoras'))renderImpressoras();if(isPageActive('firewalls'))renderFirewalls();},600);},function(e){console.error('[Banco] impressoras:',e.message);});
 
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
@@ -18567,7 +18567,7 @@ function renderSrvCharts() {
 }
 
 function getFirewalls(){
-  var lista = (STATE.switches||[]).filter(function(s){
+  function isFw(s){
     var t    = (s.tipo||'').toLowerCase();
     var desc = (s.sysDescr||s.desc||'').toLowerCase();
     var oid  = (s.sysOid||'').toLowerCase();
@@ -18584,8 +18584,14 @@ function getFirewalls(){
       || desc.includes('firewall')
       || desc.includes('cisco asa')
       || /^fw-|^fwl-|-fw\d|-fwl\d|firewall|-fw$/.test(hn);
+  }
+  // Busca em switches E ativos (Discovery pode salvar em qualquer colecao)
+  var visto = new Set();
+  var lista = [];
+  [...(STATE.switches||[]), ...(STATE.ativos||[])].forEach(function(s){
+    var key = s.ip||s.hostname||s.id||'';
+    if(isFw(s) && key && !visto.has(key)){ visto.add(key); lista.push(s); }
   });
-  // Se não achar nada, diagnostica e retorna lista vazia com info
   if (!lista.length) {
     var allTipos = [...new Set((STATE.switches||[]).map(function(s){return s.tipo||'?';}))];
     console.log('[Firewalls] 0 encontrados. Tipos nos switches:', allTipos.join(', '));
@@ -19948,226 +19954,305 @@ async function reprocessarFalhas(modo) {
 // Agrupa os 2578 dispositivos por área geográfica (87 localidades)
 // ═══════════════════════════════════════════════════════════════
 
-var _mapaScale   = 1;
-var _mapaFiltros = { status: '', tipo: '', local: '' };
-var _mapaExpanded = {}; // localidade expandida
 
 // ── Zoom ──────────────────────────────────────────────────────
-function mapaZoom(factor) {
-  if (factor === 1) { _mapaScale = 1; }
-  else _mapaScale = Math.max(0.3, Math.min(3, _mapaScale * factor));
+
+
+
+
+// ═══════════════════════════════════════════════════════════════
+// MAPA DE REDE — MODO DUPLO
+//   Modo 1: Visão Geral  — grafico SVG subnet/switch tree
+//   Modo 2: Por Localidade — cards agrupados + ao selecionar
+//           uma área mostra o grafico filtrado daquela área
+// ═══════════════════════════════════════════════════════════════
+
+var _mapaMode     = 'geral';    // 'geral' | 'areas'
+var _mapaScale    = 1;
+var _maPan        = {x:0, y:0};
+var _mapaFiltros  = {status:'', tipo:'', local:''};
+var _mapaExpanded = {};
+var _mapaAreaSel  = null;       // localidade selecionada para ver gráfico
+
+// ── Zoom ──────────────────────────────────────────────────────
+function mapaZoom(f) {
+  if (f === 1) { _mapaScale = 1; _maPan = {x:0, y:0}; }
+  else _mapaScale = Math.max(0.15, Math.min(3, _mapaScale * f));
   var inner = document.getElementById('mapa-rede-inner');
-  if (!inner) return;
-  inner.style.transform       = 'scale(' + _mapaScale + ')';
-  inner.style.transformOrigin = 'top left';
-  inner.style.width           = (100 / _mapaScale) + '%';
+  if (inner) {
+    inner.style.transform = 'translate('+_maPan.x+'px,'+_maPan.y+'px) scale('+_mapaScale+')';
+    inner.style.transformOrigin = 'top left';
+  }
 }
 
-// ── Filtro rápido por clique nos KPIs do mapa ─────────────────
-function mapaFiltrarRede(campo, valor) {
-  _mapaFiltros[campo] = (_mapaFiltros[campo] === valor) ? '' : valor;
+// ── Mudar modo ────────────────────────────────────────────────
+function mapaSetMode(mode, btn) {
+  _mapaMode    = mode;
+  _mapaAreaSel = null;
+  // Highlight active tab button
+  document.querySelectorAll('.mapa-mode-btn').forEach(function(b) {
+    b.style.background = 'transparent';
+    b.style.color      = 'var(--g500)';
+    b.style.borderBottom = '2px solid transparent';
+    b.style.fontWeight = '500';
+  });
+  if (btn) {
+    btn.style.background   = 'transparent';
+    btn.style.color        = 'var(--accent,#2563EB)';
+    btn.style.borderBottom = '2px solid var(--accent,#2563EB)';
+    btn.style.fontWeight   = '700';
+  }
   renderMapaRede();
 }
 
-// ── Expandir/colapsar card de localidade ──────────────────────
-function mapaToggleLocal(sigla) {
-  _mapaExpanded[sigla] = !_mapaExpanded[sigla];
-  renderMapaRede();
-}
-
-// ── renderMapaRede — engine principal ─────────────────────────
+// ── Main render dispatcher ─────────────────────────────────────
 function renderMapaRede() {
   var container = document.getElementById('mapa-rede-svg');
   if (!container) return;
 
-  var todos = (STATE.switches || [])
-    .concat((STATE.ativos || []).filter(function(a) {
+  var todos = (STATE.switches||[]).concat(
+    (STATE.ativos||[]).filter(function(a){
       return a.ip && !(STATE.switches||[]).find(function(s){return s.id===a.id;});
-    }));
+    })
+  );
 
   if (!todos.length) {
     container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--g400)">'
       + '<div style="font-size:48px;margin-bottom:12px">🌐</div>'
-      + '<div style="font-weight:600;font-size:15px">Nenhum dispositivo no monitor de rede</div>'
-      + '<div style="font-size:12px;margin-top:8px;color:var(--g300)">Execute o discover.js para detectar dispositivos</div></div>';
+      + '<div style="font-weight:600">Nenhum dispositivo no monitor de rede</div>'
+      + '<div style="font-size:12px;margin-top:8px">Execute o discover.js na rede CESAN</div></div>';
+    _mapaAtualizarBotoesModo();
     return;
   }
 
-  // ── Aplica filtros ──────────────────────────────────────────
-  var filtrados = todos.filter(function(d) {
-    if (_mapaFiltros.tipo && (d.tipo||'').toLowerCase() !== _mapaFiltros.tipo) return false;
-    if (_mapaFiltros.status) {
-      var st = (d.status||'').toLowerCase();
-      var online = d.reachable || st==='ok' || st==='ativo' || st==='online';
-      if (_mapaFiltros.status === 'ok'      && !online)  return false;
-      if (_mapaFiltros.status === 'offline' && online)   return false;
-      if (_mapaFiltros.status === 'alerta'  && st!=='alerta') return false;
-    }
-    if (_mapaFiltros.local && resolverLocal(d) !== _mapaFiltros.local) return false;
-    return true;
+  // Update localidade filter dropdown
+  var selLocal = document.getElementById('mon-filter-local');
+  if (selLocal && selLocal.options.length <= 1) {
+    var locais = [...new Set(todos.map(function(d){return resolverLocal(d);}).filter(function(l){return l&&l!=='—';}))].sort();
+    locais.forEach(function(loc){
+      var opt = document.createElement('option'); opt.value=loc; opt.textContent=loc; selLocal.appendChild(opt);
+    });
+  }
+
+  _mapaAtualizarBotoesModo();
+
+  if (_mapaMode === 'geral' || _mapaAreaSel) {
+    _renderMapaGrafico(todos, container);
+  } else {
+    _renderMapaAreas(todos, container);
+  }
+}
+
+function _mapaAtualizarBotoesModo() {
+  // Sync mode buttons visual state on render
+  var btnGeral = document.getElementById('mapa-btn-geral');
+  var btnAreas = document.getElementById('mapa-btn-areas');
+  if (btnGeral) {
+    var gActive = _mapaMode === 'geral' || _mapaAreaSel;
+    btnGeral.style.color       = gActive ? 'var(--accent,#2563EB)' : 'var(--g500)';
+    btnGeral.style.borderBottom= gActive ? '2px solid var(--accent,#2563EB)' : '2px solid transparent';
+    btnGeral.style.fontWeight  = gActive ? '700' : '500';
+  }
+  if (btnAreas) {
+    var aActive = _mapaMode === 'areas' && !_mapaAreaSel;
+    btnAreas.style.color       = aActive ? 'var(--accent,#2563EB)' : 'var(--g500)';
+    btnAreas.style.borderBottom= aActive ? '2px solid var(--accent,#2563EB)' : '2px solid transparent';
+    btnAreas.style.fontWeight  = aActive ? '700' : '500';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MODO 1 — GRÁFICO SVG (Visão Geral ou Área Específica)
+// Layout: switches no centro, ativos ao redor por subnet
+// ─────────────────────────────────────────────────────────────────
+function _renderMapaGrafico(todosAll, container) {
+  // Filter: se há área selecionada, mostra só essa área
+  var todos = _mapaAreaSel
+    ? todosAll.filter(function(d){return resolverLocal(d)===_mapaAreaSel;})
+    : todosAll;
+
+  // Apply status/tipo filters
+  if (_mapaFiltros.status) {
+    todos = todos.filter(function(d){
+      var ok = d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i);
+      if (_mapaFiltros.status==='ok')      return ok;
+      if (_mapaFiltros.status==='offline') return !ok;
+      if (_mapaFiltros.status==='alerta')  return (d.status||'').toLowerCase()==='alerta';
+      return true;
+    });
+  }
+  if (_mapaFiltros.tipo) {
+    todos = todos.filter(function(d){return (d.tipo||'').toLowerCase()===_mapaFiltros.tipo;});
+  }
+
+  var switches  = todos.filter(function(d){return ['switch','switch-core','switch-distribuicao','switch-acesso','router','firewall','ap'].includes((d.tipo||'').toLowerCase());});
+  var hosts     = todos.filter(function(d){return !['switch','switch-core','switch-distribuicao','switch-acesso','router','firewall','ap'].includes((d.tipo||'').toLowerCase());});
+
+  // ── Layout ──────────────────────────────────────────────────
+  // Switches: row of colored circles on top
+  // Hosts: grouped by subnet, each subnet = column below its switch
+
+  function getSubnet(ip) { var p=(ip||'').split('.'); return p.length>=3?p.slice(0,3).join('.'):'sem-subnet'; }
+
+  // Group hosts by subnet
+  var subnets = {};
+  hosts.forEach(function(h){
+    var sn = getSubnet(h.ip);
+    if (!subnets[sn]) subnets[sn]={sn:sn, hosts:[], sw:null};
+    subnets[sn].hosts.push(h);
   });
 
-  // ── Agrupa por localidade ───────────────────────────────────
-  var grupos = {};
-  filtrados.forEach(function(d) {
-    var local = resolverLocal(d) || 'Sem localidade';
-    if (!grupos[local]) grupos[local] = { nome: local, dispositivos: [] };
-    grupos[local].dispositivos.push(d);
+  // Try to match subnet to switch by IP prefix
+  switches.forEach(function(sw){
+    var sn = getSubnet(sw.ip);
+    if (subnets[sn]) subnets[sn].sw = sw;
   });
 
-  var locais = Object.values(grupos).sort(function(a, b) {
-    return a.nome.localeCompare(b.nome);
+  // Unmatched subnets (no switch found)
+  var snList = Object.values(subnets).sort(function(a,b){return a.sn.localeCompare(b.sn);});
+
+  // Also: switches with no hosts
+  var orphanSw = switches.filter(function(sw){
+    return !snList.find(function(s){return s.sw && s.sw.id===sw.id;});
   });
-
-  // ── Stats globais ───────────────────────────────────────────
-  var onlineN  = filtrados.filter(function(d){ return d.reachable||(d.status||'')==='ok'||(d.status||'')==='ativo'||(d.status||'')==='online'; }).length;
-  var offlineN = filtrados.filter(function(d){ var s=(d.status||'').toLowerCase(); return s==='offline'; }).length;
-  var alertaN  = filtrados.filter(function(d){ return (d.status||'')==='alerta'; }).length;
-
-  // ── Tipo icons ──────────────────────────────────────────────
-  var tipoIco = {
-    switch:'⇌', router:'🌐', firewall:'🔥', ap:'📡',
-    'switch-core':'★', servidor:'🖥', 'server-linux':'🖥',
-    workstation:'💻', notebook:'💻', impressora:'🖨', printer:'🖨',
-    monitor:'🖥', ups:'🔋', camera:'📷', ativo:'📦'
-  };
 
   // ── Render ──────────────────────────────────────────────────
+  var CARD_W   = 130;
+  var CARD_GAP = 10;
+  var SW_H     = 44;
+  var HOST_H   = 22;
+  var HOST_PAD = 4;
+  var HEADER_H = 60;
+
+  // Estimate total width
+  var cols  = snList.length + orphanSw.length;
+  var totalW = Math.max(cols * (CARD_W + CARD_GAP), 600);
+
+  var tipoClr = {switch:'#1E40AF','switch-core':'#0F172A','switch-distribuicao':'#1D4ED8','switch-acesso':'#2563EB',router:'#EA580C',firewall:'#7C3AED',ap:'#0891B2'};
+  var statusClr = function(d){
+    var s=(d.status||'').toLowerCase();
+    if(d.reachable||s==='ok'||s==='ativo'||s==='online') return '#10B981';
+    if(s==='offline') return '#EF4444';
+    if(s==='alerta')  return '#F59E0B';
+    return '#94A3B8';
+  };
+
   var html = '';
 
-  // Barra de filtros
-  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:10px">'
-    + '<span style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px">Filtrar:</span>'
-    + mapaFiltroBtn('status','ok',    '🟢 Online ('+onlineN+')',  '#059669')
-    + mapaFiltroBtn('status','offline','🔴 Offline ('+offlineN+')', '#DC2626')
-    + mapaFiltroBtn('status','alerta', '🟡 Alerta ('+alertaN+')',  '#D97706')
-    + '<div style="width:1px;height:18px;background:var(--g200)"></div>'
-    + mapaFiltroBtn('tipo','switch',   '⇌ Switches', '#2563EB')
-    + mapaFiltroBtn('tipo','router',   '🌐 Roteadores', '#EA580C')
-    + mapaFiltroBtn('tipo','firewall', '🔥 Firewalls', '#7C3AED')
-    + mapaFiltroBtn('tipo','ap',       '📡 APs', '#0891B2')
-    + '<div style="width:1px;height:18px;background:var(--g200)"></div>'
-    + '<span style="font-size:11.5px;color:var(--g600);font-weight:600">'
-      + filtrados.length + ' de ' + todos.length + ' dispositivos · ' + locais.length + ' localidades'
-    + '</span>'
-    + (_mapaFiltros.status||_mapaFiltros.tipo||_mapaFiltros.local
-        ? '<button onclick="Object.keys(_mapaFiltros).forEach(function(k){_mapaFiltros[k]=\"\"});renderMapaRede()" '
-          + 'style="margin-left:auto;border:none;background:var(--g100);color:var(--g600);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">✕ Limpar</button>'
+  // Breadcrumb se em área específica
+  if (_mapaAreaSel) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#EFF6FF;border-bottom:1px solid #BFDBFE;font-size:12px;flex-shrink:0">'
+      +'<button onclick="_mapaAreaSel=null;renderMapaRede()" style="border:none;background:#2563EB;color:#fff;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">← Voltar</button>'
+      +'<span style="color:#1E40AF;font-weight:700">'+escapeHtml(_mapaAreaSel)+'</span>'
+      +'<span style="color:#60A5FA">· '+todos.length+' dispositivos</span>'
+    +'</div>';
+  }
+
+  // Filter bar
+  html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 12px;background:var(--g50);border-bottom:0.5px solid var(--g100)">'
+    + _mapaFiltBtn('status','ok',    '🟢 Online',   '#059669')
+    + _mapaFiltBtn('status','offline','🔴 Offline', '#DC2626')
+    + _mapaFiltBtn('status','alerta', '🟡 Alerta',  '#D97706')
+    + '<div style="width:1px;height:16px;background:var(--g200)"></div>'
+    + _mapaFiltBtn('tipo','switch',   '⇌ Switches',  '#2563EB')
+    + _mapaFiltBtn('tipo','router',   '🌐 Routers',   '#EA580C')
+    + _mapaFiltBtn('tipo','firewall', '🔥 Firewalls', '#7C3AED')
+    + _mapaFiltBtn('tipo','ap',       '📡 APs',       '#0891B2')
+    + '<span style="font-size:11px;color:var(--g400);margin-left:auto">'+todos.length+' dispositivos · '+snList.length+' subnets</span>'
+    + ((_mapaFiltros.status||_mapaFiltros.tipo)
+        ? '<button onclick="_mapaFiltros={status:\'\',tipo:\'\',local:\'\'};renderMapaRede()" style="border:none;background:var(--g200);color:var(--g600);padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px">✕ Limpar</button>'
         : '')
-  + '</div>';
+  +'</div>';
 
-  // Grid de localidades
-  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px">';
+  // SVG canvas
+  html += '<div style="overflow:auto;position:relative"><svg xmlns="http://www.w3.org/2000/svg" width="'+(totalW+40)+'" style="display:block;padding:16px 12px">';
 
-  locais.forEach(function(grp) {
-    var devs    = grp.dispositivos;
-    var sigla   = devs[0] ? (devs[0].sigla || '') : '';
-    var onlineL = devs.filter(function(d){ return d.reachable||(d.status||'')==='ok'||(d.status||'')==='ativo'||(d.status||'')==='online'; }).length;
-    var offlineL= devs.filter(function(d){ return (d.status||'')==='offline'; }).length;
-    var alertaL = devs.filter(function(d){ return (d.status||'')==='alerta'; }).length;
-    var expanded= _mapaExpanded[grp.nome];
-    var pctOk   = devs.length ? Math.round(onlineL/devs.length*100) : 0;
-    var barColor= pctOk===100?'#059669':pctOk>=80?'#D97706':'#DC2626';
+  var x = 12;
 
-    html += '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden">';
+  // Render each subnet column
+  snList.forEach(function(s) {
+    var sw     = s.sw;
+    var hList  = s.hosts;
+    var colH   = HEADER_H + (sw ? SW_H + 8 : 0) + hList.length * (HOST_H + HOST_PAD) + 20;
 
-    // Header do card
-    html += '<div onclick="mapaToggleLocal(\''+escapeHtml(grp.nome)+'\')" style="background:linear-gradient(90deg,#0F172A,#1E293B);padding:11px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;user-select:none">'
-      + '<div style="flex:1;min-width:0">'
-        + '<div style="font-weight:800;font-size:13px;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(grp.nome)+'</div>'
-        + (sigla?'<div style="font-size:10px;color:#60A5FA;font-family:monospace;margin-top:1px">'+escapeHtml(sigla.toUpperCase())+'</div>':'')
-      +'</div>'
-      // Mini status badges
-      + '<div style="display:flex;gap:5px;flex-shrink:0;align-items:center">'
-        + (onlineL?'<span style="font-size:10px;background:#05966930;color:#34D399;padding:2px 6px;border-radius:6px;font-weight:700">'+onlineL+'✓</span>':'')
-        + (offlineL?'<span style="font-size:10px;background:#DC262630;color:#F87171;padding:2px 6px;border-radius:6px;font-weight:700">'+offlineL+'✗</span>':'')
-        + (alertaL?'<span style="font-size:10px;background:#D9770630;color:#FCD34D;padding:2px 6px;border-radius:6px;font-weight:700">'+alertaL+'!</span>':'')
-        + '<span style="font-size:10px;color:#94A3B8;margin-left:4px">'+devs.length+'</span>'
-        + '<span style="color:#94A3B8;font-size:12px;margin-left:4px">'+(expanded?'▾':'▸')+'</span>'
-      +'</div>'
-    +'</div>';
+    // Column background
+    html += '<rect x="'+x+'" y="4" width="'+CARD_W+'" height="'+colH+'" rx="8" fill="#fff" stroke="#E2E8F0" stroke-width="1"/>';
 
-    // Barra de saúde
-    html += '<div style="height:4px;background:#1E293B">'
-      + '<div style="height:100%;width:'+pctOk+'%;background:'+barColor+';transition:width .4s"></div>'
-    +'</div>';
+    // Subnet label
+    html += '<text x="'+(x+6)+'" y="18" font-size="9" fill="#94A3B8" font-family="monospace">'+escapeHtml(s.sn+'.0/24')+'</text>';
 
-    if (expanded) {
-      // Lista completa de dispositivos
-      html += '<div style="padding:10px 12px;max-height:320px;overflow-y:auto">';
-      devs.forEach(function(d) {
-        var hn   = d.hostname||d.sysName||d.desc||d.ip||'—';
-        var tipo = (d.tipo||'ativo').toLowerCase();
-        var ico  = tipoIco[tipo]||'📦';
-        var st   = (d.status||'').toLowerCase();
-        var online = d.reachable||st==='ok'||st==='ativo'||st==='online';
-        var dotC = online?'#10B981':st==='alerta'?'#F59E0B':'#EF4444';
-        var lat  = d.latencyMs!=null?d.latencyMs.toFixed(1)+'ms':'';
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--g50)">'
-          + '<span style="font-size:13px;flex-shrink:0">'+ico+'</span>'
-          + '<div style="flex:1;min-width:0">'
-            + '<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:monospace">'+escapeHtml(hn.slice(0,28))+'</div>'
-            + '<div style="font-size:10px;color:var(--g400)">'+escapeHtml(d.ip||'—')+(d.pat?' · PAT:'+escapeHtml(d.pat):'')+'</div>'
-          +'</div>'
-          + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0">'
-            + (lat?'<span style="font-size:9.5px;color:var(--g400);font-family:monospace">'+lat+'</span>':'')
-            + '<div style="width:7px;height:7px;border-radius:50%;background:'+dotC+'"></div>'
-          +'</div>'
-        +'</div>';
-      });
-      html += '</div>';
-    } else {
-      // Mini grid de pontos (status visual compacto)
-      html += '<div style="padding:10px 12px 12px">';
-      // Linha de ícones por tipo
-      var byTipo = {};
-      devs.forEach(function(d){
-        var t=(d.tipo||'ativo').toLowerCase();
-        if(!byTipo[t])byTipo[t]=0; byTipo[t]++;
-      });
-      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
-      Object.entries(byTipo).sort(function(a,b){return b[1]-a[1];}).forEach(function(e){
-        html += '<span style="font-size:10.5px;background:var(--g100);padding:2px 8px;border-radius:6px;color:var(--g600)">'
-          + (tipoIco[e[0]]||'📦')+' '+e[1]+' '+e[0]+'</span>';
-      });
-      html += '</div>';
-      // Mini dots grid (status de cada device)
-      html += '<div style="display:flex;flex-wrap:wrap;gap:3px">';
-      devs.forEach(function(d){
-        var st  = (d.status||'').toLowerCase();
-        var ok  = d.reachable||st==='ok'||st==='ativo'||st==='online';
-        var c2  = ok?'#10B981':st==='alerta'?'#F59E0B':'#94A3B8';
-        var hn  = d.hostname||d.sysName||d.ip||'—';
-        html += '<div title="'+escapeHtml(hn)+' ('+escapeHtml(d.ip||'')+')" '
-          + 'style="width:10px;height:10px;border-radius:2px;background:'+c2+';cursor:default"></div>';
-      });
-      html += '</div>';
-      html += '</div>';
+    var yy = 28;
+
+    // Switch node
+    if (sw) {
+      var swC = tipoClr[(sw.tipo||'').toLowerCase()] || '#2563EB';
+      html += '<rect x="'+(x+4)+'" y="'+yy+'" width="'+(CARD_W-8)+'" height="'+SW_H+'" rx="6" fill="'+swC+'" opacity="0.95"/>';
+      html += '<text x="'+(x+CARD_W/2)+'" y="'+(yy+14)+'" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml((sw.hostname||sw.sysName||sw.ip||'—').slice(0,17))+'</text>';
+      html += '<text x="'+(x+CARD_W/2)+'" y="'+(yy+25)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.7)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
+      // Status dot
+      html += '<circle cx="'+(x+CARD_W-10)+'" cy="'+(yy+8)+'" r="4" fill="'+statusClr(sw)+'"/>';
+      // Latency
+      if (sw.latencyMs!=null) html += '<text x="'+(x+6)+'" y="'+(yy+SW_H-4)+'" font-size="8" fill="rgba(255,255,255,.6)">'+sw.latencyMs.toFixed(0)+'ms</text>';
+
+      // Line from switch to hosts
+      if (hList.length) {
+        html += '<line x1="'+(x+CARD_W/2)+'" y1="'+(yy+SW_H)+'" x2="'+(x+CARD_W/2)+'" y2="'+(yy+SW_H+6)+'" stroke="#CBD5E1" stroke-width="1.5"/>';
+      }
+      yy += SW_H + 8;
     }
 
-    html += '</div>';
+    // Host rows
+    hList.forEach(function(h, hi) {
+      var sc = statusClr(h);
+      var hn = (h.hostname||h.desc||h.ip||'—').slice(0,17);
+      var bg = hi%2===0 ? '#F8FAFC' : '#fff';
+      html += '<rect x="'+(x+4)+'" y="'+yy+'" width="'+(CARD_W-8)+'" height="'+HOST_H+'" rx="3" fill="'+bg+'"/>';
+      html += '<circle cx="'+(x+10)+'" cy="'+(yy+HOST_H/2)+'" r="4" fill="'+sc+'"/>';
+      html += '<text x="'+(x+18)+'" y="'+(yy+HOST_H/2+4)+'" font-size="9" fill="#374151" font-family="monospace">'+escapeHtml(hn)+'</text>';
+      if (h.latencyMs!=null) html += '<text x="'+(x+CARD_W-6)+'" y="'+(yy+HOST_H/2+4)+'" text-anchor="end" font-size="8" fill="#9CA3AF">'+h.latencyMs.toFixed(0)+'ms</text>';
+      // Tooltip title
+      html += '<title>'+escapeHtml((h.hostname||h.ip||'—')+' · '+h.ip+' · '+(h.status||'—'))+'</title>';
+      yy += HOST_H + HOST_PAD;
+    });
+
+    x += CARD_W + CARD_GAP;
   });
 
-  html += '</div>';
+  // Orphan switches (no hosts)
+  orphanSw.forEach(function(sw) {
+    var swC = tipoClr[(sw.tipo||'').toLowerCase()] || '#2563EB';
+    var colH = HEADER_H + SW_H + 16;
+    html += '<rect x="'+x+'" y="4" width="'+CARD_W+'" height="'+colH+'" rx="8" fill="#fff" stroke="#E2E8F0" stroke-width="1"/>';
+    html += '<text x="'+(x+6)+'" y="18" font-size="9" fill="#94A3B8" font-family="monospace">'+(sw.tipo||'device')+'</text>';
+    html += '<rect x="'+(x+4)+'" y="28" width="'+(CARD_W-8)+'" height="'+SW_H+'" rx="6" fill="'+swC+'" opacity="0.9"/>';
+    html += '<text x="'+(x+CARD_W/2)+'" y="48" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml((sw.hostname||sw.sysName||sw.ip||'—').slice(0,17))+'</text>';
+    html += '<text x="'+(x+CARD_W/2)+'" y="60" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.7)">'+escapeHtml(sw.ip||'')+'</text>';
+    html += '<circle cx="'+(x+CARD_W-10)+'" cy="36" r="4" fill="'+statusClr(sw)+'"/>';
+    x += CARD_W + CARD_GAP;
+  });
+
+  if (!snList.length && !orphanSw.length) {
+    html += '<text x="300" y="80" text-anchor="middle" fill="#94A3B8" font-size="13" font-family="Arial">Nenhum dispositivo encontrado com esses filtros</text>';
+  }
+
+  html += '</svg></div>';
   container.innerHTML = html;
 }
 
-function mapaFiltroBtn(campo, valor, label, cor) {
+function _mapaFiltBtn(campo, valor, label, cor) {
   var ativo = _mapaFiltros[campo] === valor;
-  return '<button onclick="mapaFiltrar(\''+campo+'\',\''+valor+'\')" '
-    + 'style="padding:4px 11px;border:1px solid '+(ativo?cor:'var(--g200)')+';border-radius:8px;'
-    + 'background:'+(ativo?cor+'15':'transparent')+';color:'+(ativo?cor:'var(--g600)')+';'
-    + 'font-size:11.5px;font-weight:'+(ativo?'700':'500')+';cursor:pointer;white-space:nowrap">'
-    + label+'</button>';
+  return '<button onclick="_mapaFiltros.'+campo+'=_mapaFiltros.'+campo+'===\''+valor+'\'?\'\':\''+valor+'\';renderMapaRede()" '
+    +'style="padding:3px 9px;border:1px solid '+(ativo?cor:'var(--g200)')+';border-radius:7px;'
+    +'background:'+(ativo?cor+'15':'transparent')+';color:'+(ativo?cor:'var(--g600)')+';'
+    +'font-size:11px;font-weight:'+(ativo?'700':'400')+';cursor:pointer;white-space:nowrap">'+label+'</button>';
 }
 
-// ── PDF/Impressão ─────────────────────────────────────────────
-function mapaImprimir() {
-  var todos = (STATE.switches||[]).concat((STATE.ativos||[]).filter(function(a){
-    return a.ip && !(STATE.switches||[]).find(function(s){return s.id===a.id;});
-  }));
-
-  // Agrupa por localidade
+// ─────────────────────────────────────────────────────────────────
+// MODO 2 — CARDS POR LOCALIDADE
+// Cards agrupados. Ao clicar numa localidade → abre gráfico SVG filtrado
+// ─────────────────────────────────────────────────────────────────
+function _renderMapaAreas(todos, container) {
+  // Group by area
   var grupos = {};
   todos.forEach(function(d) {
     var local = resolverLocal(d) || 'Sem localidade';
@@ -20176,95 +20261,198 @@ function mapaImprimir() {
   });
   var locais = Object.values(grupos).sort(function(a,b){return a.nome.localeCompare(b.nome);});
 
-  var tipoIco2 = {switch:'⇌',router:'⊙',firewall:'🔥',ap:'(ap)',servidor:'[S]','server-linux':'[S]',workstation:'[W]',notebook:'[N]',impressora:'[I]',printer:'[I]'};
+  var totalOnline  = todos.filter(function(d){return d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i);}).length;
+  var totalOffline = todos.filter(function(d){return (d.status||'').toLowerCase()==='offline';}).length;
 
-  var win = window.open('','_blank','width=1400,height=900');
-  win.document.write('<!DOCTYPE html><html><head><title>Mapa de Rede CESAN — SYSACK</title><meta charset="UTF-8"><style>'
-    + '@page{size:A3 landscape;margin:12mm}'
-    + '*{box-sizing:border-box;margin:0;padding:0}'
-    + 'body{font-family:Arial,sans-serif;font-size:10px;background:#fff;color:#111}'
-    + '.header{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:8px;border-bottom:2px solid #0F172A;margin-bottom:12px}'
-    + '.header h1{font-size:18px;font-weight:900;color:#0F172A}'
-    + '.header .meta{font-size:10px;color:#64748B;text-align:right}'
-    + '.stats{display:flex;gap:16px;margin-bottom:12px}'
-    + '.stat{background:#F1F5F9;border-radius:6px;padding:6px 12px;font-size:11px}'
-    + '.stat strong{font-size:16px;display:block;font-weight:900}'
-    + '.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}'
-    + '.card{border:1px solid #E2E8F0;border-radius:8px;overflow:hidden;page-break-inside:avoid}'
-    + '.card-head{background:#0F172A;color:#F1F5F9;padding:7px 10px}'
-    + '.card-head .nome{font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-    + '.card-head .badges{display:flex;gap:4px;margin-top:3px}'
-    + '.badge{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700}'
-    + '.b-ok{background:#05966930;color:#059669}.b-off{background:#DC262625;color:#DC2626}.b-alt{background:#D9770625;color:#D97706}'
-    + '.bar{height:3px;background:#1E293B}'
-    + '.bar-fill{height:100%;background:#059669}'
-    + '.devlist{padding:6px 8px}'
-    + '.dev{display:flex;align-items:center;gap:5px;padding:2.5px 0;border-bottom:0.5px solid #F1F5F9;font-size:9px}'
-    + '.dev:last-child{border-bottom:none}'
-    + '.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}'
-    + '.dn{background:#10B981}.df{background:#EF4444}.da{background:#F59E0B}.dd{background:#94A3B8}'
-    + '.hn{font-family:monospace;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}'
-    + '.ip{color:#94A3B8;font-family:monospace;flex-shrink:0}'
-    + '.lat{color:#94A3B8;flex-shrink:0;min-width:32px;text-align:right}'
-    + '</style></head><body>');
+  var tipoIco = {switch:'⇌',router:'🌐',firewall:'🔥',ap:'📡','switch-core':'★','switch-distribuicao':'⇌','switch-acesso':'⇌',servidor:'🖥',workstation:'💻',notebook:'💻',impressora:'🖨',printer:'🖨'};
 
-  var onlineAll  = todos.filter(function(d){return d.reachable||(d.status||'')==='ok'||(d.status||'')==='ativo';}).length;
-  var offlineAll = todos.filter(function(d){return (d.status||'')==='offline';}).length;
+  var html = '';
 
-  win.document.write('<div class="header">'
-    + '<div><h1>🌐 Mapa de Rede — CESAN</h1><div style="font-size:10px;color:#475569;margin-top:3px">SYSACK · A-DSI · Gerado em '+new Date().toLocaleString('pt-BR')+'</div></div>'
-    + '<div class="meta">Total: <strong>'+todos.length+'</strong> dispositivos · '+locais.length+' localidades</div>'
-    + '</div>');
+  // Stats bar
+  html += '<div style="display:flex;gap:16px;align-items:center;padding:10px 14px;background:var(--g50);border-bottom:0.5px solid var(--g100);font-size:12px">'
+    +'<span style="font-weight:700;color:var(--g900)">'+locais.length+' localidades · '+todos.length+' dispositivos</span>'
+    +'<span style="color:#059669">🟢 '+totalOnline+' online</span>'
+    +'<span style="color:#EF4444">🔴 '+totalOffline+' offline</span>'
+    +'<div style="margin-left:auto;display:flex;gap:6px">'
+      +'<button onclick="Object.keys(_mapaExpanded).forEach(function(k){_mapaExpanded[k]=true});renderMapaRede()" style="border:1px solid var(--g200);background:var(--panel);padding:3px 9px;border-radius:6px;cursor:pointer;font-size:11px">⊞ Tudo</button>'
+      +'<button onclick="Object.keys(_mapaExpanded).forEach(function(k){_mapaExpanded[k]=false});renderMapaRede()" style="border:1px solid var(--g200);background:var(--panel);padding:3px 9px;border-radius:6px;cursor:pointer;font-size:11px">⊟ Recolher</button>'
+    +'</div>'
+  +'</div>';
 
-  win.document.write('<div class="stats">'
-    + '<div class="stat"><strong style="color:#059669">'+onlineAll+'</strong>Online</div>'
-    + '<div class="stat"><strong style="color:#DC2626">'+offlineAll+'</strong>Offline</div>'
-    + '<div class="stat"><strong>'+locais.length+'</strong>Localidades</div>'
-    + '<div class="stat"><strong>'+todos.length+'</strong>Dispositivos</div>'
-    + '</div>');
-
-  win.document.write('<div class="grid">');
+  // Grid
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;padding:12px">';
 
   locais.forEach(function(grp) {
-    var devs    = grp.devs;
-    var onlineL = devs.filter(function(d){return d.reachable||(d.status||'')==='ok'||(d.status||'')==='ativo';}).length;
-    var offlineL= devs.filter(function(d){return (d.status||'')==='offline';}).length;
-    var alertaL = devs.filter(function(d){return (d.status||'')==='alerta';}).length;
-    var pct     = devs.length ? Math.round(onlineL/devs.length*100) : 0;
-    var barC    = pct===100?'#059669':pct>=80?'#D97706':'#DC2626';
+    var devs     = grp.devs;
+    var onL      = devs.filter(function(d){return d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i);}).length;
+    var offL     = devs.filter(function(d){return (d.status||'').toLowerCase()==='offline';}).length;
+    var alertaL  = devs.filter(function(d){return (d.status||'').toLowerCase()==='alerta';}).length;
+    var expanded = _mapaExpanded[grp.nome];
+    var pct      = devs.length ? Math.round(onL/devs.length*100) : 0;
+    var barC     = pct===100?'#059669':pct>=80?'#D97706':'#DC2626';
 
-    win.document.write('<div class="card">');
-    win.document.write('<div class="card-head">'
-      + '<div class="nome">'+grp.nome+'</div>'
-      + '<div class="badges">'
-        + (onlineL?'<span class="badge b-ok">'+onlineL+'✓</span>':'')
-        + (offlineL?'<span class="badge b-off">'+offlineL+'✗</span>':'')
-        + (alertaL?'<span class="badge b-alt">'+alertaL+'!</span>':'')
-        + '<span style="font-size:9px;color:#94A3B8;margin-left:auto">'+devs.length+' disp.</span>'
-      + '</div>'
-    +'</div>');
-    win.document.write('<div class="bar"><div class="bar-fill" style="width:'+pct+'%;background:'+barC+'"></div></div>');
-    win.document.write('<div class="devlist">');
+    html += '<div style="background:var(--panel);border:0.5px solid var(--line,#e2e8f0);border-radius:10px;overflow:hidden">';
 
-    devs.forEach(function(d) {
-      var hn   = (d.hostname||d.sysName||d.desc||d.ip||'—').slice(0,22);
-      var st   = (d.status||'').toLowerCase();
-      var ok   = d.reachable||st==='ok'||st==='ativo'||st==='online';
-      var dcls = ok?'dn':st==='alerta'?'da':st==='offline'?'df':'dd';
-      var lat  = d.latencyMs!=null?d.latencyMs.toFixed(0)+'ms':'';
-      var ip   = (d.ip||'').replace(/^172\.\d+\./,'172.*.');
-      win.document.write('<div class="dev">'
-        + '<div class="dot '+dcls+'"></div>'
-        + '<span class="hn">'+hn+'</span>'
-        + '<span class="ip">'+ip+'</span>'
-        + '<span class="lat">'+lat+'</span>'
-        +'</div>');
-    });
+    // Header — clique expande ou abre gráfico via botão
+    html += '<div onclick="mapaToggleLocal(\''+escapeHtml(grp.nome)+'\')" style="background:linear-gradient(90deg,#0F172A,#1E293B);padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-weight:800;font-size:12.5px;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(grp.nome)+'</div>'
+        +'<div style="font-size:10px;color:#94A3B8;margin-top:2px">'+devs.length+' dispositivos</div>'
+      +'</div>'
+      +'<div style="display:flex;gap:4px;align-items:center;flex-shrink:0">'
+        +(onL?'<span style="font-size:10px;background:#05966930;color:#34D399;padding:1px 5px;border-radius:5px;font-weight:700">'+onL+'✓</span>':'')
+        +(offL?'<span style="font-size:10px;background:#DC262625;color:#F87171;padding:1px 5px;border-radius:5px;font-weight:700">'+offL+'✗</span>':'')
+        +(alertaL?'<span style="font-size:10px;background:#D9770630;color:#FCD34D;padding:1px 5px;border-radius:5px;font-weight:700">'+alertaL+'!</span>':'')
+      +'</div>'
+      // Botão para abrir gráfico SVG desta área
+      +'<button onclick="event.stopPropagation();mapaAbrirGraficoArea(\''+escapeHtml(grp.nome)+'\')" '
+        +'style="border:1px solid #ffffff22;background:#ffffff11;color:#94A3B8;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:10px;flex-shrink:0" title="Ver gráfico desta área">📊</button>'
+      +'<span style="color:#94A3B8;font-size:11px;flex-shrink:0">'+(expanded?'▾':'▸')+'</span>'
+    +'</div>';
 
-    win.document.write('</div></div>');
+    // Barra de saúde
+    html += '<div style="height:3px;background:#1E293B"><div style="height:100%;width:'+pct+'%;background:'+barC+'"></div></div>';
+
+    if (expanded) {
+      // Lista completa
+      html += '<div style="padding:8px 10px;max-height:260px;overflow-y:auto">';
+      devs.forEach(function(d) {
+        var hn  = d.hostname||d.sysName||d.desc||d.ip||'—';
+        var ico = tipoIco[(d.tipo||'').toLowerCase()]||'📦';
+        var sc  = (d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i)) ? '#10B981'
+                   : (d.status||'').toLowerCase()==='alerta' ? '#F59E0B' : '#EF4444';
+        var lat = d.latencyMs!=null ? d.latencyMs.toFixed(1)+'ms' : '';
+        html += '<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:0.5px solid var(--g50)">'
+          +'<span style="font-size:12px">'+ico+'</span>'
+          +'<div style="flex:1;min-width:0">'
+            +'<div style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:monospace">'+escapeHtml(hn.slice(0,24))+'</div>'
+            +'<div style="font-size:10px;color:var(--g400)">'+escapeHtml(d.ip||'—')+'</div>'
+          +'</div>'
+          +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0">'
+            +(lat?'<span style="font-size:9px;color:var(--g400);font-family:monospace">'+lat+'</span>':'')
+            +'<div style="width:7px;height:7px;border-radius:50%;background:'+sc+'"></div>'
+          +'</div>'
+        +'</div>';
+      });
+      html += '</div>';
+    } else {
+      // Mini dots grid
+      html += '<div style="padding:8px 10px 10px">';
+      // Tipo summary badges
+      var byTipo = {};
+      devs.forEach(function(d){var t=(d.tipo||'ativo').toLowerCase();byTipo[t]=(byTipo[t]||0)+1;});
+      html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:7px">';
+      Object.entries(byTipo).sort(function(a,b){return b[1]-a[1];}).slice(0,5).forEach(function(e){
+        html += '<span style="font-size:10px;background:var(--g100);padding:1px 7px;border-radius:5px;color:var(--g600)">'+(tipoIco[e[0]]||'📦')+' '+e[1]+' '+e[0]+'</span>';
+      });
+      html += '</div>';
+      // Dots
+      html += '<div style="display:flex;flex-wrap:wrap;gap:2px">';
+      devs.forEach(function(d){
+        var sc2 = (d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i)) ? '#10B981'
+                  : (d.status||'').toLowerCase()==='alerta' ? '#F59E0B' : '#94A3B8';
+        html += '<div title="'+escapeHtml(d.hostname||d.ip||'—')+'" style="width:9px;height:9px;border-radius:2px;background:'+sc2+'"></div>';
+      });
+      html += '</div></div>';
+    }
+    html += '</div>';
   });
 
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function mapaToggleLocal(nome) {
+  _mapaExpanded[nome] = !_mapaExpanded[nome];
+  renderMapaRede();
+}
+
+function mapaAbrirGraficoArea(nome) {
+  _mapaAreaSel = nome;
+  _mapaScale   = 1;
+  _maPan       = {x:0, y:0};
+  renderMapaRede();
+}
+
+// ── Impressão PDF ─────────────────────────────────────────────
+function mapaImprimir() {
+  var todos = (STATE.switches||[]).concat(
+    (STATE.ativos||[]).filter(function(a){return a.ip&&!(STATE.switches||[]).find(function(s){return s.id===a.id;});})
+  );
+  var grupos = {};
+  todos.forEach(function(d){
+    var local = resolverLocal(d)||'Sem localidade';
+    if (!grupos[local]) grupos[local]={nome:local,devs:[]};
+    grupos[local].devs.push(d);
+  });
+  var locais = Object.values(grupos).sort(function(a,b){return a.nome.localeCompare(b.nome);});
+  var onAll  = todos.filter(function(d){return d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i);}).length;
+
+  var win = window.open('','_blank','width=1400,height=900');
+  win.document.write('<!DOCTYPE html><html><head><title>Mapa de Rede CESAN</title><meta charset="UTF-8"><style>'
+    +'@page{size:A3 landscape;margin:10mm}*{box-sizing:border-box;margin:0;padding:0}'
+    +'body{font-family:Arial,sans-serif;font-size:10px;background:#fff;color:#111}'
+    +'.header{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:6px;border-bottom:2px solid #0F172A;margin-bottom:10px}'
+    +'.header h1{font-size:17px;font-weight:900;color:#0F172A}'
+    +'.stats{display:flex;gap:12px;margin-bottom:10px}'
+    +'.stat{background:#F1F5F9;border-radius:5px;padding:5px 10px;font-size:10px}'
+    +'.stat strong{font-size:15px;display:block;font-weight:900}'
+    +'.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}'
+    +'.card{border:1px solid #E2E8F0;border-radius:7px;overflow:hidden;page-break-inside:avoid}'
+    +'.card-head{background:#0F172A;color:#F1F5F9;padding:6px 9px}'
+    +'.card-head .nome{font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    +'.badges{display:flex;gap:3px;margin-top:2px}'
+    +'.b{font-size:9px;padding:1px 4px;border-radius:3px;font-weight:700}'
+    +'.b-ok{background:#05966930;color:#059669}.b-off{background:#DC262625;color:#DC2626}'
+    +'.bar{height:3px;background:#1E293B}'
+    +'.devs{padding:5px 7px}'
+    +'.dev{display:flex;align-items:center;gap:4px;padding:2px 0;border-bottom:0.5px solid #F1F5F9;font-size:9px}'
+    +'.dev:last-child{border:none}'
+    +'.dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}'
+    +'.dn{background:#10B981}.df{background:#EF4444}.da{background:#F59E0B}.dd{background:#94A3B8}'
+    +'.hn{font-family:monospace;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}'
+    +'.ip{color:#94A3B8;font-family:monospace;flex-shrink:0;font-size:8px}'
+    +'.lat{color:#94A3B8;flex-shrink:0;min-width:28px;text-align:right;font-size:8px}'
+    +'</style></head><body>');
+
+  win.document.write('<div class="header"><div><h1>🌐 Mapa de Rede — CESAN</h1>'
+    +'<div style="font-size:10px;color:#475569;margin-top:2px">SYSACK · A-DSI · '+new Date().toLocaleString('pt-BR')+'</div></div>'
+    +'<div style="text-align:right;font-size:10px;color:#475569">'+todos.length+' dispositivos · '+locais.length+' localidades</div></div>');
+
+  win.document.write('<div class="stats">'
+    +'<div class="stat"><strong style="color:#059669">'+onAll+'</strong>Online</div>'
+    +'<div class="stat"><strong style="color:#DC2626">'+(todos.length-onAll)+'</strong>Offline/Alerta</div>'
+    +'<div class="stat"><strong>'+locais.length+'</strong>Localidades</div>'
+    +'<div class="stat"><strong>'+todos.length+'</strong>Total</div>'
+    +'</div>');
+
+  win.document.write('<div class="grid">');
+  locais.forEach(function(grp) {
+    var devs    = grp.devs;
+    var onL     = devs.filter(function(d){return d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i);}).length;
+    var offL    = devs.filter(function(d){return (d.status||'').toLowerCase()==='offline';}).length;
+    var pct     = devs.length?Math.round(onL/devs.length*100):0;
+    var barC    = pct===100?'#059669':pct>=80?'#D97706':'#DC2626';
+    win.document.write('<div class="card"><div class="card-head"><div class="nome">'+grp.nome+'</div>'
+      +'<div class="badges">'
+        +(onL?'<span class="b b-ok">'+onL+'✓</span>':'')
+        +(offL?'<span class="b b-off">'+offL+'✗</span>':'')
+        +'<span style="font-size:8px;color:#94A3B8;margin-left:auto">'+devs.length+'</span>'
+      +'</div></div>'
+      +'<div class="bar"><div style="height:100%;width:'+pct+'%;background:'+barC+'"></div></div>'
+      +'<div class="devs">');
+    devs.forEach(function(d){
+      var hn  = (d.hostname||d.sysName||d.desc||d.ip||'—').slice(0,20);
+      var st  = (d.status||'').toLowerCase();
+      var ok  = d.reachable||st.match(/^(ok|ativo|online)$/);
+      var dc  = ok?'dn':st==='alerta'?'da':st==='offline'?'df':'dd';
+      var lat = d.latencyMs!=null?d.latencyMs.toFixed(0)+'ms':'';
+      var ip  = (d.ip||'').replace(/^172\.\d+\./,'172.*.');
+      win.document.write('<div class="dev"><div class="dot '+dc+'"></div><span class="hn">'+hn+'</span><span class="ip">'+ip+'</span><span class="lat">'+lat+'</span></div>');
+    });
+    win.document.write('</div></div>');
+  });
   win.document.write('</div></body></html>');
   win.document.close();
-  setTimeout(function(){ win.print(); }, 800);
+  setTimeout(function(){win.print();},700);
 }
