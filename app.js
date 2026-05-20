@@ -8205,7 +8205,6 @@ function initPWA() {
 
       // Força verificação imediata de atualização ao carregar
       reg.update().catch(() => {});
-
       // Verifica atualizações a cada 60 segundos
       setInterval(() => reg.update(), 60000);
 
@@ -8214,11 +8213,8 @@ function initPWA() {
         const worker = reg.installing;
         worker.addEventListener('statechange', () => {
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            if (reg.waiting) {
-              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-            } else {
-              showUpdateBanner();
-            }
+            // Nova versão disponível — notifica o usuário
+            showUpdateBanner();
           }
         });
       });
@@ -11968,12 +11964,27 @@ let _impCharts = {};
 // Retorna impressoras do STATE (switches com tipo='printer')
 function getImpressoras() {
   var deDisc=STATE.impressorasDisc||[];
-  var deAtivos=(STATE.ativos||[]).filter(function(a){var t=(a.tipo||'').toLowerCase();return t==='printer'||t==='impressora';});
-  var deSw=(STATE.switches||[]).filter(function(s){var t=(s.tipo||'').toLowerCase();return t==='printer'||t==='impressora';});
+  var deAtivos=(STATE.ativos||[]).filter(function(a){
+    var t=(a.tipo||'').toLowerCase();
+    var desc=(a.sysDescr||a.desc||a.hostname||'').toLowerCase();
+    return t==='printer'||t==='impressora'
+        ||desc.includes('printer')||desc.includes('laserjet')
+        ||desc.includes('mfp ')||desc.includes('xerox')
+        ||desc.includes('ricoh')||desc.includes('kyocera')
+        ||desc.includes('brother')||desc.includes('canon');
+  });
+  var deSw=(STATE.switches||[]).filter(function(s){
+    var t=(s.tipo||'').toLowerCase();
+    var desc=(s.sysDescr||s.desc||'').toLowerCase();
+    return t==='printer'||t==='impressora'
+        ||desc.includes('printer')||desc.includes('laserjet')||desc.includes('mfp ');
+  });
   var todos=deDisc.slice();
   var chave=function(x){return x.ip||x.hostname||x.desc||x.id||'';};
   var vistos=new Set(todos.map(chave).filter(Boolean));
-  deAtivos.concat(deSw).forEach(function(s){var k=chave(s);if(!k||!vistos.has(k)){if(k)vistos.add(k);todos.push(s);}});
+  deAtivos.concat(deSw).forEach(function(s){
+    var k=chave(s);if(!k||!vistos.has(k)){if(k)vistos.add(k);todos.push(s);}
+  });
   return todos;
 }
 
@@ -16849,7 +16860,21 @@ function renderServidores(){
 }
 
 // ── FIREWALLS ───────────────────────────────────────────────────────────────
-function getFirewalls(){return(STATE.switches||[]).filter(function(s){return(s.tipo||'').toLowerCase()==='firewall';});}
+function getFirewalls(){
+  return (STATE.switches||[]).filter(function(s){
+    var t=(s.tipo||'').toLowerCase();
+    if(t==='firewall')return true;
+    // Also detect by sysDescr/sysOid even if tipo wasn't classified as firewall
+    var desc=(s.sysDescr||s.desc||'').toLowerCase();
+    var oid=(s.sysOid||'').toLowerCase();
+    return oid.includes('1.3.6.1.4.1.12356.') // Fortinet
+        || desc.includes('fortigate')
+        || desc.includes('fortinet')
+        || desc.includes('pfsense')
+        || desc.includes('opnsense')
+        || desc.includes('firewall');
+  });
+}
 function renderFirewalls(){
   var q=(document.getElementById('fw-search')?.value||'').toLowerCase();
   var fSt=document.getElementById('fw-filter-status')?.value||'';
@@ -16949,9 +16974,27 @@ function renderTopologia(){
     txt.setAttribute('x',W/2);txt.setAttribute('y',H/2);txt.setAttribute('text-anchor','middle');txt.setAttribute('fill','#94A3B8');txt.setAttribute('font-size','14');
     txt.textContent='Nenhum dispositivo de rede encontrado';gN.appendChild(txt);sv('topo-kpi-links',0);return;
   }
+  // Layout por tipo E por área para melhor visualização
   var lyrs={};devs.forEach(function(d){var l=TOPO_LYR[(d.tipo||'switch').toLowerCase()]||3;if(!lyrs[l])lyrs[l]=[];lyrs[l].push(d);});
-  var mx=Math.max.apply(null,Object.keys(lyrs).map(Number)),pad=80,R=26,pos={};
-  Object.keys(lyrs).forEach(function(l){var ns=lyrs[l];var ly=pad+(Number(l)/(mx+1))*(H-pad*2);ns.forEach(function(n,i){var sp=(ns.length-1)*110;var x=W/2-sp/2+i*(sp/Math.max(ns.length-1,1));var id=n.id||n.ip;pos[id]={x:(_topoPos[id]?_topoPos[id].x:x),y:(_topoPos[id]?_topoPos[id].y:ly),d:n};});});
+  var mx=Math.max.apply(null,Object.keys(lyrs).map(Number)),pad=60,R=22,pos={};
+  var totalW=W-pad*2;
+  Object.keys(lyrs).forEach(function(l){
+    var ns=lyrs[l];
+    var ly=pad+(Number(l)/(mx+1))*(H-pad*2);
+    // Space nodes more tightly if many, ensuring they fit
+    var maxPerRow=Math.max(1,Math.floor(totalW/80));
+    var rows=[];
+    for(var i=0;i<ns.length;i+=maxPerRow)rows.push(ns.slice(i,i+maxPerRow));
+    rows.forEach(function(row,ri){
+      var rowY=ly+(ri*(R*2+10));
+      var sp=Math.min((row.length-1)*90, totalW);
+      row.forEach(function(n,i){
+        var x=pad+(row.length===1?totalW/2:(i*sp/Math.max(row.length-1,1)));
+        var id=n.id||n.ip;
+        pos[id]={x:(_topoPos[id]?_topoPos[id].x:x),y:(_topoPos[id]?_topoPos[id].y:rowY),d:n};
+      });
+    });
+  });
   var lc=0,ls=new Set();
   devs.forEach(function(d){var fi=d.id||d.ip;var fr=pos[fi];if(!fr||!Array.isArray(d.lldpVizinhos))return;
     d.lldpVizinhos.forEach(function(v){
@@ -17001,8 +17044,8 @@ function coletarTodosMonitores(){
   return r;
 }
 function renderMonitores(){
-  var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase();
-  var fSt=document.getElementById('mon-filter-status-monitores')?.value||'';
+  var q=(document.getElementById('mon-search')?.value||'').toLowerCase();
+  var fSt=document.getElementById('mon-filter-status')?.value||'';
   var grid=document.getElementById('mon-grid');
   var todos=coletarTodosMonitores();
   var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
