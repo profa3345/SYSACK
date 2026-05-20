@@ -756,14 +756,20 @@ function startFirestoreListeners() {
   const snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
   function norm(d) {
+    // Detecta tipo pelo hostname quando o campo tipo está ausente ou genérico
+    const hn = (d.hostname || d.sysName || d.name || d.desc || '').toUpperCase();
+    const tipoDetectado = (() => {
+      if (d.tipo && d.tipo !== 'workstation') return d.tipo; // respeita tipo já definido
+      if (/^NBK|^NTB|NOTEBOOK/i.test(hn))        return 'notebook';
+      if (/VSERV|VMSERVER|^VM-/i.test(hn))        return 'servidor';
+      if (/^SERV|[^A-Z]SERV[0-9]/i.test(hn))     return 'servidor';
+      return d.tipo || 'workstation';
+    })();
     return {
       ...d,
-      // pat: NUNCA usa IP como fallback — IP não é número de patrimônio
-      // Máquinas sem PAT vinculado ficam com pat vazio e exibem indicador visual na tabela
       pat:    d.pat    || d.patrimonio || '',
-      // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
       desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      tipo:   d.tipo   || 'workstation',
+      tipo:   tipoDetectado,
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
       status: d.status || (d.reachable ? 'ativo' : 'offline'),
@@ -781,6 +787,13 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
+  // impressoras — coleção própria (não entra em STATE.ativos)
+  db.collection('impressoras').onSnapshot(function(snap) {
+    STATE.impressorasDisc = snap2arr(snap).map(norm);
+    nbUpdate('nb-impressoras', (STATE.impressorasDisc||[]).length);
+    console.log('[Banco] impressoras:', STATE.impressorasDisc.length);
+  }, function(e){ console.error('[Banco] impressoras erro:', e.message); });
+
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
     STATE.switches  = STATE._assetsSw;
@@ -8017,32 +8030,78 @@ function copiarCmdInstall() {
 }
 
 function baixarInstaladorAgente() {
-  // Gera um pacote ZIP com o wizard visual (Instalar-SysackClient.bat + .ps1)
-  // O usuário só precisa clicar duas vezes no .bat — ele cuida do resto
-  const fbProject = (typeof FB_PROJECT !== 'undefined') ? FB_PROJECT : 'sysack-829e2';
-  const relayUrl  = (window.__SYSACK_CONFIG__?.relayUrl) || 'wss://sysack-relay.run.app';
+  // Gera o script de instalacao do agente desktop
+  const script = `# SYSACK Agent Desktop Installer
+# Execute como Administrador
+param([switch]$Install,[switch]$Remove,[switch]$Status)
+$ErrorActionPreference = 'Stop'
+$InstallDir  = 'C:\Program Files\SYSACK\agent-desktop'
+$ServiceName = 'SYSACKAgentDesktop'
+$NodeUrl     = 'https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi'
 
-  // Os instaladores estão pré-compilados no servidor SYSACK
-  // Baixa os 2 arquivos necessários: .ps1 (wizard) + .bat (launcher)
-  const base = 'https://sysack.vercel.app/installer';
+If ($Install) {
+  Write-Host 'Instalando SYSACK Agent Desktop...' -ForegroundColor Cyan
+  
+  # Verifica/instala Node.js
+  If (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Host 'Baixando Node.js...'
+    $tmp = "$env:TEMP\node-setup.msi"
+    Invoke-WebRequest -Uri $NodeUrl -OutFile $tmp -UseBasicParsing
+    Start-Process msiexec -ArgumentList "/i $tmp /quiet /norestart" -Wait
+    Remove-Item $tmp -Force
+    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH','Machine')
+    Write-Host 'Node.js instalado' -ForegroundColor Green
+  }
+  
+  # Cria diretório
+  New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+  
+  # Cria package.json
+  @{ name='sysack-agent-desktop'; version='2.0.0'; main='agent.js'; dependencies=@{ ws='8.16.0' } } |
+    ConvertTo-Json | Set-Content "$InstallDir\package.json"
+  
+  # Cria config
+  @{ firebaseProjectId='sysack-829e2'; firebaseApiKey='SUA_API_KEY'; agentId=$env:COMPUTERNAME; webSocketPort=9000 } |
+    ConvertTo-Json | Set-Content "$InstallDir\config.json"
+  
+  # Baixa o agente principal do SYSACK
+  Invoke-WebRequest -Uri "https://sysack.vercel.app/agent-desktop.js" -OutFile "$InstallDir\agent.js" -UseBasicParsing -ErrorAction SilentlyContinue
+  
+  # Instala dependências
+  Push-Location $InstallDir; npm install --production --silent; Pop-Location
+  
+  # Cria serviço Windows
+  $node = (Get-Command node).Path
+  sc.exe create $ServiceName binPath= "\"$node\" \"$InstallDir\agent.js\"" start= auto DisplayName= "SYSACK Agent Desktop" | Out-Null
+  sc.exe description $ServiceName "SYSACK - Gerenciamento remoto de computadores" | Out-Null
+  sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
+  Start-Service -Name $ServiceName
+  
+  Write-Host '================================================' -ForegroundColor Green
+  Write-Host 'SYSACK Agent Desktop instalado com sucesso!' -ForegroundColor Green
+  Write-Host "O computador $env:COMPUTERNAME aparecera no SYSACK em ~30s" -ForegroundColor Green
+  Write-Host '================================================' -ForegroundColor Green
+}
 
+If ($Remove) {
+  Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
+  sc.exe delete $ServiceName | Out-Null
+  Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+  Write-Host 'SYSACK Agent Desktop removido.' -ForegroundColor Yellow
+}
 
-  // Gera os dois arquivos separadamente (não pode criar .zip no browser sem lib)
-  // Baixa o .ps1 primeiro, depois o .bat
-  // Baixa os arquivos do servidor
-  const a1 = document.createElement('a');
-  a1.href = base + '/SysackClient-Installer.ps1';
-  a1.download = 'SysackClient-Installer.ps1';
-  a1.click();
+If ($Status) {
+  $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
+  Write-Host "Status: $($svc?.Status ?? 'NAO INSTALADO')" -ForegroundColor $(If ($svc?.Status -eq 'Running') {'Green'} Else {'Red'})
+  Get-Content "$InstallDir\agent.log" -Tail 20 -ErrorAction SilentlyContinue
+}`;
 
-  setTimeout(() => {
-    const a2 = document.createElement('a');
-    a2.href = base + '/Instalar-SysackClient.bat';
-    a2.download = 'Instalar-SysackClient.bat';
-    a2.click();
-  }, 800);
-
-  showToast('📦 Dois arquivos baixados! Coloque na mesma pasta e clique duas vezes no .bat', 'success', 8000);
+  const blob = new Blob([script], { type:'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'Install-SysackAgentDesktop.ps1'; a.click();
+  URL.revokeObjectURL(url);
+  showToast('Instalador baixado! Execute como Administrador no PC alvo.', 'success', 5000);
   closeModal('modal-ar-download');
 }
 
@@ -11885,7 +11944,21 @@ let _impCharts = {};
 
 // Retorna impressoras do STATE (switches com tipo='printer')
 function getImpressoras() {
-  return (STATE.switches || []).filter(s => s.tipo === 'printer' || s.tipo === 'impressora');
+  // Fonte 1: coleção 'impressoras' (discover.js novo)
+  const deDisc     = STATE.impressorasDisc || [];
+  // Fonte 2: ativos com tipo printer/impressora (cadastro manual)
+  const deAtivos   = (STATE.ativos   || []).filter(a => ['printer','impressora'].includes((a.tipo||'').toLowerCase()));
+  // Fonte 3: switches com tipo printer (discover.js legado)
+  const deSwitches = (STATE.switches || []).filter(s => ['printer','impressora'].includes((s.tipo||'').toLowerCase()));
+  // Merge sem duplicatas por IP ou hostname
+  const todos  = [...deDisc];
+  const chave  = x => x.ip || x.hostname || x.desc || x.id || '';
+  const vistos = new Set(todos.map(chave).filter(Boolean));
+  [...deAtivos, ...deSwitches].forEach(s => {
+    const k = chave(s);
+    if (!k || !vistos.has(k)) { if (k) vistos.add(k); todos.push(s); }
+  });
+  return todos;
 }
 
 function renderImpressoras() {
