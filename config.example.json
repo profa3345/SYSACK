@@ -1,0 +1,34 @@
+{
+  "agentName": "sysack-agent-HOSTNAME",
+  "firebaseProjectId": "SEU_PROJECT_ID",
+  "firebaseApiKey": "SEU_FIREBASE_API_KEY",
+  "sqlServer": "SERVIDOR_SQL\\INSTANCIA",
+  "sqlDatabase": "NOME_DO_BANCO",
+  "syncIntervalMinutes": 5,
+  "diasOfflineAlerta": 5,
+  "selfServiceEnabled": true,
+  "maxConcurrent": 20,
+  "snmpDefaultCommunity": "COMUNIDADE_SNMP",
+  "snmpTimeout": 3000,
+  "snmpRetries": 1,
+  "ausenciasQueSuprimem": [
+    "FERIAS",
+    "LICENCA",
+    "LICENCA_MEDICA",
+    "AFASTAMENTO",
+    "LICENCA_MATERNIDADE",
+    "LICENCA_PATERNIDADE",
+    "SUSPENSAO"
+  ],
+  "ldap": {
+    "url": "dominio.empresa.com.br",
+    "port": 636,
+    "bindDN": "usuario_ldap",
+    "bindPwd": "SENHA_LDAP_AQUI",
+    "baseDN": "OU=Organograma,OU=EMPRESA,DC=empresa,DC=com,DC=br",
+    "filter": "(&(objectClass=user)(objectCategory=person)(sAMAccountName=*))"
+  },
+  "serviceAccountPath": "C:\\caminho\\para\\sysack-service-account.json",
+  "version": "1.0.0",
+  "configuredAt": "2026-01-01T00:00:00.000Z"
+}
