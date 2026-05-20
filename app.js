@@ -19581,3 +19581,457 @@ function renderRelatorios() {
   var el = document.getElementById('rel-periodo-label');
   if (el) el.textContent = '→ ' + new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
 }
+
+// ═══════════════════════════════════════════════════════════════
+// IMPORTAÇÃO DE ARQUIVO (Excel/TXT) — Descarte e Reuso
+// ═══════════════════════════════════════════════════════════════
+
+// ── Tab switchers ──────────────────────────────────────────────
+function descarteSetTab(tab, btn) {
+  document.getElementById('desc-panel-manual').style.display  = tab==='manual'  ? '' : 'none';
+  document.getElementById('desc-panel-arquivo').style.display = tab==='arquivo' ? '' : 'none';
+  ['desc-tab-manual','desc-tab-arquivo'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(!el)return;
+    el.style.color         = 'var(--g500)';
+    el.style.borderBottom  = '2px solid transparent';
+    el.style.fontWeight    = '600';
+  });
+  if(btn){btn.style.color='#991B1B';btn.style.borderBottom='2px solid #991B1B';btn.style.fontWeight='700';}
+}
+
+function reusoSetTab(tab, btn) {
+  document.getElementById('reuso-panel-manual').style.display  = tab==='manual'  ? '' : 'none';
+  document.getElementById('reuso-panel-arquivo').style.display = tab==='arquivo' ? '' : 'none';
+  ['reuso-tab-manual','reuso-tab-arquivo'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(!el)return;
+    el.style.color        = 'var(--g500)';
+    el.style.borderBottom = '2px solid transparent';
+    el.style.fontWeight   = '600';
+  });
+  if(btn){btn.style.color='#065F46';btn.style.borderBottom='2px solid #065F46';btn.style.fontWeight='700';}
+}
+
+// ── Drag & Drop handlers ───────────────────────────────────────
+function descarteHandleDrop(e) {
+  e.preventDefault();
+  document.getElementById('desc-drop-zone').style.background = '#FFF5F5';
+  var file = e.dataTransfer.files[0];
+  if (file) processarArquivoLista(file, 'descarte');
+}
+function reusoHandleDrop(e) {
+  e.preventDefault();
+  document.getElementById('reuso-drop-zone').style.background = '#F0FDF4';
+  var file = e.dataTransfer.files[0];
+  if (file) processarArquivoLista(file, 'reuso');
+}
+function descarteProcessarArquivo(input) {
+  if (input.files[0]) processarArquivoLista(input.files[0], 'descarte');
+}
+function reusoProcessarArquivo(input) {
+  if (input.files[0]) processarArquivoLista(input.files[0], 'reuso');
+}
+
+// ── Core: processa o arquivo e cruza com STATE.ativos ─────────
+async function processarArquivoLista(file, modo) {
+  var statusEl = document.getElementById(modo+'-import-status');
+  if (statusEl) { statusEl.style.display=''; statusEl.innerHTML='<div style="text-align:center;padding:20px;color:var(--g500)">⏳ Lendo arquivo...</div>'; }
+
+  var ext = file.name.split('.').pop().toLowerCase();
+
+  try {
+    var linhas = [];
+
+    if (ext === 'txt' || ext === 'csv') {
+      // ── TXT / CSV ──────────────────────────────────────────
+      var texto = await lerArquivoTexto(file);
+      linhas = texto.split(/[\r\n]+/).map(function(l){ return l.replace(/[";,\t]+/g,' ').trim(); }).filter(Boolean);
+
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      // ── Excel — usa SheetJS (XLSX) ────────────────────────
+      if (typeof XLSX === 'undefined') {
+        // Carrega SheetJS dinamicamente
+        await carregarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+      }
+      var data = await lerArquivoBinario(file);
+      var wb   = XLSX.read(data, {type:'array'});
+      var ws   = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false});
+      // Pega todas as células não vazias de todas as linhas
+      rows.forEach(function(row) {
+        row.forEach(function(cell) {
+          var v = String(cell||'').trim();
+          if (v) linhas.push(v);
+        });
+      });
+    } else {
+      if (statusEl) statusEl.innerHTML = '<div style="color:#DC2626;padding:12px;background:#FEF2F2;border-radius:8px">❌ Formato não suportado. Use .xlsx, .xls, .txt ou .csv</div>';
+      return;
+    }
+
+    // Remove duplicatas e linhas vazias / cabeçalhos comuns
+    var stopWords = new Set(['pat','patrimonio','patrimônio','hostname','nome','maquina','máquina','ativo','asset','computador','equipamento','device','name','number','id']);
+    linhas = linhas.filter(function(l){ return l.length > 1 && !stopWords.has(l.toLowerCase()); });
+    linhas = [...new Set(linhas)];
+
+    if (!linhas.length) {
+      if (statusEl) statusEl.innerHTML = '<div style="color:#DC2626;padding:12px;background:#FEF2F2;border-radius:8px">❌ Nenhum item encontrado no arquivo.</div>';
+      return;
+    }
+
+    renderizarResultadoImport(linhas, modo, statusEl);
+
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = '<div style="color:#DC2626;padding:12px;background:#FEF2F2;border-radius:8px">❌ Erro ao ler arquivo: '+escapeHtml(e.message)+'</div>';
+  }
+}
+
+function lerArquivoTexto(file) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload  = function(e){ resolve(e.target.result); };
+    r.onerror = reject;
+    r.readAsText(file, 'UTF-8');
+  });
+}
+
+function lerArquivoBinario(file) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload  = function(e){ resolve(new Uint8Array(e.target.result)); };
+    r.onerror = reject;
+    r.readAsArrayBuffer(file);
+  });
+}
+
+function carregarScript(url) {
+  return new Promise(function(resolve, reject) {
+    if (document.querySelector('script[src="'+url+'"]')) { resolve(); return; }
+    var s = document.createElement('script');
+    s.src = url; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+// ── Cruza lista com STATE.ativos e exibe resultado ─────────────
+function renderizarResultadoImport(linhas, modo, statusEl) {
+  var todos  = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var cor    = modo==='descarte' ? '#991B1B' : '#065F46';
+  var corBg  = modo==='descarte' ? '#FFF5F5' : '#F0FDF4';
+
+  var encontrados  = []; // {termo, ativo}
+  var naoEncontrados = []; // {termo, candidatos:[]}
+
+  linhas.forEach(function(termo) {
+    var t = termo.toLowerCase().trim();
+
+    // 1. Match exato por PAT
+    var byPat = todos.find(function(a){ return (a.pat||'').toLowerCase() === t; });
+    if (byPat) { encontrados.push({termo:termo, ativo:byPat, metodo:'PAT exato'}); return; }
+
+    // 2. Match exato por hostname
+    var byHost = todos.find(function(a){ return (a.hostname||a.sysName||'').toLowerCase() === t; });
+    if (byHost) { encontrados.push({termo:termo, ativo:byHost, metodo:'Hostname exato'}); return; }
+
+    // 3. Match parcial por hostname (contém)
+    var byHostParcial = todos.filter(function(a){ return (a.hostname||a.sysName||'').toLowerCase().includes(t) && t.length >= 4; });
+    if (byHostParcial.length === 1) { encontrados.push({termo:termo, ativo:byHostParcial[0], metodo:'Hostname parcial'}); return; }
+    if (byHostParcial.length > 1)   { naoEncontrados.push({termo:termo, candidatos:byHostParcial.slice(0,5), motivo:'múltiplos resultados'}); return; }
+
+    // 4. Match por desc/nome
+    var byDesc = todos.find(function(a){ return (a.desc||a.nome||'').toLowerCase().includes(t) && t.length >= 5; });
+    if (byDesc) { encontrados.push({termo:termo, ativo:byDesc, metodo:'Nome/Desc'}); return; }
+
+    // 5. Não encontrado
+    naoEncontrados.push({termo:termo, candidatos:[], motivo:'não encontrado'});
+  });
+
+  // Render resultado
+  var html = '<div style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">';
+  html += '<span style="font-size:12px;font-weight:700;color:'+cor+'">'+linhas.length+' itens na lista</span>';
+  html += '<span style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">✅ '+encontrados.length+' identificados</span>';
+  if (naoEncontrados.length) {
+    html += '<span style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">⚠️ '+naoEncontrados.length+' não identificados</span>';
+  }
+  html += '</div>';
+
+  // Tabela de encontrados
+  if (encontrados.length) {
+    html += '<div style="background:#fff;border:1px solid var(--g200);border-radius:8px;overflow:hidden;margin-bottom:12px">';
+    html += '<div style="padding:8px 14px;background:'+corBg+';font-size:11px;font-weight:700;color:'+cor+'">✅ IDENTIFICADOS — serão movimentados</div>';
+    html += '<div style="max-height:180px;overflow-y:auto">';
+    html += encontrados.map(function(r){
+      var a = r.ativo;
+      var hn = a.hostname||a.nome||a.desc||a.ip||'—';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:0.5px solid var(--g100)">'
+        +'<div style="flex:1;min-width:0"><span style="font-family:monospace;font-size:12px;font-weight:600">'+escapeHtml(hn)+'</span> <span style="font-size:10.5px;color:var(--g400)">PAT: '+escapeHtml(a.pat||'—')+'</span></div>'
+        +'<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 7px;border-radius:6px">'+escapeHtml(r.metodo)+'</span>'
+        +'<span style="font-size:10.5px;color:var(--g400)">'+escapeHtml(r.termo)+'</span>'
+        +'</div>';
+    }).join('');
+    html += '</div></div>';
+  }
+
+  // Tabela de não encontrados (com inputs de confirmação)
+  if (naoEncontrados.length) {
+    html += '<div style="background:#fff;border:1px solid #FCA5A5;border-radius:8px;overflow:hidden;margin-bottom:12px">';
+    html += '<div style="padding:8px 14px;background:#FEF2F2;font-size:11px;font-weight:700;color:#DC2626">⚠️ CONFIRME MANUALMENTE — não identificados automaticamente</div>';
+    html += '<div id="import-confirm-area-'+modo+'" style="max-height:220px;overflow-y:auto">';
+    html += naoEncontrados.map(function(r, i) {
+      var candidatosHtml = '';
+      if (r.candidatos.length > 0) {
+        candidatosHtml = '<div style="margin-top:6px"><span style="font-size:10.5px;color:var(--g500)">Possíveis matches:</span> '
+          + r.candidatos.map(function(c){
+            var cn = c.hostname||c.desc||c.ip||'—';
+            return '<button onclick="importConfirmarCandidato(\''+modo+'\','+i+',\''+escapeHtml(c.id||'')+'\',\''+escapeHtml(cn)+'\')" style="margin:2px;padding:3px 8px;border:1px solid var(--g300);border-radius:6px;background:#fff;cursor:pointer;font-size:11px">'+escapeHtml(cn)+'<span style="color:var(--g400);margin-left:4px">'+escapeHtml(c.pat||'')+'</span></button>';
+          }).join('')
+          + '</div>';
+      }
+      return '<div id="import-nr-'+modo+'-'+i+'" style="padding:10px 14px;border-bottom:0.5px solid var(--g100)">'
+        +'<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">'
+          +'<div style="flex:1">'
+            +'<span style="font-family:monospace;font-size:12.5px;font-weight:700;color:#991B1B">'+escapeHtml(r.termo)+'</span>'
+            +' <span style="font-size:10.5px;color:var(--g400)">('+escapeHtml(r.motivo)+')</span>'
+            + candidatosHtml
+          +'</div>'
+          +'<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">'
+            +'<input id="import-manual-'+modo+'-'+i+'" placeholder="PAT ou hostname correto..." style="border:1px solid var(--g300);border-radius:6px;padding:4px 8px;font-size:11.5px;width:180px" onkeyup="importBuscarManual(this,\''+modo+'\','+i+')">'
+            +'<button onclick="importConfirmarManual(\''+modo+'\','+i+')" style="padding:4px 10px;background:'+cor+';color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11.5px;font-weight:600">Confirmar</button>'
+            +'<button onclick="importIgnorar(\''+modo+'\','+i+')" style="padding:4px 8px;background:var(--g100);color:var(--g600);border:none;border-radius:6px;cursor:pointer;font-size:11.5px">Ignorar</button>'
+          +'</div>'
+        +'</div>'
+        +'<div id="import-manual-result-'+modo+'-'+i+'" style="margin-top:6px;font-size:11px;color:var(--g500)"></div>'
+      +'</div>';
+    }).join('');
+    html += '</div></div>';
+  }
+
+  // Botão de aplicar
+  if (encontrados.length) {
+    // Guarda lista encontrados para uso no botão
+    window['_importLista_'+modo] = encontrados;
+    html += '<button onclick="aplicarImportacao(\''+modo+'\')" style="width:100%;padding:10px;background:'+cor+';color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">'
+      +(modo==='descarte'?'🗑️':'♻️')+' Aplicar movimentação em lote ('+encontrados.length+' ativo'+(encontrados.length>1?'s':'')+')</button>';
+  }
+
+  if (statusEl) statusEl.innerHTML = html;
+}
+
+// ── Busca manual para item não identificado ────────────────────
+function importBuscarManual(input, modo, idx) {
+  var q   = input.value.toLowerCase().trim();
+  var res = document.getElementById('import-manual-result-'+modo+'-'+idx);
+  if (!res) return;
+  if (q.length < 2) { res.textContent = ''; return; }
+  var todos = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var matches = todos.filter(function(a){
+    return (a.pat||'').toLowerCase().includes(q) || (a.hostname||'').toLowerCase().includes(q) || (a.desc||'').toLowerCase().includes(q);
+  }).slice(0,4);
+  if (!matches.length) { res.textContent = 'Nenhum resultado.'; return; }
+  res.innerHTML = matches.map(function(a){
+    var hn = a.hostname||a.desc||a.ip||'—';
+    return '<button onclick="importConfirmarCandidato(\''+modo+'\','+idx+',\''+escapeHtml(a.id||'')+'\',\''+escapeHtml(hn)+'\')" style="margin:2px;padding:3px 8px;border:1px solid #059669;border-radius:6px;background:#F0FDF4;cursor:pointer;font-size:11px">'+escapeHtml(hn)+' <span style="color:var(--g400)">'+escapeHtml(a.pat||'—')+'</span></button>';
+  }).join('');
+}
+
+function importConfirmarCandidato(modo, idx, ativoId, nome) {
+  var todos = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var a = todos.find(function(x){return x.id===ativoId;});
+  if (!a) return;
+  // Add to found list
+  if (!window['_importLista_'+modo]) window['_importLista_'+modo] = [];
+  window['_importLista_'+modo].push({termo:nome, ativo:a, metodo:'Confirmado manualmente'});
+  // Mark row as confirmed
+  var row = document.getElementById('import-nr-'+modo+'-'+idx);
+  if (row) row.innerHTML = '<div style="padding:6px 0;color:#059669;font-size:12px;font-weight:700">✅ Confirmado: '+escapeHtml(a.hostname||a.desc||a.ip||'—')+' (PAT: '+escapeHtml(a.pat||'—')+')</div>';
+  // Update apply button
+  var btn = document.querySelector('[onclick="aplicarImportacao(\''+modo+'\')"]');
+  if (btn) {
+    var count = (window['_importLista_'+modo]||[]).length;
+    btn.textContent = (modo==='descarte'?'🗑️':'♻️')+' Aplicar movimentação em lote ('+count+' ativo'+(count>1?'s':'')+')';
+  }
+}
+
+function importConfirmarManual(modo, idx) {
+  var input = document.getElementById('import-manual-'+modo+'-'+idx);
+  if (!input || !input.value.trim()) return;
+  var q     = input.value.toLowerCase().trim();
+  var todos = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var a     = todos.find(function(x){
+    return (x.pat||'').toLowerCase()===q || (x.hostname||'').toLowerCase()===q;
+  });
+  if (!a) { showToast('Ativo não encontrado: '+input.value,'warning'); return; }
+  importConfirmarCandidato(modo, idx, a.id, a.hostname||a.desc||a.ip||'—');
+}
+
+function importIgnorar(modo, idx) {
+  var row = document.getElementById('import-nr-'+modo+'-'+idx);
+  if (row) row.innerHTML = '<div style="padding:4px 0;color:var(--g400);font-size:11.5px;font-style:italic">Ignorado</div>';
+}
+
+// ── Aplica movimentação em lote ────────────────────────────────
+async function aplicarImportacao(modo) {
+  var lista = window['_importLista_'+modo] || [];
+  if (!lista.length) return showToast('Nenhum ativo para mover', 'warning');
+
+  var cor    = modo === 'descarte' ? '#991B1B' : '#065F46';
+  var corBg  = modo === 'descarte' ? '#FFF5F5' : '#F0FDF4';
+  var emoji  = modo === 'descarte' ? '🗑️' : '♻️';
+
+  // Valida campos do formulário antes de processar
+  if (modo === 'descarte') {
+    var modalidade = document.getElementById('desc-modalidade-busca').value;
+    var sap        = document.getElementById('desc-sap-busca').value.trim();
+    var obs        = document.getElementById('desc-obs-busca').value.trim();
+    if (!modalidade) return showToast('Preencha a modalidade antes de aplicar', 'warning');
+    if (!obs)        return showToast('Informe o motivo do descarte', 'warning');
+  } else {
+    var local    = document.getElementById('reuso-local-estoque').value.trim();
+    var condicao = document.getElementById('reuso-condicao').value;
+    var motivo   = document.getElementById('reuso-motivo').value.trim();
+    if (!local)  return showToast('Informe o local de armazenamento', 'warning');
+    if (!motivo) return showToast('Informe o motivo da devolução ao estoque', 'warning');
+  }
+
+  // Mostra progresso no status
+  var statusEl = document.getElementById(modo + '-import-status');
+  if (statusEl) {
+    statusEl.style.display = '';
+    statusEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--g500)">⏳ Processando '+lista.length+' ativo'+(lista.length>1?'s':'')+'...</div>';
+  }
+
+  // Desabilita botão durante o processamento
+  var applyBtn = document.getElementById(modo+'-apply-btn');
+  if (applyBtn) { applyBtn.disabled = true; applyBtn.style.opacity = '.6'; applyBtn.textContent = '⏳ Processando...'; }
+
+  var resultados = []; // {ativo, termo, ok, erro}
+
+  for (var i = 0; i < lista.length; i++) {
+    var item = lista[i];
+    var a    = item.ativo;
+    var hn   = a.hostname || a.nome || a.desc || a.ip || '—';
+
+    // Atualiza progresso
+    if (statusEl) {
+      statusEl.innerHTML = '<div style="text-align:center;padding:12px;color:var(--g500)">⏳ Processando '+emoji+' '+(i+1)+'/'+lista.length+' — '+escapeHtml(hn)+'</div>';
+    }
+
+    try {
+      if (modo === 'descarte') {
+        var upd = {
+          status: 'descarte', substatusDescarte: modalidade, descarteSAP: sap,
+          descarteObs: obs, descarteData: new Date().toISOString().split('T')[0],
+          descarteAutorizadoPor: CURRENT_USER?.nome || '', updatedAt: new Date().toISOString()
+        };
+        await fsUpdate('ativos', a.id, upd);
+        Object.assign(a, upd);
+        await registrarHistoricoAtivo(a.id, 'descartado', {
+          modalidade, sap: sap||'—', obs, por: CURRENT_USER?.nome||'—', importacao: 'lote'
+        });
+      } else {
+        var upd2 = {
+          status: 'estoque', local: local, area: local, condicao: condicao,
+          dataEstoque: new Date().toISOString().split('T')[0], updatedAt: new Date().toISOString()
+        };
+        var col2 = (STATE.mobiliario||[]).find(function(x){return x.id===a.id;}) ? 'mobiliario' : 'ativos';
+        await fsUpdate(col2, a.id, upd2);
+        Object.assign(a, upd2);
+        await registrarHistoricoAtivo(a.id, 'movimentado', {
+          para: 'Estoque (Reuso)', local: local, condicao: condicao,
+          motivo: motivo, por: CURRENT_USER?.nome||'—', importacao: 'lote'
+        });
+      }
+      resultados.push({ativo: a, termo: item.termo, ok: true});
+    } catch(e) {
+      resultados.push({ativo: a, termo: item.termo, ok: false, erro: e.message});
+    }
+  }
+
+  // ── Monta relatório final item a item ────────────────────────
+  var sucesso = resultados.filter(function(r){return r.ok;});
+  var falhas  = resultados.filter(function(r){return !r.ok;});
+
+  var html = '<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
+    + '<span style="font-size:13px;font-weight:800;color:'+cor+'">'+emoji+' Resultado do lote</span>'
+    + '<span style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">✅ '+sucesso.length+' concluído'+(sucesso.length!==1?'s':'')+'</span>'
+    + (falhas.length ? '<span style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">❌ '+falhas.length+' com erro</span>' : '')
+    + '</div>';
+
+  // Tabela de sucesso
+  if (sucesso.length) {
+    html += '<div style="background:#fff;border:1px solid #BBF7D0;border-radius:8px;overflow:hidden;margin-bottom:10px">'
+      + '<div style="padding:7px 12px;background:#F0FDF4;font-size:11px;font-weight:700;color:#065F46">✅ CONCLUÍDOS COM SUCESSO</div>'
+      + '<div style="max-height:160px;overflow-y:auto">'
+      + sucesso.map(function(r) {
+          var hn = r.ativo.hostname||r.ativo.nome||r.ativo.desc||r.ativo.ip||'—';
+          return '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:0.5px solid var(--g100)">'
+            + '<span style="color:#059669;font-size:14px;flex-shrink:0">✅</span>'
+            + '<div style="flex:1;min-width:0">'
+              + '<span style="font-family:monospace;font-size:12px;font-weight:600">'+escapeHtml(hn)+'</span>'
+              + ' <span style="font-size:10.5px;color:var(--g400)">PAT: '+escapeHtml(r.ativo.pat||'—')+'</span>'
+            + '</div>'
+            + '<span style="font-size:10px;color:var(--g400)">'+escapeHtml(r.termo)+'</span>'
+          + '</div>';
+        }).join('')
+      + '</div></div>';
+  }
+
+  // Tabela de erros — item a item com mensagem
+  if (falhas.length) {
+    html += '<div style="background:#fff;border:1px solid #FCA5A5;border-radius:8px;overflow:hidden;margin-bottom:10px">'
+      + '<div style="padding:7px 12px;background:#FEF2F2;font-size:11px;font-weight:700;color:#DC2626">❌ ERROS — NÃO MOVIMENTADOS</div>'
+      + '<div style="max-height:160px;overflow-y:auto">'
+      + falhas.map(function(r) {
+          var hn = r.ativo.hostname||r.ativo.nome||r.ativo.desc||r.ativo.ip||'—';
+          return '<div style="padding:8px 12px;border-bottom:0.5px solid var(--g100)">'
+            + '<div style="display:flex;align-items:center;gap:10px">'
+              + '<span style="color:#DC2626;font-size:14px;flex-shrink:0">❌</span>'
+              + '<div style="flex:1;min-width:0">'
+                + '<span style="font-family:monospace;font-size:12px;font-weight:600">'+escapeHtml(hn)+'</span>'
+                + ' <span style="font-size:10.5px;color:var(--g400)">PAT: '+escapeHtml(r.ativo.pat||'—')+'</span>'
+              + '</div>'
+              + '<span style="font-size:10px;color:var(--g400)">'+escapeHtml(r.termo)+'</span>'
+            + '</div>'
+            + '<div style="margin-top:4px;margin-left:24px;font-size:11px;color:#DC2626;background:#FEF2F2;padding:3px 8px;border-radius:5px">'
+              + '⚠ '+escapeHtml(r.erro||'Erro desconhecido')
+            + '</div>'
+          + '</div>';
+        }).join('')
+      + '</div>'
+      // Botão de retry para os que falharam
+      + (falhas.length ? '<div style="padding:10px 12px;background:#FEF2F2;border-top:1px solid #FCA5A5">'
+          + '<button data-modo="'+modo+'" onclick="reprocessarFalhas(this.dataset.modo)" style="padding:6px 14px;background:#DC2626;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">🔄 Tentar novamente os '+falhas.length+' com erro</button>'
+          + '</div>' : '')
+      + '</div>';
+
+    // Guarda lista de falhas para retry
+    window['_importFalhas_'+modo] = falhas;
+  }
+
+  if (statusEl) statusEl.innerHTML = html;
+  if (applyBtn) { applyBtn.disabled = false; applyBtn.style.opacity = '1'; }
+
+  // Atualiza o card correspondente
+  if (modo === 'descarte') renderDescarte(); else renderReuso();
+  if (typeof renderDashboard === 'function') renderDashboard();
+
+  // Só fecha o modal se TUDO funcionou
+  if (!falhas.length) {
+    setTimeout(function(){
+      closeModal('modal-busca-'+modo);
+      showToast(emoji+' Todos os '+sucesso.length+' ativos movidos com sucesso!', 'success', 5000);
+    }, 1500);
+  } else {
+    showToast(sucesso.length+' movidos, '+falhas.length+' com erro — veja o relatório', 'warning', 6000);
+  }
+}
+
+// ── Retry: tenta novamente só os que falharam ──────────────────
+async function reprocessarFalhas(modo) {
+  var falhas = window['_importFalhas_'+modo] || [];
+  if (!falhas.length) return;
+  // Recarrega a lista com só as falhas e tenta de novo
+  window['_importLista_'+modo] = falhas.map(function(f){return {ativo:f.ativo,termo:f.termo};});
+  await aplicarImportacao(modo);
+}
