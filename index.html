@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202605201902 -->
+<!-- build: 202605201903 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -3243,19 +3243,13 @@ window.dispatchEvent(new Event('firebase-ready'));
           <select class="form-control" id="redes-filter-sigla" style="width:200px;margin:0" onchange="window._redesFiltroKpi='';renderRedes()"><option value="">Todas as siglas</option></select>
           <button id="redes-add-btn" onclick="abrirAddRede('')" class="btn btn-primary btn-sm" style="display:none" title="Somente administradores">+ Nova Localidade</button>
         </div></div>
-      <!-- KPIs clicáveis -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
-        <div id="redes-kpi-total-card" class="stat-card blue" style="cursor:pointer;transition:outline .15s" onclick="window._redesFiltroKpi=window._redesFiltroKpi==='total'?'':'total';document.getElementById('redes-filter-sigla').value='';renderRedes()" title="Ver todas as faixas">
-          <div class="stat-label">Total de Faixas ↗</div><div class="stat-value" id="redes-kpi-total">—</div>
-          <div style="font-size:10px;color:var(--g400);margin-top:4px">Clique para listar todas</div>
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px">
+        <div id="redes-kpi-total-card" class="stat-card blue" style="cursor:pointer;transition:outline .15s" onclick="window._redesFiltroKpi='';document.getElementById('redes-filter-sigla').value='';renderRedes()" title="Ver todas as faixas">
+          <div class="stat-label">Total de Faixas</div><div class="stat-value" id="redes-kpi-total">—</div>
         </div>
         <div class="stat-card green" style="cursor:default">
           <div class="stat-label">Localidades</div><div class="stat-value" id="redes-kpi-localidades">—</div>
-          <div style="font-size:10px;color:var(--g400);margin-top:4px">Use o filtro de sigla →</div>
-        </div>
-        <div id="redes-kpi-custom-card" class="stat-card violet" style="cursor:pointer;transition:outline .15s" onclick="window._redesFiltroKpi=window._redesFiltroKpi==='personalizada'?'':'personalizada';document.getElementById('redes-filter-sigla').value='';renderRedes()" title="Ver apenas redes personalizadas (overrides)">
-          <div class="stat-label">Personalizadas ↗</div><div class="stat-value" id="redes-kpi-custom">—</div>
-          <div style="font-size:10px;color:var(--g400);margin-top:4px">Faixas editadas manualmente</div>
         </div>
       </div>
       <div id="redes-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:14px"></div>

@@ -18607,7 +18607,6 @@ function renderRedes() {
   var fView   = window._redesFiltroKpi || ''; // 'total'|'personalizada'|''
 
   var redesList  = buildRedesList();
-  var customList = redesList.filter(function(r){return r.custom;});
   var totalFaixas= redesList.length;
   var siglasUnicas = new Set(redesList.map(function(r){return r.sigla;})).size;
 
@@ -18615,13 +18614,11 @@ function renderRedes() {
   ['redes-kpi-total-card','redes-kpi-loc-card','redes-kpi-custom-card'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.style.outline='none';
   });
-  if(fView==='personalizada'){var el=document.getElementById('redes-kpi-custom-card');if(el)el.style.outline='3px solid #7C3AED';}
   if(fView==='total'){var el=document.getElementById('redes-kpi-total-card');if(el)el.style.outline='3px solid #2563EB';}
 
   var sv = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
   sv('redes-kpi-total',       totalFaixas);
   sv('redes-kpi-localidades', siglasUnicas);
-  sv('redes-kpi-custom',      customList.length);
 
   // Populate sigla dropdown once
   var fSiglaEl = document.getElementById('redes-filter-sigla');
@@ -18641,7 +18638,6 @@ function renderRedes() {
 
   // Filtra lista base
   var lista = redesList;
-  if (fView === 'personalizada') lista = lista.filter(function(r){return r.custom;});
   if (fSigla) lista = lista.filter(function(r){return r.sigla===fSigla;});
   if (q)      lista = lista.filter(function(r){return (r.prefix+' '+r.sigla+' '+r.nome+' '+(r.desc||'')).toLowerCase().includes(q);});
 
