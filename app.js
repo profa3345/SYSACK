@@ -10026,8 +10026,61 @@ function abrirHistSwitch(id){abrirGerenciarSwitch(id);}
 
 const SW_ACTIONS={
   'ping':{title:'📶 Ping',terminal:true,motivo:false,out:(sw)=>`Ping para ${sw.ip}...\n\n64 bytes from ${sw.ip}: time=0.842ms\n64 bytes from ${sw.ip}: time=0.791ms\n\n3 packets, 0% loss`},
-  'ssh':{title:'🖥️ Acesso SSH',terminal:true,motivo:true,out:(sw)=>`Conectando em ${sw.ip} via SSH...\n\nConnected to ${sw.hostname}.\n${sw.hostname}# _\n\n(WebSSH — integrar em produção)`},
-  'snmp':{title:'📊 SNMP Poll',terminal:true,motivo:false,out:(sw)=>`SNMP ${sw.ip}...\nsysDescr: ${sw.marca} ${sw.modelo}\nsysUpTime: ${sw.uptime}\nifNumber: ${sw.totalPortas}`},
+  'ssh':{title:'🖥️ Acesso SSH',terminal:false,motivo:false,
+    action:function(sw){
+      var term = document.getElementById('sw-action-terminal');
+      var conf = document.getElementById('sw-action-confirm');
+      if (conf) conf.style.display = 'none';
+      if (!term) return;
+      // Store current target for SSH helpers to read
+      window._sshTarget = { ip: sw.ip||'', hn: sw.hostname||sw.sysName||sw.ip||'—' };
+      var wsHost = localStorage.getItem('sysack_webssh_host') || '';
+      term.style.display = '';
+      term.style.background = '#0F172A';
+      term.style.color = '#F1F5F9';
+      term.style.padding = '18px';
+      term.style.borderRadius = '8px';
+      term.style.fontFamily = 'monospace';
+      term.style.fontSize = '13px';
+      term.style.lineHeight = '1.7';
+      term.innerHTML =
+        '<div style="color:#60A5FA;font-weight:800;font-size:14px;margin-bottom:4px">🖥️ Acesso SSH</div>'
+        +'<div style="color:#94A3B8;font-size:11px;margin-bottom:16px">'+escapeHtml(sw.hostname||sw.sysName||'—')+' &nbsp;·&nbsp; <span style="font-family:monospace;color:#F1F5F9">'+escapeHtml(sw.ip||'—')+'</span></div>'
+        +'<div style="display:flex;flex-direction:column;gap:10px">'
+
+          // ── Opção 1: ssh:// (cliente local do OS) ────────────────
+          +'<div style="background:#1E293B;border:1px solid #334155;border-radius:8px;padding:13px 15px">'
+            +'<div style="font-size:10.5px;font-weight:700;color:#60A5FA;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Opção 1 — Cliente SSH local</div>'
+            +'<div style="font-size:11.5px;color:#94A3B8;margin-bottom:10px">Abre PuTTY, Terminal ou outro cliente SSH instalado no seu computador</div>'
+            +'<button onclick="sshAbrirCliente()" style="background:#2563EB;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">🔗 ssh://'+escapeHtml(sw.ip||'')+'</button>'
+            +'<div style="margin-top:8px;font-size:10.5px;color:#475569;font-family:monospace;letter-spacing:.3px">ssh admin@'+escapeHtml(sw.ip||'')+'</div>'
+          +'</div>'
+
+          // ── Opção 2: WebSSH2 (navegador) ─────────────────────────
+          +'<div style="background:#1E293B;border:1px solid #334155;border-radius:8px;padding:13px 15px">'
+            +'<div style="font-size:10.5px;font-weight:700;color:#34D399;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Opção 2 — WebSSH no navegador</div>'
+            +'<div style="font-size:11.5px;color:#94A3B8;margin-bottom:10px">Requer servidor WebSSH2 na rede interna CESAN (<code style="font-size:10.5px">npm i -g webssh2</code>)</div>'
+            +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+              +'<button onclick="sshAbrirWebSSH()" style="background:#059669;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">🌐 Abrir no navegador</button>'
+              +'<button onclick="sshConfigurarWebSSH()" style="background:transparent;color:#34D399;border:1px solid #34D399;padding:7px 12px;border-radius:6px;cursor:pointer;font-size:11.5px">⚙️ Configurar endereço</button>'
+            +'</div>'
+            +'<div style="margin-top:8px;font-size:10.5px;color:#475569">'
+              +'Servidor: <span id="ssh-ws-host-lbl" style="color:'+(wsHost?'#34D399':'#F87171')+'">'+(wsHost?escapeHtml(wsHost):'Não configurado')+'</span>'
+            +'</div>'
+          +'</div>'
+
+          // ── Opção 3: Copiar comando ───────────────────────────────
+          +'<div style="background:#1E293B;border:1px solid #334155;border-radius:8px;padding:13px 15px">'
+            +'<div style="font-size:10.5px;font-weight:700;color:#F59E0B;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Opção 3 — Copiar comando</div>'
+            +'<div style="display:flex;gap:8px;align-items:center">'
+              +'<code style="background:#0F172A;color:#34D399;padding:7px 12px;border-radius:5px;font-size:13px;flex:1;white-space:nowrap">ssh admin@'+escapeHtml(sw.ip||'')+'</code>'
+              +'<button onclick="sshCopiarComando()" style="background:#D97706;color:#fff;border:none;padding:7px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;flex-shrink:0">📋 Copiar</button>'
+            +'</div>'
+          +'</div>'
+        +'</div>';
+    }
+  },
+    'snmp':{title:'📊 SNMP Poll',terminal:true,motivo:false,out:(sw)=>`SNMP ${sw.ip}...\nsysDescr: ${sw.marca} ${sw.modelo}\nsysUpTime: ${sw.uptime}\nifNumber: ${sw.totalPortas}`},
   'show-interfaces':{title:'🔌 Interfaces',terminal:true,motivo:false,out:(sw)=>`${sw.hostname}# show interfaces status\n\nPort   Status      Vlan\nGi1/1  connected   20\nGi1/2  connected   20\nGi1/24 connected   trunk\nSFP1   connected   trunk`},
   'show-mac':{title:'📋 Tabela MAC',terminal:false,motivo:false,out:null},
   'show-arp':{title:'🗂️ Tabela ARP',terminal:true,motivo:false,out:(sw)=>`${sw.hostname}# show arp\n\nInternet 192.168.10.1  -  aabb.cc01.0001 ARPA Vlan10\nInternet 192.168.20.1  -  aabb.cc02.0001 ARPA Vlan20`},
@@ -10080,10 +10133,54 @@ function pingAtivo(ip, ativoId) {
     },300);
   }
 }
+
+// ── SSH Helpers ────────────────────────────────────────────────────────────
+function sshAbrirCliente() {
+  var t = window._sshTarget || {}; var ip = t.ip || '';
+  if (!ip) return showToast('IP não disponível', 'warning');
+  window.open('ssh://admin@' + ip, '_blank');
+  setTimeout(function(){
+    showToast('Se não abriu: copie o comando da Opção 3', 'info', 5000);
+  }, 1500);
+}
+
+function sshAbrirWebSSH() {
+  var t = window._sshTarget || {}; var ip = t.ip || ''; var hn = t.hn || ip;
+  if (!ip) return showToast('IP não disponível', 'warning');
+  var host = localStorage.getItem('sysack_webssh_host');
+  if (!host) { sshConfigurarWebSSH(); return; }
+  var url = host.replace(/\/+$/, '') + '/?host=' + encodeURIComponent(ip) + '&port=22&username=admin&title=' + encodeURIComponent(hn);
+  window.open(url, '_blank', 'width=1060,height=720,resizable=yes');
+}
+
+function sshCopiarComando() {
+  var t = window._sshTarget || {}; var ip = t.ip || '';
+  navigator.clipboard.writeText('ssh admin@' + ip).then(function(){
+    showToast('✅ Copiado: ssh admin@' + ip, 'success', 3000);
+  }).catch(function(){ showToast('Erro ao copiar — use Ctrl+C', 'warning'); });
+}
+
+function sshConfigurarWebSSH() {
+  var atual = localStorage.getItem('sysack_webssh_host') || '';
+  var novo = prompt(
+    'Endereço do servidor WebSSH2 da CESAN:\n\n' +
+    'Exemplo: http://172.22.1.10:2222\n\n' +
+    'Instalação: npm install -g webssh2 && webssh --port 2222',
+    atual
+  );
+  if (!novo || !novo.trim()) return;
+  novo = novo.trim();
+  localStorage.setItem('sysack_webssh_host', novo);
+  var lbl = document.getElementById('ssh-ws-host-lbl');
+  if (lbl) { lbl.textContent = novo; lbl.style.color = '#34D399'; }
+  showToast('WebSSH2 configurado: ' + novo, 'success', 4000);
+  sshAbrirWebSSH();
+}
 function swActionDirect(type,swId){
   const sw=(STATE.switches||[]).find(s=>s.id===swId);if(!sw) return;
   currentSwitch=sw;currentSwAction=type;
   const cfg=SW_ACTIONS[type]||{title:'Ação',terminal:false,motivo:false,out:null};
+  if(type==='ssh' && cfg.action){ openModal('modal-sw-action'); var t=document.getElementById('sw-action-title');if(t)t.textContent=cfg.title; setTimeout(function(){cfg.action(sw);},100); return; }
   document.getElementById('sw-action-title').textContent=cfg.title;
   document.getElementById('sw-action-body').textContent = (sw.hostname||'') + ' (' + (sw.ip||'') + ') · ' + (sw.marca||'') + ' ' + (sw.modelo||'')
   const term=document.getElementById('sw-action-terminal');
@@ -10099,6 +10196,7 @@ function confirmSwAction(){
   const sw=currentSwitch,type=currentSwAction;if(!sw||!type) return;
   const cfg=SW_ACTIONS[type]||{};
   if(cfg.motivo&&!(document.getElementById('sw-action-motivo')?.value?.trim())) return showToast('Motivo obrigatório','danger');
+  if(cfg.action){ cfg.action(sw); return; }
   const term=document.getElementById('sw-action-terminal');
   if(cfg.terminal&&cfg.out){
     term.style.display='';term.textContent='';
