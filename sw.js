@@ -1,5 +1,6 @@
-// sw.js — SYSACK Service Worker v7
-// Fix: clone ANTES de retornar a response, nunca depois
+// sw.js — SYSACK Service Worker v8
+// Fix crítico: clone() ANTES de qualquer await/then, nunca depois
+// v8 força substituição do v6/v7 que tinham o bug de bodyUsed
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
@@ -15,18 +16,15 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// ── FCM: mensagens em background ─────────────────────────────────
 messaging.onBackgroundMessage(payload => {
   const { notification, data } = payload;
   const tipo = data?.tipo || 'notification';
-
   if (['checkin_request', 'location_request'].includes(tipo)) {
     self.clients.matchAll({ type: 'window' }).then(clients =>
       clients.forEach(c => c.postMessage({ type: 'FCM_CMD', tipo, data }))
     );
     return;
   }
-
   self.registration.showNotification(notification?.title || 'SYSACK', {
     body:     notification?.body || data?.mensagem || '',
     icon:     '/icon-192.png',
@@ -37,7 +35,6 @@ messaging.onBackgroundMessage(payload => {
   });
 });
 
-// ── Clique na notificação ─────────────────────────────────────────
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const url = event.notification.data?.url || '/';
@@ -50,11 +47,12 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
-// ── Cache ─────────────────────────────────────────────────────────
-const CACHE_VER    = 'sysack-v7';
-const STATIC_CACHE = CACHE_VER + '-static';
+// ─────────────────────────────────────────────────────────────────
+// Cache config
+// ─────────────────────────────────────────────────────────────────
+const CACHE_NAME = 'sysack-v8';
 
-const NO_CACHE_PATTERNS = [
+const BYPASS = [
   /firestore\.googleapis\.com/,
   /identitytoolkit/,
   /cloudfunctions\.net/,
@@ -67,96 +65,110 @@ const NO_CACHE_PATTERNS = [
   /firebaseio\.com/,
 ];
 
-const PRECACHE_URLS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
-
 self.addEventListener('install', event => {
+  // skipWaiting imediatamente — substitui o SW antigo sem esperar aba fechar
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(STATIC_CACHE)
-      .then(cache => Promise.allSettled(
-        PRECACHE_URLS.map(u => cache.add(u).catch(() => {}))
-      ))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache =>
+      Promise.allSettled(
+        ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png']
+          .map(u => cache.add(u).catch(() => {}))
+      )
+    )
   );
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
+    caches.keys().then(keys =>
+      Promise.all(
         keys
-          .filter(k => k.startsWith('sysack-') && k !== STATIC_CACHE)
-          .map(k => {
-            console.log('[SW] Removendo cache antigo:', k);
-            return caches.delete(k);
-          })
-      ))
-      .then(() => self.clients.claim())
+          .filter(k => k.startsWith('sysack-') && k !== CACHE_NAME)
+          .map(k => { console.log('[SW v8] Limpando cache antigo:', k); return caches.delete(k); })
+      )
+    ).then(() => self.clients.claim())
   );
 });
 
-// ── Função auxiliar: fetch → cache → return ───────────────────────
-// A regra de ouro: clone() ANTES de qualquer operação assíncrona.
-// res.body só pode ser lido uma vez; clonar preserva a cópia para o cache.
-function fetchAndCache(req, cacheName) {
-  return fetch(req).then(res => {
-    // Só cacheia respostas válidas e clonable
-    if (res && res.ok && res.status < 400) {
-      const resParaCache = res.clone(); // clone PRIMEIRO, antes de retornar
-      caches.open(cacheName).then(c => c.put(req, resParaCache)).catch(() => {});
-    }
-    return res; // retorna o original (ainda não consumido)
-  });
+// ─────────────────────────────────────────────────────────────────
+// fetchAndCache — a correção do bug
+//
+// REGRA: res.clone() deve ser chamado IMEDIATAMENTE ao receber a
+// resposta, ANTES de qualquer operação assíncrona (incluindo abrir
+// o cache). O body de um Response é um ReadableStream que só pode
+// ser lido uma vez; após qualquer leitura assíncrona ele fica
+// marcado como bodyUsed=true e clone() lança TypeError.
+//
+// ERRADO (padrão antigo com bug):
+//   fetch(req).then(res => {
+//     caches.open(n).then(c => c.put(req, res.clone())); // BOOM
+//     return res;
+//   })
+//
+// CORRETO (este arquivo):
+//   fetch(req).then(res => {
+//     const copy = res.clone();   // clone PRIMEIRO, síncrono
+//     caches.open(n).then(c => c.put(req, copy)); // usa a cópia
+//     return res;                 // retorna o original intacto
+//   })
+// ─────────────────────────────────────────────────────────────────
+function networkFirst(event) {
+  const req = event.request;
+  event.respondWith(
+    fetch(req).then(res => {
+      if (res && res.ok) {
+        const copy = res.clone();                          // clone síncrono
+        caches.open(CACHE_NAME)
+          .then(c => c.put(req, copy))
+          .catch(() => {});
+      }
+      return res;
+    }).catch(() => caches.match(req))
+  );
+}
+
+function cacheFirst(event) {
+  const req = event.request;
+  event.respondWith(
+    caches.match(req).then(cached => {
+      if (cached) return cached;
+      return fetch(req).then(res => {
+        if (res && res.ok) {
+          const copy = res.clone();                        // clone síncrono
+          caches.open(CACHE_NAME)
+            .then(c => c.put(req, copy))
+            .catch(() => {});
+        }
+        return res;
+      }).catch(() => new Response('', { status: 408 }));
+    })
+  );
 }
 
 self.addEventListener('fetch', event => {
   const req = event.request;
-
-  // Só intercepta GET
   if (req.method !== 'GET') return;
 
   const url = req.url;
-
-  // Nunca intercepta extensões Chrome
   if (url.startsWith('chrome-extension://')) return;
-
-  // Nunca intercepta requisições externas
   if (!url.startsWith(self.location.origin)) return;
+  if (BYPASS.some(p => p.test(url))) return;
 
-  // Nunca intercepta padrões Firebase / Google
-  if (NO_CACHE_PATTERNS.some(p => p.test(url))) return;
-
-  // ── HTML: network-first, fallback cache se offline ──────────────
-  if (url.endsWith('.html') || url.endsWith('/') || url === self.location.origin) {
-    event.respondWith(
-      fetchAndCache(req, STATIC_CACHE)
-        .catch(() => caches.match(req))
-    );
+  // HTML e JS/CSS: sempre network-first (garante código atualizado)
+  if (/\.(html|js|css)(\?.*)?$/.test(url) ||
+      url.endsWith('/') ||
+      url === self.location.origin) {
+    networkFirst(event);
     return;
   }
 
-  // ── JS e CSS: network-first (garante versão mais recente) ────────
-  if (/\.(js|css)(\?.*)?$/.test(url)) {
-    event.respondWith(
-      fetchAndCache(req, STATIC_CACHE)
-        .catch(() => caches.match(req))
-    );
-    return;
-  }
-
-  // ── Imagens e fontes locais: cache-first ─────────────────────────
+  // Imagens e fontes: cache-first
   if (/\.(png|jpg|jpeg|svg|ico|woff2?)(\?.*)?$/.test(url)) {
-    event.respondWith(
-      caches.match(req).then(cached => {
-        if (cached) return cached;
-        return fetchAndCache(req, STATIC_CACHE)
-          .catch(() => new Response('', { status: 404 }));
-      })
-    );
+    cacheFirst(event);
     return;
   }
 });
 
-// ── Mensagens do app ──────────────────────────────────────────────
 self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });

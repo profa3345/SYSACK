@@ -763,7 +763,14 @@ function startFirestoreListeners() {
       pat:    d.pat    || d.patrimonio || '',
       // desc: prefere desc → hostname → sysDescr (linha 1) → nunca o IP puro
       desc:   d.desc   || d.hostname   || (d.sysDescr ? d.sysDescr.split('\n')[0].trim().slice(0,80) : '') || '',
-      tipo:   d.tipo   || 'workstation',
+      tipo: (function(){
+        var hn=(d.hostname||d.sysName||d.name||d.desc||'').toUpperCase();
+        if(d.tipo&&d.tipo!=='workstation')return d.tipo;
+        if(/^NBK|^NTB|NOTEBOOK/i.test(hn))return 'notebook';
+        if(/VSERV|VMSERVER|^VM-/i.test(hn))return 'servidor';
+        if(/^SERV[0-9A-Z]|[A-Z]{2,4}-SERV/i.test(hn))return 'servidor';
+        return d.tipo||'workstation';
+      })(),
       area:   d.area   || '',
       resp:   d.resp   || d.responsavel || '',
       status: d.status || (d.reachable ? 'ativo' : 'offline'),
@@ -781,6 +788,12 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
+  db.collection('impressoras').onSnapshot(function(snap) {
+    STATE.impressorasDisc=snap2arr(snap).map(norm);
+    nbUpdate('nb-impressoras',(STATE.impressorasDisc||[]).length);
+    console.log('[Banco] impressoras:',STATE.impressorasDisc.length);
+  },function(e){console.error('[Banco] impressoras erro:',e.message);});
+
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
     STATE.switches  = STATE._assetsSw;
@@ -992,7 +1005,7 @@ function renderDashboard() {
         <div class="pr-icon">🚨</div>
         <div class="pr-text"><div class="pr-title">${t.pat} — ${t.ativo}</div><div class="pr-sub">Enviado ${fmtDate(t.dataEnvio)} · Técnico: ${getTecNome(t.tecnicoTerc)} · ${t.chamadoId}</div></div>
         <div class="pr-days">${t.diasUteis}d</div>
-        <button class="btn btn-danger btn-sm" onclick="goPage(&quot;terceirizada&quot;)">Ver</button>
+        <button class="btn btn-danger btn-sm" onclick="goPage('terceirizada')">Ver</button>
       </div>`).join('');
   }
 
@@ -1035,7 +1048,7 @@ function renderChamados(filter='abertos') {
       <td style="font-size:11.5px;color:var(--g600)">${c.atribuido||'—'}</td>
       <td class="td-mono" style="font-size:10.5px;white-space:nowrap">${fmtDatetime(c.createdAt)}</td>
       <td class="td-mono" style="font-size:10.5px;white-space:nowrap">${fmtDatetime(c.updatedAt||c.createdAt)}</td>
-      <td><div class="flex gap-4"><button class="btn btn-secondary btn-xs" onclick="abrirAtendimento('${escapeHtml(c.id)}')">Atender</button><button class="btn btn-ghost btn-xs" data-ia-btn="${escapeHtml(c.id)}" onclick="triagemIAChamado('${escapeHtml(c.id)}')" title="Análise com IA">🤖</button><button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${c.pat||''}')">📜</button>${(c.status==='concluido'||c.status==='fechado')?`<button class="btn btn-ghost btn-xs" onclick="reabrirChamado("${escapeHtml(c.id)}')">🔄</button>`:''} ${c.status==='concluido'||c.status==='aberto'?`<button class="btn btn-ghost btn-xs" onclick="configurarChamadoRecorrente("${escapeHtml(c.id)}')" title="Tornar recorrente">🔁</button>`:''}</div></td>
+      <td><div class="flex gap-4"><button class="btn btn-secondary btn-xs" onclick="abrirAtendimento('${escapeHtml(c.id)}')">Atender</button><button class="btn btn-ghost btn-xs" data-ia-btn="${escapeHtml(c.id)}" onclick="triagemIAChamado('${escapeHtml(c.id)}')" title="Análise com IA">🤖</button><button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${c.pat||''}')">📜</button>${(c.status==='concluido'||c.status==='fechado')?`<button class="btn btn-ghost btn-xs" onclick="reabrirChamado('${escapeHtml(c.id)}')">🔄</button>`:''} ${c.status==='concluido'||c.status==='aberto'?`<button class="btn btn-ghost btn-xs" onclick="configurarChamadoRecorrente('${escapeHtml(c.id)}')" title="Tornar recorrente">🔁</button>`:''}</div></td>
     </tr>`).join('') || `<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum chamado neste filtro</td></tr>`;
   nbUpdate('nb-chamados', STATE.chamados.filter(c=>c.status!=='concluido'&&c.status!=='fechado').length);
 }
@@ -1116,7 +1129,7 @@ function renderAtivos() {
         <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')">📜</button>
         <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
         <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
-        <button class="btn btn-secondary btn-xs" onclick="openModal(&quot;modal-transferencia&quot;)">↔</button>
+        <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="patAbrirBusca()" title="Vincular PAT">🏷️</button>` : ''}
       </div></td>
     </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo — ${tipos.length?'tipo: '+_ativoFiltroTipo:'cadastrado'}</td></tr>`;
@@ -1186,7 +1199,7 @@ function renderTerceirizada() {
   document.getElementById('terc-alertas-overdue').innerHTML = overdue.map(t => `
     <div class="alert alert-danger"><span>🚨</span>
       <div><strong>${t.pat} — ${t.ativo}</strong><br><span style="font-size:11.5px">Enviado ${fmtDate(t.dataEnvio)} · ${t.diasUteis} dias úteis · Prazo de 10 dias excedido!</span></div>
-      <button class="btn btn-danger btn-sm" style="margin-left:auto;flex-shrink:0" onclick="openModal(&quot;modal-retorno-terc&quot;)">Registrar Retorno</button>
+      <button class="btn btn-danger btn-sm" style="margin-left:auto;flex-shrink:0" onclick="openModal('modal-retorno-terc')">Registrar Retorno</button>
     </div>`).join('');
   document.getElementById('terc-body').innerHTML = ativos.map(t => {
     const d = t.diasUteis;
@@ -1201,7 +1214,7 @@ function renderTerceirizada() {
       <td class="td-mono">${t.chamadoId}</td>
       <td><span class="badge ${cls}">${alerta}</span></td>
       <td><span class="status-pill sp-terceirizada">Na Terceirizada</span></td>
-      <td><button class="btn btn-primary btn-xs" onclick="openModal(&quot;modal-retorno-terc&quot;)">↩ Retorno</button></td>
+      <td><button class="btn btn-primary btn-xs" onclick="openModal('modal-retorno-terc')">↩ Retorno</button></td>
     </tr>`;
   }).join('') || `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo na terceirizada</td></tr>`;
   nbUpdate('nb-terc', overdue.length);
@@ -1269,8 +1282,8 @@ function renderAprovacoes() {
       <div class="ab-icon">⏳</div>
       <div class="ab-text"><h4>${ap.tipo} — ${ap.pat}</h4><p>${ap.ativo} · Solicitado por ${ap.solicitante} · ${fmtDate(ap.data)}</p></div>
       <div class="ab-actions">
-        <button class="btn btn-danger btn-sm" onclick="decidirAprovacao('${ap.id}',&quot;recusado&quot;)">✕ Recusar</button>
-        <button class="btn btn-success btn-sm" onclick="decidirAprovacao('${ap.id}',&quot;aprovado&quot;)">✓ Autorizar</button>
+        <button class="btn btn-danger btn-sm" onclick="decidirAprovacao('${ap.id}','recusado')">✕ Recusar</button>
+        <button class="btn btn-success btn-sm" onclick="decidirAprovacao('${ap.id}','aprovado')">✓ Autorizar</button>
       </div>
     </div>`).join('') || '<p class="text-sm text-muted" style="padding:8px">Nenhuma aprovação pendente. ✓</p>';
   document.getElementById('aprov-hist-body').innerHTML = hist.map(ap => `
@@ -2956,8 +2969,8 @@ function renderMDM() {
           <button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSm('${s.id}')">⚙️ Gerenciar</button>
           <button class="mdm-action-btn mab-success" onclick="abrirChamadoSm('${s.id}')">🎫 Chamado</button>
           <button class="mdm-action-btn mab-violet" onclick="gerarTermoSm('${s.id}')">📄 Termo</button>
-          <button class="mdm-action-btn mab-warning" onclick="mdmActionDirect(&quot;localize&quot;,'${s.id}')">📍 Localizar</button>
-          <button class="mdm-action-btn mab-danger" onclick="mdmActionDirect(&quot;lock&quot;,'${s.id}')">🔒 Bloquear</button>
+          <button class="mdm-action-btn mab-warning" onclick="mdmActionDirect('localize','${s.id}')">📍 Localizar</button>
+          <button class="mdm-action-btn mab-danger" onclick="mdmActionDirect('lock','${s.id}')">🔒 Bloquear</button>
         </div>
       </div>`).join('') || '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">📱</div><h3>Nenhum smartphone encontrado</h3></div>';
   }
@@ -4985,12 +4998,12 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
         <span id="rv-status-txt" style="color:#64748B;font-size:11.5px">Conectando...</span>
         <button id="rv-btn-screen" onclick="rvCaptura()" class="rv-btn" title="Capturar tela (F5)">📷</button>
-        <button onclick="rvShowPanel(&quot;shell&quot;)"    class="rv-btn" title="Terminal">⬛</button>
-        <button onclick="rvShowPanel(&quot;procs&quot;)"    class="rv-btn" title="Processos">📊</button>
-        <button onclick="rvShowPanel(&quot;services&quot;)" class="rv-btn" title="Serviços">⚙️</button>
-        <button onclick="rvShowPanel(&quot;software&quot;)" class="rv-btn" title="Software">📦</button>
-        <button onclick="rvShowPanel(&quot;patches&quot;)"  class="rv-btn" title="Patches">🔒</button>
-        <button onclick="rvShowPanel(&quot;deploy&quot;)"   class="rv-btn" title="Deploy">📲</button>
+        <button onclick="rvShowPanel('shell')"    class="rv-btn" title="Terminal">⬛</button>
+        <button onclick="rvShowPanel('procs')"    class="rv-btn" title="Processos">📊</button>
+        <button onclick="rvShowPanel('services')" class="rv-btn" title="Serviços">⚙️</button>
+        <button onclick="rvShowPanel('software')" class="rv-btn" title="Software">📦</button>
+        <button onclick="rvShowPanel('patches')"  class="rv-btn" title="Patches">🔒</button>
+        <button onclick="rvShowPanel('deploy')"   class="rv-btn" title="Deploy">📲</button>
         <div style="width:1px;height:24px;background:#334155;margin:0 4px"></div>
         <button onclick="rvEncerrar('${sessaoId}')" style="background:#EF4444;color:#fff;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px">
           ✕ Encerrar Sessão
@@ -5590,9 +5603,9 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(s.DisplayName||s.Name)}">${escapeHtml(s.DisplayName||s.Name)}</span>
         <span style="${s.Status==='Running'?'color:#10B981':'color:#64748B'};font-size:11px;font-weight:600;width:56px;text-align:right">${s.Status}</span>
         <div style="display:flex;gap:4px">
-          ${s.Status!=='Running' ? `<button onclick="rvSvcAction("${escapeHtml(s.Name)}',&quot;Start-Service&quot;)" style="background:rgba(16,185,129,.15);color:#10B981;border:1px solid #10B981;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px">▶</button>` : ''}
-          ${s.Status==='Running'  ? `<button onclick="rvSvcAction("${escapeHtml(s.Name)}',&quot;Stop-Service -Force&quot;)" style="background:rgba(239,68,68,.15);color:#EF4444;border:1px solid #EF4444;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px">⏹</button>` : ''}
-          <button onclick="rvSvcAction('${escapeHtml(s.Name)}',&quot;Restart-Service -Force&quot;)" style="background:rgba(37,99,235,.15);color:#3B82F6;border:1px solid #3B82F6;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px">↺</button>
+          ${s.Status!=='Running' ? `<button onclick="rvSvcAction('${escapeHtml(s.Name)}','Start-Service')" style="background:rgba(16,185,129,.15);color:#10B981;border:1px solid #10B981;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px">▶</button>` : ''}
+          ${s.Status==='Running'  ? `<button onclick="rvSvcAction('${escapeHtml(s.Name)}','Stop-Service -Force')" style="background:rgba(239,68,68,.15);color:#EF4444;border:1px solid #EF4444;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px">⏹</button>` : ''}
+          <button onclick="rvSvcAction('${escapeHtml(s.Name)}','Restart-Service -Force')" style="background:rgba(37,99,235,.15);color:#3B82F6;border:1px solid #3B82F6;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:10px">↺</button>
         </div>
       </div>`
     ).join('');
@@ -5950,7 +5963,7 @@ function renderMonitorRede() {
     if (d.tonerLevels?.length) extras.push(`Toner: ${Math.min(...d.tonerLevels.map(t=>t.pct))}%`);
     if (d.uptime)              extras.push(`Up: ${d.uptime}`);
 
-    return `<tr onclick="abrirMonitorDetalhe('${d.id}','${d._col||'ativos'}')" style="cursor:pointer">
+    return `<tr style="cursor:pointer" onclick="abrirMonitorDetalhe('${d.id}','${d._col}')">
       <td style="text-align:center"><span class="mon-dot ${dotClass}"></span></td>
       <td style="font-weight:600;font-size:13px">${escapeHtml(d.hostname||d.desc||d.pat||'—')}</td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${escapeHtml(d.ip||'—')}</td>
@@ -6515,7 +6528,7 @@ function gerarRelTerceirizada(inicio, fim) {
       <td style="font-size:12px">${t.prazoRetorno||'—'}</td>
       <td style="font-weight:700;color:${diasAtraso>0?'var(--danger)':'var(--g400)'}">${diasAtraso > 0 ? diasAtraso + 'd' : '—'}</td>
       <td><span class="badge ${t.retornado?'badge-success':'badge-warning'}" style="font-size:10px">${t.retornado?'Devolvida':'Aguardando'}</span></td>
-      <td>${!t.retornado ? `<button class="btn btn-success btn-xs" onclick="marcarRetornoTerceirizada("${t.id}')">Registrar retorno</button>` : ''}</td>
+      <td>${!t.retornado ? `<button class="btn btn-success btn-xs" onclick="marcarRetornoTerceirizada('${t.id}')">Registrar retorno</button>` : ''}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--g400)">Nenhum registro na Empresa Terceirizada</td></tr>';
 }
@@ -6934,7 +6947,7 @@ function renderMapaSala(ativos, container) {
     const ativo   = ativosSala.find(a => a.posicao === pos);
     const dataAttrs = ativo ? `data-pat="${ativo.pat}" data-desc="${escapeHtml(ativo.desc||'')}" data-status="${ativo.status}"` : '';
     return `<div class="mapa-slot ${getStatusClass(pos)}" style="left:${leftPct}%;top:${topPct}%" 
-                 onclick="mapaSlotClick('${escapeHtml(pos)}','${ativo?.id||""}')"
+                 onclick="mapaSlotClick('${escapeHtml(pos)}','${ativo?.id||''}')"
                  title="${escapeHtml(pos)}" ${dataAttrs}>
               <div class="mapa-slot-dot">${getStatusIcon(pos)}</div>
               <div class="mapa-slot-label">${escapeHtml(pos)}</div>
@@ -6962,7 +6975,7 @@ function renderMapaSala(ativos, container) {
           <td style="font-size:12px;color:var(--g500)">${escapeHtml(a.posicao||'—')}</td>
           <td><span class="sp-${a.status||''}">${escapeHtml(a.status||'—')}</span></td>
           <td style="font-size:12px">${escapeHtml(a.resp||'—')}</td>
-          <td><button class="btn btn-ghost btn-xs" onclick="goPage(&quot;ativos&quot;)">Ver</button></td>
+          <td><button class="btn btn-ghost btn-xs" onclick="goPage('ativos')">Ver</button></td>
         </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--g400)">Nenhum ativo nesta sala</td></tr>'}
       </tbody>
     </table></div>
@@ -7667,7 +7680,7 @@ function abrirInstalarSoftware() {
   const cat = document.getElementById('soft-catalogo');
   if (cat) {
     cat.innerHTML = SOFT_CATALOGO.map((s,i) =>
-      '<div class="mapa-card" style="text-align:center;padding:10px;cursor:pointer" onclick="selecionarSoft(&quot; + i + &quot;)">' +
+      '<div class="mapa-card" style="text-align:center;padding:10px;cursor:pointer" onclick="selecionarSoft(' + i + ')">' +
       '<div style="font-size:20px">' + s.icon + '</div>' +
       '<div style="font-size:11px;font-weight:700;margin-top:4px">' + s.nome + '</div>' +
       '</div>'
@@ -8190,6 +8203,9 @@ function initPWA() {
       _swRegistration = reg;
       console.log('[PWA] ✓ Service Worker registrado:', reg.scope);
 
+      // Força verificação imediata de atualização ao carregar
+      reg.update().catch(() => {});
+
       // Verifica atualizações a cada 60 segundos
       setInterval(() => reg.update(), 60000);
 
@@ -8198,8 +8214,11 @@ function initPWA() {
         const worker = reg.installing;
         worker.addEventListener('statechange', () => {
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            // Nova versão disponível — notifica o usuário
-            showUpdateBanner();
+            if (reg.waiting) {
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            } else {
+              showUpdateBanner();
+            }
           }
         });
       });
@@ -9016,626 +9035,6 @@ function filtrarEmpregadosModal() {
     : '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum empregado encontrado</div>';
 }
 
-
-// ═══════════════════════════════════════════════════════════════
-// SERVIDORES — página dedicada
-// ═══════════════════════════════════════════════════════════════
-
-// Helpers de identificação de servidor pelo hostname
-function _srvNome(a) {
-  const candidatos = [a.hostname, a.sysName, a.nome, a.desc, a.name, a.pat];
-  for (const c of candidatos) {
-    const s = (c || '').trim();
-    if (s && s.toUpperCase() !== (a.ip || '').toUpperCase() && s.length > 2) return s;
-  }
-  return '';
-}
-function _contemServ(nome)  { return /serv/i.test(nome || ''); }
-function _contemVServ(nome) { return /vserv|vmserver|^vm-/i.test(nome || ''); }
-
-function isFisicoServidor(a) {
-  const hn   = _srvNome(a);
-  const tipo = (a.tipo || '').toLowerCase();
-  return (_contemServ(hn) && !_contemVServ(hn))
-      || (tipo === 'servidor' && !_contemVServ(hn));
-}
-function isVirtualServidor(a) {
-  const hn   = _srvNome(a);
-  const tipo = (a.tipo || '').toLowerCase();
-  return _contemVServ(hn) || tipo === 'server-linux';
-}
-function isServidor(a) {
-  const hn   = _srvNome(a);
-  const tipo = (a.tipo || '').toLowerCase();
-  return _contemServ(hn) || tipo === 'servidor' || tipo === 'server-linux';
-}
-function identificarServidores(ativos) {
-  return (ativos || []).filter(a => isServidor(a));
-}
-
-let _srvTab = 'todos';
-function srvTab(tab, el) {
-  _srvTab = tab;
-  document.querySelectorAll('.srv-tab-btn').forEach(b => {
-    b.style.background = 'transparent';
-    b.style.color      = 'var(--g500)';
-    b.style.boxShadow  = 'none';
-  });
-  if (el) {
-    el.style.background = '#fff';
-    el.style.color      = 'var(--g900)';
-    el.style.boxShadow  = '0 1px 3px rgba(0,0,0,.1)';
-  }
-  renderServidores();
-}
-
-function renderServidores() {
-  const q       = (document.getElementById('srv-search')?.value || '').toLowerCase();
-  const fStatus = document.getElementById('srv-filter-status')?.value || '';
-
-  // Busca servidores em STATE.ativos (identificados pelo hostname ou tipo)
-  let lista = identificarServidores(STATE.ativos);
-
-  if (_srvTab === 'fisico')   lista = lista.filter(isFisicoServidor);
-  if (_srvTab === 'virtual')  lista = lista.filter(isVirtualServidor);
-  if (fStatus)                lista = lista.filter(a => (a.status || '').toLowerCase() === fStatus);
-  if (q) lista = lista.filter(a =>
-    ['hostname','ip','desc','area','pat','sysName','osNome','fabricante','modelo']
-      .some(f => (a[f] || '').toLowerCase().includes(q))
-  );
-
-  // KPIs
-  const todos = identificarServidores(STATE.ativos);
-  const sv = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  sv('srv-kpi-total',   todos.length);
-  sv('srv-kpi-fisicos', todos.filter(isFisicoServidor).length);
-  sv('srv-kpi-virtuais',todos.filter(isVirtualServidor).length);
-  sv('srv-kpi-online',  todos.filter(a => a.reachable || (a.status || '').toLowerCase() === 'online').length);
-  sv('srv-kpi-offline', todos.filter(a => ['offline','critico'].includes((a.status || '').toLowerCase())).length);
-  nbUpdate('nb-servidores', todos.length);
-
-  const grid = document.getElementById('srv-grid');
-  if (!grid) return;
-
-  if (!lista.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px 24px;color:var(--g400)">'
-      + '<div style="font-size:48px;margin-bottom:12px">🖥️</div>'
-      + '<div style="font-size:15px;font-weight:600;margin-bottom:8px">Nenhum servidor encontrado</div>'
-      + '<div style="font-size:12px;line-height:1.6">Servidores são identificados pelo hostname:<br>'
-      + '<strong>Físicos:</strong> SERV* &nbsp;·&nbsp; <strong>Virtuais:</strong> VSERV*, VMSERVER*<br>'
-      + 'O agente SYSACK Client também define o tipo como <code>servidor</code> automaticamente.</div>'
-      + '</div>';
-    return;
-  }
-
-  // Ordena: crítico/offline primeiro, depois por hostname
-  lista.sort((a, b) => {
-    const ord = { critico: 0, offline: 1, alerta: 2, online: 3, ativo: 4 };
-    const sa  = ord[(a.status || '').toLowerCase()] ?? 5;
-    const sb  = ord[(b.status || '').toLowerCase()] ?? 5;
-    return sa !== sb ? sa - sb : (_srvNome(a) || '').localeCompare(_srvNome(b) || '');
-  });
-
-  function metricBar(label, val, danger, warn) {
-    if (val == null) return '';
-    const cor = val >= danger ? '#DC2626' : val >= warn ? '#D97706' : '#059669';
-    return '<div style="margin-bottom:6px">'
-      + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px">'
-      + '<span>' + label + '</span><span style="font-weight:700;color:' + cor + '">' + val + '%</span></div>'
-      + '<div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden">'
-      + '<div style="background:' + cor + ';width:' + Math.min(val, 100) + '%;height:100%;border-radius:3px"></div>'
-      + '</div></div>';
-  }
-
-  grid.innerHTML = lista.map(function(a) {
-    const hn       = _srvNome(a) || a.ip || '—';
-    const isVirt   = isVirtualServidor(a);
-    const tColor   = isVirt ? '#7C3AED' : '#2563EB';
-    const st       = (a.status || 'desconhecido').toLowerCase();
-    const online   = a.reachable || st === 'online' || st === 'ativo';
-    const stColor  = online ? '#059669' : st === 'critico' ? '#DC2626' : st === 'offline' ? '#6B7280' : '#D97706';
-    const stLabel  = online ? 'Online' : st.charAt(0).toUpperCase() + st.slice(1);
-
-    const uptime   = a.uptimeHoras != null
-      ? (a.uptimeHoras >= 24 ? Math.floor(a.uptimeHoras / 24) + 'd ' + Math.round(a.uptimeHoras % 24) + 'h'
-                              : Math.round(a.uptimeHoras) + 'h')
-      : null;
-    const lastSeen = a.lastSeen
-      ? new Date(a.lastSeen.seconds ? a.lastSeen.seconds * 1000 : a.lastSeen)
-          .toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
-      : '—';
-
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid ' + tColor + '">'
-      // Header escuro
-      + '<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
-          + '<span style="font-size:22px;flex-shrink:0">' + (isVirt ? '☁️' : '🖥️') + '</span>'
-          + '<div style="min-width:0">'
-            + '<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(hn) + '</div>'
-            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">' + escapeHtml(a.ip || '—') + (a.area ? ' · ' + escapeHtml(a.area) : '') + '</div>'
-          + '</div>'
-        + '</div>'
-        + '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
-          + '<span style="background:' + stColor + '22;color:' + stColor + ';border:1px solid ' + stColor + '44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">' + stLabel + '</span>'
-          + '<span style="background:' + tColor + '22;color:' + tColor + ';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">' + (isVirt ? '☁️ Virtual' : '🖥️ Físico') + '</span>'
-        + '</div>'
-      + '</div>'
-      // Métricas e info
-      + '<div style="padding:14px 16px">'
-        + (a.cpuPct != null || a.memPct != null
-            ? metricBar('CPU', a.cpuPct, 90, 70) + metricBar('RAM', a.memPct, 90, 80)
-            : '<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Métricas indisponíveis — agente não instalado</div>')
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:4px">'
-          + '<div><span style="color:var(--g400)">OS:</span> <span>' + escapeHtml((a.osNome || '—').split(' ').slice(0, 3).join(' ')) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">' + (uptime || '—') + '</span></div>'
-          + '<div><span style="color:var(--g400)">CPU:</span> <span>' + escapeHtml((a.cpuModelo || '—').slice(0, 24)) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Contato:</span> <span style="font-size:10px">' + lastSeen + '</span></div>'
-        + '</div>'
-      + '</div>'
-      // Ações
-      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        + '<button data-pid="' + escapeHtml(a.pat || a.id) + '" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
-        + '<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
-        + '<button data-aid="' + escapeHtml(a.id) + '" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
-      + '</div>'
-    + '</div>';
-  }).join('');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// FIREWALLS — página dedicada
-// ═══════════════════════════════════════════════════════════════
-
-function getFirewalls() {
-  return (STATE.switches || []).filter(s => (s.tipo || '').toLowerCase() === 'firewall');
-}
-
-function renderFirewalls() {
-  const q       = (document.getElementById('fw-search')?.value || '').toLowerCase();
-  const fStatus = document.getElementById('fw-filter-status')?.value || '';
-
-  let lista = getFirewalls();
-  if (fStatus) lista = lista.filter(f => (f.status || '').toLowerCase() === fStatus);
-  if (q) lista = lista.filter(f =>
-    (f.hostname || f.sysName || f.ip || '').toLowerCase().includes(q) ||
-    (f.ip || '').toLowerCase().includes(q) ||
-    (f.local || f.sysLocation || '').toLowerCase().includes(q)
-  );
-
-  const todos = getFirewalls();
-  const sv = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  sv('fw-kpi-total',    todos.length);
-  sv('fw-kpi-online',   todos.filter(f => f.reachable || (f.status || '').toLowerCase() === 'online').length);
-  sv('fw-kpi-offline',  todos.filter(f => (f.status || '').toLowerCase() === 'offline').length);
-  sv('fw-kpi-sem-snmp', todos.filter(f => !f.hasSnmp).length);
-  nbUpdate('nb-firewalls', todos.filter(f => (f.status || '').toLowerCase() === 'offline').length);
-
-  const grid = document.getElementById('fw-grid');
-  if (!grid) return;
-
-  if (!lista.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:56px 24px;color:var(--g400)">'
-      + '<div style="font-size:40px;margin-bottom:12px">🔥</div>'
-      + '<div style="font-weight:600;margin-bottom:6px">Nenhum firewall detectado</div>'
-      + '<div style="font-size:12px">Detectados via SNMP — OID Fortinet (1.3.6.1.4.1.12356.*) ou pfSense</div>'
-      + '</div>';
-    return;
-  }
-
-  grid.innerHTML = lista.map(function(f) {
-    const hn      = f.hostname || f.sysName || f.name || f.ip || '—';
-    const st      = (f.status || 'desconhecido').toLowerCase();
-    const online  = f.reachable || st === 'online' || st === 'ativo';
-    const stColor = online ? '#059669' : st === 'alerta' ? '#D97706' : st === 'offline' ? '#DC2626' : '#6B7280';
-    const stLabel = online ? 'Online' : st.charAt(0).toUpperCase() + st.slice(1);
-    const local   = f.local || f.sysLocation || '—';
-    const uptime  = f.uptimeH != null ? (f.uptimeH >= 24 ? Math.floor(f.uptimeH/24) + 'd ' + Math.round(f.uptimeH % 24) + 'h' : Math.round(f.uptimeH) + 'h') : '—';
-    const firmware= f.firmware || (f.sysDescr ? (f.sysDescr.match(/[Vv][\d.]+/) || ['—'])[0] : '—');
-    const latBar  = f.latencyMs != null
-      ? '<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'
-          + (f.latencyMs > 20 ? '#DC2626' : f.latencyMs > 5 ? '#D97706' : '#059669')
-          + ';width:' + Math.min(Math.round(f.latencyMs / 50 * 100), 100) + '%;height:100%;border-radius:3px"></div></div>'
-          + '<span style="font-size:11px;color:var(--g500);white-space:nowrap">' + f.latencyMs.toFixed(1) + 'ms</span></div>'
-      : '<span style="color:var(--g400);font-size:11px">—</span>';
-
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid ' + stColor + '">'
-      + '<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
-          + '<span style="font-size:22px;flex-shrink:0">🔥</span>'
-          + '<div style="min-width:0">'
-            + '<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(hn) + '</div>'
-            + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">' + escapeHtml(f.ip || '—') + '</div>'
-          + '</div>'
-        + '</div>'
-        + '<span style="background:' + stColor + '22;color:' + stColor + ';border:1px solid ' + stColor + '44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-left:8px">' + stLabel + '</span>'
-      + '</div>'
-      + '<div style="padding:14px 16px">'
-        + '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:4px"><span>Latência</span>'
-          + (f.hasSnmp ? '<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP ✓</span>' : '<span style="background:var(--g100);color:var(--g500);font-size:9px;padding:1px 5px;border-radius:8px">Sem SNMP</span>')
-          + '</div>' + latBar + '</div>'
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px">'
-          + '<div><span style="color:var(--g400)">Local:</span> <span>' + escapeHtml(local) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">' + escapeHtml(String(uptime)) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Firmware:</span> <span style="font-family:monospace;font-size:10.5px">' + escapeHtml(firmware) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Interfaces:</span> <span>' + (f.ifNumber || '—') + '</span></div>'
-        + '</div>'
-      + '</div>'
-      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        + '<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
-        + '<button data-aid="' + escapeHtml(f.id) + '" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📶 Ping</button>'
-        + '<button data-aid="' + escapeHtml(f.id) + '" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">🖥️ SSH</button>'
-      + '</div>'
-    + '</div>';
-  }).join('');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TOPOLOGIA — página dedicada
-// ═══════════════════════════════════════════════════════════════
-
-let _topoZoom = 1, _topoOffset = { x: 0, y: 0 }, _topoPositions = {};
-const TOPO_COLORS = { firewall:'#7C3AED', router:'#EA580C', switch:'#2563EB', 'switch-core':'#0F172A', ap:'#0891B2', default:'#64748B' };
-const TOPO_LAYER  = { firewall:0, router:1, 'switch-core':2, switch:3, ap:4, default:5 };
-
-function renderTopologia() {
-  const container = document.getElementById('topo-container');
-  const svg       = document.getElementById('topo-svg');
-  if (!svg || !container) return;
-
-  const W = container.clientWidth || 900;
-  const H = container.clientHeight || 620;
-
-  // Popula dropdown de áreas
-  const fArea = document.getElementById('topo-filter-area');
-  if (fArea) {
-    const areas = [...new Set((STATE.switches || []).map(d => d.area || d.sigla || '').filter(Boolean))].sort();
-    const cur   = fArea.value;
-    fArea.innerHTML = '<option value="">Todas as áreas</option>'
-      + areas.map(a => '<option value="' + escapeHtml(a) + '"' + (a === cur ? ' selected' : '') + '>' + escapeHtml(a) + '</option>').join('');
-  }
-
-  const fAreaVal    = fArea?.value || '';
-  const showFw      = document.getElementById('topo-show-fw')?.checked !== false;
-  const showRt      = document.getElementById('topo-show-rt')?.checked !== false;
-  const showSw      = document.getElementById('topo-show-sw')?.checked !== false;
-  const showAp      = document.getElementById('topo-show-ap')?.checked !== false;
-  const showLabels  = document.getElementById('topo-show-labels')?.checked !== false;
-
-  const tiposOk = new Set([
-    ...(showFw ? ['firewall'] : []),
-    ...(showRt ? ['router'] : []),
-    ...(showSw ? ['switch','switch-core','switch-distribuicao','switch-acesso'] : []),
-    ...(showAp ? ['ap'] : []),
-  ]);
-
-  const devs = (STATE.switches || []).filter(d => {
-    const t = (d.tipo || '').toLowerCase();
-    if (!tiposOk.has(t)) return false;
-    if (fAreaVal && d.area !== fAreaVal && d.sigla !== fAreaVal) return false;
-    return true;
-  });
-
-  // KPIs
-  const sv = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  sv('topo-kpi-total',    devs.length);
-  sv('topo-kpi-online',   devs.filter(d => d.reachable || (d.status || '') === 'online').length);
-  sv('topo-kpi-offline',  devs.filter(d => (d.status || '') === 'offline').length);
-  sv('topo-kpi-sem-lldp', devs.filter(d => !(d.lldpVizinhos || []).length).length);
-
-  const lu = document.getElementById('topo-last-update');
-  if (lu) lu.textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-
-  const gLinks  = document.getElementById('topo-g-links');
-  const gNodes  = document.getElementById('topo-g-nodes');
-  const gLabels = document.getElementById('topo-g-labels');
-  gLinks.innerHTML = ''; gNodes.innerHTML = ''; gLabels.innerHTML = '';
-
-  if (!devs.length) {
-    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    txt.setAttribute('x', W / 2); txt.setAttribute('y', H / 2);
-    txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('fill', '#94A3B8');
-    txt.setAttribute('font-size', '14');
-    txt.textContent = 'Nenhum dispositivo de rede encontrado';
-    gNodes.appendChild(txt);
-    sv('topo-kpi-links', 0);
-    return;
-  }
-
-  // Layout simples por camadas
-  const layers = {};
-  devs.forEach(d => {
-    const t = (d.tipo || 'switch').toLowerCase();
-    const l = TOPO_LAYER[t] ?? TOPO_LAYER.default;
-    if (!layers[l]) layers[l] = [];
-    layers[l].push(d);
-  });
-  const maxLayer = Math.max(...Object.keys(layers).map(Number));
-  const pad = 80, R = 26;
-  const nodePos = {};
-  Object.entries(layers).forEach(([layer, ns]) => {
-    const ly = pad + (Number(layer) / (maxLayer + 1)) * (H - pad * 2);
-    ns.forEach((n, i) => {
-      const spread = (ns.length - 1) * 110;
-      const x = W / 2 - spread / 2 + i * (spread / Math.max(ns.length - 1, 1));
-      const id = n.id || n.ip;
-      const saved = _topoPositions[id];
-      nodePos[id] = { x: saved?.x ?? x, y: saved?.y ?? ly, d: n };
-    });
-  });
-
-  // Links LLDP
-  let linkCount = 0;
-  const linkSet = new Set();
-  devs.forEach(d => {
-    const fromId = d.id || d.ip;
-    const from   = nodePos[fromId];
-    if (!from) return;
-    (d.lldpVizinhos || []).forEach(v => {
-      const toNode = Object.values(nodePos).find(p =>
-        (p.d.hostname || p.d.sysName || '').toLowerCase() === (v.remoteHost || '').toLowerCase()
-        || p.d.ip === v.remoteIp
-      );
-      if (!toNode) return;
-      const toId = toNode.d.id || toNode.d.ip;
-      const key  = [fromId, toId].sort().join('→');
-      if (linkSet.has(key)) return;
-      linkSet.add(key); linkCount++;
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', from.x); line.setAttribute('y1', from.y);
-      line.setAttribute('x2', toNode.x); line.setAttribute('y2', toNode.y);
-      line.setAttribute('stroke', '#2563EB'); line.setAttribute('stroke-width', '2');
-      line.setAttribute('opacity', '0.6');
-      gLinks.appendChild(line);
-    });
-  });
-  sv('topo-kpi-links', linkCount);
-
-  // Links inferidos (se não há LLDP)
-  if (linkCount === 0) {
-    const byArea = {};
-    Object.values(nodePos).forEach(p => {
-      const k = p.d.area || 'geral';
-      if (!byArea[k]) byArea[k] = { fw: [], rt: [], sw: [] };
-      const t = (p.d.tipo || '').toLowerCase();
-      if (t === 'firewall') byArea[k].fw.push(p);
-      else if (t === 'router') byArea[k].rt.push(p);
-      else byArea[k].sw.push(p);
-    });
-    Object.values(byArea).forEach(area => {
-      const anchors = [...area.fw, ...area.rt];
-      area.sw.forEach(sw => {
-        anchors.forEach(up => {
-          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-          line.setAttribute('x1', sw.x); line.setAttribute('y1', sw.y);
-          line.setAttribute('x2', up.x); line.setAttribute('y2', up.y);
-          line.setAttribute('stroke', '#CBD5E1'); line.setAttribute('stroke-width', '1.5');
-          line.setAttribute('stroke-dasharray', '5,4'); line.setAttribute('opacity', '0.5');
-          gLinks.appendChild(line);
-        });
-      });
-    });
-  }
-
-  // Nós
-  Object.values(nodePos).forEach(({ x, y, d }) => {
-    const tipo  = (d.tipo || 'switch').toLowerCase();
-    const color = TOPO_COLORS[tipo] || TOPO_COLORS.default;
-    const icon  = { firewall:'🔥', router:'🌐', switch:'🔀', 'switch-core':'🔀', ap:'📡' }[tipo] || '🔌';
-    const label = (d.hostname || d.sysName || d.name || d.ip || '').slice(0, 14);
-
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('cursor', 'pointer');
-    g.setAttribute('data-id', d.id || d.ip);
-
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', x); circle.setAttribute('cy', y);
-    circle.setAttribute('r', R); circle.setAttribute('fill', color);
-    circle.setAttribute('opacity', (d.reachable || (d.status || '') === 'online') ? '1' : '0.5');
-    g.appendChild(circle);
-
-    const ico = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    ico.setAttribute('x', x); ico.setAttribute('y', y + 1);
-    ico.setAttribute('text-anchor', 'middle'); ico.setAttribute('dominant-baseline', 'central');
-    ico.setAttribute('font-size', '15'); ico.setAttribute('pointer-events', 'none');
-    ico.textContent = icon;
-    g.appendChild(ico);
-
-    if (showLabels && label) {
-      const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      lbl.setAttribute('x', x); lbl.setAttribute('y', y + R + 14);
-      lbl.setAttribute('text-anchor', 'middle'); lbl.setAttribute('font-size', '10');
-      lbl.setAttribute('fill', '#334155'); lbl.setAttribute('font-weight', '600');
-      lbl.setAttribute('pointer-events', 'none');
-      lbl.textContent = label;
-      gLabels.appendChild(lbl);
-    }
-
-    g.addEventListener('mouseenter', () => circle.setAttribute('r', String(R + 3)));
-    g.addEventListener('mouseleave', () => circle.setAttribute('r', String(R)));
-    g.addEventListener('click', () => {
-      const panel = document.getElementById('topo-detail-panel');
-      if (panel) {
-        panel.style.display = '';
-        const n = document.getElementById('topo-detail-name');
-        const s = document.getElementById('topo-detail-sub');
-        if (n) n.textContent = d.hostname || d.sysName || d.ip || '—';
-        if (s) s.textContent = tipo.toUpperCase() + ' · ' + (d.ip || '—') + (d.area ? ' · ' + d.area : '');
-        const body = document.getElementById('topo-detail-body');
-        if (body) {
-          const campos = [
-            ['Status', d.status || '—'], ['IP', d.ip || '—'],
-            ['Área', d.area || '—'], ['Latência', d.latencyMs ? d.latencyMs.toFixed(1) + 'ms' : '—'],
-            ['SNMP', d.hasSnmp ? '✅ Sim' : '❌ Não'], ['Links LLDP', (d.lldpVizinhos || []).length],
-          ];
-          body.innerHTML = campos.map(([k, v]) =>
-            '<div style="background:var(--g50);border-radius:8px;padding:8px 10px">'
-            + '<div style="font-size:10px;color:var(--g400);font-weight:600;margin-bottom:2px">' + k + '</div>'
-            + '<div style="font-size:12px;font-weight:700;color:var(--g800)">' + escapeHtml(String(v)) + '</div>'
-            + '</div>'
-          ).join('');
-        }
-      }
-    });
-    gNodes.appendChild(g);
-  });
-
-  // Pan/zoom
-  const newC = container.cloneNode(false);
-  while (container.firstChild) newC.appendChild(container.firstChild);
-  container.parentNode.replaceChild(newC, container);
-  let dragging = false, sx = 0, sy = 0, sox = 0, soy = 0;
-  newC.addEventListener('mousedown', e => {
-    if (e.target.closest('g[data-id]')) return;
-    dragging = true; sx = e.clientX; sy = e.clientY;
-    sox = _topoOffset.x; soy = _topoOffset.y; newC.style.cursor = 'grabbing';
-  });
-  window.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    _topoOffset.x = sox + (e.clientX - sx); _topoOffset.y = soy + (e.clientY - sy);
-    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
-    svg.style.transformOrigin = '0 0';
-  });
-  window.addEventListener('mouseup', () => { dragging = false; newC.style.cursor = 'grab'; });
-  newC.addEventListener('wheel', e => {
-    e.preventDefault();
-    _topoZoom = Math.max(0.3, Math.min(3, _topoZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
-    svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')';
-    svg.style.transformOrigin = '0 0';
-  }, { passive: false });
-}
-
-function topoZoom(f) {
-  _topoZoom = Math.max(0.3, Math.min(3, _topoZoom * f));
-  const svg = document.getElementById('topo-svg');
-  if (svg) { svg.style.transform = 'translate(' + _topoOffset.x + 'px,' + _topoOffset.y + 'px) scale(' + _topoZoom + ')'; svg.style.transformOrigin = '0 0'; }
-}
-function topoReset() {
-  _topoZoom = 1; _topoOffset = { x: 0, y: 0 }; _topoPositions = {};
-  const svg = document.getElementById('topo-svg');
-  if (svg) svg.style.transform = '';
-  renderTopologia();
-}
-function topoExportar() {
-  const svg = document.getElementById('topo-svg');
-  if (!svg) return;
-  const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = 'topologia-' + new Date().toISOString().split('T')[0] + '.svg';
-  a.click(); URL.revokeObjectURL(url);
-  showToast('Topologia exportada', 'success', 2000);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// MONITORES — página dedicada
-// ═══════════════════════════════════════════════════════════════
-
-function coletarTodosMonitores() {
-  const wmi = [];
-  (STATE.ativos || []).forEach(ativo => {
-    let mons = [];
-    try { mons = typeof ativo.monitoresConectados === 'string'
-      ? JSON.parse(ativo.monitoresConectados)
-      : (Array.isArray(ativo.monitoresConectados) ? ativo.monitoresConectados : []);
-    } catch {}
-    mons.forEach(m => {
-      if (!m.serial) return;
-      const c = (STATE.monitoresCadastrados || []).find(x => x.serial === m.serial);
-      wmi.push({
-        serial: m.serial, fabricante: m.fabricante || '', modelo: m.modelo || '',
-        pat: c?.pat || m.pat || '', local: c?.local || ativo.sala || '',
-        pcAtual: ativo.hostname || ativo.ip || '—', pcId: ativo.id || '',
-        area: ativo.area || '', detectadoWMI: true, cadastroId: c?.id || null,
-        qtdMovimentos: (STATE.monitorHistorico || []).filter(h => h.serial === m.serial).length,
-      });
-    });
-  });
-  (STATE.monitoresCadastrados || []).forEach(c => {
-    if (wmi.find(m => m.serial === c.serial)) return;
-    wmi.push({ serial: c.serial || '', fabricante: c.fabricante || '', modelo: c.modelo || '',
-      pat: c.pat || '', local: c.local || '', pcAtual: c.pcVinculado || '—',
-      pcId: '', area: c.area || '', detectadoWMI: false, cadastroId: c.id, qtdMovimentos: 0 });
-  });
-  return wmi;
-}
-
-function renderMonitores() {
-  const q     = (document.getElementById('mon-search')?.value || '').toLowerCase();
-  const fSt   = document.getElementById('mon-filter-status')?.value || '';
-  const grid  = document.getElementById('mon-grid');
-  const todos = coletarTodosMonitores();
-
-  const sv = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  sv('mon-kpi-total',   todos.length);
-  sv('mon-kpi-sem-pat', todos.filter(m => !m.pat).length);
-  sv('mon-kpi-com-pat', todos.filter(m => !!m.pat).length);
-  sv('mon-kpi-movidos', todos.filter(m => m.qtdMovimentos > 1).length);
-  nbUpdate('nb-monitores-sem-pat', todos.filter(m => !m.pat).length);
-
-  if (!grid) return;
-  let lista = todos;
-  if (q) lista = lista.filter(m =>
-    (m.serial + m.pat + m.modelo + m.fabricante + m.pcAtual).toLowerCase().includes(q));
-  if (fSt === 'sem-pat') lista = lista.filter(m => !m.pat);
-  if (fSt === 'com-pat') lista = lista.filter(m =>  !!m.pat);
-  if (fSt === 'movido')  lista = lista.filter(m => m.qtdMovimentos > 1);
-
-  if (!lista.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)">'
-      + '<div style="font-size:40px;margin-bottom:12px">🖥️</div>'
-      + '<div style="font-weight:600">Nenhum monitor encontrado</div>'
-      + '<div style="font-size:12px;margin-top:6px">Detectados via WMI quando o agente SYSACK Client estiver instalado nas estações</div></div>';
-    return;
-  }
-
-  grid.innerHTML = lista.map(m => {
-    const temPat = !!m.pat;
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid ' + (temPat ? 'var(--success)' : '#F59E0B') + '">'
-      + '<div style="padding:14px 16px 10px">'
-        + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">'
-          + '<div style="display:flex;align-items:center;gap:10px">'
-            + '<div style="font-size:28px">🖥️</div>'
-            + '<div>'
-              + '<div style="font-size:14px;font-weight:700">' + escapeHtml((m.fabricante || '') + ' ' + (m.modelo || 'Monitor')) + '</div>'
-              + '<div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: ' + escapeHtml(m.serial || '—') + '</div>'
-            + '</div>'
-          + '</div>'
-          + (temPat
-              ? '<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">✅ ' + escapeHtml(m.pat) + '</span>'
-              : '<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">⚠️ Sem PAT</span>')
-        + '</div>'
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:8px">'
-          + '<div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">' + escapeHtml(m.pcAtual) + '</span></div>'
-          + '<div><span style="color:var(--g400)">Área:</span> <span>' + escapeHtml(m.area || '—') + '</span></div>'
-        + '</div>'
-      + '</div>'
-      + '<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        + '<button data-serial="' + escapeHtml(m.serial) + '" onclick="abrirAtribuirPATMonitor(this.dataset.serial)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:' + (temPat ? 'var(--g500)' : 'var(--accent)') + ';cursor:pointer;border-right:0.5px solid var(--g100)">' + (temPat ? '✏️ Alterar PAT' : '🏷️ Atribuir PAT') + '</button>'
-        + '<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">🎫 Chamado</button>'
-      + '</div>'
-    + '</div>';
-  }).join('');
-}
-
-function abrirAtribuirPATMonitor(serial) {
-  const m = coletarTodosMonitores().find(x => x.serial === serial);
-  if (!m) return;
-  const info = document.getElementById('mon-pat-info');
-  if (info) info.innerHTML = '<b>' + escapeHtml((m.fabricante || '') + ' ' + (m.modelo || 'Monitor')) + '</b> — S/N: ' + escapeHtml(serial);
-  const inp = document.getElementById('mon-pat-input');
-  if (inp) inp.value = m.pat || '';
-  const btn = document.getElementById('mon-pat-confirmar-btn');
-  if (btn) btn.disabled = !m.pat;
-  openModal('modal-atribuir-pat-monitor');
-  window._monitorAtualSerial = serial;
-}
-
-function abrirCadastroMonitorManual() {
-  ['mon-man-serial','mon-man-pat','mon-man-fab','mon-man-modelo','mon-man-local','mon-man-pc','mon-man-obs']
-    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  openModal('modal-monitor-manual');
-}
-
 function renderEmpregados() {
   const tbody    = document.getElementById('emp-body');
   if (!tbody) return;
@@ -9806,62 +9205,75 @@ let currentSwitch=null,currentSwView='cards',currentSwAction=null;
 const _swVlans=[];
 
 function renderSwitches(){
-  const sws=STATE.switches||[];
-  const q=(document.getElementById('sw-search-input')?.value||'').toLowerCase();
-  const fs=document.getElementById('sw-filter-status')?.value||'';
-  const ft=document.getElementById('sw-filter-tipo')?.value||'';
-  const filtered=sws.filter(s=>(!q||(s.hostname||s.sysName||s.name||'').toLowerCase().includes(q)||(s.ip||'').includes(q)||(s.modelo||'').toLowerCase().includes(q)||(s.local||s.sysLocation||'').toLowerCase().includes(q)||(s.marca||'').toLowerCase().includes(q))&&(!fs||s.status===fs)&&(!ft||s.tipo===ft));
-  sv('sw-s-total',sws.length);sv('sw-s-online',sws.filter(s=>s.status==='online').length);
-  sv('sw-s-offline',sws.filter(s=>s.status==='offline').length);sv('sw-s-alerta',sws.filter(s=>s.status==='alerta').length);
-  sv('sw-s-portas',sws.reduce((a,s)=>a+(s.totalPortas||0),0));
-  sv('sw-s-uso-portas',sws.reduce((a,s)=>a+(s.portasUso||0),0));
-  nbUpdate('nb-switches',sws.filter(s=>s.status==='offline'||s.status==='alerta').length);
-  const alertas=sws.filter(s=>s.status==='offline'||s.status==='alerta');
-  const alertDiv=document.getElementById('sw-network-alerts');
-  if(alertDiv) alertDiv.innerHTML=alertas.map(s=>{const _h=s.hostname||s.sysName||s.name||s.ip||'—';const _l=s.local&&s.local!=='undefined'?s.local:s.sysLocation&&s.sysLocation!=='undefined'?s.sysLocation:'sem local';const _m=[s.marca,s.modelo].filter(v=>v&&v!=='undefined').join(' ')||'';return `<div class='alert ${s.status==='offline'?'alert-danger':'alert-warning'}' style='margin-bottom:8px'><span>${s.status==='offline'?'🔴':'🟡'}</span><div><strong>${_h}</strong> — ${s.status==='offline'?'OFFLINE':'Em Alerta'}<br><span style='font-size:11.5px'>${s.ip} · ${_l}${_m?' · '+_m:''}</span></div><button class='btn btn-danger btn-sm' style='margin-left:auto;flex-shrink:0' onclick="abrirGerenciarSwitch('${s.id}')">Investigar</button></div>`}).join('');
-  if(currentSwView==='cards'){
-    const grid=document.getElementById('sw-cards-grid');
-    if(!grid) return;
-    grid.innerHTML=filtered.map(s=>{
-      const pct=Math.round(((s.portasUso||0)/(s.totalPortas||1))*100)||0;
-      const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
-      const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#1E293B';
-      // Fallbacks seguros para campos que podem vir undefined do Firestore
-      const hostname   = s.hostname || s.sysName || s.name || s.host || s.ip || '—';
-      const marcaModelo= [s.marca, s.modelo].filter(v => v && v !== 'undefined').join(' ') || '—';
-      const local      = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
-      const portasLabel= (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0)+'/'+s.totalPortas : '—/—';
-      return `<div class='sw-card'>
-        <div class='sw-card-header' style='background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px'>
-          <div style='width:36px;height:36px;border-radius:8px;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>\${ico}</div>
-          <div style='flex:1;min-width:0;margin-left:10px'>
-            <div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>\${hostname}</div>
-            <div style='font-size:10.5px;color:#94A3B8;margin-top:2px'>\${marcaModelo}</div>
-          </div>
-          \${swStatusHtml(s.status)}
-        </div>
-        <div class='sw-card-body'>
-          <div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>\${s.ip||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Local</span><span class='val' style='\${local==='—'?'color:var(--g400);font-style:italic':''}'>\${local}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:\${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ \${s.uptime||'—'}</span></div>
-          <div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>\${s.firmware||'—'}</span></div>
-          \${s.tipo!=='ap'&&s.tipo!=='firewall'?\`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: \${portasLabel}</span><span>\${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:\${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:\${pct}%;height:100%;border-radius:4px'></div></div></div>\`:''}
-        </div>
-        <div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>\${renderPortMinimap(s)}</div></div>
-        <div class='sw-card-actions'>
-          <button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch(&quot;\${s.id}')">⚙️ Gerenciar</button>
-          <button class='mdm-action-btn mab-info' onclick="abrirHistSwitch(&quot;\${s.id}')">📜 Histórico</button>
-          <button class='mdm-action-btn mab-success' onclick="openModal(&quot;modal-novo-chamado&quot;)">🎫 Chamado</button>
-          <button class='mdm-action-btn mab-warning' onclick="swActionDirect(&quot;ping&quot;,&quot;\${s.id}')">📶 Ping</button>
-          <button class='mdm-action-btn mab-dark' onclick="swActionDirect(&quot;ssh&quot;,&quot;\${s.id}')">🖥️ SSH</button>
-          <button class='mdm-action-btn mab-violet' onclick="swActionDirect(&quot;backup-config&quot;,&quot;\${s.id}')">💾 Backup</button>
-        </div>
-      </div>`;
-    }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
-  } else {
-    const tbody=document.getElementById('sw-table-body');
-    if(tbody) tbody.innerHTML=filtered.map(s=>`<tr><td class='td-mono' style='color:var(--accent)'>${s.pat}</td><td style='font-weight:700;font-family:JetBrains Mono,monospace'>${s.hostname}</td><td><span class='tag'>${s.tipo}</span></td><td>${s.marca} ${s.modelo}</td><td class='td-mono' style='color:var(--accent-hi)'>${s.ip}</td><td>${s.local}</td><td>${s.portasUso||0}/${s.totalPortas||0}</td><td class='td-mono' style='font-size:10.5px'>${(s.vlans||[]).map(v=>v.id).join(', ')||'—'}</td><td class='td-mono' style='font-size:10.5px'>${s.firmware||'—'}</td><td style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</td><td>${swStatusHtml(s.status)}</td><td><div class='flex gap-4'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect(&quot;ping&quot;,'${s.id}')">📶</button></div></td></tr>`).join('')||'<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum</td></tr>';
-  }
+  var q=(document.getElementById('sw-search')?.value||'').toLowerCase();
+  var fSt=document.getElementById('sw-filter-status')?.value||'';
+  var fTp=document.getElementById('sw-filter-tipo')?.value||'';
+  var fLo=document.getElementById('sw-filter-local')?.value||'';
+  var lista=(STATE.switches||[]).filter(function(s){
+    var t=(s.tipo||'').toLowerCase();
+    if(t==='firewall'||t==='impressora'||t==='printer')return false;
+    if(fSt&&(s.status||'')!==fSt)return false;
+    if(fTp&&t!==fTp)return false;
+    if(fLo&&!(s.local||s.sysLocation||'').toLowerCase().includes(fLo.toLowerCase()))return false;
+    if(q&&!(s.ip+' '+s.hostname+' '+s.sysName+' '+s.local+' '+s.desc+' '+s.pat).toLowerCase().includes(q))return false;
+    return true;
+  });
+  var total=(STATE.switches||[]).filter(function(s){var t=(s.tipo||'').toLowerCase();return t!=='firewall'&&t!=='impressora'&&t!=='printer';});
+  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('sw-total',total.length);
+  sv('sw-online',total.filter(function(s){return s.reachable||(s.status||'')==='online';}).length);
+  sv('sw-offline',total.filter(function(s){return(s.status||'')==='offline';}).length);
+  sv('sw-alertas',total.filter(function(s){return(s.status||'')==='alerta'||(s.status||'')==='critico';}).length);
+  sv('sw-portas-total',total.reduce(function(a,s){return a+(s.totalPortas||0);},0));
+  sv('sw-portas-uso',total.reduce(function(a,s){return a+(s.portasUso||0);},0));
+  var grid=document.getElementById('sw-cards-grid')||document.getElementById('sw-grid');
+  if(!grid)return;
+  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🔀</div><div style="font-weight:600">Nenhum dispositivo encontrado</div></div>';return;}
+  grid.innerHTML=lista.map(function(s){
+    var t=(s.tipo||'switch').toLowerCase();
+    var ico={switch:'🔀',router:'🌐',ap:'📡','switch-core':'🔀','switch-acesso':'🔀'}[t]||'🔌';
+    var bg={switch:'#2563EB',router:'#EA580C',ap:'#0891B2','switch-core':'#0F172A','switch-acesso':'#1D4ED8'}[t]||'#64748B';
+    var online=s.reachable||(s.status||'')==='online'||(s.status||'')==='ativo';
+    var sc=online?'#059669':(s.status||'')==='offline'?'#6B7280':(s.status||'')==='critico'?'#DC2626':'#D97706';
+    var sl=online?'Online':((s.status||'desconhecido').charAt(0).toUpperCase()+(s.status||'desconhecido').slice(1));
+    var hostname=s.hostname||s.sysName||s.name||s.ip||'—';
+    var marcaModelo=[s.marca,s.modelo].filter(function(v){return v&&v!=='undefined';}).join(' ')||(s.sysDescr?s.sysDescr.split(',')[0].trim().slice(0,40):'—');
+    var local=(s.local&&s.local!=='undefined')?s.local:'—';
+    var uptime=s.uptimeH!=null?(s.uptimeH>=24?Math.floor(s.uptimeH/24)+'d '+Math.round(s.uptimeH%24)+'h':Math.round(s.uptimeH)+'h'):(s.uptime||'—');
+    var firmware=s.firmware||(s.sysDescr?(s.sysDescr.match(/[Vv][\d.]+/)||['—'])[0]:'—');
+    var pct=s.totalPortas?Math.round((s.portasUso||0)/s.totalPortas*100):0;
+    var portasLabel=s.totalPortas&&s.totalPortas!=='undefined'?(s.portasUso||0)+'/'+s.totalPortas:'—/—';
+    var latBar='<span style="color:var(--g400);font-size:11px">—</span>';
+    if(s.latencyMs!=null){var lc=s.latencyMs>20?'#DC2626':s.latencyMs>5?'#D97706':'#059669';latBar='<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+lc+';width:'+Math.min(Math.round(s.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div><span style="font-size:11px;color:var(--g500)">'+s.latencyMs.toFixed(1)+'ms</span></div>';}
+    var portBar='';
+    if(s.totalPortas){var pc=pct>85?'#DC2626':pct>70?'#D97706':'#059669';portBar='<div style="margin-top:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Portas: '+portasLabel+'</span><span>'+pct+'%</span></div><div style="background:var(--g200);border-radius:4px;height:5px;overflow:hidden"><div style="background:'+pc+';width:'+pct+'%;height:100%;border-radius:4px"></div></div></div>';}
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;min-width:0">'
+      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);border-radius:10px 10px 0 0;padding:12px 14px;display:flex;align-items:center;gap:10px">'
+        +'<div style="width:36px;height:36px;border-radius:8px;background:'+bg+';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">'+ico+'</div>'
+        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;font-family:monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hostname)+'</div>'
+        +'<div style="font-size:10.5px;color:#94A3B8;margin-top:1px">'+escapeHtml(marcaModelo)+'</div></div>'
+        +'<span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;flex-shrink:0">'+sl+'</span>'
+      +'</div>'
+      +'<div style="padding:12px 14px">'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-bottom:10px">'
+          +'<div><span style="color:var(--g400)">IP</span> <span style="font-family:monospace;font-weight:600">'+escapeHtml(s.ip||'—')+'</span></div>'
+          +'<div><span style="color:var(--g400)">Local</span> <span>'+escapeHtml(local)+'</span></div>'
+          +'<div><span style="color:var(--g400)">Uptime</span> <span style="font-weight:600">'+escapeHtml(String(uptime))+'</span></div>'
+          +'<div><span style="color:var(--g400)">Firmware</span> <span style="font-family:monospace;font-size:10.5px">'+escapeHtml(firmware)+'</span></div>'
+        +'</div>'
+        +'<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Latência</span>'+(s.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP ✓</span>':'')+'</div>'+latBar+'</div>'
+        +portBar
+      +'</div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="abrirGerenciarSwitch(this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">⚙️ Gerenciar</button>'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="abrirHistSwitch(this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
+        +'<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📶 Ping</button>'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🖥 SSH</button>'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="swActionDirect(&quot;backup-config&quot;,this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer">💾 Backup</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
 }
 
 function renderPortMinimap(s){
@@ -10557,7 +9969,7 @@ function renderPatrimonio() {
       <td>
         <div style="display:flex;gap:4px">
           <button class="btn btn-ghost btn-xs" onclick="patVerDetalhes('${p.id||p.pat}')">Ver</button>
-          ${p.status !== 'baixado' ? `<button class="btn btn-danger btn-xs" onclick="patBaixar("${p.id||p.pat}')">Baixar</button>` : ''}
+          ${p.status !== 'baixado' ? `<button class="btn btn-danger btn-xs" onclick="patBaixar('${p.id||p.pat}')">Baixar</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -11812,8 +11224,8 @@ function renderOSDDeploys() {
       <td style="font-size:12px">${d.inicio ? new Date(d.inicio).toLocaleString('pt-BR') : '—'}</td>
       <td style="font-size:12px">${escapeHtml(d.tecnico||'—')}</td>
       <td>
-        ${d.status === 'andamento' ? `<button class="btn btn-danger btn-xs" onclick="osdCancelar("${d.id}')">Cancelar</button>` : ''}
-        ${d.status === 'erro' ? `<button class="btn btn-secondary btn-xs" onclick="osdReiniciar("${d.id}')">↺ Tentar novamente</button>` : ''}
+        ${d.status === 'andamento' ? `<button class="btn btn-danger btn-xs" onclick="osdCancelar('${d.id}')">Cancelar</button>` : ''}
+        ${d.status === 'erro' ? `<button class="btn btn-secondary btn-xs" onclick="osdReiniciar('${d.id}')">↺ Tentar novamente</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -12383,7 +11795,7 @@ function cisExibirResultados(dispId) {
     const catCor = catPct === 100 ? '#10B981' : catPct >= 70 ? '#F59E0B' : '#EF4444';
     return `
       <div class="card mb-12">
-        <div class="card-header" style="cursor:pointer" onclick="this.nextElementSibling.classList.toggle(&quot;hidden&quot;)">
+        <div class="card-header" style="cursor:pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">
           <div style="display:flex;align-items:center;gap:12px;flex:1">
             <span style="font-weight:700;font-size:13px">${escapeHtml(cat)}</span>
             <div style="flex:1;max-width:200px;height:6px;background:var(--g200);border-radius:3px;overflow:hidden">
@@ -12555,7 +11967,14 @@ let _impCharts = {};
 
 // Retorna impressoras do STATE (switches com tipo='printer')
 function getImpressoras() {
-  return (STATE.switches || []).filter(s => s.tipo === 'printer' || s.tipo === 'impressora');
+  var deDisc=STATE.impressorasDisc||[];
+  var deAtivos=(STATE.ativos||[]).filter(function(a){var t=(a.tipo||'').toLowerCase();return t==='printer'||t==='impressora';});
+  var deSw=(STATE.switches||[]).filter(function(s){var t=(s.tipo||'').toLowerCase();return t==='printer'||t==='impressora';});
+  var todos=deDisc.slice();
+  var chave=function(x){return x.ip||x.hostname||x.desc||x.id||'';};
+  var vistos=new Set(todos.map(chave).filter(Boolean));
+  deAtivos.concat(deSw).forEach(function(s){var k=chave(s);if(!k||!vistos.has(k)){if(k)vistos.add(k);todos.push(s);}});
+  return todos;
 }
 
 function renderImpressoras() {
@@ -13788,7 +13207,7 @@ function abrirSeletorTemplate() {
             <span style="font-size:10px;padding:1px 8px;border-radius:10px;background:var(--g100);color:var(--g600)">${tpl.prioridade}</span>
           </div>
         </div>`).join('')}
-      <div onclick="openModal(&quot;modal-novo-chamado');this.closest('[style*=z-index:10001]').remove()"
+      <div onclick="openModal('modal-novo-chamado');this.closest('[style*=z-index:10001]').remove()"
         style="border:2px dashed var(--g300);border-radius:10px;padding:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--g400);transition:all .15s"
         onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
         onmouseout="this.style.borderColor='var(--g300)';this.style.color='var(--g400)'">
@@ -14531,7 +13950,7 @@ function renderRelatorioCapacidade() {
     <!-- Bens próximos da renovação -->
     ${parasRenovar.length ? `
     <div class="card mb-16">
-      <div class="card-header"><h3>🔄 Bens próximos do prazo de renovação</h3><button class="btn btn-ghost btn-sm" onclick="patExportarRelatorio(&quot;csv&quot;)">⬇ Exportar</button></div>
+      <div class="card-header"><h3>🔄 Bens próximos do prazo de renovação</h3><button class="btn btn-ghost btn-sm" onclick="patExportarRelatorio('csv')">⬇ Exportar</button></div>
       <div class="table-wrap"><table>
         <thead><tr><th>PAT</th><th>Descrição</th><th>Categoria</th><th>Data Aquisição</th><th>Idade</th><th>Vida Útil</th><th>Depreciado</th><th>Valor Atual</th></tr></thead>
         <tbody>
@@ -14657,8 +14076,8 @@ function renderWSUS() {
 
     <div style="display:flex;gap:8px;margin-bottom:14px">
       <button class="btn btn-primary btn-sm" onclick="wsusVarredura()">🔍 Iniciar Varredura</button>
-      <button class="btn btn-secondary btn-sm" onclick="wsusInstalarTodos(&quot;critica&quot;)">🚨 Instalar críticos agora</button>
-      <button class="btn btn-ghost btn-sm" onclick="wsusInstalarTodos(&quot;todos&quot;)">📦 Instalar todos aprovados</button>
+      <button class="btn btn-secondary btn-sm" onclick="wsusInstalarTodos('critica')">🚨 Instalar críticos agora</button>
+      <button class="btn btn-ghost btn-sm" onclick="wsusInstalarTodos('todos')">📦 Instalar todos aprovados</button>
     </div>
 
     <div class="card">
@@ -16850,7 +16269,7 @@ function patCardResultado(ativo, pat, hn, pp) {
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       ${!a.pat ? `<button onclick="patAbrirVincular('${escapeHtml(a.id||'')}','${escapeHtml(p.pat||'')}',this)" class="btn btn-primary btn-sm">+ Vincular PAT</button>` : ''}
       ${a.id   ? `<button onclick="patAbrirCadastro('',${JSON.stringify(a.id)})" class="btn btn-ghost btn-sm">✏️ Editar</button>` : ''}
-      ${!hostnameOk && a.id ? `<button onclick="patCorrigirHostname("${escapeHtml(a.id)}')" class="btn btn-warning btn-sm" style="background:#F59E0B;color:#fff;border:none">⚠️ Corrigir Hostname</button>` : ''}
+      ${!hostnameOk && a.id ? `<button onclick="patCorrigirHostname('${escapeHtml(a.id)}')" class="btn btn-warning btn-sm" style="background:#F59E0B;color:#fff;border:none">⚠️ Corrigir Hostname</button>` : ''}
     </div>
   </div>`;
 }
@@ -17163,7 +16582,7 @@ function renderMapaRede() {
           fill="${node._isSw?'#1E293B':'var(--bg,#fff)'}"
           stroke="${statusColor}" stroke-width="2"
           style="cursor:pointer;filter:drop-shadow(0 2px 6px rgba(0,0,0,.1))"
-          data-nid="${node.id}" data-col="${node._isSw?'switches':'ativos'}" onclick="abrirMonitorDetalhe(this.dataset.nid,this.dataset.col)" />
+          onclick="abrirMonitorDetalhe('${node.id}','${node._isSw?'switches':'ativos'}')"/>
         <circle cx="${nx+18}" cy="${ny+H_NODE/2}" r="6" fill="${statusColor}"/>
         <text x="${nx+30}" y="${ny+18}" font-size="11" font-weight="700" fill="${node._isSw?'#fff':'var(--g900,#111827)'}" font-family="system-ui">${icon} ${escapeHtml((node.hostname||node.desc||node.ip||'—').slice(0,20))}</text>
         <text x="${nx+30}" y="${ny+30}" font-size="9.5" fill="${node._isSw?'rgba(255,255,255,.6)':'var(--g400,#94a3b8)'}" font-family="monospace">${escapeHtml(node.ip||node.ipAddress||'—')}</text>
@@ -17325,3 +16744,273 @@ function monSetView(view) {
     if (typeof _prev === 'function') return _prev(id, val);
   };
 })();
+
+// ── SERVIDORES ──────────────────────────────────────────────────────────────
+function _srvNome(a){var cs=[a.hostname,a.sysName,a.nome,a.desc,a.name,a.pat];for(var i=0;i<cs.length;i++){var s=(cs[i]||'').trim();if(s&&s!==a.ip&&s.length>2)return s;}return '';}
+function _contemVServ(n){return /vserv|vmserver|vm-/i.test(n||'');}
+function _contemServ(n){return /serv/i.test(n||'');}
+function isFisicoServidor(a){var h=_srvNome(a),t=(a.tipo||'').toLowerCase();return(_contemServ(h)&&!_contemVServ(h))||(t==='servidor'&&!_contemVServ(h));}
+function isVirtualServidor(a){var h=_srvNome(a),t=(a.tipo||'').toLowerCase();return _contemVServ(h)||t==='server-linux';}
+function isServidor(a){var h=_srvNome(a),t=(a.tipo||'').toLowerCase();return _contemServ(h)||t==='servidor'||t==='server-linux';}
+var _srvTabAtual='todos';
+function srvTab(tab,el){
+  _srvTabAtual=tab;
+  document.querySelectorAll('.srv-tab-btn').forEach(function(b){b.style.background='transparent';b.style.color='var(--g500)';b.style.boxShadow='none';});
+  if(el){el.style.background='#fff';el.style.color='var(--g900)';el.style.boxShadow='0 1px 3px rgba(0,0,0,.1)';}
+  renderServidores();
+}
+function renderServidores(){
+  var q=(document.getElementById('srv-search')?.value||'').toLowerCase();
+  var fSt=document.getElementById('srv-filter-status')?.value||'';
+  var lista=(STATE.ativos||[]).filter(isServidor);
+  if(_srvTabAtual==='fisico')lista=lista.filter(isFisicoServidor);
+  if(_srvTabAtual==='virtual')lista=lista.filter(isVirtualServidor);
+  if(fSt)lista=lista.filter(function(a){return(a.status||'').toLowerCase()===fSt;});
+  if(q)lista=lista.filter(function(a){return['hostname','ip','desc','area','pat','osNome'].some(function(f){return(a[f]||'').toLowerCase().includes(q);});});
+  var todos=(STATE.ativos||[]).filter(isServidor);
+  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('srv-kpi-total',todos.length);
+  sv('srv-kpi-fisicos',todos.filter(isFisicoServidor).length);
+  sv('srv-kpi-virtuais',todos.filter(isVirtualServidor).length);
+  sv('srv-kpi-online',todos.filter(function(a){return a.reachable||(a.status||'').toLowerCase()==='online';}).length);
+  sv('srv-kpi-offline',todos.filter(function(a){return(a.status||'').toLowerCase()==='offline';}).length);
+  var grid=document.getElementById('srv-grid');
+  if(!grid)return;
+  if(!lista.length){
+    grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)">'
+      +'<div style="font-size:48px;margin-bottom:12px">🖥️</div>'
+      +'<div style="font-size:15px;font-weight:600">Nenhum servidor encontrado</div>'
+      +'<div style="font-size:12px;margin-top:8px">Identificados por hostname contendo SERV/VSERV ou tipo=servidor</div>'
+      +'</div>';
+    return;
+  }
+  lista.sort(function(a,b){
+    var ord={critico:0,offline:1,alerta:2,online:3,ativo:4};
+    var sa=ord[(a.status||'').toLowerCase()]||5,sb=ord[(b.status||'').toLowerCase()]||5;
+    return sa!==sb?sa-sb:(_srvNome(a)||'').localeCompare(_srvNome(b)||'');
+  });
+  function mBar(lbl,val,danger,warn){
+    if(val==null)return '';
+    var cor=val>=danger?'#DC2626':val>=warn?'#D97706':'#059669';
+    return '<div style="margin-bottom:5px">'
+      +'<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px">'
+      +'<span>'+lbl+'</span><span style="font-weight:700;color:'+cor+'">'+val+'%</span></div>'
+      +'<div style="background:var(--g200);border-radius:3px;height:4px;overflow:hidden">'
+      +'<div style="background:'+cor+';width:'+Math.min(val,100)+'%;height:100%;border-radius:3px"></div>'
+      +'</div></div>';
+  }
+  grid.innerHTML=lista.map(function(a){
+    var hn=_srvNome(a)||a.ip||'—';
+    var isVirt=isVirtualServidor(a);
+    var tc=isVirt?'#7C3AED':'#2563EB';
+    var st=(a.status||'desconhecido').toLowerCase();
+    var online=a.reachable||st==='online'||st==='ativo';
+    var sc=online?'#059669':st==='critico'?'#DC2626':st==='offline'?'#6B7280':'#D97706';
+    var sl=online?'Online':(st.charAt(0).toUpperCase()+st.slice(1));
+    var up=a.uptimeHoras!=null
+      ?(a.uptimeHoras>=24?Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h':Math.round(a.uptimeHoras)+'h')
+      :null;
+    var ls=a.lastSeen
+      ?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen)
+          .toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+      :'—';
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tc+'">'
+      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
+        +'<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
+          +'<span style="font-size:22px;flex-shrink:0">'+(isVirt?'☁️':'🖥️')+'</span>'
+          +'<div style="min-width:0">'
+            +'<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
+            +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+(a.area?' · '+escapeHtml(a.area):'')+'</div>'
+          +'</div>'
+        +'</div>'
+        +'<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
+          +'<span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+sl+'</span>'
+          +'<span style="background:'+tc+'22;color:'+tc+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+(isVirt?'☁️ Virtual':'🖥️ Físico')+'</span>'
+        +'</div>'
+      +'</div>'
+      +'<div style="padding:14px 16px">'
+        +(a.cpuPct!=null||a.memPct!=null
+          ?mBar('CPU',a.cpuPct,90,70)+mBar('RAM',a.memPct,90,80)
+          :'<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Agente não instalado — métricas indisponíveis</div>')
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:4px">'
+          +'<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').slice(0,28))+'</span></div>'
+          +'<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(up||'—')+'</span></div>'
+          +'<div><span style="color:var(--g400)">CPU:</span> <span>'+escapeHtml((a.cpuModelo||'—').slice(0,22))+'</span></div>'
+          +'<div><span style="color:var(--g400)">Contato:</span> <span style="font-size:10px">'+ls+'</span></div>'
+        +'</div>'
+      +'</div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button data-pid="'+escapeHtml(a.pat||a.id)+'" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📜 Histórico</button>'
+        +'<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        +'<button data-aid="'+escapeHtml(a.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">📶 Ping</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+
+// ── FIREWALLS ───────────────────────────────────────────────────────────────
+function getFirewalls(){return(STATE.switches||[]).filter(function(s){return(s.tipo||'').toLowerCase()==='firewall';});}
+function renderFirewalls(){
+  var q=(document.getElementById('fw-search')?.value||'').toLowerCase();
+  var fSt=document.getElementById('fw-filter-status')?.value||'';
+  var todos=getFirewalls();
+  var lista=todos.filter(function(f){return(!fSt||(f.status||'').toLowerCase()===fSt)&&(!q||(f.hostname||f.sysName||f.ip||'').toLowerCase().includes(q));});
+  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('fw-kpi-total',todos.length);
+  sv('fw-kpi-online',todos.filter(function(f){return f.reachable||(f.status||'').toLowerCase()==='online';}).length);
+  sv('fw-kpi-offline',todos.filter(function(f){return(f.status||'').toLowerCase()==='offline';}).length);
+  sv('fw-kpi-sem-snmp',todos.filter(function(f){return!f.hasSnmp;}).length);
+  nbUpdate('nb-firewalls',todos.filter(function(f){return(f.status||'').toLowerCase()==='offline';}).length);
+  var grid=document.getElementById('fw-grid');
+  if(!grid)return;
+  if(!lista.length){
+    grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)">'
+      +'<div style="font-size:40px;margin-bottom:12px">🔥</div>'
+      +'<div style="font-weight:600">Nenhum firewall detectado</div>'
+      +'<div style="font-size:12px">Detectados via SNMP — OID Fortinet ou pfSense</div>'
+      +'</div>';
+    return;
+  }
+  grid.innerHTML=lista.map(function(f){
+    var hn=f.hostname||f.sysName||f.ip||'—';
+    var st=(f.status||'desconhecido').toLowerCase();
+    var online=f.reachable||st==='online'||st==='ativo';
+    var sc=online?'#059669':st==='alerta'?'#D97706':st==='offline'?'#DC2626':'#6B7280';
+    var sl=online?'Online':(st.charAt(0).toUpperCase()+st.slice(1));
+    var latBar='<span style="color:var(--g400);font-size:11px">—</span>';
+    if(f.latencyMs!=null){
+      var lc=f.latencyMs>20?'#DC2626':f.latencyMs>5?'#D97706':'#059669';
+      latBar='<div style="display:flex;align-items:center;gap:6px">'
+        +'<div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden">'
+        +'<div style="background:'+lc+';width:'+Math.min(Math.round(f.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div>'
+        +'<span style="font-size:11px;color:var(--g500)">'+f.latencyMs.toFixed(1)+'ms</span></div>';
+    }
+    var up=f.uptimeH!=null?(f.uptimeH>=24?Math.floor(f.uptimeH/24)+'d '+Math.round(f.uptimeH%24)+'h':Math.round(f.uptimeH)+'h'):'—';
+    var fw=f.firmware||(f.sysDescr?(f.sysDescr.match(/[Vv][\d.]+/)||['—'])[0]:'—');
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+sc+'">'
+      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
+        +'<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
+          +'<span style="font-size:22px;flex-shrink:0">🔥</span>'
+          +'<div style="min-width:0">'
+            +'<div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(hn)+'</div>'
+            +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(f.ip||'—')+'</div>'
+          +'</div>'
+        +'</div>'
+        +'<span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-left:8px">'+sl+'</span>'
+      +'</div>'
+      +'<div style="padding:14px 16px">'
+        +'<div style="margin-bottom:10px">'
+          +'<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:4px">'
+            +'<span>Latência</span>'
+            +(f.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP ✓</span>':'')
+          +'</div>'+latBar
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px">'
+          +'<div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(f.local||f.sysLocation||'—')+'</span></div>'
+          +'<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+escapeHtml(up)+'</span></div>'
+          +'<div><span style="color:var(--g400)">Firmware:</span> <span style="font-family:monospace;font-size:10.5px">'+escapeHtml(fw)+'</span></div>'
+          +'<div><span style="color:var(--g400)">Interfaces:</span> <span>'+(f.ifNumber||'—')+'</span></div>'
+        +'</div>'
+      +'</div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">🎫 Chamado</button>'
+        +'<button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">📶 Ping</button>'
+        +'<button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">🖥 SSH</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+
+// ── TOPOLOGIA ───────────────────────────────────────────────────────────────
+var _topoZoom=1,_topoOffset={x:0,y:0},_topoPos={};
+var TOPO_CLR={firewall:'#7C3AED',router:'#EA580C',switch:'#2563EB','switch-core':'#0F172A',ap:'#0891B2'};
+var TOPO_LYR={firewall:0,router:1,'switch-core':2,switch:3,ap:4};
+function renderTopologia(){
+  var cont=document.getElementById('topo-container');
+  var svg=document.getElementById('topo-svg');
+  if(!svg||!cont)return;
+  var W=cont.clientWidth||900,H=cont.clientHeight||620;
+  var fA=document.getElementById('topo-filter-area');
+  if(fA){var areas=[...new Set((STATE.switches||[]).map(function(d){return d.area||'';}).filter(Boolean))].sort();fA.innerHTML='<option value="">Todas as áreas</option>'+areas.map(function(a){return'<option>'+escapeHtml(a)+'</option>';}).join('');}
+  var fAv=fA?fA.value:'';
+  var ck=function(id){return document.getElementById(id)?.checked!==false;};
+  var typs=new Set([...(ck('topo-show-fw')?['firewall']:[]),...(ck('topo-show-rt')?['router']:[]),...(ck('topo-show-sw')?['switch','switch-core','switch-acesso','switch-distribuicao']:[]),...(ck('topo-show-ap')?['ap']:[])]);
+  var devs=(STATE.switches||[]).filter(function(d){return typs.has((d.tipo||'').toLowerCase())&&(!fAv||d.area===fAv);});
+  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('topo-kpi-total',devs.length);
+  sv('topo-kpi-online',devs.filter(function(d){return d.reachable||(d.status||'')==='online';}).length);
+  sv('topo-kpi-offline',devs.filter(function(d){return(d.status||'')==='offline';}).length);
+  sv('topo-kpi-sem-lldp',devs.filter(function(d){return!Array.isArray(d.lldpVizinhos)||!d.lldpVizinhos.length;}).length);
+  var lu=document.getElementById('topo-last-update');if(lu)lu.textContent='Atualizado: '+new Date().toLocaleTimeString('pt-BR');
+  var gL=document.getElementById('topo-g-links'),gN=document.getElementById('topo-g-nodes'),gLb=document.getElementById('topo-g-labels');
+  gL.innerHTML='';gN.innerHTML='';gLb.innerHTML='';
+  if(!devs.length){
+    var txt=document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x',W/2);txt.setAttribute('y',H/2);txt.setAttribute('text-anchor','middle');txt.setAttribute('fill','#94A3B8');txt.setAttribute('font-size','14');
+    txt.textContent='Nenhum dispositivo de rede encontrado';gN.appendChild(txt);sv('topo-kpi-links',0);return;
+  }
+  var lyrs={};devs.forEach(function(d){var l=TOPO_LYR[(d.tipo||'switch').toLowerCase()]||3;if(!lyrs[l])lyrs[l]=[];lyrs[l].push(d);});
+  var mx=Math.max.apply(null,Object.keys(lyrs).map(Number)),pad=80,R=26,pos={};
+  Object.keys(lyrs).forEach(function(l){var ns=lyrs[l];var ly=pad+(Number(l)/(mx+1))*(H-pad*2);ns.forEach(function(n,i){var sp=(ns.length-1)*110;var x=W/2-sp/2+i*(sp/Math.max(ns.length-1,1));var id=n.id||n.ip;pos[id]={x:(_topoPos[id]?_topoPos[id].x:x),y:(_topoPos[id]?_topoPos[id].y:ly),d:n};});});
+  var lc=0,ls=new Set();
+  devs.forEach(function(d){var fi=d.id||d.ip;var fr=pos[fi];if(!fr||!Array.isArray(d.lldpVizinhos))return;
+    d.lldpVizinhos.forEach(function(v){
+      var tn=Object.values(pos).find(function(p){return(p.d.hostname||p.d.sysName||'').toLowerCase()===(v.remoteHost||'').toLowerCase()||p.d.ip===v.remoteIp;});
+      if(!tn)return;var ti=tn.d.id||tn.d.ip;var key=[fi,ti].sort().join('>');if(ls.has(key))return;ls.add(key);lc++;
+      var line=document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1',fr.x);line.setAttribute('y1',fr.y);line.setAttribute('x2',tn.x);line.setAttribute('y2',tn.y);
+      line.setAttribute('stroke','#2563EB');line.setAttribute('stroke-width','2');line.setAttribute('opacity','0.6');gL.appendChild(line);
+    });
+  });
+  sv('topo-kpi-links',lc);
+  if(lc===0){var ba={};Object.values(pos).forEach(function(p){var k=p.d.area||'g';if(!ba[k])ba[k]={fw:[],rt:[],sw:[]};var t=(p.d.tipo||'').toLowerCase();if(t==='firewall')ba[k].fw.push(p);else if(t==='router')ba[k].rt.push(p);else ba[k].sw.push(p);});Object.values(ba).forEach(function(ar){var anch=ar.fw.concat(ar.rt);ar.sw.forEach(function(sw){anch.forEach(function(up){var l=document.createElementNS('http://www.w3.org/2000/svg','line');l.setAttribute('x1',sw.x);l.setAttribute('y1',sw.y);l.setAttribute('x2',up.x);l.setAttribute('y2',up.y);l.setAttribute('stroke','#CBD5E1');l.setAttribute('stroke-width','1.5');l.setAttribute('stroke-dasharray','5,4');l.setAttribute('opacity','0.5');gL.appendChild(l);});});});}
+  var showLbls=ck('topo-show-labels');
+  Object.values(pos).forEach(function(item){
+    var x=item.x,y=item.y,d=item.d;
+    var tipo=(d.tipo||'switch').toLowerCase();
+    var color=TOPO_CLR[tipo]||'#64748B';
+    var icon={firewall:'🔥',router:'🌐',switch:'🔀','switch-core':'🔀',ap:'📡'}[tipo]||'🔌';
+    var label=(d.hostname||d.sysName||d.ip||'').slice(0,14);
+    var g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('cursor','pointer');g.setAttribute('data-id',d.id||d.ip);
+    var c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('cx',x);c.setAttribute('cy',y);c.setAttribute('r',R);c.setAttribute('fill',color);c.setAttribute('opacity',(d.reachable||(d.status||'')==='online')?'1':'0.5');g.appendChild(c);
+    var ic=document.createElementNS('http://www.w3.org/2000/svg','text');ic.setAttribute('x',x);ic.setAttribute('y',y+1);ic.setAttribute('text-anchor','middle');ic.setAttribute('dominant-baseline','central');ic.setAttribute('font-size','15');ic.setAttribute('pointer-events','none');ic.textContent=icon;g.appendChild(ic);
+    if(showLbls&&label){var lb=document.createElementNS('http://www.w3.org/2000/svg','text');lb.setAttribute('x',x);lb.setAttribute('y',y+R+14);lb.setAttribute('text-anchor','middle');lb.setAttribute('font-size','10');lb.setAttribute('fill','#334155');lb.setAttribute('font-weight','600');lb.setAttribute('pointer-events','none');lb.textContent=label;gLb.appendChild(lb);}
+    g.addEventListener('mouseenter',function(){c.setAttribute('r',String(R+3));});
+    g.addEventListener('mouseleave',function(){c.setAttribute('r',String(R));});
+    gN.appendChild(g);
+  });
+  var nc=cont.cloneNode(false);while(cont.firstChild)nc.appendChild(cont.firstChild);cont.parentNode.replaceChild(nc,cont);
+  var drag=false,sx=0,sy=0,sox=0,soy=0;
+  nc.addEventListener('mousedown',function(e){if(e.target.closest('g[data-id]'))return;drag=true;sx=e.clientX;sy=e.clientY;sox=_topoOffset.x;soy=_topoOffset.y;nc.style.cursor='grabbing';});
+  window.addEventListener('mousemove',function(e){if(!drag)return;_topoOffset.x=sox+(e.clientX-sx);_topoOffset.y=soy+(e.clientY-sy);svg.style.transform='translate('+_topoOffset.x+'px,'+_topoOffset.y+'px) scale('+_topoZoom+')';svg.style.transformOrigin='0 0';});
+  window.addEventListener('mouseup',function(){drag=false;nc.style.cursor='grab';});
+  nc.addEventListener('wheel',function(e){e.preventDefault();_topoZoom=Math.max(0.3,Math.min(3,_topoZoom*(e.deltaY>0?0.9:1.1)));svg.style.transform='translate('+_topoOffset.x+'px,'+_topoOffset.y+'px) scale('+_topoZoom+')';svg.style.transformOrigin='0 0';},{passive:false});
+}
+function topoZoom(f){_topoZoom=Math.max(0.3,Math.min(3,_topoZoom*f));var s=document.getElementById('topo-svg');if(s){s.style.transform='translate('+_topoOffset.x+'px,'+_topoOffset.y+'px) scale('+_topoZoom+')';s.style.transformOrigin='0 0';}}
+function topoReset(){_topoZoom=1;_topoOffset={x:0,y:0};_topoPos={};var s=document.getElementById('topo-svg');if(s)s.style.transform='';renderTopologia();}
+function topoExportar(){var s=document.getElementById('topo-svg');if(!s)return;var b=new Blob([s.outerHTML],{type:'image/svg+xml'});var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download='topologia-'+new Date().toISOString().split('T')[0]+'.svg';a.click();URL.revokeObjectURL(u);}
+
+// ── MONITORES ───────────────────────────────────────────────────────────────
+function coletarTodosMonitores(){
+  var r=[];
+  (STATE.ativos||[]).forEach(function(av){
+    var ms=[];try{ms=typeof av.monitoresConectados==='string'?JSON.parse(av.monitoresConectados):(Array.isArray(av.monitoresConectados)?av.monitoresConectados:[]);}catch(e){}
+    ms.forEach(function(m){if(!m.serial)return;var c=(STATE.monitoresCadastrados||[]).find(function(x){return x.serial===m.serial;});r.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:(c&&c.pat)||m.pat||'',local:(c&&c.local)||av.sala||'',pcAtual:av.hostname||av.ip||'—',area:av.area||'',qtdMovimentos:(STATE.monitorHistorico||[]).filter(function(h){return h.serial===m.serial;}).length});});
+  });
+  (STATE.monitoresCadastrados||[]).forEach(function(c){if(r.find(function(m){return m.serial===c.serial;}))return;r.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',local:c.local||'',pcAtual:c.pcVinculado||'—',area:c.area||'',qtdMovimentos:0});});
+  return r;
+}
+function renderMonitores(){
+  var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase();
+  var fSt=document.getElementById('mon-filter-status-monitores')?.value||'';
+  var grid=document.getElementById('mon-grid');
+  var todos=coletarTodosMonitores();
+  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);
+  if(!grid)return;
+  var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});
+  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px;margin-bottom:12px">🖥️</div><div style="font-weight:600">Nenhum monitor encontrado</div></div>';return;}
+  grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'">'+'<div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">✅ '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">⚠️ Sem PAT</span>')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Área:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div>'+'<div style="display:flex;border-top:0.5px solid var(--g100)"><button data-serial="'+escapeHtml(m.serial)+'" onclick="abrirAtribuirPATMonitor(this.dataset.serial)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'✏️ Alterar PAT':'🏷️ Atribuir PAT')+'</button><button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">🎫 Chamado</button></div></div>';}).join('');
+}
+function abrirAtribuirPATMonitor(serial){openModal('modal-atribuir-pat-monitor');window._monitorAtualSerial=serial;}
+function abrirCadastroMonitorManual(){openModal('modal-monitor-manual');}
