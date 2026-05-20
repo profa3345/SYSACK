@@ -6928,6 +6928,23 @@ function mapaFiltrar() {
   renderMapaAtivos();
 }
 
+function mapaIniciarEventos() {
+  var cont = document.getElementById('mapa-content');
+  if (!cont || cont._mapaEvt) return;
+  cont._mapaEvt = true;
+  cont.addEventListener('click', function(e) {
+    var card = e.target.closest('[data-nav]');
+    if (!card) return;
+    var nav  = card.dataset.nav;
+    var pred = card.dataset.predio ? decodeURIComponent(card.dataset.predio) : null;
+    var and_ = card.dataset.andar  ? decodeURIComponent(card.dataset.andar)  : null;
+    var sal  = card.dataset.sala   ? decodeURIComponent(card.dataset.sala)   : null;
+    card.style.transform = 'scale(0.97)';
+    setTimeout(function(){card.style.transform='';}, 120);
+    mapaNavTo(nav, pred, and_, sal);
+  });
+}
+
 function mapaNavTo(nivel, predio, andar, sala) {
   MAPA_STATE.nivel  = nivel  || 'root';
   MAPA_STATE.predio = predio || null;
@@ -6964,6 +6981,7 @@ function renderMapaAtivos() {
   ).join('');
 
   // Render nível atual
+  setTimeout(mapaIniciarEventos, 0);
   switch (MAPA_STATE.nivel) {
     case 'root':  renderMapaPredios(filtered, content);  break;
     case 'predio': renderMapaAndares(filtered, content); break;
@@ -7011,7 +7029,7 @@ function renderMapaAndares(ativos, container) {
       const ativosAndar = ativos.filter(a => a.predio===predio && a.andar===andar);
       const salas = [...new Set(LOCALIZACOES_SEED.filter(l=>l.predio===predio&&l.andar===andar).map(l=>l.sala))];
       const problemas = ativosAndar.filter(a=>['terceirizada','extraviado','manut'].includes(a.status)).length;
-      return '<div class="mapa-card'+(problemas?' has-problem':'')+'" data-nav="andar" data-predio="'+encodeURIComponent(predio)+'" data-andar="'+encodeURIComponent(andar)+'">' +
+      return '<div class="mapa-card'+(problemas?' has-problem':'')+'" style="cursor:pointer" onclick="mapaNavTo(\'andar\',\''+encodeURIComponent(predio)+'\',\''+encodeURIComponent(andar)+'\')">' +
         '<div class="mapa-card-icon">🏬</div>' +
         '<div class="mapa-card-label">' + escapeHtml(andar) + '</div>' +
         '<div class="mapa-card-sub">' + salas.length + ' sala(s)</div>' +
@@ -7038,7 +7056,7 @@ function renderMapaSalas(ativos, container) {
     salas.map(sala => {
       const ativosSala = ativos.filter(a => a.predio===predio && a.andar===andar && a.sala===sala);
       const problemas  = ativosSala.filter(a=>['terceirizada','extraviado','manut'].includes(a.status)).length;
-      return '<div class="mapa-card'+(problemas?' has-problem':'')+'" data-nav="sala" data-predio="'+encodeURIComponent(predio)+'" data-andar="'+encodeURIComponent(andar)+'" data-sala="'+encodeURIComponent(sala)+'">' +
+      return '<div class="mapa-card'+(problemas?' has-problem':'')+'" style="cursor:pointer" onclick="mapaNavTo(\'sala\',\''+encodeURIComponent(predio)+'\',\''+encodeURIComponent(andar)+'\',\''+encodeURIComponent(sala)+'\')">' +
         '<div class="mapa-card-icon">'+getSalaIcon(sala)+'</div>' +
         '<div class="mapa-card-label">' + escapeHtml(sala) + '</div>' +
         '<div class="mapa-card-sub">' + ativosSala.length + ' ativo(s)</div>' +
