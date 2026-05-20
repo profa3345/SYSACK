@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202605201919 -->
+<!-- build: 202605201946 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1689,28 +1689,228 @@ window.dispatchEvent(new Event('firebase-ready'));
 
     <!-- RELATÓRIOS -->
     <div class="page" id="page-relatorios">
-      <div class="flex items-center justify-between mb-20">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Relatórios</h2><p class="text-sm text-muted mt-8">Análises gerenciais e exportações</p></div>
-      </div>
-      <div class="grid-3 mb-20">
-        <div class="card" style="cursor:pointer;transition:all .2s" onclick="loadRel('movimentacoes')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform=''"><div class="card-body"><div style="font-size:28px;margin-bottom:8px">📋</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Movimentações</div><p class="text-sm text-muted">Por mês, semana e ano.</p></div></div>
-        <div class="card" style="cursor:pointer;transition:all .2s" onclick="loadRel('pendencias')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform=''"><div class="card-body"><div style="font-size:28px;margin-bottom:8px">⏳</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Pendências</div><p class="text-sm text-muted">Movimentações em aberto.</p></div></div>
-        <div class="card" style="cursor:pointer;transition:all .2s" onclick="loadRel('sc')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform=''"><div class="card-body"><div style="font-size:28px;margin-bottom:8px">📍</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Santa Clara</div><p class="text-sm text-muted">Ativos armazenados.</p></div></div>
-        <div class="card" style="cursor:pointer;transition:all .2s" onclick="loadRel('terc-atraso')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform=''"><div class="card-body"><div style="font-size:28px;margin-bottom:8px">🚨</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Terceirizada — Atraso</div><p class="text-sm text-muted">Mais de 10 dias sem retorno.</p><div class="flex gap-6 mt-8"><span class="badge badge-danger">Crítico</span></div></div></div>
-        <div class="card" style="cursor:pointer;transition:all .2s" onclick="loadRel('terc-geral')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform=''"><div class="card-body"><div style="font-size:28px;margin-bottom:8px">🏭</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Terceirizada — Geral</div><p class="text-sm text-muted">Todos os ativos enviados.</p></div></div>
-        <div class="card" style="cursor:pointer;transition:all .2s" onclick="loadRel('historico')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform=''"><div class="card-body"><div style="font-size:28px;margin-bottom:8px">🔍</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Histórico por Ativo</div><p class="text-sm text-muted">Vida completa de cada máquina.</p></div></div>
-      </div>
-      <div id="rel-result" style="display:none">
-        <div class="card">
-          <div class="card-header">
-            <h3 id="rel-title">Relatório</h3>
-            <select class="form-control" style="width:130px;margin:0" id="rel-periodo"><option value="mes">Este mês</option><option value="semana">Esta semana</option><option value="ano">Este ano</option><option value="todos">Todos</option></select>
-            <button class="btn btn-secondary btn-sm">⬇ Exportar CSV</button>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('rel-result').style.display='none'">✕</button>
+      <!-- Header -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">📊 Relatórios</h2>
+          <p class="text-sm text-muted mt-4">Análises gerenciais · Selecione o período e clique no relatório</p>
+        </div>
+        <!-- Seletor global de período -->
+        <div style="display:flex;gap:8px;align-items:center;background:var(--panel);border:0.5px solid var(--line);border-radius:10px;padding:8px 14px">
+          <span style="font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;letter-spacing:.5px">Período:</span>
+          <div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px">
+            <button onclick="relSetPeriodo('dia',this)"    class="rel-per-btn" style="padding:5px 12px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--g500)">Hoje</button>
+            <button onclick="relSetPeriodo('semana',this)" class="rel-per-btn" style="padding:5px 12px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--g500)">Semana</button>
+            <button onclick="relSetPeriodo('mes',this)"    class="rel-per-btn" style="padding:5px 12px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1)">Mês</button>
+            <button onclick="relSetPeriodo('ano',this)"    class="rel-per-btn" style="padding:5px 12px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--g500)">Ano</button>
+            <button onclick="relSetPeriodo('todos',this)"  class="rel-per-btn" style="padding:5px 12px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--g500)">Todos</button>
           </div>
-          <div class="table-wrap"><table><thead id="rel-thead"></thead><tbody id="rel-tbody"></tbody></table></div>
+          <span id="rel-periodo-label" style="font-size:11px;color:var(--g400);min-width:100px"></span>
         </div>
       </div>
+
+      <!-- Cards de relatório -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:24px">
+
+        <!-- Movimentações -->
+        <div class="rel-card" onclick="loadRel('movimentacoes')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#2563EB,#60A5FA)"></div>
+          <div style="font-size:32px;margin-bottom:10px">📋</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Movimentações</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Todas as movimentações de ativos no período</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-mov-total" style="font-size:11px;background:#EFF6FF;color:#2563EB;padding:3px 10px;border-radius:8px;font-weight:700">— total</span>
+            <span id="rel-card-mov-aprov" style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">— aprovadas</span>
+            <span id="rel-card-mov-pend"  style="font-size:11px;background:#FFFBEB;color:#D97706;padding:3px 10px;border-radius:8px;font-weight:700">— pendentes</span>
+          </div>
+        </div>
+
+        <!-- Pendências -->
+        <div class="rel-card" onclick="loadRel('pendencias')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#D97706,#FCD34D)"></div>
+          <div style="font-size:32px;margin-bottom:10px">⏳</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Pendências</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Aprovações e movimentações em aberto</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-pend-aprov" style="font-size:11px;background:#FFFBEB;color:#D97706;padding:3px 10px;border-radius:8px;font-weight:700">— aprovações</span>
+            <span id="rel-card-pend-mw"    style="font-size:11px;background:#F5F3FF;color:#7C3AED;padding:3px 10px;border-radius:8px;font-weight:700">— Mindworks</span>
+          </div>
+        </div>
+
+        <!-- Santa Clara -->
+        <div class="rel-card" onclick="loadRel('sc')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#475569,#94A3B8)"></div>
+          <div style="font-size:32px;margin-bottom:10px">📍</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Santa Clara</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Ativos armazenados no depósito</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-sc-total"  style="font-size:11px;background:#F8FAFC;color:#475569;padding:3px 10px;border-radius:8px;font-weight:700">— armazenados</span>
+            <span id="rel-card-sc-period" style="font-size:11px;background:#EFF6FF;color:#2563EB;padding:3px 10px;border-radius:8px;font-weight:700">— no período</span>
+          </div>
+        </div>
+
+        <!-- Terceirizada Atraso -->
+        <div class="rel-card" onclick="loadRel('terc-atraso')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#DC2626,#F87171)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🚨</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Terceirizada — Atraso</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Mais de 10 dias úteis sem retorno</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-terc-venc" style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">— vencidos</span>
+            <span class="badge badge-danger">Crítico</span>
+          </div>
+        </div>
+
+        <!-- Terceirizada Geral -->
+        <div class="rel-card" onclick="loadRel('terc-geral')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#7C3AED,#A78BFA)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🏭</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Terceirizada — Geral</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Todos os ativos enviados no período</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-terc-total"  style="font-size:11px;background:#F5F3FF;color:#7C3AED;padding:3px 10px;border-radius:8px;font-weight:700">— enviados</span>
+            <span id="rel-card-terc-retorn" style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">— retornados</span>
+          </div>
+        </div>
+
+        <!-- Histórico por Ativo -->
+        <div class="rel-card" onclick="loadRel('historico')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#0891B2,#67E8F9)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🔍</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Histórico por Ativo</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Vida completa de cada máquina — busque por PAT</div>
+          <div style="display:flex;gap:8px">
+            <span style="font-size:11px;background:#ECFEFF;color:#0891B2;padding:3px 10px;border-radius:8px;font-weight:700">📋 Linha do tempo</span>
+          </div>
+        </div>
+
+        <!-- Descarte -->
+        <div class="rel-card" onclick="loadRel('descarte')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#DC2626,#F87171)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🗑️</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Descarte</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Ativos em processo de descarte no período</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-desc-total" style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">— em descarte</span>
+          </div>
+        </div>
+
+        <!-- Estoque/Reuso -->
+        <div class="rel-card" onclick="loadRel('reuso')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#059669,#34D399)"></div>
+          <div style="font-size:32px;margin-bottom:10px">♻️</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Estoque / Reuso</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Ativos disponíveis para redistribuição</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-reuso-total" style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">— disponíveis</span>
+          </div>
+        </div>
+
+        <!-- Chamados -->
+        <div class="rel-card" onclick="loadRel('chamados')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#0891B2,#67E8F9)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🎫</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Chamados</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Todos os chamados abertos e concluídos no período</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-cham-total" style="font-size:11px;background:#ECFEFF;color:#0891B2;padding:3px 10px;border-radius:8px;font-weight:700">— total</span>
+            <span id="rel-card-cham-aberto" style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">— aguardando</span>
+            <span id="rel-card-cham-concl" style="font-size:11px;background:#F8FAFC;color:#475569;padding:3px 10px;border-radius:8px;font-weight:700">— concluídos</span>
+          </div>
+        </div>
+
+        <!-- Smartphones/MDM -->
+        <div class="rel-card" onclick="loadRel('smartphones')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#7C3AED,#A78BFA)"></div>
+          <div style="font-size:32px;margin-bottom:10px">📱</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Smartphones / MDM</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Dispositivos móveis gerenciados</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-mdm-total" style="font-size:11px;background:#F5F3FF;color:#7C3AED;padding:3px 10px;border-radius:8px;font-weight:700">— dispositivos</span>
+            <span id="rel-card-mdm-bloq" style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">— bloqueados</span>
+          </div>
+        </div>
+
+        <!-- Patrimônios -->
+        <div class="rel-card" onclick="loadRel('patrimonio')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#D97706,#FCD34D)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🏷️</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Patrimônios</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Registros patrimoniais e baixas no período</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-pat-total" style="font-size:11px;background:#FFFBEB;color:#D97706;padding:3px 10px;border-radius:8px;font-weight:700">— registros</span>
+            <span id="rel-card-pat-baixa" style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">— baixas</span>
+          </div>
+        </div>
+
+        <!-- Mudanças ITIL -->
+        <div class="rel-card" onclick="loadRel('mudancas')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#1D4ED8,#60A5FA)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🔄</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Mudanças ITIL</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Requisições de mudança registradas no período</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-mud-total" style="font-size:11px;background:#EFF6FF;color:#1D4ED8;padding:3px 10px;border-radius:8px;font-weight:700">— mudanças</span>
+            <span id="rel-card-mud-aprov" style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">— aprovadas</span>
+          </div>
+        </div>
+
+        <!-- Backups -->
+        <div class="rel-card" onclick="loadRel('backups')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#064E3B,#34D399)"></div>
+          <div style="font-size:32px;margin-bottom:10px">💾</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Backups</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Execuções de backup no período</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-bkp-total" style="font-size:11px;background:#F0FDF4;color:#059669;padding:3px 10px;border-radius:8px;font-weight:700">— execuções</span>
+            <span id="rel-card-bkp-falha" style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">— falhas</span>
+          </div>
+        </div>
+
+        <!-- Alertas Motor de Eventos -->
+        <div class="rel-card" onclick="loadRel('alertas')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#DC2626,#F87171)"></div>
+          <div style="font-size:32px;margin-bottom:10px">🚨</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Alertas do Sistema</div>
+          <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Eventos detectados pelo Motor de Eventos</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span id="rel-card-alt-total" style="font-size:11px;background:#FEF2F2;color:#DC2626;padding:3px 10px;border-radius:8px;font-weight:700">— alertas</span>
+            <span id="rel-card-alt-urg" style="font-size:11px;background:#7F1D1D;color:#FCA5A5;padding:3px 10px;border-radius:8px;font-weight:700">— urgentes</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Resultado do relatório -->
+      <div id="rel-result" style="display:none">
+        <div class="card">
+          <div class="card-header" style="flex-wrap:wrap;gap:8px">
+            <h3 id="rel-title" style="flex:1;min-width:200px">Relatório</h3>
+            <!-- Período no resultado também -->
+            <div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px">
+              <button onclick="relSetPeriodo('dia',this)"    class="rel-per-btn2" style="padding:4px 10px;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;background:transparent;color:var(--g500)">Hoje</button>
+              <button onclick="relSetPeriodo('semana',this)" class="rel-per-btn2" style="padding:4px 10px;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;background:transparent;color:var(--g500)">Semana</button>
+              <button onclick="relSetPeriodo('mes',this)"    class="rel-per-btn2" style="padding:4px 10px;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1)">Mês</button>
+              <button onclick="relSetPeriodo('ano',this)"    class="rel-per-btn2" style="padding:4px 10px;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;background:transparent;color:var(--g500)">Ano</button>
+              <button onclick="relSetPeriodo('todos',this)"  class="rel-per-btn2" style="padding:4px 10px;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;background:transparent;color:var(--g500)">Todos</button>
+            </div>
+            <button onclick="relExportarCSV()" class="btn btn-secondary btn-sm">⬇ Exportar CSV</button>
+            <button onclick="document.getElementById('rel-result').style.display='none'" class="btn btn-ghost btn-sm">✕</button>
+          </div>
+          <!-- Campo busca para histórico -->
+          <div id="rel-historico-busca" style="display:none;padding:12px 20px;border-bottom:1px solid var(--g100)">
+            <div style="display:flex;gap:10px;align-items:center">
+              <input class="form-control" id="rel-historico-q" style="width:280px;margin:0" placeholder="🔍 PAT, hostname, IP..." oninput="relBuscarHistorico()">
+              <span style="font-size:12px;color:var(--g500)">Digite o PAT ou hostname para buscar o histórico do ativo</span>
+            </div>
+            <div id="rel-historico-lista" style="margin-top:10px"></div>
+          </div>
+          <div class="table-wrap"><table><thead id="rel-thead"></thead><tbody id="rel-tbody"></tbody></table></div>
+          <div id="rel-summary" style="padding:12px 20px;border-top:1px solid var(--g100);font-size:11.5px;color:var(--g500)"></div>
+        </div>
+      </div>
+
+
     </div>
 
     <!-- TÉCNICOS -->
@@ -3262,9 +3462,19 @@ window.dispatchEvent(new Event('firebase-ready'));
         <p class="text-sm text-muted">Ativos em estoque prontos para redistribuição · Mais antigos têm prioridade de saída</p></div>
         <div class="flex gap-8">
           <input class="form-control" id="reuso-search" style="width:220px;margin:0" placeholder="🔍 PAT, hostname, OS..." oninput="renderReuso()">
-          <select class="form-control" id="reuso-filter-tipo" style="width:140px;margin:0" onchange="renderReuso()">
-            <option value="">Todos os tipos</option><option value="notebook">Notebook</option><option value="workstation">Desktop</option><option value="servidor">Servidor</option>
+          <select class="form-control" id="reuso-filter-tipo" style="width:160px;margin:0" onchange="renderReuso()">
+            <option value="">Todos os tipos</option>
+            <option value="notebook">Notebook</option>
+            <option value="workstation">Desktop</option>
+            <option value="servidor">Servidor</option>
+            <option value="monitor">Monitor</option>
+            <option value="switch">Switch/Rede</option>
+            <option value="impressora">Impressora</option>
+            <option value="mobiliario">Mobiliário</option>
           </select>
+          <button onclick="abrirBuscaReuso()" class="btn btn-primary btn-sm" style="white-space:nowrap;background:#059669;border-color:#059669">
+            ♻️ + Mover para Reuso
+          </button>
         </div>
       </div>
       <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
@@ -3285,6 +3495,9 @@ window.dispatchEvent(new Event('firebase-ready'));
           <select class="form-control" id="descarte-filter-sub" style="width:160px;margin:0" onchange="renderDescarte()">
             <option value="">Todos</option><option value="em-analise">Em Análise</option><option value="leilao">Leilão/Pregão</option><option value="doacao">Doação</option><option value="inutilizado">Inutilizado</option>
           </select>
+          <button onclick="abrirBuscaDescarte()" class="btn btn-danger btn-sm" style="white-space:nowrap">
+            🗑️ + Mover para Descarte
+          </button>
         </div>
       </div>
       <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
@@ -5374,6 +5587,165 @@ window.dispatchEvent(new Event('firebase-ready'));
 <script>
 function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=document.getElementById('ger-sw-tab-'+t);if(p)p.style.display=t===tab?'':' none';});document.querySelectorAll('.sw-tab-btn').forEach(function(b){b.style.color='var(--g500)';b.style.borderBottomColor='transparent';});if(el){el.style.color='var(--accent)';el.style.borderBottomColor='var(--accent)';}}
 </script>
+
+<!-- MODAL: Buscar e Mover Ativo para Descarte -->
+<div class="modal-overlay" id="modal-busca-descarte">
+  <div class="modal" style="width:720px;max-width:98vw;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header" style="background:linear-gradient(135deg,#7F1D1D,#991B1B);border-radius:12px 12px 0 0">
+      <h3 class="modal-title" style="color:#FEF2F2">🗑️ Mover Ativo para Descarte</h3>
+      <button onclick="closeModal('modal-busca-descarte')" class="modal-close" style="color:#FCA5A5">✕</button>
+    </div>
+    <div style="padding:20px 24px;border-bottom:1px solid var(--g100);background:var(--g50);flex-shrink:0">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div>
+          <label class="form-label" style="font-size:11px">Buscar por PAT, hostname, IP</label>
+          <input class="form-control" id="desc-busca-q" placeholder="🔍 Ex: NBK-001, APNO64..." oninput="buscarAtivosDescarte()" style="margin:0">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px">Área / Localidade</label>
+          <input class="form-control" id="desc-busca-area" placeholder="Ex: Anchieta, ETA..." oninput="buscarAtivosDescarte()" style="margin:0">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px">Tipo de ativo</label>
+          <select class="form-control" id="desc-busca-tipo" onchange="buscarAtivosDescarte()" style="margin:0">
+            <option value="">Todos</option>
+            <option value="notebook">Notebook</option>
+            <option value="workstation">Desktop</option>
+            <option value="monitor">Monitor</option>
+            <option value="servidor">Servidor</option>
+            <option value="switch">Switch</option>
+            <option value="impressora">Impressora</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:11.5px;color:var(--g500)" id="desc-busca-count">Digite para buscar ativos...</div>
+    </div>
+    <!-- Lista de resultados -->
+    <div style="overflow-y:auto;flex:1;min-height:200px;max-height:340px" id="desc-busca-lista">
+      <div style="text-align:center;padding:40px;color:var(--g400)">
+        <div style="font-size:32px;margin-bottom:8px">🔍</div>
+        <div>Busque um ativo acima para selecioná-lo</div>
+      </div>
+    </div>
+    <!-- Ativo selecionado -->
+    <div id="desc-selecionado-wrap" style="display:none;border-top:2px solid var(--danger);background:#FEF2F2;padding:14px 24px;flex-shrink:0">
+      <div style="font-size:11px;font-weight:700;color:#991B1B;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">✅ Ativo Selecionado</div>
+      <div id="desc-selecionado-info" style="font-size:13px;font-weight:700;color:#7F1D1D;font-family:monospace"></div>
+    </div>
+    <!-- Formulário de descarte -->
+    <div id="desc-form-wrap" style="display:none;padding:16px 24px;border-top:1px solid var(--g100);background:var(--panel);flex-shrink:0">
+      <input type="hidden" id="desc-busca-ativo-id">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label class="form-label">Modalidade de Descarte <span style="color:var(--danger)">*</span></label>
+          <select class="form-control" id="desc-modalidade-busca" style="margin:0">
+            <option value="">Selecione...</option>
+            <option value="em-analise">🔍 Em Análise</option>
+            <option value="leilao">🏷️ Leilão / Pregão</option>
+            <option value="doacao">🤝 Doação</option>
+            <option value="inutilizado">🔨 Inutilização</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Nº Processo SAP</label>
+          <input class="form-control" id="desc-sap-busca" placeholder="Ex: 2026/001234" style="margin:0">
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="form-label">Motivo / Observações <span style="color:var(--danger)">*</span></label>
+        <textarea class="form-control" id="desc-obs-busca" rows="2" placeholder="Descreva o motivo do descarte, condição do ativo, etc..." style="margin:0"></textarea>
+      </div>
+      <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;font-size:11.5px;color:#92400E;margin-bottom:12px">
+        ⚠️ Esta ação requer aprovação do gestor. O ativo ficará bloqueado até a autorização.
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button onclick="closeModal('modal-busca-descarte')" class="btn btn-secondary">Cancelar</button>
+      <button id="desc-confirmar-btn" onclick="confirmarMoverDescarte()" class="btn btn-danger" disabled style="opacity:.5;cursor:not-allowed">
+        🗑️ Confirmar Descarte
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- MODAL: Buscar e Mover Ativo para Reuso -->
+<div class="modal-overlay" id="modal-busca-reuso">
+  <div class="modal" style="width:720px;max-width:98vw;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header" style="background:linear-gradient(135deg,#064E3B,#065F46);border-radius:12px 12px 0 0">
+      <h3 class="modal-title" style="color:#ECFDF5">♻️ Mover Ativo para Reuso (Estoque)</h3>
+      <button onclick="closeModal('modal-busca-reuso')" class="modal-close" style="color:#6EE7B7">✕</button>
+    </div>
+    <div style="padding:20px 24px;border-bottom:1px solid var(--g100);background:var(--g50);flex-shrink:0">
+      <p style="font-size:12px;color:var(--g500);margin:0 0 12px">Selecione o ativo que está sobrando na área e deseja disponibilizar para redistribuição.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div>
+          <label class="form-label" style="font-size:11px">PAT, hostname, IP</label>
+          <input class="form-control" id="reuso-busca-q" placeholder="🔍 Ex: NBK-001, APNO..." oninput="buscarAtivosReuso()" style="margin:0">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px">Área / Localidade</label>
+          <input class="form-control" id="reuso-busca-area" placeholder="Ex: Anchieta, ETA..." oninput="buscarAtivosReuso()" style="margin:0">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px">Tipo</label>
+          <select class="form-control" id="reuso-busca-tipo" onchange="buscarAtivosReuso()" style="margin:0">
+            <option value="">Todos</option>
+            <option value="notebook">Notebook</option>
+            <option value="workstation">Desktop</option>
+            <option value="servidor">Servidor</option>
+            <option value="monitor">Monitor</option>
+            <option value="switch">Switch/Rede</option>
+            <option value="impressora">Impressora</option>
+            <option value="mobiliario">Mobiliário</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:11.5px;color:var(--g500)" id="reuso-busca-count">Digite para buscar ativos...</div>
+    </div>
+    <!-- Resultados -->
+    <div style="overflow-y:auto;flex:1;min-height:200px;max-height:320px" id="reuso-busca-lista">
+      <div style="text-align:center;padding:40px;color:var(--g400)">
+        <div style="font-size:32px;margin-bottom:8px">🔍</div>
+        <div>Busque um ativo acima para selecioná-lo</div>
+      </div>
+    </div>
+    <!-- Selecionado -->
+    <div id="reuso-selecionado-wrap" style="display:none;border-top:2px solid #059669;background:#F0FDF4;padding:14px 24px;flex-shrink:0">
+      <div style="font-size:11px;font-weight:700;color:#065F46;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">✅ Ativo Selecionado</div>
+      <div id="reuso-selecionado-info" style="font-size:13px;font-weight:700;color:#064E3B;font-family:monospace"></div>
+    </div>
+    <!-- Formulário -->
+    <div id="reuso-form-wrap" style="display:none;padding:16px 24px;border-top:1px solid var(--g100);background:var(--panel);flex-shrink:0">
+      <input type="hidden" id="reuso-busca-ativo-id">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label class="form-label">Local de armazenamento (estoque) <span style="color:var(--danger)">*</span></label>
+          <input class="form-control" id="reuso-local-estoque" placeholder="Ex: Sala TI — Almoxarifado" style="margin:0">
+        </div>
+        <div>
+          <label class="form-label">Condição do ativo</label>
+          <select class="form-control" id="reuso-condicao" style="margin:0">
+            <option value="bom">Bom estado</option>
+            <option value="regular">Regular</option>
+            <option value="necessita-reparo">Necessita pequeno reparo</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="form-label">Motivo da devolução ao estoque <span style="color:var(--danger)">*</span></label>
+        <textarea class="form-control" id="reuso-motivo" rows="2" placeholder="Ex: Área reduziu equipe, equipamento sobrou após troca, etc..." style="margin:0"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button onclick="closeModal('modal-busca-reuso')" class="btn btn-secondary">Cancelar</button>
+      <button id="reuso-confirmar-btn" onclick="confirmarMoverReuso()" class="btn btn-primary" disabled style="opacity:.5;cursor:not-allowed;background:#059669;border-color:#059669">
+        ♻️ Confirmar — Mover para Estoque
+      </button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

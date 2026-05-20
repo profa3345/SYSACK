@@ -818,12 +818,88 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] chamados erro:', e.message); });
 
   // aprovacoes
-  db.collection('aprovacoes').onSnapshot(function(snap) {
-    STATE.aprovacoes = snap2arr(snap).filter(function(a){ return a.status === 'pendente'; });
-    nbUpdate('nb-aprov', STATE.aprovacoes.length);
+  db.collection('aprovacoes').orderBy('createdAt','desc').limit(500).onSnapshot(function(snap) {
+    STATE.aprovacoes = snap2arr(snap);
+    nbUpdate('nb-aprov', STATE.aprovacoes.filter(function(a){return a.status==='pendente';}).length);
+    _debounce('aprov',function(){
+      if(isPageActive('aprovacoes')) renderAprovacoes();
+      if(isPageActive('relatorios')) relAtualizarCards();
+    },600);
   }, function(e){ console.error('[Banco] aprovacoes erro:', e.message); });
 
-  // smartphones
+  // Chamados — listener completo (não só abertos)
+  db.collection('chamados').orderBy('createdAt','desc').limit(500).onSnapshot(function(snap){
+    STATE.chamados = snap2arr(snap);
+    _debounce('chamados-rel',function(){
+      if(isPageActive('chamados')) renderChamados();
+      if(isPageActive('relatorios')) relAtualizarCards();
+    },600);
+  }, function(e){ console.error('[Banco] chamados erro:',e.message); });
+
+  // Mudanças ITIL
+  db.collection('mudancas').orderBy('criadoEm','desc').limit(200).onSnapshot(function(snap){
+    STATE.mudancas = snap2arr(snap);
+    if(isPageActive('mudancas-itil')) renderMudancasITIL();
+    if(isPageActive('relatorios')) relAtualizarCards();
+  }, function(e){ console.error('[Banco] mudancas erro:',e.message); });
+
+  // Backups
+  db.collection('backups').orderBy('dataHora','desc').limit(200).onSnapshot(function(snap){
+    STATE.backups = snap2arr(snap);
+    if(isPageActive('backup-recovery')) renderBackupRecovery();
+    if(isPageActive('relatorios')) relAtualizarCards();
+  }, function(e){ console.error('[Banco] backups erro:',e.message); });
+
+  // Licenças
+  db.collection('licencas').onSnapshot(function(snap){
+    STATE.licencas = snap2arr(snap);
+    if(isPageActive('relatorios')) relAtualizarCards();
+  }, function(e){ console.error('[Banco] licencas erro:',e.message); });
+
+  // Vistorias
+  db.collection('vistorias').orderBy('data','desc').limit(200).onSnapshot(function(snap){
+    STATE.vistorias = snap2arr(snap);
+    if(isPageActive('relatorios')) relAtualizarCards();
+  }, function(e){ console.error('[Banco] vistorias erro:',e.message); });
+
+  // Baixas Patrimoniais
+  db.collection('baixasPatrimoniais').orderBy('data','desc').limit(200).onSnapshot(function(snap){
+    STATE.baixasPatrimoniais = snap2arr(snap);
+    if(isPageActive('relatorios')) relAtualizarCards();
+  }, function(e){ console.error('[Banco] baixasPatrimoniais erro:',e.message); });
+
+  // Notas Fiscais
+  db.collection('notasFiscais').orderBy('emissao','desc').limit(200).onSnapshot(function(snap){
+    STATE.notasFiscais = snap2arr(snap);
+    if(isPageActive('relatorios')) relAtualizarCards();
+  }, function(e){ console.error('[Banco] notasFiscais erro:',e.message); });
+
+    // Santa Clara
+  db.collection('scAtivos').orderBy('dataEntrada','desc').limit(200).onSnapshot(function(snap) {
+    STATE.scAtivos = snap2arr(snap);
+    console.log('[Banco] scAtivos:', STATE.scAtivos.length);
+    if(isPageActive('relatorios')) relAtualizarCards();
+    if(isPageActive('santa-clara')) renderSantaClara();
+  }, function(e){ console.error('[Banco] scAtivos erro:', e.message); });
+
+  // Mindworks / Terceirizada
+  db.collection('terceirizadaAtivos').orderBy('dataEnvio','desc').limit(200).onSnapshot(function(snap) {
+    STATE.terceirizadaAtivos = snap2arr(snap);
+    console.log('[Banco] terceirizadaAtivos:', STATE.terceirizadaAtivos.length);
+    if(isPageActive('relatorios')) relAtualizarCards();
+    if(isPageActive('terceirizada')) renderTerceirizada();
+    if(isPageActive('mindworks')) renderMindworks();
+  }, function(e){ console.error('[Banco] terceirizadaAtivos erro:', e.message); });
+
+  // Movimentações (histórico completo)
+  db.collection('movimentacoes').orderBy('data','desc').limit(500).onSnapshot(function(snap) {
+    STATE.movimentacoes = snap2arr(snap);
+    console.log('[Banco] movimentacoes:', STATE.movimentacoes.length);
+    if(isPageActive('movimentacoes')) renderMovimentacoes();
+    if(isPageActive('relatorios')) relAtualizarCards();
+  }, function(e){ console.error('[Banco] movimentacoes erro:', e.message); });
+
+    // smartphones
   db.collection('smartphones').onSnapshot(function(snap) {
     STATE.smartphones = snap2arr(snap);
   }, function(e){ console.error('[Banco] smartphones erro:', e.message); });
@@ -6506,7 +6582,7 @@ function relTab(tab) {
   }
 }
 
-function renderRelatorios() { gerarRelatorios(); }
+// renderRelatorios moved to bottom
 
 function gerarRelatorios() {
   const periodo  = document.getElementById('rel-periodo')?.value || 'mes';
@@ -17507,12 +17583,13 @@ function renderReuso() {
   var fTipo = document.getElementById('reuso-filter-tipo')?.value||'';
   if (!grid) return;
 
-  // Ativos em estoque ou marcados como disponíveis
-  var lista = (STATE.ativos||[]).filter(function(a) {
+  // Ativos em estoque — inclui todos os tipos (computadores, mobiliário, switches, etc.)
+  var todosAtivos = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var lista = todosAtivos.filter(function(a) {
     var s = (a.status||'').toLowerCase();
     return s==='estoque'||s==='disponivel'||s==='disponível';
   });
-  if (fTipo) lista = lista.filter(function(a){return (a.tipo||'').toLowerCase()===fTipo;});
+  if (fTipo) lista = lista.filter(function(a){return (a.tipo||'').toLowerCase().includes(fTipo);});
   if (q) lista = lista.filter(function(a){
     return ['hostname','ip','desc','pat','area','osNome'].some(function(f){return (a[f]||'').toLowerCase().includes(q);});
   });
@@ -18737,3 +18814,770 @@ async function salvarRede(){if(!isAdmin())return;var id=document.getElementById(
 async function excluirRede(id){if(!isAdmin()||!id)return;if(!confirm('Remover override? A faixa original será restaurada.'))return;db.collection('config_redes').doc(id).delete().then(function(){showToast('Override removido','success',2000);}).catch(function(e){showToast('Erro: '+e.message,'danger',4000);});}
 function iniciarListenerRedes(){if(!db)return;db.collection('config_redes').onSnapshot(function(snap){STATE_REDES=snap.docs.map(function(d){return Object.assign({id:d.id},d.data());});if(isPageActive('redes'))renderRedes();},function(e){console.warn('[Redes] erro listener:',e.message);});}
 function isAdmin(){return CURRENT_USER&&(CURRENT_USER.role==='admin'||CURRENT_USER.perfil==='admin');}
+
+// ═══════════════════════════════════════════════════════════════
+// DESCARTE — Busca, Seleção e Movimentação
+// ═══════════════════════════════════════════════════════════════
+
+var _descarteAtivoSel = null;
+
+function abrirBuscaDescarte() {
+  _descarteAtivoSel = null;
+  // Reset form
+  ['desc-busca-q','desc-busca-area','desc-sap-busca','desc-obs-busca'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.value = '';
+  });
+  var sel = document.getElementById('desc-busca-tipo'); if(sel) sel.value = '';
+  var sel2 = document.getElementById('desc-modalidade-busca'); if(sel2) sel2.value = '';
+  document.getElementById('desc-busca-lista').innerHTML = '<div style="text-align:center;padding:40px;color:var(--g400)"><div style="font-size:32px;margin-bottom:8px">🔍</div><div>Busque um ativo acima para selecioná-lo</div></div>';
+  document.getElementById('desc-busca-count').textContent = 'Digite para buscar ativos...';
+  document.getElementById('desc-selecionado-wrap').style.display = 'none';
+  document.getElementById('desc-form-wrap').style.display = 'none';
+  var btn = document.getElementById('desc-confirmar-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.style.cursor = 'not-allowed'; }
+  openModal('modal-busca-descarte');
+  setTimeout(function(){ var el = document.getElementById('desc-busca-q'); if(el) el.focus(); }, 300);
+}
+
+function buscarAtivosDescarte() {
+  var q     = (document.getElementById('desc-busca-q')?.value || '').toLowerCase().trim();
+  var area  = (document.getElementById('desc-busca-area')?.value || '').toLowerCase().trim();
+  var tipo  = (document.getElementById('desc-busca-tipo')?.value || '').toLowerCase();
+
+  // Precisa de pelo menos 2 chars para buscar
+  if (!q && !area && !tipo) {
+    document.getElementById('desc-busca-lista').innerHTML = '<div style="text-align:center;padding:40px;color:var(--g400)"><div style="font-size:32px;margin-bottom:8px">🔍</div><div>Busque um ativo acima para selecioná-lo</div></div>';
+    document.getElementById('desc-busca-count').textContent = 'Digite para buscar ativos...';
+    return;
+  }
+
+  // Filtra ativos — exclui os já em descarte
+  // Inclui todos os tipos: ativos, mobiliário, etc.
+  var _todosDesc = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var lista = _todosDesc.filter(function(a) {
+    if ((a.status || '').toLowerCase() === 'descarte') return false;
+    var matchQ    = !q    || (a.pat||'').toLowerCase().includes(q) || (a.hostname||'').toLowerCase().includes(q) || (a.ip||'').toLowerCase().includes(q) || (a.desc||'').toLowerCase().includes(q);
+    var matchArea = !area || resolverLocal(a).toLowerCase().includes(area) || (a.area||'').toLowerCase().includes(area);
+    var matchTipo = !tipo || (a.tipo||'').toLowerCase().includes(tipo);
+    return matchQ && matchArea && matchTipo;
+  });
+
+  document.getElementById('desc-busca-count').textContent = lista.length + ' ativo(s) encontrado(s)' + (lista.length > 50 ? ' — refine a busca' : '');
+
+  if (!lista.length) {
+    document.getElementById('desc-busca-lista').innerHTML = '<div style="text-align:center;padding:40px;color:var(--g400)"><div style="font-size:32px;margin-bottom:8px">📭</div><div>Nenhum ativo encontrado</div></div>';
+    return;
+  }
+
+  // Limita a 80 resultados para performance
+  var exibir = lista.slice(0, 80);
+  var tipoColors = {notebook:'#7C3AED',workstation:'#2563EB',desktop:'#2563EB',servidor:'#0891B2','server-linux':'#0891B2',switch:'#EA580C',impressora:'#059669',printer:'#059669',monitor:'#475569'};
+
+  document.getElementById('desc-busca-lista').innerHTML = exibir.map(function(a) {
+    var hn    = a.hostname || a.desc || a.ip || '—';
+    var tipo  = (a.tipo || 'workstation').toLowerCase();
+    var cor   = tipoColors[tipo] || '#64748B';
+    var local = resolverLocal(a);
+    var st    = (a.status || 'ativo').toLowerCase();
+    var stCor = st === 'em-uso' || st === 'ativo' ? '#059669' : st === 'manutencao' ? '#D97706' : '#64748B';
+    var sel   = _descarteAtivoSel && _descarteAtivoSel.id === a.id;
+
+    return '<div onclick="selecionarAtivoDescarte(\'' + escapeHtml(a.id) + '\')" style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:0.5px solid var(--g100);cursor:pointer;transition:background .12s;background:' + (sel ? '#FEF2F2' : 'var(--panel)') + '" onmouseenter="this.style.background=\'#FFF7F7\'" onmouseleave="this.style.background=\'' + (sel ? '#FEF2F2' : 'var(--panel)') + '\'">'
+      + '<div style="width:36px;height:36px;border-radius:8px;background:' + cor + '22;border:1px solid ' + cor + '44;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">'
+        + (tipo==='notebook'?'💻':tipo==='switch'||tipo==='router'?'🔀':tipo==='servidor'||tipo==='server-linux'?'🖥️':tipo==='impressora'||tipo==='printer'?'🖨️':'🖥️')
+      + '</div>'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-weight:700;font-size:13px;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(hn) + '</div>'
+        + '<div style="font-size:11px;color:var(--g500);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap">'
+          + '<span>PAT: <strong>' + escapeHtml(a.pat || '—') + '</strong></span>'
+          + '<span>IP: <span style="font-family:monospace">' + escapeHtml(a.ip || '—') + '</span></span>'
+          + '<span>📍 ' + escapeHtml(local) + '</span>'
+          + '<span style="color:' + cor + ';font-weight:600">' + escapeHtml(tipo) + '</span>'
+        + '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0">'
+        + '<span style="font-size:10px;font-weight:700;color:' + stCor + ';background:' + stCor + '15;padding:2px 8px;border-radius:8px">' + escapeHtml(st) + '</span>'
+        + (sel ? '<div style="font-size:18px;margin-top:4px">✅</div>' : '')
+      + '</div>'
+    + '</div>';
+  }).join('')
+  + (lista.length > 80 ? '<div style="text-align:center;padding:12px;font-size:11.5px;color:var(--g400)">... e mais ' + (lista.length-80) + ' ativos. Refine a busca.</div>' : '');
+}
+
+function selecionarAtivoDescarte(ativoId) {
+  var a = (STATE.ativos || []).find(function(x){ return x.id === ativoId; });
+  if (!a) return;
+
+  _descarteAtivoSel = a;
+  document.getElementById('desc-busca-ativo-id').value = ativoId;
+
+  // Atualiza info do selecionado
+  var hn    = a.hostname || a.desc || a.ip || '—';
+  var local = resolverLocal(a);
+  document.getElementById('desc-selecionado-info').innerHTML =
+    '🖥️ <strong>' + escapeHtml(hn) + '</strong>'
+    + ' &nbsp;·&nbsp; PAT: <strong>' + escapeHtml(a.pat || '—') + '</strong>'
+    + ' &nbsp;·&nbsp; ' + escapeHtml(a.tipo || '?')
+    + ' &nbsp;·&nbsp; 📍 ' + escapeHtml(local);
+
+  document.getElementById('desc-selecionado-wrap').style.display = '';
+  document.getElementById('desc-form-wrap').style.display = '';
+
+  // Habilita botão confirmar
+  var btn = document.getElementById('desc-confirmar-btn');
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+
+  // Re-render lista para mostrar selecionado
+  buscarAtivosDescarte();
+
+  // Scroll para o formulário
+  var fw = document.getElementById('desc-form-wrap');
+  if (fw) fw.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function confirmarMoverDescarte() {
+  var ativoId    = document.getElementById('desc-busca-ativo-id').value;
+  var modalidade = document.getElementById('desc-modalidade-busca').value;
+  var sap        = document.getElementById('desc-sap-busca').value.trim();
+  var obs        = document.getElementById('desc-obs-busca').value.trim();
+
+  if (!ativoId)    return showToast('Selecione um ativo da lista', 'warning');
+  if (!modalidade) return showToast('Selecione a modalidade de descarte', 'warning');
+  if (!obs)        return showToast('Informe o motivo do descarte', 'warning');
+
+  var a = (STATE.ativos || []).find(function(x){ return x.id === ativoId; });
+  if (!a) return;
+
+  var btn = document.getElementById('desc-confirmar-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Processando...'; }
+
+  try {
+    var updates = {
+      status:               'descarte',
+      substatusDescarte:    modalidade,
+      descarteSAP:          sap,
+      descarteObs:          obs,
+      descarteData:         new Date().toISOString().split('T')[0],
+      descarteAutorizadoPor: CURRENT_USER?.nome || '',
+      updatedAt:            new Date().toISOString(),
+    };
+
+    await fsUpdate('ativos', ativoId, updates);
+    Object.assign(a, updates);
+
+    // Histórico imutável
+    await registrarHistoricoAtivo(ativoId, 'descartado', {
+      modalidade,
+      sap:          sap || '—',
+      obs,
+      por:          CURRENT_USER?.nome || '—',
+      dataDescarte: updates.descarteData,
+    });
+
+    // Cria aprovação pendente para o gestor
+    var aprov = {
+      id:           'APROV-DESC-' + Date.now(),
+      tipo:         'Descarte de Ativo',
+      pat:          a.pat || ativoId,
+      descricao:    'Descarte: ' + (a.hostname||a.pat||'—') + ' → ' + modalidade,
+      destino:      'descarte',
+      modalidade,
+      sap,
+      obs,
+      ativoId,
+      solicitante:  CURRENT_USER?.nome || '',
+      status:       'pendente',
+      createdAt:    new Date().toISOString(),
+    };
+    if (!STATE.aprovacoes) STATE.aprovacoes = [];
+    STATE.aprovacoes.unshift(aprov);
+    await fsAdd('aprovacoes', aprov);
+    nbUpdate('nb-aprov', STATE.aprovacoes.filter(function(x){return x.status==='pendente';}).length);
+
+    closeModal('modal-busca-descarte');
+    showToast('✅ ' + (a.hostname||a.pat||'Ativo') + ' movido para Descarte — aguardando aprovação do gestor', 'success', 6000);
+    renderDescarte();
+    if (typeof renderDashboard === 'function') renderDashboard();
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger', 5000);
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️ Confirmar Descarte'; }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REUSO — Busca, Seleção e Movimentação para Estoque
+// ═══════════════════════════════════════════════════════════════
+
+var _reusoAtivoSel = null;
+
+function abrirBuscaReuso() {
+  _reusoAtivoSel = null;
+  ['reuso-busca-q','reuso-busca-area','reuso-local-estoque','reuso-motivo'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.value = '';
+  });
+  var sel = document.getElementById('reuso-busca-tipo'); if(sel) sel.value = '';
+  var sel2 = document.getElementById('reuso-condicao'); if(sel2) sel2.value = 'bom';
+  document.getElementById('reuso-busca-lista').innerHTML = '<div style="text-align:center;padding:40px;color:var(--g400)"><div style="font-size:32px;margin-bottom:8px">🔍</div><div>Busque um ativo acima para selecioná-lo</div></div>';
+  document.getElementById('reuso-busca-count').textContent = 'Digite para buscar ativos...';
+  document.getElementById('reuso-selecionado-wrap').style.display = 'none';
+  document.getElementById('reuso-form-wrap').style.display = 'none';
+  var btn = document.getElementById('reuso-confirmar-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.style.cursor = 'not-allowed'; }
+  openModal('modal-busca-reuso');
+  setTimeout(function(){ var el = document.getElementById('reuso-busca-q'); if(el) el.focus(); }, 300);
+}
+
+function buscarAtivosReuso() {
+  var q    = (document.getElementById('reuso-busca-q')?.value||'').toLowerCase().trim();
+  var area = (document.getElementById('reuso-busca-area')?.value||'').toLowerCase().trim();
+  var tipo = (document.getElementById('reuso-busca-tipo')?.value||'').toLowerCase();
+
+  if (!q && !area && !tipo) {
+    document.getElementById('reuso-busca-lista').innerHTML = '<div style="text-align:center;padding:40px;color:var(--g400)"><div style="font-size:32px;margin-bottom:8px">🔍</div><div>Busque um ativo acima para selecioná-lo</div></div>';
+    document.getElementById('reuso-busca-count').textContent = 'Digite para buscar ativos...';
+    return;
+  }
+
+  // Busca em TODOS os tipos — ativos + mobiliário
+  var todos = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var lista = todos.filter(function(a) {
+    var s = (a.status||'').toLowerCase();
+    // Exclui já em estoque, descarte ou reuso
+    if (s === 'estoque' || s === 'disponivel' || s === 'disponível' || s === 'descarte') return false;
+    var matchQ    = !q    || (a.pat||'').toLowerCase().includes(q) || (a.hostname||a.nome||a.desc||'').toLowerCase().includes(q) || (a.ip||'').toLowerCase().includes(q);
+    var matchArea = !area || resolverLocal(a).toLowerCase().includes(area) || (a.area||'').toLowerCase().includes(area) || (a.local||'').toLowerCase().includes(area);
+    var matchTipo = !tipo || (a.tipo||'').toLowerCase().includes(tipo);
+    return matchQ && matchArea && matchTipo;
+  });
+
+  document.getElementById('reuso-busca-count').textContent = lista.length + ' ativo(s) encontrado(s)' + (lista.length > 50 ? ' — refine a busca' : '');
+
+  if (!lista.length) {
+    document.getElementById('reuso-busca-lista').innerHTML = '<div style="text-align:center;padding:40px;color:var(--g400)"><div style="font-size:32px;margin-bottom:8px">📭</div><div>Nenhum ativo encontrado com esses critérios</div></div>';
+    return;
+  }
+
+  var exibir = lista.slice(0, 80);
+  var tipoIco = {notebook:'💻',workstation:'🖥️',desktop:'🖥️',servidor:'🖥️','server-linux':'🖥️',switch:'🔀',router:'🌐',impressora:'🖨️',printer:'🖨️',monitor:'🖥️',mobiliario:'🪑',ups:'🔋',camera:'📷',ap:'📡'};
+  var tipoCor = {notebook:'#7C3AED',workstation:'#2563EB',desktop:'#2563EB',servidor:'#0891B2',switch:'#EA580C',impressora:'#059669',monitor:'#475569',mobiliario:'#92400E',ups:'#1D4ED8'};
+
+  document.getElementById('reuso-busca-lista').innerHTML = exibir.map(function(a) {
+    var hn    = a.hostname || a.nome || a.desc || a.ip || '—';
+    var tipo_ = (a.tipo || 'ativo').toLowerCase();
+    var cor   = tipoCor[tipo_] || '#64748B';
+    var ico   = tipoIco[tipo_] || '📦';
+    var local = resolverLocal(a) || a.local || a.area || '—';
+    var st    = (a.status||'ativo').toLowerCase();
+    var stCor = st==='em-uso'||st==='ativo'||st==='ok' ? '#059669' : st==='manutencao' ? '#D97706' : '#64748B';
+    var sel   = _reusoAtivoSel && _reusoAtivoSel.id === a.id;
+
+    return '<div onclick="selecionarAtivoReuso(\'' + escapeHtml(a.id||'') + '\')" style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:0.5px solid var(--g100);cursor:pointer;transition:background .12s;background:' + (sel ? '#F0FDF4' : 'var(--panel)') + '" onmouseenter="this.style.background=\'#F7FDFA\'" onmouseleave="this.style.background=\'' + (sel ? '#F0FDF4' : 'var(--panel)') + '\'">'
+      + '<div style="width:36px;height:36px;border-radius:8px;background:' + cor + '22;border:1px solid ' + cor + '44;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">' + ico + '</div>'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(hn) + '</div>'
+        + '<div style="font-size:11px;color:var(--g500);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap">'
+          + (a.pat ? '<span>PAT: <strong>' + escapeHtml(a.pat) + '</strong></span>' : '')
+          + (a.ip  ? '<span>IP: <span style="font-family:monospace">' + escapeHtml(a.ip) + '</span></span>' : '')
+          + '<span>📍 ' + escapeHtml(local) + '</span>'
+          + '<span style="color:' + cor + ';font-weight:600">' + escapeHtml(tipo_) + '</span>'
+        + '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0">'
+        + '<span style="font-size:10px;font-weight:700;color:' + stCor + ';background:' + stCor + '15;padding:2px 8px;border-radius:8px">' + escapeHtml(st) + '</span>'
+        + (sel ? '<div style="font-size:18px;margin-top:4px">✅</div>' : '')
+      + '</div>'
+    + '</div>';
+  }).join('')
+  + (lista.length > 80 ? '<div style="text-align:center;padding:12px;font-size:11.5px;color:var(--g400)">... e mais ' + (lista.length-80) + '. Refine a busca.</div>' : '');
+}
+
+function selecionarAtivoReuso(ativoId) {
+  var todos = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var a = todos.find(function(x){ return x.id === ativoId; });
+  if (!a) return;
+
+  _reusoAtivoSel = a;
+  document.getElementById('reuso-busca-ativo-id').value = ativoId;
+
+  var hn    = a.hostname || a.nome || a.desc || a.ip || '—';
+  var local = resolverLocal(a) || a.local || a.area || '—';
+  document.getElementById('reuso-selecionado-info').innerHTML =
+    '📦 <strong>' + escapeHtml(hn) + '</strong>'
+    + (a.pat ? ' &nbsp;·&nbsp; PAT: <strong>' + escapeHtml(a.pat) + '</strong>' : '')
+    + ' &nbsp;·&nbsp; ' + escapeHtml(a.tipo || '?')
+    + ' &nbsp;·&nbsp; 📍 ' + escapeHtml(local);
+
+  document.getElementById('reuso-selecionado-wrap').style.display = '';
+  document.getElementById('reuso-form-wrap').style.display = '';
+
+  var btn = document.getElementById('reuso-confirmar-btn');
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+
+  buscarAtivosReuso(); // re-render com highlight
+
+  var fw = document.getElementById('reuso-form-wrap');
+  if (fw) fw.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function confirmarMoverReuso() {
+  var ativoId = document.getElementById('reuso-busca-ativo-id').value;
+  var local   = document.getElementById('reuso-local-estoque').value.trim();
+  var condicao= document.getElementById('reuso-condicao').value;
+  var motivo  = document.getElementById('reuso-motivo').value.trim();
+
+  if (!ativoId) return showToast('Selecione um ativo da lista', 'warning');
+  if (!local)   return showToast('Informe o local de armazenamento', 'warning');
+  if (!motivo)  return showToast('Informe o motivo da devolução ao estoque', 'warning');
+
+  var todos = (STATE.ativos||[]).concat(STATE.mobiliario||[]);
+  var a = todos.find(function(x){ return x.id === ativoId; });
+  if (!a) return;
+
+  var btn = document.getElementById('reuso-confirmar-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Processando...'; }
+
+  try {
+    var updates = {
+      status:      'estoque',
+      local:       local,
+      area:        local,
+      condicao:    condicao,
+      dataEstoque: new Date().toISOString().split('T')[0],
+      updatedAt:   new Date().toISOString(),
+    };
+
+    // Detecta se é mobiliário ou ativo normal
+    var colecao = (STATE.mobiliario||[]).find(function(x){return x.id===ativoId;}) ? 'mobiliario' : 'ativos';
+    await fsUpdate(colecao, ativoId, updates);
+    Object.assign(a, updates);
+
+    // Histórico imutável
+    await registrarHistoricoAtivo(ativoId, 'movimentado', {
+      para:        'Estoque (Reuso)',
+      local,
+      condicao,
+      motivo,
+      por:         CURRENT_USER?.nome || '—',
+    });
+
+    closeModal('modal-busca-reuso');
+    showToast('✅ ' + (a.hostname||a.nome||a.pat||'Ativo') + ' movido para Estoque — disponível para redistribuição!', 'success', 5000);
+    renderReuso();
+    if (typeof renderDashboard === 'function') renderDashboard();
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger', 5000);
+    if (btn) { btn.disabled = false; btn.textContent = '♻️ Confirmar — Mover para Estoque'; }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RELATÓRIOS — Período, Cards, Exportação e Histórico
+// ═══════════════════════════════════════════════════════════════
+
+var _relPeriodoAtual = 'mes';
+var _relTipoAtual    = '';
+var _relDadosAtual   = [];
+
+// ── Seletor de período ─────────────────────────────────────────
+function relSetPeriodo(periodo, btn) {
+  _relPeriodoAtual = periodo;
+
+  // Atualiza visual dos botões rel-per-btn e rel-per-btn2
+  document.querySelectorAll('.rel-per-btn, .rel-per-btn2').forEach(function(b) {
+    b.style.background    = 'transparent';
+    b.style.color         = 'var(--g500)';
+    b.style.boxShadow     = 'none';
+  });
+  if (btn) {
+    btn.style.background = '#fff';
+    btn.style.color      = 'var(--g900)';
+    btn.style.boxShadow  = '0 1px 3px rgba(0,0,0,.1)';
+    // Sincroniza o outro grupo de botões pelo texto
+    var label = btn.textContent.trim();
+    document.querySelectorAll('.rel-per-btn, .rel-per-btn2').forEach(function(b2) {
+      if (b2 !== btn && b2.textContent.trim() === label) {
+        b2.style.background = '#fff';
+        b2.style.color      = 'var(--g900)';
+        b2.style.boxShadow  = '0 1px 3px rgba(0,0,0,.1)';
+      }
+    });
+  }
+
+  // Label de período
+  var hoje  = new Date();
+  var label2 = '';
+  if (periodo === 'dia')    label2 = hoje.toLocaleDateString('pt-BR');
+  if (periodo === 'semana') label2 = 'Esta semana';
+  if (periodo === 'mes')    label2 = hoje.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  if (periodo === 'ano')    label2 = String(hoje.getFullYear());
+  if (periodo === 'todos')  label2 = 'Todo o histórico';
+  var el = document.getElementById('rel-periodo-label');
+  if (el) el.textContent = '→ ' + label2;
+
+  // Atualiza cards e resultado
+  relAtualizarCards();
+  if (_relTipoAtual) loadRel(_relTipoAtual);
+}
+
+// ── Calcula intervalo de datas pelo período ────────────────────
+function relGetIntervalo() {
+  var hoje  = new Date();
+  var inicio, fim;
+  if (_relPeriodoAtual === 'dia') {
+    inicio = new Date(hoje); inicio.setHours(0,0,0,0);
+    fim    = new Date(hoje); fim.setHours(23,59,59,999);
+  } else if (_relPeriodoAtual === 'semana') {
+    var dow = hoje.getDay() || 7;
+    inicio  = new Date(hoje); inicio.setDate(hoje.getDate() - dow + 1); inicio.setHours(0,0,0,0);
+    fim     = new Date(inicio); fim.setDate(inicio.getDate() + 6); fim.setHours(23,59,59,999);
+  } else if (_relPeriodoAtual === 'mes') {
+    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    fim    = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (_relPeriodoAtual === 'ano') {
+    inicio = new Date(hoje.getFullYear(), 0, 1);
+    fim    = new Date(hoje.getFullYear(), 11, 31, 23, 59, 59, 999);
+  } else {
+    inicio = new Date(0); fim = new Date(9999, 0);
+  }
+  return { inicio: inicio, fim: fim };
+}
+
+function filtroPeriodoRel(item, inicio, fim) {
+  var campos = ['createdAt','dataEnvio','dataEntrada','descarteData','dataEstoque','updatedAt','timestamp'];
+  for (var i = 0; i < campos.length; i++) {
+    var v = item[campos[i]];
+    if (!v) continue;
+    var d = new Date(v.seconds ? v.seconds*1000 : v);
+    if (!isNaN(d) && d >= inicio && d <= fim) return true;
+  }
+  return false;
+}
+
+// ── Atualiza badges dos cards com o período atual ──────────────
+function relAtualizarCards() {
+  var iv    = relGetIntervalo();
+  var ini   = iv.inicio, fim = iv.fim;
+  var sv    = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  var aprovs = STATE.aprovacoes||[];
+  var tercList = STATE.terceirizadaAtivos||[];
+
+  // Movimentações
+  var fromA = aprovs.filter(function(a){return a.tipo && (a.tipo.includes('Moviment')||a.tipo.includes('Descarte')||a.tipo.includes('Reuso')) && filtroPeriodoRel(a,ini,fim);});
+  var fromM = (STATE.movimentacoes||[]).filter(function(m){return filtroPeriodoRel(m,ini,fim);});
+  var movs  = fromA.concat(fromM);
+  sv('rel-card-mov-total', movs.length + ' total');
+  sv('rel-card-mov-aprov', movs.filter(function(m){return m.status==='aprovado';}).length + ' aprovadas');
+  sv('rel-card-mov-pend',  movs.filter(function(m){return m.status==='pendente';}).length + ' pendentes');
+
+  // Pendências (não usa período — sempre atual)
+  sv('rel-card-pend-aprov', aprovs.filter(function(a){return a.status==='pendente';}).length + ' aprovações');
+  sv('rel-card-pend-mw',    tercList.filter(function(t){return !t.retornado;}).length + ' Mindworks');
+
+  // Santa Clara
+  var scList = STATE.scAtivos||[];
+  sv('rel-card-sc-total',  scList.length + ' armazenados');
+  sv('rel-card-sc-period', scList.filter(function(t){return filtroPeriodoRel(t,ini,fim);}).length + ' no período');
+
+  // Terceirizada
+  var tercPeriodo = tercList.filter(function(t){return filtroPeriodoRel(t,ini,fim);});
+  var vencidos    = tercList.filter(function(t){return !t.retornado && t.prazoRetorno && new Date(t.prazoRetorno) < new Date();});
+  sv('rel-card-terc-venc',  vencidos.length + ' vencidos');
+  sv('rel-card-terc-total', tercPeriodo.length + ' enviados');
+  sv('rel-card-terc-retorn',tercPeriodo.filter(function(t){return t.retornado;}).length + ' retornados');
+
+  // Descarte
+  var descList = (STATE.ativos||[]).filter(function(a){return (a.status||'').toLowerCase()==='descarte' && filtroPeriodoRel(a,ini,fim);});
+  sv('rel-card-desc-total', descList.length + ' em descarte');
+
+  // Reuso/Estoque
+  var reusoList = (STATE.ativos||[]).filter(function(a){var s=(a.status||'').toLowerCase();return s==='estoque'||s==='disponivel'||s==='disponível';});
+  sv('rel-card-reuso-total', reusoList.length + ' disponíveis');
+
+  // Chamados
+  var chamList = (STATE.chamados||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+  sv('rel-card-cham-total',  chamList.length + ' abertos');
+  sv('rel-card-cham-aberto', chamList.filter(function(a){return a.status==='aberto';}).length + ' aguardando');
+  sv('rel-card-cham-concl',  chamList.filter(function(a){return a.status==='concluido'||a.status==='fechado';}).length + ' concluídos');
+
+  // Smartphones/MDM
+  var smList = (STATE.smartphones||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+  sv('rel-card-mdm-total',  smList.length + ' dispositivos');
+  sv('rel-card-mdm-bloq',   smList.filter(function(a){return a.bloqueado;}).length + ' bloqueados');
+
+  // Patrimônios
+  var patList = (STATE.patrimonios||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+  sv('rel-card-pat-total',   patList.length + ' registros');
+  sv('rel-card-pat-baixa',   (STATE.baixasPatrimoniais||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);}).length + ' baixas');
+
+  // Mudanças ITIL
+  var mudList = (STATE.mudancas||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+  sv('rel-card-mud-total',  mudList.length + ' mudanças');
+  sv('rel-card-mud-aprov',  mudList.filter(function(a){return a.status==='aprovada';}).length + ' aprovadas');
+
+  // Backups
+  var bkpList = (STATE.backups||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+  sv('rel-card-bkp-total',  bkpList.length + ' execuções');
+  sv('rel-card-bkp-falha',  bkpList.filter(function(a){return a.status==='falha'||a.status==='erro';}).length + ' falhas');
+
+  // Alertas Motor de Eventos
+  var altList = (STATE.alertasEventos||[]);
+  sv('rel-card-alt-total',  altList.length + ' alertas');
+  sv('rel-card-alt-urg',    altList.filter(function(a){return a.urgente;}).length + ' urgentes');
+}
+
+// ── loadRel: abre o relatório no painel inferior ───────────────
+function loadRel(tipo) {
+  _relTipoAtual = tipo;
+  var iv  = relGetIntervalo();
+  var ini = iv.inicio, fim = iv.fim;
+  var el  = document.getElementById('rel-result');
+  var hb  = document.getElementById('rel-historico-busca');
+  if (el) el.style.display = '';
+  if (hb) hb.style.display = (tipo==='historico') ? '' : 'none';
+
+  var titulos = {
+    movimentacoes: '📋 Movimentações',
+    pendencias:    '⏳ Pendências',
+    sc:            '📍 Santa Clara',
+    'terc-atraso': '🚨 Terceirizada — Atraso',
+    'terc-geral':  '🏭 Terceirizada — Geral',
+    historico:     '🔍 Histórico por Ativo',
+    descarte:      '🗑️ Descarte',
+    reuso:         '♻️ Estoque / Reuso',
+  };
+  var sv = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('rel-title', (titulos[tipo]||'Relatório') + ' · ' + (
+    _relPeriodoAtual==='dia'?'Hoje':_relPeriodoAtual==='semana'?'Esta semana':
+    _relPeriodoAtual==='mes'?new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):
+    _relPeriodoAtual==='ano'?String(new Date().getFullYear()):'Todo o histórico'
+  ));
+
+  var thead = document.getElementById('rel-thead');
+  var tbody = document.getElementById('rel-tbody');
+  var sumEl = document.getElementById('rel-summary');
+  if (!thead||!tbody) return;
+
+  var linhas = [];
+
+  if (tipo === 'movimentacoes') {
+    thead.innerHTML = '<tr><th>Data</th><th>Tipo</th><th>PAT</th><th>Ativo</th><th>Destino</th><th>Solicitante</th><th>Status</th></tr>';
+    // Combina aprovacoes (movimentações formais) + movimentacoes (registro direto)
+    var fromAprov = (STATE.aprovacoes||[]).filter(function(a){return a.tipo&&(a.tipo.includes('Moviment')||a.tipo.includes('Descarte')||a.tipo.includes('Reuso'))&&filtroPeriodoRel(a,ini,fim);});
+    var fromMov   = (STATE.movimentacoes||[]).filter(function(m){return filtroPeriodoRel(m,ini,fim);}).map(function(m){return {createdAt:m.data||m.createdAt,tipo:m.tipo||'Movimentação',pat:m.pat||'—',descricao:m.desc||m.ativo||'—',destino:m.para||m.destino||'—',solicitante:m.tecnico||m.solicitante||'—',status:m.status||'concluido'};});
+    var seen = new Set(fromAprov.map(function(a){return a.id;}));
+    linhas = fromAprov.concat(fromMov.filter(function(m){return !seen.has(m.id);}));
+    linhas.sort(function(a,b){return (b.createdAt||'').localeCompare(a.createdAt||'');});
+    tbody.innerHTML = linhas.map(function(a){
+      var sc=a.status==='aprovado'?'#059669':a.status==='pendente'?'#D97706':'#DC2626';
+      return '<tr><td>'+escapeHtml(a.createdAt?new Date(a.createdAt).toLocaleDateString('pt-BR'):'—')+'</td><td>'+escapeHtml(a.tipo||'—')+'</td><td style="font-family:monospace">'+escapeHtml(a.pat||'—')+'</td><td>'+escapeHtml(a.descricao||'—')+'</td><td>'+escapeHtml(a.destino||'—')+'</td><td>'+escapeHtml(a.solicitante||'—')+'</td><td><span style="color:'+sc+';font-weight:700">'+escapeHtml(a.status||'—')+'</span></td></tr>';
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--g400)">Nenhuma movimentação no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length + ' registros · ' + linhas.filter(function(a){return a.status==='aprovado';}).length + ' aprovadas · ' + linhas.filter(function(a){return a.status==='pendente';}).length + ' pendentes';
+
+  } else if (tipo === 'pendencias') {
+    thead.innerHTML = '<tr><th>Tipo</th><th>PAT</th><th>Descrição</th><th>Destino</th><th>Solicitante</th><th>Há quanto tempo</th></tr>';
+    var pend = (STATE.aprovacoes||[]).filter(function(a){return a.status==='pendente';});
+    var mwPend = (STATE.terceirizadaAtivos||[]).filter(function(t){return !t.retornado;});
+    var todas = pend.map(function(a){return {tipo:'Aprovação',pat:a.pat||'—',desc:a.descricao||'—',dest:a.destino||'—',sol:a.solicitante||'—',dt:a.createdAt||''};})
+      .concat(mwPend.map(function(t){return {tipo:'Mindworks',pat:t.pat||'—',desc:t.ativo||'—',dest:'Retorno pendente',sol:t.tecnicoId||'—',dt:t.dataEnvio||''};}));
+    tbody.innerHTML = todas.map(function(r){
+      var diff = r.dt ? Math.floor((new Date()-new Date(r.dt))/86400000) : 0;
+      var dc   = diff>5?'#DC2626':diff>2?'#D97706':'#059669';
+      return '<tr><td><span class="tag">'+escapeHtml(r.tipo)+'</span></td><td style="font-family:monospace">'+escapeHtml(r.pat)+'</td><td>'+escapeHtml(r.desc)+'</td><td>'+escapeHtml(r.dest)+'</td><td>'+escapeHtml(r.sol)+'</td><td style="color:'+dc+';font-weight:700">'+diff+'d</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--g400)">Nenhuma pendência</td></tr>';
+    linhas = todas;
+    if (sumEl) sumEl.textContent = pend.length + ' aprovações pendentes · ' + mwPend.length + ' retornos Mindworks aguardando';
+
+  } else if (tipo === 'sc') {
+    thead.innerHTML = '<tr><th>PAT</th><th>Local</th><th>Data Entrada</th><th>Origem</th></tr>';
+    linhas = (STATE.scAtivos||[]).filter(function(t){return filtroPeriodoRel(t,ini,fim);});
+    tbody.innerHTML = linhas.map(function(t){
+      return '<tr><td style="font-family:monospace">'+escapeHtml(t.pat||'—')+'</td><td>'+escapeHtml(t.local||'—')+'</td><td>'+escapeHtml(t.dataEntrada||'—')+'</td><td>'+escapeHtml(t.origemTerceirizada?'Mindworks':'Direto')+'</td></tr>';
+    }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--g400)">Nenhum ativo em Santa Clara no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length + ' registros';
+
+  } else if (tipo === 'terc-atraso') {
+    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Técnico</th><th>Enviado em</th><th>Venceu em</th><th>Atraso</th></tr>';
+    var hoje_ = new Date();
+    linhas = (STATE.terceirizadaAtivos||[]).filter(function(t){return !t.retornado && t.prazoRetorno && new Date(t.prazoRetorno)<hoje_;});
+    tbody.innerHTML = linhas.map(function(t){
+      var atraso = Math.floor((hoje_-new Date(t.prazoRetorno))/86400000);
+      return '<tr><td style="font-family:monospace">'+escapeHtml(t.pat||'—')+'</td><td>'+escapeHtml(t.ativo||'—')+'</td><td>'+escapeHtml(t.tecnicoId||'—')+'</td><td>'+escapeHtml(t.dataEnvio||'—')+'</td><td style="color:#DC2626">'+escapeHtml(t.prazoRetorno||'—')+'</td><td style="color:#DC2626;font-weight:700">'+atraso+'d atraso</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--g400)">Nenhum atraso</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length + ' ativos com SLA vencido';
+
+  } else if (tipo === 'terc-geral') {
+    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Técnico</th><th>Enviado em</th><th>Prazo</th><th>Status</th></tr>';
+    linhas = (STATE.terceirizadaAtivos||[]).filter(function(t){return filtroPeriodoRel(t,ini,fim);});
+    tbody.innerHTML = linhas.map(function(t){
+      var sc=t.retornado?'#059669':new Date(t.prazoRetorno||0)<new Date()?'#DC2626':'#D97706';
+      var sl=t.retornado?'Retornado':new Date(t.prazoRetorno||0)<new Date()?'Vencido':'Em andamento';
+      return '<tr><td style="font-family:monospace">'+escapeHtml(t.pat||'—')+'</td><td>'+escapeHtml(t.ativo||'—')+'</td><td>'+escapeHtml(t.tecnicoId||'—')+'</td><td>'+escapeHtml(t.dataEnvio||'—')+'</td><td>'+escapeHtml(t.prazoRetorno||'—')+'</td><td style="color:'+sc+';font-weight:700">'+sl+'</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--g400)">Nenhum ativo no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length + ' enviados · ' + linhas.filter(function(t){return t.retornado;}).length + ' retornados';
+
+  } else if (tipo === 'historico') {
+    thead.innerHTML = '<tr><th>Evento</th><th>Ativo</th><th>Detalhes</th><th>Usuário</th><th>Data</th></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--g400);padding:32px">🔍 Use o campo de busca acima para encontrar o ativo</td></tr>';
+    if (sumEl) sumEl.textContent = '';
+    linhas = [];
+
+  } else if (tipo === 'descarte') {
+    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Tipo</th><th>Modalidade</th><th>SAP</th><th>Data</th><th>Responsável</th></tr>';
+    linhas = (STATE.ativos||[]).filter(function(a){return (a.status||'').toLowerCase()==='descarte' && filtroPeriodoRel(a,ini,fim);});
+    tbody.innerHTML = linhas.map(function(a){
+      var sub={leilao:'Leilão/Pregão',doacao:'Doação',inutilizado:'Inutilização','em-analise':'Em Análise'};
+      return '<tr><td style="font-family:monospace">'+escapeHtml(a.pat||'—')+'</td><td>'+escapeHtml(a.hostname||a.desc||'—')+'</td><td>'+escapeHtml(a.tipo||'—')+'</td><td>'+escapeHtml(sub[a.substatusDescarte]||a.substatusDescarte||'—')+'</td><td style="font-family:monospace">'+escapeHtml(a.descarteSAP||'—')+'</td><td>'+escapeHtml(a.descarteData||'—')+'</td><td>'+escapeHtml(a.descarteAutorizadoPor||'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--g400)">Nenhum descarte no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length + ' ativos em descarte no período';
+
+  } else if (tipo === 'reuso') {
+    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Tipo</th><th>Local Estoque</th><th>Condição</th><th>Em Estoque Desde</th></tr>';
+    linhas = (STATE.ativos||[]).filter(function(a){var s=(a.status||'').toLowerCase();return (s==='estoque'||s==='disponivel'||s==='disponível') && filtroPeriodoRel(a,ini,fim);});
+    tbody.innerHTML = linhas.map(function(a){
+      return '<tr><td style="font-family:monospace">'+escapeHtml(a.pat||'—')+'</td><td>'+escapeHtml(a.hostname||a.desc||'—')+'</td><td>'+escapeHtml(a.tipo||'—')+'</td><td>'+escapeHtml(a.local||'—')+'</td><td>'+escapeHtml(a.condicao||'—')+'</td><td>'+escapeHtml(a.dataEstoque||'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--g400)">Nenhum ativo em estoque no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length + ' ativos em estoque · ' + (STATE.ativos||[]).filter(function(a){var s=(a.status||'').toLowerCase();return s==='estoque'||s==='disponivel'||s==='disponível';}).length + ' total disponíveis';
+
+  } else if (tipo === 'chamados') {
+    thead.innerHTML = '<tr><th>ID</th><th>Tipo</th><th>Solicitante</th><th>Prioridade</th><th>Técnico</th><th>Status</th><th>Abertura</th><th>Conclusão</th></tr>';
+    linhas = (STATE.chamados||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+    tbody.innerHTML = linhas.map(function(a){
+      var sc={aberto:'#059669',concluido:'#475569','em-atendimento':'#2563EB','aguardando-aprovacao':'#D97706','aguardando':'#D97706'}[a.status]||'#64748B';
+      return '<tr><td style="font-family:monospace">'+escapeHtml(a.id||'—')+'</td><td><span class="tag">'+escapeHtml(a.tipo||'incidente')+'</span></td><td>'+escapeHtml(a.solicitante||'—')+'</td><td>'+escapeHtml(a.prioridade||'—')+'</td><td>'+escapeHtml(a.tecnico||'—')+'</td><td style="color:'+sc+';font-weight:700">'+escapeHtml(a.status||'—')+'</td><td>'+escapeHtml(a.createdAt?new Date(a.createdAt).toLocaleDateString('pt-BR'):'—')+'</td><td>'+escapeHtml(a.concluidoEm?new Date(a.concluidoEm).toLocaleDateString('pt-BR'):'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--g400)">Nenhum chamado no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length+' chamados · '+linhas.filter(function(a){return a.status==='aberto';}).length+' abertos · '+linhas.filter(function(a){return a.status==='concluido'||a.status==='fechado';}).length+' concluídos';
+
+  } else if (tipo === 'smartphones') {
+    thead.innerHTML = '<tr><th>Dispositivo</th><th>Usuário</th><th>IMEI</th><th>OS</th><th>Bloqueado</th><th>Último Acesso</th></tr>';
+    linhas = (STATE.smartphones||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim)||true;}).slice(0,200);
+    tbody.innerHTML = linhas.map(function(a){
+      return '<tr><td>'+escapeHtml((a.marca||'')+(a.modelo?' '+a.modelo:''))+'</td><td>'+escapeHtml(a.usuario||'—')+'</td><td style="font-family:monospace">'+escapeHtml(a.imei||'—')+'</td><td>'+escapeHtml(a.sistemaOperacional||'—')+'</td><td style="color:'+(a.bloqueado?'#DC2626':'#059669')+';font-weight:700">'+(a.bloqueado?'Sim':'Não')+'</td><td>'+escapeHtml(a.ultimoAcesso||'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--g400)">Nenhum dispositivo</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length+' dispositivos · '+(STATE.smartphones||[]).filter(function(a){return a.bloqueado;}).length+' bloqueados';
+
+  } else if (tipo === 'patrimonio') {
+    thead.innerHTML = '<tr><th>Número</th><th>Descrição</th><th>Valor</th><th>Localidade</th><th>Status</th><th>Aquisição</th></tr>';
+    linhas = (STATE.patrimonios||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+    tbody.innerHTML = linhas.map(function(a){
+      var v = a.valorAquisicao ? 'R$ '+Number(a.valorAquisicao).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '—';
+      return '<tr><td style="font-family:monospace">'+escapeHtml(a.numero||a.id||'—')+'</td><td>'+escapeHtml(a.descricao||'—')+'</td><td>'+escapeHtml(v)+'</td><td>'+escapeHtml(a.localidade||a.area||'—')+'</td><td>'+escapeHtml(a.status||'ativo')+'</td><td>'+escapeHtml(a.dataAquisicao||'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--g400)">Nenhum patrimônio no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length+' registros · R$ '+linhas.reduce(function(s,a){return s+(Number(a.valorAquisicao)||0);},0).toLocaleString('pt-BR',{minimumFractionDigits:2})+' valor total';
+
+  } else if (tipo === 'mudancas') {
+    thead.innerHTML = '<tr><th>ID</th><th>Tipo</th><th>Título</th><th>Impacto</th><th>Responsável</th><th>Status</th><th>Data</th></tr>';
+    linhas = (STATE.mudancas||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+    tbody.innerHTML = linhas.map(function(a){
+      var sc={aprovada:'#059669',rejeitada:'#DC2626',pendente:'#D97706',concluida:'#475569'}[a.status]||'#64748B';
+      return '<tr><td style="font-family:monospace">'+escapeHtml(a.id||'—')+'</td><td>'+escapeHtml(a.tipo||'—')+'</td><td>'+escapeHtml(a.titulo||'—')+'</td><td>'+escapeHtml(a.impacto||'—')+'</td><td>'+escapeHtml(a.responsavel||'—')+'</td><td style="color:'+sc+';font-weight:700">'+escapeHtml(a.status||'—')+'</td><td>'+escapeHtml(a.criadoEm?new Date(a.criadoEm).toLocaleDateString('pt-BR'):'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--g400)">Nenhuma mudança no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length+' mudanças';
+
+  } else if (tipo === 'backups') {
+    thead.innerHTML = '<tr><th>Servidor</th><th>Tipo</th><th>Tamanho</th><th>Duração</th><th>Status</th><th>Data/Hora</th></tr>';
+    linhas = (STATE.backups||[]).filter(function(a){return filtroPeriodoRel(a,ini,fim);});
+    tbody.innerHTML = linhas.map(function(a){
+      var sc={sucesso:'#059669',ok:'#059669',falha:'#DC2626',erro:'#DC2626',alerta:'#D97706'}[(a.status||'').toLowerCase()]||'#64748B';
+      var tam = a.tamanhoGB ? a.tamanhoGB+'GB' : a.tamanhoMB ? a.tamanhoMB+'MB' : '—';
+      return '<tr><td>'+escapeHtml(a.servidor||a.origem||'—')+'</td><td>'+escapeHtml(a.tipo||'—')+'</td><td>'+escapeHtml(tam)+'</td><td>'+escapeHtml(a.duracao||'—')+'</td><td style="color:'+sc+';font-weight:700">'+escapeHtml(a.status||'—')+'</td><td>'+escapeHtml(a.dataHora?new Date(a.dataHora).toLocaleString('pt-BR'):'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--g400)">Nenhum backup no período</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length+' execuções · '+linhas.filter(function(a){return (a.status||'').toLowerCase()==='falha'||(a.status||'').toLowerCase()==='erro';}).length+' falhas';
+
+  } else if (tipo === 'alertas') {
+    thead.innerHTML = '<tr><th>Tipo</th><th>Ativo/IP</th><th>Mensagem</th><th>Urgente</th><th>Detectado</th></tr>';
+    linhas = (STATE.alertasEventos||[]);
+    tbody.innerHTML = linhas.map(function(a){
+      var hn = a.ativo ? (a.ativo.hostname||a.ativo.ip||a.ativo.pat||'—') : '—';
+      return '<tr><td><span class="tag">'+escapeHtml(a.tipo||'—')+'</span></td><td style="font-family:monospace">'+escapeHtml(hn)+'</td><td>'+escapeHtml(a.msg||'—')+'</td><td style="color:'+(a.urgente?'#DC2626':'#059669')+';font-weight:700">'+(a.urgente?'⚠️ Sim':'Não')+'</td><td>'+new Date().toLocaleTimeString('pt-BR')+'</td></tr>';
+    }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--g400)">Nenhum alerta ativo</td></tr>';
+    if (sumEl) sumEl.textContent = linhas.length+' alertas · '+linhas.filter(function(a){return a.urgente;}).length+' urgentes';
+  }
+
+  _relDadosAtual = linhas;
+
+  // Scroll para o resultado
+  setTimeout(function(){
+    var el2 = document.getElementById('rel-result');
+    if (el2) el2.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 100);
+}
+
+// ── Busca histórico por ativo ──────────────────────────────────
+function relBuscarHistorico() {
+  var q = (document.getElementById('rel-historico-q')?.value||'').toLowerCase().trim();
+  var lista = document.getElementById('rel-historico-lista');
+  if (!lista) return;
+  if (!q) { lista.innerHTML = ''; return; }
+
+  var ativos = (STATE.ativos||[]).filter(function(a){
+    return (a.pat||'').toLowerCase().includes(q) || (a.hostname||'').toLowerCase().includes(q) || (a.ip||'').toLowerCase().includes(q);
+  }).slice(0,10);
+
+  if (!ativos.length) {
+    lista.innerHTML = '<div style="font-size:12px;color:var(--g400);padding:8px 0">Nenhum ativo encontrado</div>';
+    return;
+  }
+  lista.innerHTML = ativos.map(function(a){
+    var hn = a.hostname||a.desc||a.ip||'—';
+    return '<button onclick="relAbrirHistoricoAtivo(\''+escapeHtml(a.id||'')+'\',\''+escapeHtml(a.pat||'')+'\',\''+escapeHtml(hn)+'\')" style="margin:3px;padding:5px 12px;border:1px solid var(--g200);border-radius:8px;background:var(--panel);cursor:pointer;font-size:12px;font-weight:600">🖥️ '+escapeHtml(hn)+' <span style="color:var(--g400);font-weight:400">PAT:'+escapeHtml(a.pat||'—')+'</span></button>';
+  }).join('');
+}
+
+async function relAbrirHistoricoAtivo(ativoId, pat, nome) {
+  var tbody = document.getElementById('rel-tbody');
+  var sumEl = document.getElementById('rel-summary');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--g400);padding:24px">⏳ Carregando histórico de '+escapeHtml(nome)+'...</td></tr>';
+  if (sumEl) sumEl.textContent = '';
+  try {
+    var snap = await db.collection('ativos').doc(ativoId).collection('historico').orderBy('timestamp','desc').limit(200).get();
+    var eventos = snap.docs.map(function(d){return d.data();});
+    var iconMap = {criado:'🟢',atribuido:'👤',transferido:'🔄',manutencao:'🔧',retornou:'🏭','santa-clara':'📍',reutilizado:'♻️',descartado:'🗑️',renomeado:'🏷️',observacao:'💬',movimentado:'📦'};
+    tbody.innerHTML = eventos.map(function(ev){
+      var ico  = iconMap[ev.evento]||'📌';
+      var data = ev.timestamp ? new Date(ev.timestamp).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+      var dets = ev.detalhes ? Object.entries(ev.detalhes).filter(function(e){return e[1]&&e[0]!=='id';}).map(function(e){return escapeHtml(e[0])+': '+escapeHtml(String(e[1]));}).join(' · ') : '—';
+      return '<tr><td>'+ico+' <strong>'+escapeHtml((ev.evento||'').replace(/-/g,' '))+'</strong></td><td style="font-family:monospace">'+escapeHtml(pat)+'</td><td style="font-size:11.5px;color:var(--g600)">'+dets+'</td><td>'+escapeHtml(ev.usuario||'—')+'</td><td style="font-size:11.5px">'+data+'</td></tr>';
+    }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--g400)">Nenhum evento registrado para este ativo</td></tr>';
+    if (sumEl) sumEl.textContent = eventos.length + ' eventos no histórico de ' + nome + ' (PAT: ' + pat + ')';
+    _relDadosAtual = eventos;
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Erro: '+escapeHtml(e.message)+'</td></tr>';
+  }
+}
+
+// ── Exportar CSV ───────────────────────────────────────────────
+function relExportarCSV() {
+  if (!_relDadosAtual || !_relDadosAtual.length) return showToast('Nenhum dado para exportar','warning');
+  var cols = Object.keys(_relDadosAtual[0]).filter(function(k){return typeof _relDadosAtual[0][k]!=='object'||_relDadosAtual[0][k]===null;});
+  var csv  = cols.join(';') + '\n';
+  csv += _relDadosAtual.map(function(row){
+    return cols.map(function(c){
+      var v = row[c];
+      if (v == null) return '';
+      return '"' + String(v).replace(/"/g,'""') + '"';
+    }).join(';');
+  }).join('\n');
+  var blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href   = url;
+  a.download = 'sysack-relatorio-'+_relTipoAtual+'-'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV exportado com sucesso','success');
+}
+
+// ── Inicializa relatórios ao entrar na página ──────────────────
+function renderRelatorios() {
+  relAtualizarCards();
+  // Marca Mês como padrão visualmente
+  var btns = document.querySelectorAll('.rel-per-btn, .rel-per-btn2');
+  btns.forEach(function(b){
+    if (b.textContent.trim() === 'Mês') {
+      b.style.background = '#fff'; b.style.color='var(--g900)'; b.style.boxShadow='0 1px 3px rgba(0,0,0,.1)';
+    }
+  });
+  var el = document.getElementById('rel-periodo-label');
+  if (el) el.textContent = '→ ' + new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+}
