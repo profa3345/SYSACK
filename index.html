@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202605201818 -->
+<!-- build: 202605201902 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2332,134 +2332,149 @@ window.dispatchEvent(new Event('firebase-ready'));
 
     <!-- MONITOR DE REDE -->
     <div class="page" id="page-monitor-rede">
-      <div class="flex items-center justify-between mb-16">
+
+      <!-- ── Header ──────────────────────────────────────────── -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2 style="font-size:20px;font-weight:800;color:var(--g900)">📡 Monitor de Rede</h2>
-          <p class="text-sm text-muted mt-8">SNMP · ICMP · HTTP — todos os dispositivos lógicos em tempo real</p>
+          <p class="text-sm text-muted mt-4">SNMP · ICMP · HTTP — todos os dispositivos em tempo real</p>
         </div>
-        <div class="flex gap-8">
-          <span id="monitor-last-update" style="font-size:11px;color:var(--g400);align-self:center"></span>
-          <button class="btn btn-ghost btn-sm" onclick="renderMonitorRede();renderMapaRede()">↺ Atualizar</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="monitor-last-update" style="font-size:11px;color:var(--g400)"></span>
+          <button class="btn btn-ghost btn-sm" onclick="renderMonitorRede();setTimeout(renderMapaRede,200)">↺ Atualizar</button>
         </div>
       </div>
 
-      <!-- STATS GLOBAIS -->
-      <!-- KPIs clicáveis Monitor de Rede -->
-      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px">
-        <div id="mon-card-total" class="stat-card blue" style="cursor:pointer" onclick="monFiltrar('')" title="Ver todos">
+      <!-- ── KPIs clicáveis ──────────────────────────────────── -->
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px">
+        <div id="mon-card-total"  class="stat-card blue"   style="cursor:pointer" onclick="monFiltrar('')"        title="Ver todos">
           <div class="stat-label">Total</div><div class="stat-value" id="mon-total">—</div></div>
-        <div id="mon-card-online" class="stat-card green" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('ok')" title="Filtrar online">
+        <div id="mon-card-online" class="stat-card green"  style="cursor:pointer" onclick="monFiltrar('ok')"      title="Filtrar online">
           <div class="stat-label">Online ↗</div><div class="stat-value" id="mon-online">—</div></div>
-        <div id="mon-card-offline" class="stat-card red" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('offline')" title="Filtrar offline">
+        <div id="mon-card-offline"class="stat-card red"    style="cursor:pointer" onclick="monFiltrar('offline')" title="Filtrar offline">
           <div class="stat-label">Offline ↗</div><div class="stat-value" id="mon-offline">—</div></div>
-        <div id="mon-card-critico" class="stat-card orange" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('critico')" title="Filtrar críticos">
+        <div id="mon-card-critico"class="stat-card orange" style="cursor:pointer" onclick="monFiltrar('critico')" title="Filtrar críticos">
           <div class="stat-label">Crítico ↗</div><div class="stat-value" id="mon-critico">—</div></div>
-        <div id="mon-card-alerta" class="stat-card yellow" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('alerta')" title="Filtrar alertas">
+        <div id="mon-card-alerta" class="stat-card yellow" style="cursor:pointer" onclick="monFiltrar('alerta')"  title="Filtrar alertas">
           <div class="stat-label">Alerta ↗</div><div class="stat-value" id="mon-alerta">—</div></div>
-        <div class="stat-card violet"><div class="stat-label">Uptime Rede</div><div class="stat-value" id="mon-uptime">—</div></div>
+        <div class="stat-card violet">
+          <div class="stat-label">Uptime Rede</div><div class="stat-value" id="mon-uptime">—</div></div>
       </div>
 
-      <!-- VIEW TOGGLE + FILTROS -->
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-        <div style="display:flex;gap:0;background:var(--g100,#f1f5f9);border-radius:8px;padding:3px">
-          <button id="mon-view-tabela" onclick="monSetView('tabela')"
-            style="padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:#fff;color:var(--g900,#111827);box-shadow:0 1px 3px rgba(0,0,0,.1)">
-            ☰ Tabela
-          </button>
-          <button id="mon-view-mapa" onclick="monSetView('mapa')"
-            style="padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:none;color:var(--g500,#64748b)">
-            🗺️ Mapa de Rede
-          </button>
+      <!-- ── Linha: tabs + filtros + gráfico ────────────────── -->
+      <div style="display:grid;grid-template-columns:1fr 320px;gap:14px;margin-bottom:14px;align-items:start">
+
+        <!-- Esquerda: tabs + filtros -->
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+            <div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px">
+              <button id="mon-view-tabela" onclick="monSetView('tabela')"
+                style="padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1)">
+                ☰ Tabela</button>
+              <button id="mon-view-mapa" onclick="monSetView('mapa')"
+                style="padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;background:none;color:var(--g500)">
+                🗺️ Mapa de Rede</button>
+            </div>
+            <input class="form-control" style="width:200px;margin:0" placeholder="🔍 IP, hostname, PAT..." id="mon-search" oninput="renderMonitorRede()">
+            <select class="form-control" style="width:130px;margin:0" id="mon-filter-status" onchange="_monFiltro=this.value;renderMonitorRede()">
+              <option value="">Todos</option>
+              <option value="ok">Online</option>
+              <option value="offline">Offline</option>
+              <option value="critico">Crítico</option>
+              <option value="alerta">Alerta</option>
+            </select>
+            <select class="form-control" style="width:150px;margin:0" id="mon-filter-tipo" onchange="renderMonitorRede()">
+              <option value="">Todos os tipos</option>
+              <option value="switch">Switches</option>
+              <option value="router">Roteadores</option>
+              <option value="firewall">Firewalls</option>
+              <option value="ap">APs Wi-Fi</option>
+              <option value="servidor">Servidores</option>
+              <option value="printer">Impressoras</option>
+              <option value="ups">Nobreaks</option>
+            </select>
+          </div>
         </div>
-        <div class="doc-filter-row" style="margin:0">
-          <input class="form-control" style="width:220px;margin:0" placeholder="🔍 IP, hostname, PAT..." id="mon-search" oninput="renderMonitorRede()">
-          <select class="form-control" style="width:140px;margin:0" id="mon-filter-status" onchange="renderMonitorRede()">
-            <option value="">Todos</option>
-            <option value="offline">Offline</option>
-            <option value="critico">Crítico</option>
-            <option value="alerta">Alerta</option>
-            <option value="ok">Online</option>
-          </select>
-          <select class="form-control" style="width:160px;margin:0" id="mon-filter-tipo" onchange="renderMonitorRede()">
-            <option value="">Todos os tipos</option>
-            <option value="switch">Switches</option>
-            <option value="router">Roteadores</option>
-            <option value="ups">Nobreaks</option>
-            <option value="printer">Impressoras</option>
-            <option value="servidor">Servidores</option>
-            <option value="camera">Câmeras</option>
-            <option value="firewall">Firewalls</option>
-            <option value="ap">APs Wi-Fi</option>
-          </select>
+
+        <!-- Direita: gráfico por tipo -->
+        <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:10px;padding:14px 16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div style="font-size:12px;font-weight:700;color:var(--g900)">Distribuição por Tipo</div>
+            <button onclick="_monFiltro='';document.getElementById('mon-filter-status').value='';renderMonitorRede()"
+              style="border:none;background:var(--g100);color:var(--g600);padding:3px 8px;border-radius:5px;font-size:10px;cursor:pointer">Limpar filtro</button>
+          </div>
+          <div id="mon-chart" style="min-height:50px"></div>
         </div>
-      <!-- Gráfico de distribuição por tipo -->
-      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;padding:16px 20px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div style="font-size:13px;font-weight:700;color:var(--g900)">Distribuição por Tipo</div>
-          <button onclick="_monFiltro='';document.getElementById('mon-filter-status').value='';renderMonitorRede()" style="border:none;background:var(--g100);color:var(--g600);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">Limpar filtro</button>
-        </div>
-        <div id="mon-chart" style="min-height:60px"></div>
       </div>
 
-      </div>
-
-      <!-- VIEW: TABELA -->
+      <!-- ── View: TABELA ────────────────────────────────────── -->
       <div id="mon-view-tabela-wrap" class="card">
         <div class="table-wrap">
           <table id="mon-table">
             <thead><tr>
-              <th style="width:36px"></th>
-              <th>Dispositivo</th>
-              <th>IP</th>
-              <th>Tipo</th>
-              <th>Status</th>
-              <th>Latência</th>
-              <th>CPU</th>
-              <th>Temp</th>
-              <th>Métricas extras</th>
-              <th>Último online</th>
+              <th style="width:32px"></th>
+              <th>Dispositivo</th><th>IP</th><th>Tipo</th><th>Status</th>
+              <th>Latência</th><th>CPU</th><th>Temp</th><th>Métricas</th><th>Último online</th>
             </tr></thead>
             <tbody id="mon-tbody">
-              <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--g400)">
-                Instale o SYSACK Agent com suporte SNMP no servidor para monitorar dispositivos.<br>
-                <span style="font-size:12px">Os dispositivos aparecem automaticamente quando o agente os detecta.</span>
-              </td></tr>
+              <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--g400)">Carregando...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- VIEW: MAPA DE REDE -->
-      <div id="mon-view-mapa-wrap" style="display:none" class="card" style="padding:0;overflow:hidden">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--g100,#f1f5f9);display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <span style="font-size:13px;font-weight:700;color:var(--g900)">🗺️ Mapa de Topologia</span>
-            <span style="font-size:11px;color:var(--g400);margin-left:8px">Switches → Ativos por Subnet</span>
-          </div>
-          <div style="display:flex;gap:14px;font-size:11px;color:var(--g500)">
-            <span><span style="display:inline-block;width:10px;height:10px;background:#10B981;border-radius:50%;margin-right:4px"></span>Online</span>
-            <span><span style="display:inline-block;width:10px;height:10px;background:#F59E0B;border-radius:50%;margin-right:4px"></span>Alerta</span>
-            <span><span style="display:inline-block;width:10px;height:10px;background:#EF4444;border-radius:50%;margin-right:4px"></span>Offline</span>
-            <span><span style="display:inline-block;width:10px;height:10px;background:#94A3B8;border-radius:50%;margin-right:4px"></span>Desconhecido</span>
-          </div>
-        </div>
-        <div id="mapa-rede-svg" style="overflow:auto;padding:16px;min-height:320px;background:var(--g50,#f8fafc)">
-          <div style="display:flex;align-items:center;justify-content:center;height:240px;color:var(--g400)">🔄 Carregando mapa...</div>
-        </div>
-      </div>
+      <!-- ── View: MAPA DE REDE (card separado, sem corte) ───── -->
+      <div id="mon-view-mapa-wrap" style="display:none">
 
-      <!-- MODAL DETALHE DISPOSITIVO -->
+        <!-- Toolbar do mapa -->
+        <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px 12px 0 0;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--g100)">
+          <div style="display:flex;align-items:center;gap:16px">
+            <div>
+              <span style="font-size:13px;font-weight:700;color:var(--g900)">🗺️ Mapa de Topologia</span>
+              <span style="font-size:11px;color:var(--g400);margin-left:8px">Switches → Ativos por Subnet</span>
+            </div>
+            <div style="display:flex;gap:12px;font-size:11px;color:var(--g500)">
+              <span><span style="display:inline-block;width:8px;height:8px;background:#10B981;border-radius:50%;margin-right:3px"></span>Online</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#F59E0B;border-radius:50%;margin-right:3px"></span>Alerta</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#EF4444;border-radius:50%;margin-right:3px"></span>Offline</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#94A3B8;border-radius:50%;margin-right:3px"></span>Desconhecido</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button onclick="mapaZoom(1.15)" style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700" title="Ampliar">+</button>
+            <button onclick="mapaZoom(0.87)" style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700" title="Reduzir">−</button>
+            <button onclick="mapaZoom(1)"   style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Tamanho real">1:1</button>
+            <div style="width:1px;height:20px;background:var(--g200);margin:0 4px"></div>
+            <button onclick="mapaImprimir()" style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Imprimir / Exportar PDF">🖨️ PDF</button>
+          </div>
+        </div>
+
+        <!-- Área do mapa — scroll vertical, nunca horizontal -->
+        <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-top:none;border-radius:0 0 12px 12px;overflow:hidden">
+          <div id="mapa-rede-outer" style="overflow-x:hidden;overflow-y:auto;max-height:75vh;background:var(--g50,#f8fafc)">
+            <div id="mapa-rede-inner" style="transform-origin:top left;width:100%;transition:transform .2s">
+              <div id="mapa-rede-svg" style="padding:16px;min-height:320px">
+                <div style="display:flex;align-items:center;justify-content:center;height:240px;color:var(--g400)">🔄 Carregando mapa...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /mon-view-mapa-wrap -->
+
+      <!-- Modal detalhe -->
       <div class="modal-overlay" id="modal-monitor-detalhe">
         <div class="modal" style="max-width:560px">
           <div class="modal-header">
             <h3 id="mon-modal-title">Detalhes do Dispositivo</h3>
-            <button class="close-btn" onclick="closeModal('modal-monitor-detalhe')">✕</button>
+            <button class="modal-close" onclick="closeModal('modal-monitor-detalhe')">✕</button>
           </div>
-          <div class="modal-body" id="mon-modal-body">
-          </div>
+          <div class="modal-body" id="mon-modal-body"></div>
         </div>
       </div>
-    </div>
+
+    </div><!-- /page-monitor-rede -->
+
 
     <!-- MAPA DE ATIVOS -->
     <!-- MAPA DE ATIVOS -->
@@ -3074,10 +3089,70 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <div class="page" id="page-topologia">
-      <div class="flex items-center justify-between mb-16" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🗺️ Topologia de Rede</h2><p class="text-sm text-muted">Mapa físico via LLDP/CDP</p></div><div class="flex gap-8" style="align-items:center"><select id="topo-filter-area" class="form-control" style="width:180px;margin:0" onchange="renderTopologia()"><option value="">Todas as áreas</option></select><button class="btn btn-ghost btn-sm" onclick="topoZoom(1.2)">🔍+</button><button class="btn btn-ghost btn-sm" onclick="topoZoom(0.8)">🔍−</button><button class="btn btn-ghost btn-sm" onclick="topoReset()">⟳</button><button class="btn btn-ghost btn-sm" onclick="topoExportar()">📥 SVG</button></div></div>
-      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px"><div class="stat-card blue"><div class="stat-label">Dispositivos</div><div class="stat-value" id="topo-kpi-total">—</div></div><div class="stat-card violet"><div class="stat-label">Links LLDP</div><div class="stat-value" id="topo-kpi-links">—</div></div><div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="topo-kpi-online">—</div></div><div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="topo-kpi-offline">—</div></div><div class="stat-card orange"><div class="stat-label">Sem LLDP</div><div class="stat-value" id="topo-kpi-sem-lldp">—</div></div></div>
-      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:14px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--g100);display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;font-weight:600;color:var(--g500)">MOSTRAR:</span><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-fw" checked onchange="renderTopologia()"> 🔥 Firewalls</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-rt" checked onchange="renderTopologia()"> 🌐 Roteadores</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-sw" checked onchange="renderTopologia()"> 🔀 Switches</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-ap" checked onchange="renderTopologia()"> 📡 APs</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-labels" checked onchange="renderTopologia()"> 🏷️ Labels</label><div style="margin-left:auto;font-size:11px;color:var(--g400)" id="topo-last-update"></div></div><div id="topo-container" style="width:100%;height:620px;overflow:hidden;cursor:grab;position:relative;background:radial-gradient(circle at 50% 50%,#f8fafc,#f1f5f9)"><svg id="topo-svg" style="width:100%;height:100%" xmlns="http://www.w3.org/2000/svg"><g id="topo-g-links"></g><g id="topo-g-nodes"></g><g id="topo-g-labels"></g></svg></div></div>
-    </div>
+
+      <!-- Header + controles -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🗺️ Topologia de Rede</h2>
+          <p class="text-sm text-muted">Mapa físico via LLDP/CDP · Arraste os nós para reorganizar</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="topo-filter-area" class="form-control" style="width:200px;margin:0" onchange="renderTopologia()">
+            <option value="">Todas as áreas</option>
+          </select>
+          <button onclick="topoZoom(1.2)"  style="border:1px solid var(--g200);background:var(--panel);padding:5px 11px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:700" title="Ampliar">+</button>
+          <button onclick="topoZoom(0.83)" style="border:1px solid var(--g200);background:var(--panel);padding:5px 11px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:700" title="Reduzir">−</button>
+          <button onclick="topoReset()"    style="border:1px solid var(--g200);background:var(--panel);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Resetar layout">⟳ Reset</button>
+          <button onclick="topoExportar()" style="border:1px solid var(--g200);background:var(--panel);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">📥 SVG</button>
+          <span id="topo-last-update" style="font-size:10.5px;color:var(--g400)"></span>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">
+        <div class="stat-card blue">  <div class="stat-label">Dispositivos</div><div class="stat-value" id="topo-kpi-total">—</div></div>
+        <div class="stat-card violet"><div class="stat-label">Links LLDP</div>  <div class="stat-value" id="topo-kpi-links">—</div></div>
+        <div class="stat-card green"> <div class="stat-label">Online</div>       <div class="stat-value" id="topo-kpi-online">—</div></div>
+        <div class="stat-card red">   <div class="stat-label">Offline</div>      <div class="stat-value" id="topo-kpi-offline">—</div></div>
+        <div class="stat-card orange"><div class="stat-label">Sem LLDP</div>     <div class="stat-value" id="topo-kpi-sem-lldp">—</div></div>
+      </div>
+
+      <!-- Filtros de tipo -->
+      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;letter-spacing:.5px">Mostrar:</span>
+        <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="topo-show-fw"     checked onchange="renderTopologia()"> 🔥 Firewalls</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="topo-show-rt"     checked onchange="renderTopologia()"> 🌐 Roteadores</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="topo-show-sw"     checked onchange="renderTopologia()"> ⇌ Switches</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="topo-show-ap"     checked onchange="renderTopologia()"> 📡 APs</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="topo-show-labels" checked onchange="renderTopologia()"> 🏷️ Labels</label>
+        <div style="margin-left:auto;display:flex;gap:12px;font-size:11px;color:var(--g500)">
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;background:#10B981;border-radius:50%;display:inline-block"></span>Online</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;background:#F59E0B;border-radius:50%;display:inline-block"></span>Alerta</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;background:#6B7280;border-radius:50%;display:inline-block"></span>Offline</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;background:#2563EB;border-radius:50%;display:inline-block;border:2px solid #1D4ED8"></span>Switch</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;background:#7C3AED;border-radius:50%;display:inline-block"></span>Firewall</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;background:#0891B2;border-radius:50%;display:inline-block"></span>AP</span>
+        </div>
+      </div>
+
+      <!-- Canvas SVG do mapa -->
+      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;position:relative">
+        <!-- Hint de controles -->
+        <div style="position:absolute;top:10px;right:12px;z-index:10;font-size:10px;color:var(--g400);text-align:right;line-height:1.6;pointer-events:none">
+          Scroll = zoom · Arraste nó = mover · Arraste fundo = pan
+        </div>
+        <div id="topo-container" style="width:100%;height:680px;overflow:hidden;cursor:grab;position:relative;background:radial-gradient(circle at 50% 30%,#f0f4ff,#f8fafc)">
+          <svg id="topo-svg" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block">
+            <g id="topo-g-links"></g>
+            <g id="topo-g-nodes"></g>
+            <g id="topo-g-labels"></g>
+          </svg>
+        </div>
+      </div>
+
+    </div><!-- /page-topologia -->
+
+
 
     <div class="page" id="page-servidores">
       <!-- Header -->
@@ -3162,8 +3237,27 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <div class="page" id="page-redes">
-      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🌐 Faixas de Rede</h2><p class="text-sm text-muted">397 prefixos · 87 localidades</p></div><div class="flex gap-8" style="align-items:center;flex-wrap:wrap"><input class="form-control" id="redes-search" style="width:220px;margin:0" placeholder="🔍 Prefixo, sigla..." oninput="renderRedes()"><select class="form-control" id="redes-filter-sigla" style="width:180px;margin:0" onchange="renderRedes()"><option value="">Todas as siglas</option></select><button id="redes-add-btn" onclick="abrirAddRede('')" class="btn btn-primary btn-sm" style="display:none">+ Nova Área</button></div></div>
-      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px"><div class="stat-card blue"><div class="stat-label">Total de Faixas</div><div class="stat-value" id="redes-kpi-total">—</div></div><div class="stat-card green"><div class="stat-label">Localidades</div><div class="stat-value" id="redes-kpi-localidades">—</div></div><div class="stat-card violet"><div class="stat-label">Personalizadas</div><div class="stat-value" id="redes-kpi-custom">—</div></div></div>
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🌐 Faixas de Rede</h2><p class="text-sm text-muted">397 prefixos · 87 localidades CESAN</p></div>
+        <div class="flex gap-8" style="align-items:center;flex-wrap:wrap">
+          <input class="form-control" id="redes-search" style="width:220px;margin:0" placeholder="🔍 Prefixo, sigla, localidade..." oninput="renderRedes()">
+          <select class="form-control" id="redes-filter-sigla" style="width:200px;margin:0" onchange="window._redesFiltroKpi='';renderRedes()"><option value="">Todas as siglas</option></select>
+          <button id="redes-add-btn" onclick="abrirAddRede('')" class="btn btn-primary btn-sm" style="display:none" title="Somente administradores">+ Nova Localidade</button>
+        </div></div>
+      <!-- KPIs clicáveis -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+        <div id="redes-kpi-total-card" class="stat-card blue" style="cursor:pointer;transition:outline .15s" onclick="window._redesFiltroKpi=window._redesFiltroKpi==='total'?'':'total';document.getElementById('redes-filter-sigla').value='';renderRedes()" title="Ver todas as faixas">
+          <div class="stat-label">Total de Faixas ↗</div><div class="stat-value" id="redes-kpi-total">—</div>
+          <div style="font-size:10px;color:var(--g400);margin-top:4px">Clique para listar todas</div>
+        </div>
+        <div class="stat-card green" style="cursor:default">
+          <div class="stat-label">Localidades</div><div class="stat-value" id="redes-kpi-localidades">—</div>
+          <div style="font-size:10px;color:var(--g400);margin-top:4px">Use o filtro de sigla →</div>
+        </div>
+        <div id="redes-kpi-custom-card" class="stat-card violet" style="cursor:pointer;transition:outline .15s" onclick="window._redesFiltroKpi=window._redesFiltroKpi==='personalizada'?'':'personalizada';document.getElementById('redes-filter-sigla').value='';renderRedes()" title="Ver apenas redes personalizadas (overrides)">
+          <div class="stat-label">Personalizadas ↗</div><div class="stat-value" id="redes-kpi-custom">—</div>
+          <div style="font-size:10px;color:var(--g400);margin-top:4px">Faixas editadas manualmente</div>
+        </div>
+      </div>
       <div id="redes-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:14px"></div>
     </div>
 
