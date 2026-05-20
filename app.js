@@ -16392,12 +16392,18 @@ async function carregarPaginaChamados(pagina = 0) {
     document.getElementById('pat-mode-knob')?.classList.add('on');
     localStorage.setItem(PAT_KEY,'1');
     pmShowTab('dashboard');
+    // Mostra Patrimônio no nav
+    var navPat = document.getElementById('nav-patrimonio-item');
+    if (navPat) navPat.style.display = '';
   };
 
   window.fecharPatMode = function(){
     _pmOpen = false;
     document.getElementById('pat-mode-panel')?.classList.remove('open');
     document.getElementById('pat-mode-overlay')?.classList.remove('open');
+    // Esconde Patrimônio no nav
+    var navPat = document.getElementById('nav-patrimonio-item');
+    if (navPat) navPat.style.display = 'none';
     document.getElementById('pat-mode-sw')?.classList.remove('on');
     document.getElementById('pat-mode-knob')?.classList.remove('on');
     localStorage.removeItem(PAT_KEY);
