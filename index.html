@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202605201913 -->
+<!-- build: 202605201919 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -174,6 +174,12 @@ window.dispatchEvent(new Event('firebase-ready'));
   </div>
 
   <nav class="sb-nav">
+    <!-- ── Patrimônio — só aparece no Modo Patrimônio ── -->
+    <a class="nav-i" id="nav-patrimonio-item" data-page="patrimonio" style="display:none;background:rgba(37,99,235,.15);border:1px solid rgba(37,99,235,.3);border-radius:8px;margin-bottom:6px;margin-top:2px">
+      <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1.5" stroke="#60A5FA" stroke-width="1.4"/><path d="M4 7h3M4 9.5h5M10 7h2" stroke="#60A5FA" stroke-width="1.3" stroke-linecap="round"/></svg>
+      <span style="color:#60A5FA;font-weight:700">Patrimônio</span>
+      <span style="font-size:9px;background:#2563EB;color:#fff;padding:1px 5px;border-radius:6px;margin-left:auto">PAT</span>
+    </a>
     <a class="nav-i" data-page="ai-dashboard" title="IA & Insights" style="background:linear-gradient(135deg,rgba(37,99,235,.08),rgba(124,58,237,.08));border:1px solid rgba(37,99,235,.15);margin:4px 8px;border-radius:var(--r)">
       <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       IA &amp; Insights
@@ -192,12 +198,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="sb-gh-inner"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M5 12v2M11 12v2M4 14h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Ativos</div>
       <svg class="sb-chevron" id="chev-grp-ativos" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
     </div>
-    <div class="sb-group"       <!-- Patrimônio (visível apenas no Modo Patrimônio) -->
-      <a class="nav-i nav-sub" id="nav-patrimonio-item" style="display:none" data-page="patrimonio">
-        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 7h3M4 9.5h5M10 7h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1 6h14" stroke="currentColor" stroke-width="1.3"/></svg>
-        Patrimônio
-        <span style="font-size:9px;font-weight:800;background:linear-gradient(135deg,#2563EB,#7C3AED);color:#fff;padding:1px 6px;border-radius:10px;margin-left:auto">NEW</span>
-      </a>
+    <div class="sb-group"       
       id="grp-ativos">
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="computador,workstation,notebook,desktop"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="9" height="7" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M11 7h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Computadores</a>
       <a class="nav-i nav-sub" data-page="ativos" data-tipo="notebook">
