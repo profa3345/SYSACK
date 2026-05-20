@@ -6039,6 +6039,7 @@ function renderMonitorRede() {
   const q      = (document.getElementById('mon-search')?.value || '').toLowerCase();
   const fSt    = _monFiltro || document.getElementById('mon-filter-status')?.value || '';
   const fTipo  = document.getElementById('mon-filter-tipo')?.value   || '';
+  const fLocal = document.getElementById('mon-filter-local')?.value  || '';
   const agora  = new Date();
 
   // Agrupa switches + ativos com IP
@@ -6067,6 +6068,16 @@ function renderMonitorRede() {
   sv('mon-uptime',  uptimePct + '%');
   setTimeout(function(){ renderMonChart(todos); }, 0);
   nbUpdate('nb-monitor-critico', critico + offline);
+  // Populate localidade dropdown dynamically
+  var localSel = document.getElementById('mon-filter-local');
+  if (localSel && localSel.options.length <= 1) {
+    var locais = [...new Set(todos.map(d => resolverLocal(d)).filter(l => l && l !== '—'))].sort();
+    locais.forEach(function(loc) {
+      var opt = document.createElement('option');
+      opt.value = loc; opt.textContent = loc;
+      localSel.appendChild(opt);
+    });
+  }
 
   document.getElementById('monitor-last-update')
     .textContent = 'Atualizado: ' + agora.toLocaleTimeString('pt-BR');
@@ -6077,9 +6088,19 @@ function renderMonitorRede() {
     d.ip?.includes(q) || d.hostname?.toLowerCase().includes(q) ||
     d.desc?.toLowerCase().includes(q) || d.pat?.toLowerCase().includes(q));
   if (fSt)   lista = lista.filter(d => d.status === fSt);
-  if (fTipo) lista = lista.filter(d => d.tipo === fTipo);
+  if (fTipo)  lista = lista.filter(d => d.tipo === fTipo);
+  if (fLocal) lista = lista.filter(d => resolverLocal(d) === fLocal);
 
   // Ordena: críticos primeiro
+  // Populate localidade dropdown once
+  var localSelMon = document.getElementById('mon-filter-local');
+  if (localSelMon && localSelMon.options.length <= 1) {
+    var locaisMon = [...new Set(todos.map(function(d){ return resolverLocal(d); }).filter(function(l){ return l && l !== '—'; }))].sort();
+    locaisMon.forEach(function(loc) {
+      var opt = document.createElement('option'); opt.value=loc; opt.textContent=loc; localSelMon.appendChild(opt);
+    });
+  }
+
   const ORDER = { offline:0, critico:1, alerta:2, 'sem-snmp':3, ok:4 };
   lista.sort((a,b) => (ORDER[a.status]??5) - (ORDER[b.status]??5));
 
@@ -19845,7 +19866,7 @@ function mapaZoom(factor) {
 }
 
 // ── Filtro rápido por clique nos KPIs do mapa ─────────────────
-function mapaFiltrar(campo, valor) {
+function mapaFiltrarRede(campo, valor) {
   _mapaFiltros[campo] = (_mapaFiltros[campo] === valor) ? '' : valor;
   renderMapaRede();
 }
