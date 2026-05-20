@@ -207,7 +207,7 @@ function showOfflineBar(msg) {
   const bar = document.getElementById('fb-offline-bar') || document.createElement('div');
   bar.id = 'fb-offline-bar';
   bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1E293B;color:#FCD34D;font-size:12px;font-weight:600;text-align:center;padding:7px;z-index:9998;display:flex;align-items:center;justify-content:center;gap:8px';
-  bar.innerHTML = '<span>📡</span><span>' + escapeHtml(msg) + '</span><button onclick="initBanco()" style="margin-left:12px;padding:2px 10px;border-radius:5px;border:1px solid #FCD34D;background:transparent;color:#FCD34D;cursor:pointer;font-size:11px;font-family:inherit">&#8635; Tentar novamente</button>'
+  bar.innerHTML = '<span>📡</span><span>' + escapeHtml(msg) + '</span><button onclick="initBanco()" style="margin-left:12px;padding:2px 10px;border-radius:5px;border:1px solid #FCD34D;background:transparent;color:#FCD34D;cursor:pointer;font-size:11px;font-family:inherit">🔄 Tentar novamente</button>'
   document.body.appendChild(bar);
 }
 
@@ -7288,12 +7288,12 @@ function abrirNotaSm(smId) {
   div.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
   div.innerHTML = `
     <div style="background:var(--g0,#fff);border-radius:12px;padding:24px;max-width:460px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <h3 style="margin:0 0 4px;font-size:16px">&#128221; Adicionar Nota — ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'')} (${escapeHtml(sm.pat||'')})</h3>
+      <h3 style="margin:0 0 4px;font-size:16px">📝 Adicionar Nota — ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'')} (${escapeHtml(sm.pat||'')})</h3>
       <p style="font-size:12px;color:var(--g400);margin:0 0 14px">A nota ficará permanentemente no histórico do smartphone</p>
       <textarea id="nota-sm-texto" rows="4" style="width:100%;background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px 12px;font-size:13px;resize:vertical;font-family:inherit;box-sizing:border-box" placeholder="Descreva ocorrências, manutenções, trocas de chip, problemas, observações..."></textarea>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px">
         <button class="btn btn-ghost" onclick="this.closest('[style*=fixed]').remove()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarNotaSm('${smId}', this)">&#128190; Salvar Nota</button>
+        <button class="btn btn-primary" onclick="salvarNotaSm('${smId}', this)">💾 Salvar Nota</button>
       </div>
     </div>`;
   document.body.appendChild(div);
@@ -7319,11 +7319,11 @@ async function salvarNotaSm(smId, btn) {
       createdAt:     new Date().toISOString(),
     });
     btn.closest('[style*=fixed]')?.remove();
-    showToast('&#128221; Nota adicionada ao histórico do smartphone!', 'success', 3000);
+    showToast('📝 Nota adicionada ao histórico do smartphone!', 'success', 3000);
   } catch (err) {
     showToast('Erro: ' + err.message, 'danger');
   } finally {
-    setButtonLoading(btn, false, '&#128190; Salvar Nota');
+    setButtonLoading(btn, false, '💾 Salvar Nota');
   }
 }
 
@@ -7792,7 +7792,7 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
 
     if (!usuarios.length) {
       body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)">' +
-        '<div style="font-size:32px;margin-bottom:12px">&#128101;</div>' +
+        '<div style="font-size:32px;margin-bottom:12px">👥</div>' +
         'Nenhum registro ainda. O histórico é preenchido automaticamente ' +
         'quando o SYSACK Client está instalado na máquina.</div>';
       return;
@@ -7833,7 +7833,7 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
               const ativoNow   = u.ativo !== false;
 
               return `<tr style="${ehResp ? 'background:rgba(37,99,235,.04)' : ''}">
-                <td style="text-align:center">${ehResp ? '<span title="Responsável atual" style="font-size:16px">&#11088;</span>' : ''}</td>
+                <td style="text-align:center">${ehResp ? '<span title="Responsável atual" style="font-size:16px">⭐</span>' : ''}</td>
                 <td>
                   <div style="font-weight:${ehResp ? '700' : '500'};font-size:13px">${escapeHtml(u.nome || u.usuarioLogado || '—')}</div>
                   ${u.matricula ? '<div style="font-size:11px;color:var(--g400)">Mat: ' + escapeHtml(String(u.matricula)) + '</div>' : ''}
@@ -7846,7 +7846,7 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
                 </td>
                 <td style="text-align:center">
                   <span style="font-size:13px;font-weight:700;color:${diasSemAtu >= 2 ? 'var(--success)' : 'var(--g400)'}">${diasSemAtu}</span>
-                  ${diasSemAtu >= 2 ? '<span style="font-size:10px;color:var(--success);display:block">&#10003; critério</span>' : ''}
+                  ${diasSemAtu >= 2 ? '<span style="font-size:10px;color:var(--success);display:block">✓ critério</span>' : ''}
                 </td>
                 <td>
                   ${ehResp
@@ -7901,7 +7901,7 @@ async function carregarHistoricoMovimentacoes(ativoId) {
 
     if (!hist.length) {
       body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)">' +
-        '<div style="font-size:32px;margin-bottom:12px">&#128221;</div>' +
+        '<div style="font-size:32px;margin-bottom:12px">📝</div>' +
         'Nenhuma movimentação registrada ainda.<br>' +
         '<span style="font-size:12px">O histórico é gerado automaticamente quando área, localização ou responsável são alterados.</span>' +
         '</div>';
@@ -7909,11 +7909,11 @@ async function carregarHistoricoMovimentacoes(ativoId) {
     }
 
     const ICONS = {
-      troca_responsavel: '&#128101;',
-      mudanca_local:     '&#128205;',
-      mudanca_campo:     '&#9998;&#65039;',
-      movimentacao:      '&#128666;',
-      nota_tecnico:      '&#128172;',  // balão de fala
+      troca_responsavel: '👥',
+      mudanca_local:     '📍',
+      mudanca_campo:     '✏️',
+      movimentacao:      '🚚',
+      nota_tecnico:      '💬',  // balão de fala
     };
     const CORES = {
       troca_responsavel: '#2563EB',
@@ -7928,7 +7928,7 @@ async function carregarHistoricoMovimentacoes(ativoId) {
       '<div style="position:absolute;left:20px;top:0;bottom:0;width:2px;background:var(--g200)"></div>' +
       hist.map(h => {
         const tipo  = h.subtipo || h.tipo || 'mudanca_campo';
-        const icon  = ICONS[tipo]  || '&#9998;&#65039;';
+        const icon  = ICONS[tipo]  || '✏️';
         const cor   = CORES[tipo]  || '#94A3B8';
         const data  = h.createdAt ? new Date(h.createdAt).toLocaleString('pt-BR') : h.data || '—';
         const quem  = h.nomeAlterador || h.alteradoPor || 'sistema';
@@ -7950,8 +7950,8 @@ async function carregarHistoricoMovimentacoes(ativoId) {
               : `<div style="font-size:12.5px;color:var(--g600);margin:3px 0">${escapeHtml(h.desc || (h.de + ' → ' + h.para))}</div>`
             }
             <div style="font-size:11px;color:var(--g400);display:flex;gap:12px;margin-top:6px">
-              <span>&#128336; ${escapeHtml(data)}</span>
-              <span>&#128100; ${escapeHtml(quem)}</span>
+              <span>🕐 ${escapeHtml(data)}</span>
+              <span>👤 ${escapeHtml(quem)}</span>
             </div>
           </div>
         </div>`;
@@ -7994,7 +7994,7 @@ async function salvarNotaHistorico() {
   } catch (err) {
     showToast('Erro ao salvar: ' + err.message, 'danger');
   } finally {
-    setButtonLoading(btn, false, '&#128190; Salvar Consideração');
+    setButtonLoading(btn, false, '💾 Salvar Consideração');
   }
 }
 
@@ -9209,11 +9209,11 @@ function renderSwitches(){
   sv('sw-portas-uso',total.reduce(function(a,s){return a+(s.portasUso||0);},0));
   var cont=document.getElementById('sw-cards-grid')||document.getElementById('sw-grid');
   if(!cont)return;
-  if(!lista.length){cont.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">&#128258;</div><div style="font-weight:600;margin-top:8px">Nenhum dispositivo encontrado</div></div>';return;}
+  if(!lista.length){cont.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🔀</div><div style="font-weight:600;margin-top:8px">Nenhum dispositivo encontrado</div></div>';return;}
   cont.innerHTML=lista.map(function(s){
     var t=(s.tipo||'switch').toLowerCase();
     var bg={switch:'#2563EB',router:'#EA580C',ap:'#0891B2','switch-core':'#0F172A','switch-acesso':'#1D4ED8','switch-distribuicao':'#1E40AF'}[t]||'#64748B';
-    var ico={switch:'&#128258;',router:'&#127760;',ap:'&#128225;','switch-core':'&#128258;'}[t]||'&#128274;';
+    var ico={switch:'🔀',router:'🌐',ap:'📡','switch-core':'🔀'}[t]||'🔌';
     var online=s.reachable||(s.status||'')==='online'||(s.status||'')==='ativo';
     var sc=online?'#059669':(s.status||'')==='offline'?'#6B7280':(s.status||'')==='critico'?'#DC2626':'#D97706';
     var sl=online?'Online':((s.status||'?').charAt(0).toUpperCase()+(s.status||'?').slice(1));
@@ -13575,7 +13575,10 @@ function agendarVistoria(ativoId) {
     <div class="form-group">
       <label class="form-label">Checklist da vistoria</label>
       <textarea class="form-control" id="vist-checklist" rows="3"
-        placeholder="Ex: Verificar estado físico&#10;Conferir PAT&#10;Checar funcionamento&#10;Fotografar se houver dano"></textarea>
+        placeholder="Ex: Verificar estado físico
+Conferir PAT
+Checar funcionamento
+Fotografar se houver dano"></textarea>
     </div>
     <div class="form-group">
       <label class="form-label">Técnico responsável</label>
@@ -16733,7 +16736,7 @@ function renderServidores(){
   sv('srv-kpi-online',todos.filter(function(a){return a.reachable||(a.status||'').toLowerCase()==='online';}).length);
   sv('srv-kpi-offline',todos.filter(function(a){return(a.status||'').toLowerCase()==='offline';}).length);
   var grid=document.getElementById('srv-grid');if(!grid)return;
-  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:48px">&#128187;</div><div style="font-weight:600;margin-top:8px">Nenhum servidor encontrado</div><div style="font-size:12px;margin-top:6px">Hostnames com SERV/VSERV ou tipo servidor</div></div>';return;}
+  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:48px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum servidor encontrado</div><div style="font-size:12px;margin-top:6px">Hostnames com SERV/VSERV ou tipo servidor</div></div>';return;}
   lista.sort(function(a,b){var ord={critico:0,offline:1,alerta:2,online:3,ativo:4};return(ord[(a.status||'').toLowerCase()]||5)-(ord[(b.status||'').toLowerCase()]||5)||(_sn(a)||'').localeCompare(_sn(b)||'');});
   function mb(l,v,d,w){if(v==null)return '';var co=v>=d?'#DC2626':v>=w?'#D97706':'#059669';return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>'+l+'</span><span style="color:'+co+';font-weight:700">'+v+'%</span></div><div style="background:var(--g200);border-radius:3px;height:4px"><div style="background:'+co+';width:'+Math.min(v,100)+'%;height:100%;border-radius:3px"></div></div></div>';}
   grid.innerHTML=lista.map(function(a){
@@ -16744,7 +16747,7 @@ function renderServidores(){
     var ls=a.lastSeen?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
     return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tc+'">'
       +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        +'<div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(iv?'&#9729;':'&#128187;')+'</span>'
+        +'<div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(iv?'☁️':'🖥️')+'</span>'
           +'<div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
           +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+(a.area?' · '+escapeHtml(a.area):'')+'</div></div></div>'
         +'<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
@@ -16779,7 +16782,7 @@ function renderFirewalls(){
   sv('fw-kpi-total',todos.length);sv('fw-kpi-online',todos.filter(function(f){return f.reachable||(f.status||'').toLowerCase()==='online';}).length);
   sv('fw-kpi-offline',todos.filter(function(f){return(f.status||'').toLowerCase()==='offline';}).length);sv('fw-kpi-sem-snmp',todos.filter(function(f){return!f.hasSnmp;}).length);
   var grid=document.getElementById('fw-grid');if(!grid)return;
-  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:40px">&#128293;</div><div style="font-weight:600;margin-top:8px">Nenhum firewall detectado</div><div style="font-size:12px;margin-top:6px">OID Fortinet 1.3.6.1.4.1.12356.* ou sysDescr com FortiGate/pfSense</div></div>';return;}
+  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:40px">🔥</div><div style="font-weight:600;margin-top:8px">Nenhum firewall detectado</div><div style="font-size:12px;margin-top:6px">OID Fortinet 1.3.6.1.4.1.12356.* ou sysDescr com FortiGate/pfSense</div></div>';return;}
   grid.innerHTML=lista.map(function(f){
     var hn=f.hostname||f.sysName||f.ip||'—',st=(f.status||'?').toLowerCase(),online=f.reachable||st==='online'||st==='ativo';
     var sc=online?'#059669':st==='alerta'?'#D97706':st==='offline'?'#DC2626':'#6B7280';
@@ -16787,7 +16790,7 @@ function renderFirewalls(){
     var up=f.uptimeH!=null?(f.uptimeH>=24?Math.floor(f.uptimeH/24)+'d '+Math.round(f.uptimeH%24)+'h':Math.round(f.uptimeH)+'h'):'—';
     return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+sc+'">'
       +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        +'<div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">&#128293;</span>'
+        +'<div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">🔥</span>'
           +'<div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(hn)+'</div>'
           +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(f.ip||'—')+'</div></div></div>'
         +'<span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-left:8px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span>'
@@ -16827,7 +16830,7 @@ function renderTopologia(){
   sv('topo-kpi-links',lc);
   if(lc===0){var ba={};Object.values(pos).forEach(function(p){var k=p.d.area||'g';if(!ba[k])ba[k]={fw:[],rt:[],sw:[]};var t=(p.d.tipo||'').toLowerCase();if(t==='firewall')ba[k].fw.push(p);else if(t==='router')ba[k].rt.push(p);else ba[k].sw.push(p);});Object.values(ba).forEach(function(ar){ar.fw.concat(ar.rt).forEach(function(up){ar.sw.forEach(function(sw){var l=document.createElementNS('http://www.w3.org/2000/svg','line');l.setAttribute('x1',sw.x);l.setAttribute('y1',sw.y);l.setAttribute('x2',up.x);l.setAttribute('y2',up.y);l.setAttribute('stroke','#CBD5E1');l.setAttribute('stroke-width','1.5');l.setAttribute('stroke-dasharray','5,4');l.setAttribute('opacity','0.5');gL.appendChild(l);});});});}
   var sl=ck('topo-show-labels');
-  Object.values(pos).forEach(function(item){var x=item.x,y=item.y,d=item.d,tipo=(d.tipo||'switch').toLowerCase();var color=CLR[tipo]||'#64748B',icon={firewall:'&#128293;',router:'&#127760;',switch:'&#128258;','switch-core':'&#128258;',ap:'&#128225;'}[tipo]||'&#128274;';var label=(d.hostname||d.sysName||d.ip||'').slice(0,14);var g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('cursor','pointer');g.setAttribute('data-id',d.id||d.ip);var ci=document.createElementNS('http://www.w3.org/2000/svg','circle');ci.setAttribute('cx',x);ci.setAttribute('cy',y);ci.setAttribute('r',R);ci.setAttribute('fill',color);ci.setAttribute('opacity',(d.reachable||(d.status||'')==='online')?'1':'0.5');g.appendChild(ci);var ic=document.createElementNS('http://www.w3.org/2000/svg','text');ic.setAttribute('x',x);ic.setAttribute('y',y+1);ic.setAttribute('text-anchor','middle');ic.setAttribute('dominant-baseline','central');ic.setAttribute('font-size','13');ic.setAttribute('pointer-events','none');ic.textContent=icon;g.appendChild(ic);if(sl&&label){var lb=document.createElementNS('http://www.w3.org/2000/svg','text');lb.setAttribute('x',x);lb.setAttribute('y',y+R+13);lb.setAttribute('text-anchor','middle');lb.setAttribute('font-size','9');lb.setAttribute('fill','#334155');lb.setAttribute('font-weight','600');lb.setAttribute('pointer-events','none');lb.textContent=label;gLb.appendChild(lb);}g.addEventListener('mouseenter',function(){ci.setAttribute('r',String(R+3));});g.addEventListener('mouseleave',function(){ci.setAttribute('r',String(R));});gN.appendChild(g);});
+  Object.values(pos).forEach(function(item){var x=item.x,y=item.y,d=item.d,tipo=(d.tipo||'switch').toLowerCase();var color=CLR[tipo]||'#64748B',icon={firewall:'🔥',router:'🌐',switch:'🔀','switch-core':'🔀',ap:'📡'}[tipo]||'🔌';var label=(d.hostname||d.sysName||d.ip||'').slice(0,14);var g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('cursor','pointer');g.setAttribute('data-id',d.id||d.ip);var ci=document.createElementNS('http://www.w3.org/2000/svg','circle');ci.setAttribute('cx',x);ci.setAttribute('cy',y);ci.setAttribute('r',R);ci.setAttribute('fill',color);ci.setAttribute('opacity',(d.reachable||(d.status||'')==='online')?'1':'0.5');g.appendChild(ci);var ic=document.createElementNS('http://www.w3.org/2000/svg','text');ic.setAttribute('x',x);ic.setAttribute('y',y+1);ic.setAttribute('text-anchor','middle');ic.setAttribute('dominant-baseline','central');ic.setAttribute('font-size','13');ic.setAttribute('pointer-events','none');ic.textContent=icon;g.appendChild(ic);if(sl&&label){var lb=document.createElementNS('http://www.w3.org/2000/svg','text');lb.setAttribute('x',x);lb.setAttribute('y',y+R+13);lb.setAttribute('text-anchor','middle');lb.setAttribute('font-size','9');lb.setAttribute('fill','#334155');lb.setAttribute('font-weight','600');lb.setAttribute('pointer-events','none');lb.textContent=label;gLb.appendChild(lb);}g.addEventListener('mouseenter',function(){ci.setAttribute('r',String(R+3));});g.addEventListener('mouseleave',function(){ci.setAttribute('r',String(R));});gN.appendChild(g);});
   var nc=cont.cloneNode(false);while(cont.firstChild)nc.appendChild(cont.firstChild);cont.parentNode.replaceChild(nc,cont);
   var drag=false,sx=0,sy=0,sox=0,soy=0;
   nc.addEventListener('mousedown',function(e){if(e.target.closest('g[data-id]'))return;drag=true;sx=e.clientX;sy=e.clientY;sox=_to.x;soy=_to.y;nc.style.cursor='grabbing';});
@@ -16848,8 +16851,8 @@ function renderMonitores(){
   sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);
   if(!grid)return;
   var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});
-  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">&#128187;</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}
-  grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'">'+'<div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">&#128187;</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem PAT</span>')+'</div>'+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Area:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div>'+'<div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');
+  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}
+  grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'">'+'<div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem PAT</span>')+'</div>'+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Area:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div>'+'<div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');
 }
 function abrirAtribuirPATMonitor(s){openModal('modal-atribuir-pat-monitor');window._monitorAtualSerial=s;}
 function abrirCadastroMonitorManual(){openModal('modal-monitor-manual');}
