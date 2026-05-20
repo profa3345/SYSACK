@@ -1,5 +1,5 @@
-// sw.js — SYSACK Service Worker v6
-// Fix: !res.bodyUsed guard em todos os fetch + isPageActive + exportarAtivosCSV
+// sw.js — SYSACK Service Worker v7
+// Fix: clone ANTES de retornar a response, nunca depois
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
@@ -51,11 +51,9 @@ self.addEventListener('notificationclick', event => {
 });
 
 // ── Cache ─────────────────────────────────────────────────────────
-const CACHE_VER    = 'sysack-v6';
+const CACHE_VER    = 'sysack-v7';
 const STATIC_CACHE = CACHE_VER + '-static';
 
-// URLs que NUNCA devem ser interceptadas pelo SW
-// gstatic.com cobre o firebase-messaging-compat.js — evita conflito de Response.clone()
 const NO_CACHE_PATTERNS = [
   /firestore\.googleapis\.com/,
   /identitytoolkit/,
@@ -96,6 +94,20 @@ self.addEventListener('activate', event => {
   );
 });
 
+// ── Função auxiliar: fetch → cache → return ───────────────────────
+// A regra de ouro: clone() ANTES de qualquer operação assíncrona.
+// res.body só pode ser lido uma vez; clonar preserva a cópia para o cache.
+function fetchAndCache(req, cacheName) {
+  return fetch(req).then(res => {
+    // Só cacheia respostas válidas e clonable
+    if (res && res.ok && res.status < 400) {
+      const resParaCache = res.clone(); // clone PRIMEIRO, antes de retornar
+      caches.open(cacheName).then(c => c.put(req, resParaCache)).catch(() => {});
+    }
+    return res; // retorna o original (ainda não consumido)
+  });
+}
+
 self.addEventListener('fetch', event => {
   const req = event.request;
 
@@ -107,53 +119,37 @@ self.addEventListener('fetch', event => {
   // Nunca intercepta extensões Chrome
   if (url.startsWith('chrome-extension://')) return;
 
-  // Nunca intercepta requisições externas (fora da origem)
+  // Nunca intercepta requisições externas
   if (!url.startsWith(self.location.origin)) return;
 
   // Nunca intercepta padrões Firebase / Google
   if (NO_CACHE_PATTERNS.some(p => p.test(url))) return;
 
-  // ── HTML: network-first, fallback cache se offline ──
+  // ── HTML: network-first, fallback cache se offline ──────────────
   if (url.endsWith('.html') || url.endsWith('/') || url === self.location.origin) {
     event.respondWith(
-      fetch(req.clone())
-        .then(res => {
-          if (res && res.ok && !res.bodyUsed) {
-            caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
-          }
-          return res;
-        })
+      fetchAndCache(req, STATIC_CACHE)
         .catch(() => caches.match(req))
     );
     return;
   }
 
-  // ── JS e CSS: network-first (crítico após modularização) ──
+  // ── JS e CSS: network-first (garante versão mais recente) ────────
   if (/\.(js|css)(\?.*)?$/.test(url)) {
     event.respondWith(
-      fetch(req.clone())
-        .then(res => {
-          if (res && res.ok && !res.bodyUsed) {
-            caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
-          }
-          return res;
-        })
+      fetchAndCache(req, STATIC_CACHE)
         .catch(() => caches.match(req))
     );
     return;
   }
 
-  // ── Imagens e fontes locais: cache-first ──
+  // ── Imagens e fontes locais: cache-first ─────────────────────────
   if (/\.(png|jpg|jpeg|svg|ico|woff2?)(\?.*)?$/.test(url)) {
     event.respondWith(
       caches.match(req).then(cached => {
         if (cached) return cached;
-        return fetch(req.clone()).then(res => {
-          if (res && res.ok && !res.bodyUsed) {
-            caches.open(STATIC_CACHE).then(c => c.put(req, res.clone()));
-          }
-          return res;
-        });
+        return fetchAndCache(req, STATIC_CACHE)
+          .catch(() => new Response('', { status: 404 }));
       })
     );
     return;
