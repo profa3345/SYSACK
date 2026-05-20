@@ -748,6 +748,13 @@ async function fsDelete(col, docId) {
 }
 
 // ── FIRESTORE REAL-TIME LISTENERS ────────────────────────────
+// ── Debounce — evita re-renders em cascata ───────────────────────
+const _deb = {};
+function _debounce(key, fn, ms) {
+  if (_deb[key]) clearTimeout(_deb[key]);
+  _deb[key] = setTimeout(fn, ms || 300);
+}
+
 function startFirestoreListeners() {
   if (!db || !FB_READY) return;
   if (window._listenersAtivos) return; // evita dupla chamada
@@ -781,7 +788,11 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
-  db.collection('impressoras').onSnapshot(function(snap){STATE.impressorasDisc=snap2arr(snap).map(norm);nbUpdate('nb-impressoras',(STATE.impressorasDisc||[]).length);console.log('[Banco] impressoras:',STATE.impressorasDisc.length);},function(e){console.error('[Banco] impressoras:',e.message);});
+  db.collection('impressoras').onSnapshot(function(snap){
+    STATE.impressorasDisc=snap2arr(snap).map(norm);
+    nbUpdate('nb-impressoras',(STATE.impressorasDisc||[]).length);
+    console.log('[Banco] impressoras:',STATE.impressorasDisc.length);
+  },function(e){console.error('[Banco] impressoras:',e.message);});
 
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
@@ -800,10 +811,12 @@ function startFirestoreListeners() {
     STATE.empregadosSyncAt = primeiro?.syncAt ? new Date(primeiro.syncAt)
       : primeiro?.syncLdap ? new Date(primeiro.syncLdap)
       : null;
-    nbUpdate('nb-emp', STATE.empregados.length);
-    nbUpdate('nb-ausentes', STATE.empregados.filter(e => e.emAusencia).length);
-    console.log('[Banco] empregados:', STATE.empregados.length);
-    if (isPageActive('empregados')) renderEmpregados();
+    _debounce('emp', function(){
+      nbUpdate('nb-emp', STATE.empregados.length);
+      nbUpdate('nb-ausentes', STATE.empregados.filter(function(e){return e.emAusencia;}).length);
+      console.log('[Banco] empregados:', STATE.empregados.length);
+      if (isPageActive('empregados')) renderEmpregados();
+    }, 800);
   }, function(e){ console.error('[Banco] empregados erro:', e.message); });
 
   // chamados
@@ -832,12 +845,13 @@ function startFirestoreListeners() {
   // organograma_unidades — sincronizado pelo agent.js a cada 5 min
   db.collection('organograma_unidades').onSnapshot(function(snap) {
     STATE.orgUnidades = snap2arr(snap);
-    _debounce('org-render', function() {
+    _debounce('org', function(){
       console.log('[Banco] organograma_unidades:', STATE.orgUnidades.length);
       if (isPageActive('organograma')) renderOrganograma();
     }, 1000);
   }, function(e){ console.error('[Banco] orgUnidades erro:', e.message); });
 
+  iniciarListenerRedes();
   console.log('[Banco] Listeners iniciados');
 }
 
@@ -949,6 +963,7 @@ function renderPage(id) {
     'monitores':     () => renderMonitores(),
     'firewalls':     () => renderFirewalls(),
     'topologia':     () => renderTopologia(),
+    'redes':         () => renderRedes(),
     chamados:        () => renderChamados(),
     ativos:          () => renderAtivos(),
     movimentacoes:   () => renderMovimentacoes(),
@@ -9190,548 +9205,63 @@ STATE.switches = [];
 let currentSwitch=null,currentSwView='cards',currentSwAction=null;
 const _swVlans=[];
 
-const REDES_PREFIX = {
-  '172.22.10': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.22.100': {sigla:'acb',nome:'Águia Branca'},
-  '172.22.101': {sigla:'pnc',nome:'Pancas'},
-  '172.22.102': {sigla:'pnc',nome:'ETA Pancas'},
-  '172.22.104': {sigla:'iun',nome:'Iúna'},
-  '172.22.105': {sigla:'iun',nome:'Pequiá'},
-  '172.22.106': {sigla:'ibt',nome:'Ibatiba'},
-  '172.22.107': {sigla:'ibt',nome:'ETA Ibatiba'},
-  '172.22.108': {sigla:'smj',nome:'Santa Maria de Jetiba'},
-  '172.22.109': {sigla:'smj',nome:'ETA Rio Possmouser'},
-  '172.22.110': {sigla:'anc',nome:'Anchieta'},
-  '172.22.112': {sigla:'sjc',nome:'São José do Calçado'},
-  '172.22.114': {sigla:'bes',nome:'Boa Esperança'},
-  '172.22.116': {sigla:'api',nome:'Apiacá'},
-  '172.22.118': {sigla:'atv',nome:'Atílio Vivacqua'},
-  '172.22.119': {sigla:'atv',nome:'ETA Atílio Vivacqua'},
-  '172.22.120': {sigla:'avt',nome:'Atendimento Vitória'},
-  '172.22.122': {sigla:'bri',nome:'Braço do Rio'},
-  '172.22.124': {sigla:'mtp',nome:'Mantenópolis'},
-  '172.22.126': {sigla:'plb',nome:'Ponto Belo'},
-  '172.22.127': {sigla:'plb',nome:'Escritório Ponto Belo'},
-  '172.22.128': {sigla:'rns',nome:'Rio Novo do Sul'},
-  '172.22.130': {sigla:'mfr',nome:'ETA Muniz Freire'},
-  '172.22.132': {sigla:'cca',nome:'Conceição do Castelo'},
-  '172.22.134': {sigla:'cas',nome:'ETA/Almoxarifado Castelo'},
-  '172.22.135': {sigla:'cas',nome:'ETE Castelo'},
-  '172.22.136': {sigla:'bsf',nome:'ETA/Almoxarifado Barra de São Francisco'},
-  '172.22.138': {sigla:'dbc',nome:'ETA Duas Bocas'},
-  '172.22.140': {sigla:'via',nome:'ETA Viana'},
-  '172.22.142': {sigla:'cac',nome:'ETA Caçaroca/Baixo Recalque'},
-  '172.22.144': {sigla:'cob',nome:'Elevatória Alto Recalque'},
-  '172.22.146': {sigla:'smr',nome:'ETA/Elevatória Santa Maria'},
-  '172.22.148': {sigla:'acg',nome:'Faça Fácil Cariacica'},
-  '172.22.150': {sigla:'juc',nome:'ETA Jucu/Antártica'},
-  '172.22.152': {sigla:'egu',nome:'ETA Guarapari'},
-  '172.22.154': {sigla:'arn',nome:'Alto Rio Novo'},
-  '172.22.156': {sigla:'ecc',nome:'Escritório Call Center'},
-  '172.22.158': {sigla:'mqc',nome:'Muquiçaba - Polo de Esgoto'},
-  '172.22.160': {sigla:'arc',nome:'Aracê'},
-  '172.22.161': {sigla:'poa',nome:'ETA Ponto Alto'},
-  '172.22.162': {sigla:'afc',nome:'ETA Afonso Cláudio'},
-  '172.22.164': {sigla:'api',nome:'ETA Apiacá'},
-  '172.22.166': {sigla:'bjn',nome:'ETA Bom Jesus do Norte'},
-  '172.22.168': {sigla:'bri',nome:'ETA Braço do Rio'},
-  '172.22.170': {sigla:'brj',nome:'ETA Brejetuba'},
-  '172.22.171': {sigla:'cba',nome:'Escritório Conceição da Barra'},
-  '172.22.172': {sigla:'cba',nome:'ETA Conceição da Barra'},
-  '172.22.174': {sigla:'cca',nome:'ETA Conceição do Castelo'},
-  '172.22.176': {sigla:'drp',nome:'ETA Dores do Rio Preto'},
-  '172.22.177': {sigla:'dsl',nome:'ETA Divino São Lourenço'},
-  '172.22.178': {sigla:'eco',nome:'ETA Ecoporanga'},
-  '172.22.180': {sigla:'fun',nome:'ETA Fundão'},
-  '172.22.182': {sigla:'iri',nome:'ETA Iriri'},
-  '172.22.184': {sigla:'irp',nome:'ETA Irupi'},
-  '172.22.186': {sigla:'ljt',nome:'ETA Laranja da Terra'},
-  '172.22.188': {sigla:'mtp',nome:'ETA Mantenópolis'},
-  '172.22.189': {sigla:'muq',nome:'Escritório Muqui'},
-  '172.22.190': {sigla:'muq',nome:'ETA Muqui'},
-  '172.22.191': {sigla:'muq',nome:'ETA Camará'},
-  '172.22.192': {sigla:'nve',nome:'ETA Nova Venécia'},
-  '172.22.194': {sigla:'pia',nome:'ETA Piaçu'},
-  '172.22.196': {sigla:'pma',nome:'ETA Piúma'},
-  '172.22.198': {sigla:'prk',nome:'ETA Presidente Kennedy'},
-  '172.22.200': {sigla:'rns',nome:'ETA Rio Novo do Sul'},
-  '172.22.201': {sigla:'slp',nome:'Escritório de Santa Leopoldina'},
-  '172.22.202': {sigla:'slp',nome:'ETA Santa Leopoldina'},
-  '172.22.203': {sigla:'smj',nome:'ETA Garrafão'},
-  '172.22.204': {sigla:'ste',nome:'ETA Santa Teresa'},
-  '172.22.205': {sigla:'ste',nome:'ETE Santa Teresa'},
-  '172.22.206': {sigla:'sac',nome:'ETA Santo Antônio do Canaã'},
-  '172.22.207': {sigla:'vza',nome:'ETA Várzea Alegre'},
-  '172.22.208': {sigla:'sjc',nome:'ETA São José do Calçado'},
-  '172.22.209': {sigla:'sjc',nome:'Escritório de São José do Calçado'},
-  '172.22.210': {sigla:'src',nome:'ETA São Roque do Canaã'},
-  '172.22.212': {sigla:'spl',nome:'ETA Serra Pelada'},
-  '172.22.214': {sigla:'tmb',nome:'ETA Timbuí'},
-  '172.22.216': {sigla:'vni',nome:'ETA Venda Nova do Imigrante'},
-  '172.22.218': {sigla:'smj',nome:'ETA Santa Maria de Jetiba'},
-  '172.22.22': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.22.220': {sigla:'irp',nome:'Escritório Irupi'},
-  '172.22.222': {sigla:'adn',nome:'Água Doce do Norte'},
-  '172.22.223': {sigla:'adn',nome:'ETA Água Doce do Norte'},
-  '172.22.224': {sigla:'erm',nome:'ETA Reis Magos'},
-  '172.22.226': {sigla:'vpv',nome:'Escritório Vila Pavão'},
-  '172.22.228': {sigla:'src',nome:'ETE Manguinhos'},
-  '172.22.23': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.22.230': {sigla:'ara',nome:'ETE Araças'},
-  '172.22.232': {sigla:'brj',nome:'Escritório Brejetuba'},
-  '172.22.234': {sigla:'ljt',nome:'Escritório Laranja da Terra'},
-  '172.22.236': {sigla:'afc',nome:'Escritório Afonso Cláudio'},
-  '172.22.237': {sigla:'muc',nome:'Escritório Mucurici'},
-  '172.22.238': {sigla:'ita',nome:'Itaúnas'},
-  '172.22.240': {sigla:'muc',nome:'Mucurici'},
-  '172.22.242': {sigla:'vpv',nome:'Vila Pavão'},
-  '172.22.244': {sigla:'nve',nome:'ETE Nova Venécia'},
-  '172.22.246': {sigla:'arn',nome:'ETA Alto Rio Novo'},
-  '172.22.248': {sigla:'prk',nome:'Escritório Presidente Kennedy'},
-  '172.22.250': {sigla:'sgp',nome:'ETA São Gabriel da Palha'},
-  '172.22.252': {sigla:'vlv',nome:'Vila Valério'},
-  '172.22.253': {sigla:'vlv',nome:'ETA Vila Valério'},
-  '172.22.26': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.22.28': {sigla:'agu',nome:'Muquiçaba Atendimento'},
-  '172.22.30': {sigla:'alj',nome:'Atendimento Laranjeiras'},
-  '172.22.32': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.22.34': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.22.36': {sigla:'pbv',nome:'Polo Boa Vista'},
-  '172.22.44': {sigla:'ves',nome:'Vale Esperança'},
-  '172.22.46': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.22.48': {sigla:'gua',nome:'Guarapari'},
-  '172.22.50': {sigla:'cas',nome:'Castelo'},
-  '172.22.52': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.22.54': {sigla:'nve',nome:'Nova Venécia'},
-  '172.22.56': {sigla:'ste',nome:'Santa Teresa'},
-  '172.22.58': {sigla:'cba',nome:'Conceição da Barra'},
-  '172.22.60': {sigla:'pma',nome:'Piúma'},
-  '172.22.62': {sigla:'atv',nome:'Pólo Atílio Vivácqua'},
-  '172.22.64': {sigla:'nve',nome:'Escritório Nova Venécia (atendimento)'},
-  '172.22.66': {sigla:'drp',nome:'Escritório Dores do Rio Preto'},
-  '172.22.68': {sigla:'mfl',nome:'Marechal Floriano'},
-  '172.22.70': {sigla:'mfl',nome:'Escritório Marechal Floriano'},
-  '172.22.72': {sigla:'dmt',nome:'Domingos Martins'},
-  '172.22.73': {sigla:'src',nome:'Escritório São Roque do Canaã'},
-  '172.22.74': {sigla:'fun',nome:'Fundão'},
-  '172.22.76': {sigla:'dsl',nome:'Escritório Divino São Lourenço'},
-  '172.22.78': {sigla:'anc',nome:'ETA Ubú'},
-  '172.22.79': {sigla:'anc',nome:'ETE Ubú'},
-  '172.22.80': {sigla:'afc',nome:'Afonso Claudio'},
-  '172.22.82': {sigla:'vnv',nome:'Venda Nova do Imigrante'},
-  '172.22.84': {sigla:'sgp',nome:'São Gabriel da Palha'},
-  '172.22.86': {sigla:'eco',nome:'Ecoporanga'},
-  '172.22.87': {sigla:'pcn',nome:'Escritório de Pedro Canário'},
-  '172.22.88': {sigla:'pcn',nome:'Pedro Canário'},
-  '172.22.89': {sigla:'mtn',nome:'Escritório de Montanha'},
-  '172.22.90': {sigla:'mtn',nome:'Montanha'},
-  '172.22.91': {sigla:'pnh',nome:'Escritório Pinheiros'},
-  '172.22.92': {sigla:'pnh',nome:'Pinheiros'},
-  '172.22.93': {sigla:'pnh',nome:'ETA Pinheiros'},
-  '172.22.94': {sigla:'bjn',nome:'Bom Jesus do Norte'},
-  '172.22.95': {sigla:'bjn',nome:'Escritório de Bom Jesus do Norte'},
-  '172.22.96': {sigla:'pma',nome:'Piúma'},
-  '172.22.98': {sigla:'scl',nome:'Santa Clara'},
-  '172.23.10': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.104': {sigla:'alj',nome:'Atendimento Laranjeiras'},
-  '172.23.105': {sigla:'alj',nome:'Atendimento Laranjeiras'},
-  '172.23.106': {sigla:'alj',nome:'Atendimento Laranjeiras'},
-  '172.23.11': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.112': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.23.113': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.23.114': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.23.116': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.23.117': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.23.118': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.23.119': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.23.12': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.120': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.121': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.122': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.123': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.124': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.125': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.126': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.127': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.128': {sigla:'pbv',nome:'Pólo Boa Vista'},
-  '172.23.129': {sigla:'pbv',nome:'Pólo Boa Vista'},
-  '172.23.13': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.130': {sigla:'pbv',nome:'Pólo Boa Vista'},
-  '172.23.131': {sigla:'pbv',nome:'Pólo Boa Vista'},
-  '172.23.132': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.133': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.134': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.135': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.136': {sigla:'gua',nome:'Guarapari'},
-  '172.23.137': {sigla:'gua',nome:'Guarapari'},
-  '172.23.138': {sigla:'gua',nome:'Guarapari'},
-  '172.23.139': {sigla:'gua',nome:'Guarapari'},
-  '172.23.14': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.140': {sigla:'agu',nome:'Escritório Guarapari'},
-  '172.23.141': {sigla:'agu',nome:'Escritório Guarapari'},
-  '172.23.142': {sigla:'agu',nome:'Escritório Guarapari'},
-  '172.23.143': {sigla:'agu',nome:'Escritório Guarapari'},
-  '172.23.15': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.153': {sigla:'scl',nome:'Santa Clara'},
-  '172.23.154': {sigla:'smr',nome:'ETA e Elevatória Santa Maria'},
-  '172.23.155': {sigla:'erm',nome:'ETA Reis Magos'},
-  '172.23.156': {sigla:'ara',nome:'ETE Araçás'},
-  '172.23.157': {sigla:'cac',nome:'ETA Caçaroca / Elevatória Baixo Recalque'},
-  '172.23.158': {sigla:'cob',nome:'Elevatória Alto Recalque'},
-  '172.23.159': {sigla:'dbc',nome:'ETA Duas Bocas'},
-  '172.23.16': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.160': {sigla:'egu',nome:'ETA Guarapari'},
-  '172.23.161': {sigla:'mqc',nome:'Polo de Esgoto - Muquiçaba'},
-  '172.23.162': {sigla:'via',nome:'Escritório Viana'},
-  '172.23.163': {sigla:'via',nome:'ETA Viana'},
-  '172.23.164': {sigla:'juc',nome:'ETA Jucu / Antártica'},
-  '172.23.165': {sigla:'juc',nome:'ETA Jucu Nova'},
-  '172.23.17': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.18': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.19': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.20': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.25': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.26': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.27': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.28': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.29': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.30': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.31': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.64': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.65': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.66': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.67': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.68': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.69': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.70': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.71': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.72': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.73': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.74': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.75': {sigla:'rbs',nome:'Rui Barbosa'},
-  '172.23.82': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.23.83': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.23.84': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.23.85': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.23.86': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.23.87': {sigla:'vit',nome:'Escritório Central (Bemge)'},
-  '172.23.96': {sigla:'avt',nome:'Atendimento Vitória'},
-  '172.23.97': {sigla:'avt',nome:'Atendimento Vitória'},
-  '172.23.98': {sigla:'avt',nome:'Atendimento Vitória'},
-  '172.24.10': {sigla:'pcn',nome:'ETA Pedro Canário'},
-  '172.24.11': {sigla:'pcn',nome:'ETA Floresta do Sul'},
-  '172.24.12': {sigla:'crn',nome:'ETA Cristal do Norte'},
-  '172.24.13': {sigla:'mtn',nome:'Escritório Montanha'},
-  '172.24.14': {sigla:'mtn',nome:'ETA Montanha'},
-  '172.24.15': {sigla:'mtn',nome:'ETA Vinhatico'},
-  '172.24.16': {sigla:'muc',nome:'Escritório Mucurici'},
-  '172.24.17': {sigla:'muc',nome:'ETA Mucurici'},
-  '172.24.18': {sigla:'muc',nome:'ETA Itabaiana'},
-  '172.24.19': {sigla:'muc',nome:'ETE Mucurici'},
-  '172.24.2': {sigla:'cba',nome:'Conceição da Barra'},
-  '172.24.20': {sigla:'eco',nome:'Escritório Ecoporanga'},
-  '172.24.200': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.201': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.202': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.203': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.204': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.24.205': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.24.206': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.24.207': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.24.21': {sigla:'eco',nome:'ETA Ecoporanga'},
-  '172.24.22': {sigla:'eco',nome:'ETE Ecoporanga'},
-  '172.24.23': {sigla:'eco',nome:'ETA Cotaxé'},
-  '172.24.24': {sigla:'eco',nome:'ETA Imburana'},
-  '172.24.25': {sigla:'eco',nome:'ETA Prata dos Baianos'},
-  '172.24.26': {sigla:'pbl',nome:'Escritório Ponto Belo'},
-  '172.24.27': {sigla:'pbl',nome:'ETA Ponto Belo'},
-  '172.24.28': {sigla:'pbl',nome:'ETA Itamira'},
-  '172.24.29': {sigla:'pnh',nome:'Pinheiros'},
-  '172.24.3': {sigla:'cba',nome:'Escritório Conceição da Barra'},
-  '172.24.30': {sigla:'pnh',nome:'Escritório Pinheiros'},
-  '172.24.31': {sigla:'pnh',nome:'ETA Pinheiros'},
-  '172.24.32': {sigla:'pnh',nome:'ETE Pinheiros'},
-  '172.24.33': {sigla:'pnh',nome:'ETA São João Do Sobrado'},
-  '172.24.34': {sigla:'bes',nome:'Escritório e ETA Boa Esperança'},
-  '172.24.36': {sigla:'nve',nome:'Escritório Nova Venécia'},
-  '172.24.37': {sigla:'nve',nome:'ETA Nova Venécia'},
-  '172.24.38': {sigla:'nve',nome:'ETE Nova Venécia'},
-  '172.24.39': {sigla:'vpv',nome:'Escritório Vila Pavão'},
-  '172.24.4': {sigla:'bri',nome:'Escritório Braço do Rio'},
-  '172.24.40': {sigla:'vpv',nome:'ETA Vila Pavão'},
-  '172.24.42': {sigla:'bsf',nome:'Almoxarifado / ETA Barra de São Francisco'},
-  '172.24.43': {sigla:'bsf',nome:'ETE Barra de São Francisco'},
-  '172.24.44': {sigla:'bsf',nome:'ETA Paulista'},
-  '172.24.45': {sigla:'adn',nome:'Escritório Água Doce do Norte'},
-  '172.24.46': {sigla:'adn',nome:'ETA Água Doce do Norte'},
-  '172.24.47': {sigla:'adn',nome:'ETA Gov. Lacerda de Aguiar'},
-  '172.24.48': {sigla:'adn',nome:'ETA Santo Agostinho'},
-  '172.24.49': {sigla:'mtp',nome:'Mantenópolis'},
-  '172.24.5': {sigla:'cba',nome:'ETA Conceição da Barra'},
-  '172.24.50': {sigla:'mtp',nome:'ETA Mantenópolis'},
-  '172.24.51': {sigla:'mtp',nome:'ETE Mantenópolis'},
-  '172.24.52': {sigla:'mtp',nome:'ETA Santa Luzia de Mantenópolis'},
-  '172.24.53': {sigla:'mtp',nome:'ETA São José de Mantenópolis'},
-  '172.24.54': {sigla:'arn',nome:'Escritório Alto Rio Novo'},
-  '172.24.55': {sigla:'arn',nome:'ETA Alto Rio Novo'},
-  '172.24.56': {sigla:'abc',nome:'Escritório Águia Branca'},
-  '172.24.57': {sigla:'abc',nome:'ETA Águia Branca'},
-  '172.24.58': {sigla:'sgp',nome:'São Gabriel da Palha'},
-  '172.24.59': {sigla:'sgp',nome:'ETA São Gabriel da Palha'},
-  '172.24.6': {sigla:'bri',nome:'ETA Braço do Rio'},
-  '172.24.60': {sigla:'sgp',nome:'ETE São Gabriel da Palha'},
-  '172.24.61': {sigla:'vlv',nome:'Escritório Vila Valério'},
-  '172.24.62': {sigla:'vlv',nome:'ETA Vila Valério'},
-  '172.24.63': {sigla:'vlv',nome:'ETE Vila Valério'},
-  '172.24.64': {sigla:'pnc',nome:'Escritório Pancas'},
-  '172.24.65': {sigla:'pnc',nome:'ETA Pancas'},
-  '172.24.66': {sigla:'pnc',nome:'ETA Vila Verde'},
-  '172.24.7': {sigla:'ita',nome:'ETA Itaúnas'},
-  '172.24.8': {sigla:'ita',nome:'ETE Itaúnas'},
-  '172.24.9': {sigla:'pcn',nome:'Escritório Pedro Canário'},
-  '172.25.10': {sigla:'rns',nome:'ETA Rio Novo do Sul'},
-  '172.25.11': {sigla:'prk',nome:'Escritório Presidente Kennedy'},
-  '172.25.12': {sigla:'prk',nome:'ETA Presidente Kennedy'},
-  '172.25.13': {sigla:'atv',nome:'Escritório Atílio Vivacqua'},
-  '172.25.14': {sigla:'atv',nome:'ETA Atílio Vivacqua'},
-  '172.25.15': {sigla:'muq',nome:'ETA Camará'},
-  '172.25.16': {sigla:'atv',nome:'Pólo Atílio Vivacqua'},
-  '172.25.17': {sigla:'muq',nome:'Escritório Muqui'},
-  '172.25.18': {sigla:'muq',nome:'ETA Muqui'},
-  '172.25.19': {sigla:'bjn',nome:'Bom Jesus do Norte'},
-  '172.25.2': {sigla:'anc',nome:'Escritório Anchieta'},
-  '172.25.20': {sigla:'bjn',nome:'Escritório Bom Jesus do Norte'},
-  '172.25.200': {sigla:'cas',nome:'Castelo'},
-  '172.25.201': {sigla:'cas',nome:'Castelo'},
-  '172.25.202': {sigla:'cas',nome:'Castelo'},
-  '172.25.203': {sigla:'cas',nome:'Castelo'},
-  '172.25.204': {sigla:'ste',nome:'Santa Teresa'},
-  '172.25.205': {sigla:'ste',nome:'Santa Teresa'},
-  '172.25.206': {sigla:'ste',nome:'Santa Teresa'},
-  '172.25.207': {sigla:'ste',nome:'Santa Teresa'},
-  '172.25.21': {sigla:'bjn',nome:'ETA Bom Jesus do Norte'},
-  '172.25.22': {sigla:'bjn',nome:'ETE Bom Jesus do Norte'},
-  '172.25.23': {sigla:'api',nome:'Escritório Apiacá'},
-  '172.25.24': {sigla:'api',nome:'ETA Apiacá'},
-  '172.25.25': {sigla:'sjc',nome:'São José do Calçado'},
-  '172.25.26': {sigla:'sjc',nome:'Escritório São José do Calçado'},
-  '172.25.27': {sigla:'sjc',nome:'ETA São José do Calçado'},
-  '172.25.28': {sigla:'drp',nome:'Escritório Dores do Rio Preto'},
-  '172.25.29': {sigla:'drp',nome:'ETA Dores do Rio Preto'},
-  '172.25.3': {sigla:'iri',nome:'ETA Iriri'},
-  '172.25.30': {sigla:'drp',nome:'ETA Pedra Menina'},
-  '172.25.31': {sigla:'dsl',nome:'Escritório Divino São Lourenço'},
-  '172.25.32': {sigla:'dsl',nome:'ETA Divino São Lourenço'},
-  '172.25.33': {sigla:'irp',nome:'Escritório Irupi'},
-  '172.25.34': {sigla:'irp',nome:'ETA Irupi'},
-  '172.25.35': {sigla:'iun',nome:'Escritório Iúna'},
-  '172.25.36': {sigla:'iun',nome:'ETA Iúna'},
-  '172.25.37': {sigla:'iun',nome:'ETA Pequiá'},
-  '172.25.38': {sigla:'ibt',nome:'Ibatiba'},
-  '172.25.39': {sigla:'ibt',nome:'ETA Ibatiba'},
-  '172.25.4': {sigla:'anc',nome:'ETA Ubú'},
-  '172.25.40': {sigla:'mfr',nome:'Escritório Muniz Freire'},
-  '172.25.41': {sigla:'mfr',nome:'ETA Muniz Freire'},
-  '172.25.42': {sigla:'arz',nome:'ETA Coqueiral'},
-  '172.25.43': {sigla:'pia',nome:'ETA Piaçu'},
-  '172.25.44': {sigla:'arz',nome:'ETA Barra do Riacho'},
-  '172.25.46': {sigla:'cas',nome:'Escritório Castelo'},
-  '172.25.47': {sigla:'cas',nome:'ETA / Almoxarifado Castelo'},
-  '172.25.48': {sigla:'cas',nome:'ETE Castelo'},
-  '172.25.49': {sigla:'cca',nome:'Escritório Conceição de Castelo'},
-  '172.25.5': {sigla:'arz',nome:'ETA Barra do Sahy'},
-  '172.25.50': {sigla:'cca',nome:'ETA Conceição do Castelo'},
-  '172.25.51': {sigla:'brj',nome:'Escritório Brejetuba'},
-  '172.25.52': {sigla:'brj',nome:'ETA Brejetuba'},
-  '172.25.53': {sigla:'ljt',nome:'Escritório Laranja da Terra'},
-  '172.25.54': {sigla:'ljt',nome:'ETA Laranja da Terra'},
-  '172.25.55': {sigla:'arz',nome:'ETA Vila do Riacho'},
-  '172.25.56': {sigla:'ljt',nome:'ETA Sobreiro'},
-  '172.25.57': {sigla:'afc',nome:'Afonso Cláudio'},
-  '172.25.58': {sigla:'afc',nome:'Escritório Afonso Cláudio'},
-  '172.25.59': {sigla:'afc',nome:'ETA Afonso Cláudio'},
-  '172.25.6': {sigla:'pma',nome:'Escritório Piúma'},
-  '172.25.60': {sigla:'afc',nome:'ETE Afonso Cláudio'},
-  '172.25.61': {sigla:'spl',nome:'ETA Serra Pelada'},
-  '172.25.62': {sigla:'vnv',nome:'Venda Nova do Imigrante'},
-  '172.25.63': {sigla:'vnv',nome:'Escritório Venda Nova'},
-  '172.25.64': {sigla:'vnv',nome:'ETA Venda Nova do Imigrante'},
-  '172.25.65': {sigla:'vnv',nome:'ETE Venda Nova do Imigrante'},
-  '172.25.66': {sigla:'dmt',nome:'Escritório Domingos Martins'},
-  '172.25.67': {sigla:'dmt',nome:'ETE Domingos Martins'},
-  '172.25.68': {sigla:'arc',nome:'ETA Aracê'},
-  '172.25.69': {sigla:'dmt',nome:'ETE Vila Pedra Azul'},
-  '172.25.7': {sigla:'pma',nome:'Pólo Piúma'},
-  '172.25.70': {sigla:'dmt',nome:'ETE Vivendas de Pedra Azul'},
-  '172.25.71': {sigla:'poa',nome:'ETA Ponto Alto'},
-  '172.25.72': {sigla:'mfl',nome:'Escritório Marechal Floriano'},
-  '172.25.73': {sigla:'mfl',nome:'ETA Marechal Floriano'},
-  '172.25.74': {sigla:'mfl',nome:'ETE Marechal Floriano'},
-  '172.25.75': {sigla:'smj',nome:'Escritório Santa Maria de Jetibá'},
-  '172.25.76': {sigla:'smj',nome:'ETA Santa Maria de Jetibá'},
-  '172.25.77': {sigla:'smj',nome:'ETA Garrafão'},
-  '172.25.78': {sigla:'smj',nome:'ETA Alto Rio Possmouser'},
-  '172.25.79': {sigla:'smj',nome:'ETE Santa Maria de Jetibá'},
-  '172.25.8': {sigla:'pma',nome:'ETA Piúma'},
-  '172.25.81': {sigla:'ste',nome:'Escritório Santa Teresa'},
-  '172.25.82': {sigla:'ste',nome:'ETA Santa Teresa'},
-  '172.25.83': {sigla:'sac',nome:'ETA Santo Antônio do Canaã'},
-  '172.25.84': {sigla:'ste',nome:'ETE Santa Teresa'},
-  '172.25.85': {sigla:'vza',nome:'ETA Várzea Alegre'},
-  '172.25.86': {sigla:'src',nome:'Escritório São Roque do Canaã'},
-  '172.25.87': {sigla:'src',nome:'ETA São Roque do Canaã'},
-  '172.25.88': {sigla:'slp',nome:'Escritório Santa Leopoldina'},
-  '172.25.89': {sigla:'slp',nome:'ETA Santa Leopoldina'},
-  '172.25.9': {sigla:'rns',nome:'Escritório Rio Novo do Sul'},
-  '172.25.90': {sigla:'fun',nome:'Escritório Fundão'},
-  '172.25.91': {sigla:'fun',nome:'ETA Fundão'},
-  '172.25.92': {sigla:'tmb',nome:'ETA Timbuí'},
-  '172.25.93': {sigla:'fun',nome:'Escritório Praia Grande'},
-  '172.25.94': {sigla:'arz',nome:'Escritório Coqueiral (Aracruz)'},
-};
-
-const REDES_SIGLA = {
-  'abc': 'ETA Águia Branca',
-  'acb': 'Águia Branca',
-  'acg': 'Faça Fácil Cariacica',
-  'adn': 'Água Doce do Norte',
-  'afc': 'Afonso Cláudio',
-  'agu': 'Muquiçaba Atendimento',
-  'alj': 'Atendimento Laranjeiras',
-  'anc': 'Anchieta',
-  'api': 'Apiacá',
-  'ara': 'ETE Araças',
-  'arc': 'Aracê',
-  'arn': 'Alto Rio Novo',
-  'arz': 'ETA Coqueiral',
-  'atv': 'Atílio Vivacqua',
-  'avt': 'Atendimento Vitória',
-  'avv': 'Atendimento Vila Velha',
-  'bes': 'Boa Esperança',
-  'bjn': 'Bom Jesus do Norte',
-  'bri': 'Braço do Rio',
-  'brj': 'ETA Brejetuba',
-  'bsf': 'Barra de São Francisco',
-  'cac': 'ETA Caçaroca/Baixo Recalque',
-  'cas': 'Castelo',
-  'cba': 'Conceição da Barra',
-  'cca': 'Conceição do Castelo',
-  'cob': 'Elevatória Alto Recalque',
-  'coc': 'Centro Operativo de Carapina',
-  'crn': 'ETA Cristal do Norte',
-  'dbc': 'ETA Duas Bocas',
-  'dmt': 'Domingos Martins',
-  'drp': 'ETA Pedra Menina',
-  'dsl': 'ETA Divino São Lourenço',
-  'ecb': 'ETA Cobi',
-  'ecc': 'Escritório Call Center',
-  'eco': 'Ecoporanga',
-  'egu': 'ETA Guarapari',
-  'ejc': 'ETE Camburi',
-  'erm': 'ETA Reis Magos',
-  'fun': 'Fundão',
-  'gua': 'Guarapari',
-  'ibt': 'Ibatiba',
-  'iri': 'ETA Iriri',
-  'irp': 'ETA Irupi',
-  'ita': 'Itaúnas',
-  'iun': 'Iúna',
-  'juc': 'ETA Jucu Nova',
-  'ljt': 'ETA Sobreiro',
-  'mfl': 'Marechal Floriano',
-  'mfr': 'ETA Muniz Freire',
-  'mqc': 'Polo de Esgoto - Muquiçaba',
-  'mtn': 'Montanha',
-  'mtp': 'Mantenópolis',
-  'muc': 'Mucurici',
-  'muq': 'ETA Muqui',
-  'nve': 'Nova Venécia',
-  'pbl': 'ETA Itamira',
-  'pbv': 'Pólo Boa Vista',
-  'pcn': 'Pedro Canário',
-  'pia': 'ETA Piaçu',
-  'plb': 'Ponto Belo',
-  'pma': 'Piúma',
-  'pnc': 'Pancas',
-  'pnh': 'Pinheiros',
-  'poa': 'ETA Ponto Alto',
-  'prk': 'ETA Presidente Kennedy',
-  'rbs': 'Rui Barbosa',
-  'rns': 'Rio Novo do Sul',
-  'sac': 'ETA Santo Antônio do Canaã',
-  'scl': 'Santa Clara',
-  'sgp': 'São Gabriel da Palha',
-  'sjc': 'São José do Calçado',
-  'slp': 'ETA Santa Leopoldina',
-  'slu': 'Santa Lúcia',
-  'smj': 'Santa Maria de Jetiba',
-  'smr': 'ETA/Elevatória Santa Maria',
-  'spl': 'ETA Serra Pelada',
-  'src': 'ETE Manguinhos',
-  'ste': 'Santa Teresa',
-  'tmb': 'ETA Timbuí',
-  'ves': 'Vale Esperança',
-  'via': 'ETA Viana',
-  'vit': 'Escritório Central (Bemge)',
-  'vlv': 'Vila Valério',
-  'vni': 'ETA Venda Nova do Imigrante',
-  'vnv': 'Venda Nova do Imigrante',
-  'vpv': 'Vila Pavão',
-  'vza': 'ETA Várzea Alegre',
-};
-
-
-// Resolve localidade de um switch pelo IP ou hostname
-function resolverLocal(sw) {
-  // 1. Se já tem local/area preenchido, usa
-  if (sw.local && sw.local !== 'undefined' && sw.local !== '—') return sw.local;
-  if (sw.area  && sw.area  !== 'undefined' && sw.area  !== '—') return sw.area;
-
-  // 2. Tenta pelo prefixo do IP (ex: 172.23.104 → alj → Atendimento Laranjeiras)
-  if (sw.ip) {
-    var parts = sw.ip.split('.');
-    // Tenta prefixo /24 primeiro, depois /16
-    var p24 = parts.slice(0,3).join('.');
-    var p16 = parts.slice(0,2).join('.');
-    if (REDES_PREFIX[p24]) return REDES_PREFIX[p24].nome;
-    if (REDES_PREFIX[p16]) return REDES_PREFIX[p16].nome;
-  }
-
-  // 3. Tenta pela sigla no hostname (ex: "ALJ-SW01" → alj → Atendimento Laranjeiras)
-  if (sw.hostname || sw.sysName) {
-    var hn = (sw.hostname || sw.sysName || '').toUpperCase();
-    var match = hn.match(/^([A-Z]{2,4})-/);
-    if (match) {
-      var sigla = match[1].toLowerCase();
-      if (REDES_SIGLA[sigla]) return REDES_SIGLA[sigla];
-    }
-  }
-
-  return '—';
-}
-
 function renderSwitches(){
-  var sws=STATE.switches||[];
-  var q=(document.getElementById('sw-search-input')?.value||'').toLowerCase();
-  var fSt=document.getElementById('sw-filter-status')?.value||'';
-  var fTp=document.getElementById('sw-filter-tipo')?.value||'';
-  var fLo=document.getElementById('sw-filter-local')?.value||'';
-  var lista=sws.filter(function(s){var t=(s.tipo||'').toLowerCase();if(t==='firewall'||t==='impressora'||t==='printer')return false;if(fSt&&(s.status||'')!==fSt)return false;if(fTp&&t!==fTp)return false;if(fLo&&!(s.local||s.sysLocation||'').toLowerCase().includes(fLo.toLowerCase()))return false;if(q&&!((s.ip||'')+' '+(s.hostname||'')+' '+(s.sysName||'')+' '+(s.desc||'')+' '+(s.local||'')).toLowerCase().includes(q))return false;return true;});
-  var total=sws.filter(function(s){var t=(s.tipo||'').toLowerCase();return t!=='firewall'&&t!=='impressora'&&t!=='printer';});
-  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
-  sv('sw-total',total.length);sv('sw-online',total.filter(function(s){return s.reachable||(s.status||'')==='online';}).length);sv('sw-offline',total.filter(function(s){return(s.status||'')==='offline';}).length);sv('sw-alertas',total.filter(function(s){return(s.status||'')==='alerta'||(s.status||'')==='critico';}).length);sv('sw-portas-total',total.reduce(function(a,s){return a+(s.totalPortas||0);},0));sv('sw-portas-uso',total.reduce(function(a,s){return a+(s.portasUso||0);},0));
-  var cont=document.getElementById('sw-cards-grid')||document.getElementById('sw-grid');if(!cont)return;
-  if(!lista.length){cont.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🔀</div><div style="font-weight:600;margin-top:8px">Nenhum dispositivo encontrado</div></div>';return;}
-  cont.innerHTML=lista.map(function(s){
-    var t=(s.tipo||'switch').toLowerCase(),bg={switch:'#2563EB',router:'#EA580C',ap:'#0891B2','switch-core':'#0F172A','switch-acesso':'#1D4ED8'}[t]||'#64748B',ico={switch:'🔀',router:'🌐',ap:'📡','switch-core':'🔀'}[t]||'🔌';
-    var online=s.reachable||(s.status||'')==='online'||(s.status||'')==='ativo',sc=online?'#059669':(s.status||'')==='offline'?'#6B7280':(s.status||'')==='critico'?'#DC2626':'#D97706',sl=online?'Online':((s.status||'?').charAt(0).toUpperCase()+(s.status||'?').slice(1));
-    var hn=s.hostname||s.sysName||s.ip||'—',mm=[s.marca,s.modelo].filter(function(v){return v&&v!=='undefined';}).join(' ')||(s.sysDescr?s.sysDescr.split(',')[0].trim().slice(0,40):'—');
-    var loc=resolverLocal(s),up=s.uptimeH!=null?(s.uptimeH>=24?Math.floor(s.uptimeH/24)+'d '+Math.round(s.uptimeH%24)+'h':Math.round(s.uptimeH)+'h'):(s.uptime||'—');
-    var pct=s.totalPortas?Math.round((s.portasUso||0)/s.totalPortas*100):0,pl=s.totalPortas&&s.totalPortas!=='undefined'?(s.portasUso||0)+'/'+s.totalPortas:'—';
-    var lat='—';if(s.latencyMs!=null){var lc=s.latencyMs>20?'#DC2626':s.latencyMs>5?'#D97706':'#059669';lat='<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+lc+';width:'+Math.min(Math.round(s.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div><span style="font-size:11px;color:var(--g500)">'+s.latencyMs.toFixed(1)+'ms</span></div>';}
-    var pb='';if(s.totalPortas&&t!=='ap'&&t!=='firewall'){var pc=pct>85?'#DC2626':pct>70?'#D97706':'#059669';pb='<div style="margin-top:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Portas: '+pl+'</span><span>'+pct+'%</span></div><div style="background:var(--g200);border-radius:4px;height:5px;overflow:hidden"><div style="background:'+pc+';width:'+pct+'%;height:100%;border-radius:4px"></div></div></div>';}
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden"><div style="background:linear-gradient(135deg,#0F172A,#1E293B);border-radius:10px 10px 0 0;padding:12px 14px;display:flex;align-items:center;gap:10px"><div style="width:36px;height:36px;border-radius:8px;background:'+bg+';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">'+ico+'</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;font-family:monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div><div style="font-size:10.5px;color:#94A3B8;margin-top:1px">'+escapeHtml(mm)+'</div></div><span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;flex-shrink:0">'+sl+'</span></div><div style="padding:12px 14px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-bottom:10px"><div><span style="color:var(--g400)">IP</span> <span style="font-family:monospace;font-weight:600">'+escapeHtml(s.ip||'—')+'</span></div><div><span style="color:var(--g400)">Local</span> <span>'+escapeHtml(loc)+'</span></div><div><span style="color:var(--g400)">Uptime</span> <span style="font-weight:600">'+escapeHtml(String(up))+'</span></div><div><span style="color:var(--g400)">Tipo</span> <span>'+escapeHtml(t)+'</span></div></div><div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Latência</span>'+(s.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP</span>':'')+'</div>'+lat+'</div>'+pb+'</div><div style="display:flex;border-top:0.5px solid var(--g100)"><button data-sid="'+escapeHtml(s.id)+'" onclick="abrirGerenciarSwitch(this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Gerenciar</button><button data-sid="'+escapeHtml(s.id)+'" onclick="abrirHistSwitch(this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Historico</button><button data-sid="'+escapeHtml(s.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Ping</button><button data-sid="'+escapeHtml(s.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer">SSH</button></div></div>';
-  }).join('');
+  const sws=STATE.switches||[];
+  const q=(document.getElementById('sw-search-input')?.value||'').toLowerCase();
+  const fs=document.getElementById('sw-filter-status')?.value||'';
+  const ft=document.getElementById('sw-filter-tipo')?.value||'';
+  const filtered=sws.filter(s=>(!q||(s.hostname||s.sysName||s.name||'').toLowerCase().includes(q)||(s.ip||'').includes(q)||(s.modelo||'').toLowerCase().includes(q)||(s.local||s.sysLocation||'').toLowerCase().includes(q)||(s.marca||'').toLowerCase().includes(q))&&(!fs||s.status===fs)&&(!ft||s.tipo===ft));
+  sv('sw-s-total',sws.length);sv('sw-s-online',sws.filter(s=>s.status==='online').length);
+  sv('sw-s-offline',sws.filter(s=>s.status==='offline').length);sv('sw-s-alerta',sws.filter(s=>s.status==='alerta').length);
+  sv('sw-s-portas',sws.reduce((a,s)=>a+(s.totalPortas||0),0));
+  sv('sw-s-uso-portas',sws.reduce((a,s)=>a+(s.portasUso||0),0));
+  nbUpdate('nb-switches',sws.filter(s=>s.status==='offline'||s.status==='alerta').length);
+  const alertas=sws.filter(s=>s.status==='offline'||s.status==='alerta');
+  const alertDiv=document.getElementById('sw-network-alerts');
+  if(alertDiv) alertDiv.innerHTML=alertas.map(s=>{const _h=s.hostname||s.sysName||s.name||s.ip||'—';const _l=s.local&&s.local!=='undefined'?s.local:s.sysLocation&&s.sysLocation!=='undefined'?s.sysLocation:'sem local';const _m=[s.marca,s.modelo].filter(v=>v&&v!=='undefined').join(' ')||'';return `<div class='alert ${s.status==='offline'?'alert-danger':'alert-warning'}' style='margin-bottom:8px'><span>${s.status==='offline'?'🔴':'🟡'}</span><div><strong>${_h}</strong> — ${s.status==='offline'?'OFFLINE':'Em Alerta'}<br><span style='font-size:11.5px'>${s.ip} · ${_l}${_m?' · '+_m:''}</span></div><button class='btn btn-danger btn-sm' style='margin-left:auto;flex-shrink:0' onclick="abrirGerenciarSwitch('${s.id}')">Investigar</button></div>`}).join('');
+  if(currentSwView==='cards'){
+    const grid=document.getElementById('sw-cards-grid');
+    if(!grid) return;
+    grid.innerHTML=filtered.map(s=>{
+      const pct=Math.round(((s.portasUso||0)/(s.totalPortas||1))*100)||0;
+      const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
+      const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#1E293B';
+      // Fallbacks seguros para campos que podem vir undefined do Firestore
+      const hostname   = s.hostname || s.sysName || s.name || s.host || s.ip || '—';
+      const marcaModelo= [s.marca, s.modelo].filter(v => v && v !== 'undefined').join(' ') || '—';
+      const local      = (s.local && s.local !== 'undefined') ? s.local : (s.sysLocation && s.sysLocation !== 'undefined') ? s.sysLocation : '—';
+      const portasLabel= (s.totalPortas && s.totalPortas !== 'undefined') ? (s.portasUso||0)+'/'+s.totalPortas : '—/—';
+      return `<div class='sw-card'>
+        <div class='sw-card-header' style='background:#0F172A;border-radius:10px 10px 0 0;padding:12px 14px'>
+          <div style='width:36px;height:36px;border-radius:8px;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0'>\${ico}</div>
+          <div style='flex:1;min-width:0;margin-left:10px'>
+            <div style='font-weight:700;font-size:13px;font-family:JetBrains Mono,monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>\${hostname}</div>
+            <div style='font-size:10.5px;color:#94A3B8;margin-top:2px'>\${marcaModelo}</div>
+          </div>
+          \${swStatusHtml(s.status)}
+        </div>
+        <div class='sw-card-body'>
+          <div class='mdm-card-field'><span class='lbl'>IP</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:11px'>\${s.ip||'—'}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Local</span><span class='val' style='\${local==='—'?'color:var(--g400);font-style:italic':''}'>\${local}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Uptime</span><span class='val' style='color:\${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ \${s.uptime||'—'}</span></div>
+          <div class='mdm-card-field'><span class='lbl'>Firmware</span><span class='val' style='font-family:JetBrains Mono,monospace;font-size:10.5px'>\${s.firmware||'—'}</span></div>
+          \${s.tipo!=='ap'&&s.tipo!=='firewall'?\`<div style='margin-top:8px'><div style='display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px'><span>Portas: \${portasLabel}</span><span>\${pct}%</span></div><div style='background:var(--g200);border-radius:4px;height:5px;overflow:hidden'><div style='background:\${pct>85?'var(--danger)':pct>70?'var(--warning)':'var(--success)'};width:\${pct}%;height:100%;border-radius:4px'></div></div></div>\`:''}
+        </div>
+        <div class='sw-card-ports'><div style='display:flex;flex-wrap:wrap;gap:2px'>\${renderPortMinimap(s)}</div></div>
+        <div class='sw-card-actions'>
+          <button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('\${s.id}')">⚙️ Gerenciar</button>
+          <button class='mdm-action-btn mab-info' onclick="abrirHistSwitch('\${s.id}')">📜 Histórico</button>
+          <button class='mdm-action-btn mab-success' onclick="openModal('modal-novo-chamado')">🎫 Chamado</button>
+          <button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','\${s.id}')">📶 Ping</button>
+          <button class='mdm-action-btn mab-dark' onclick="swActionDirect('ssh','\${s.id}')">🖥️ SSH</button>
+          <button class='mdm-action-btn mab-violet' onclick="swActionDirect('backup-config','\${s.id}')">💾 Backup</button>
+        </div>
+      </div>`;
+    }).join('')||'<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">🔌</div><h3>Nenhum equipamento encontrado</h3></div>';
+  } else {
+    const tbody=document.getElementById('sw-table-body');
+    if(tbody) tbody.innerHTML=filtered.map(s=>`<tr><td class='td-mono' style='color:var(--accent)'>${s.pat}</td><td style='font-weight:700;font-family:JetBrains Mono,monospace'>${s.hostname}</td><td><span class='tag'>${s.tipo}</span></td><td>${s.marca} ${s.modelo}</td><td class='td-mono' style='color:var(--accent-hi)'>${s.ip}</td><td>${s.local}</td><td>${s.portasUso||0}/${s.totalPortas||0}</td><td class='td-mono' style='font-size:10.5px'>${(s.vlans||[]).map(v=>v.id).join(', ')||'—'}</td><td class='td-mono' style='font-size:10.5px'>${s.firmware||'—'}</td><td style='color:${s.status==='online'?'var(--success)':'var(--danger)'}'>⏱ ${s.uptime||'—'}</td><td>${swStatusHtml(s.status)}</td><td><div class='flex gap-4'><button class='mdm-action-btn mab-gray' onclick="abrirGerenciarSwitch('${s.id}')">⚙️</button><button class='mdm-action-btn mab-warning' onclick="swActionDirect('ping','${s.id}')">📶</button></div></td></tr>`).join('')||'<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--g400)">Nenhum</td></tr>';
+  }
 }
 
 function renderPortMinimap(s){
@@ -17194,7 +16724,574 @@ function monSetView(view) {
   };
 })();
 
-// ═══ SERVIDORES ════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
+// REDES — Mapa de faixas de rede por localidade
+// ════════════════════════════════════════════════════════════════
+// ── Mapa de redes da CESAN (gerado de redes.txt) ─────────────────
+const REDES_PREFIX = {
+  '172.22.10': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.22.100': {sigla:'acb',nome:'Águia Branca'},
+  '172.22.101': {sigla:'pnc',nome:'Pancas'},
+  '172.22.102': {sigla:'pnc',nome:'ETA Pancas'},
+  '172.22.104': {sigla:'iun',nome:'Iúna'},
+  '172.22.105': {sigla:'iun',nome:'Pequiá'},
+  '172.22.106': {sigla:'ibt',nome:'Ibatiba'},
+  '172.22.107': {sigla:'ibt',nome:'ETA Ibatiba'},
+  '172.22.108': {sigla:'smj',nome:'Santa Maria de Jetiba'},
+  '172.22.109': {sigla:'smj',nome:'ETA Rio Possmouser'},
+  '172.22.110': {sigla:'anc',nome:'Anchieta'},
+  '172.22.112': {sigla:'sjc',nome:'São José do Calçado'},
+  '172.22.114': {sigla:'bes',nome:'Boa Esperança'},
+  '172.22.116': {sigla:'api',nome:'Apiacá'},
+  '172.22.118': {sigla:'atv',nome:'Atílio Vivacqua'},
+  '172.22.119': {sigla:'atv',nome:'ETA Atílio Vivacqua'},
+  '172.22.120': {sigla:'avt',nome:'Atendimento Vitória'},
+  '172.22.122': {sigla:'bri',nome:'Braço do Rio'},
+  '172.22.124': {sigla:'mtp',nome:'Mantenópolis'},
+  '172.22.126': {sigla:'plb',nome:'Ponto Belo'},
+  '172.22.127': {sigla:'plb',nome:'Escritório Ponto Belo'},
+  '172.22.128': {sigla:'rns',nome:'Rio Novo do Sul'},
+  '172.22.130': {sigla:'mfr',nome:'ETA Muniz Freire'},
+  '172.22.132': {sigla:'cca',nome:'Conceição do Castelo'},
+  '172.22.134': {sigla:'cas',nome:'ETA/Almoxarifado Castelo'},
+  '172.22.135': {sigla:'cas',nome:'ETE Castelo'},
+  '172.22.136': {sigla:'bsf',nome:'ETA/Almoxarifado Barra de São Francisco'},
+  '172.22.138': {sigla:'dbc',nome:'ETA Duas Bocas'},
+  '172.22.140': {sigla:'via',nome:'ETA Viana'},
+  '172.22.142': {sigla:'cac',nome:'ETA Caçaroca/Baixo Recalque'},
+  '172.22.144': {sigla:'cob',nome:'Elevatória Alto Recalque'},
+  '172.22.146': {sigla:'smr',nome:'ETA/Elevatória Santa Maria'},
+  '172.22.148': {sigla:'acg',nome:'Faça Fácil Cariacica'},
+  '172.22.150': {sigla:'juc',nome:'ETA Jucu/Antártica'},
+  '172.22.152': {sigla:'egu',nome:'ETA Guarapari'},
+  '172.22.154': {sigla:'arn',nome:'Alto Rio Novo'},
+  '172.22.156': {sigla:'ecc',nome:'Escritório Call Center'},
+  '172.22.158': {sigla:'mqc',nome:'Muquiçaba - Polo de Esgoto'},
+  '172.22.160': {sigla:'arc',nome:'Aracê'},
+  '172.22.161': {sigla:'poa',nome:'ETA Ponto Alto'},
+  '172.22.162': {sigla:'afc',nome:'ETA Afonso Cláudio'},
+  '172.22.164': {sigla:'api',nome:'ETA Apiacá'},
+  '172.22.166': {sigla:'bjn',nome:'ETA Bom Jesus do Norte'},
+  '172.22.168': {sigla:'bri',nome:'ETA Braço do Rio'},
+  '172.22.170': {sigla:'brj',nome:'ETA Brejetuba'},
+  '172.22.171': {sigla:'cba',nome:'Escritório Conceição da Barra'},
+  '172.22.172': {sigla:'cba',nome:'ETA Conceição da Barra'},
+  '172.22.174': {sigla:'cca',nome:'ETA Conceição do Castelo'},
+  '172.22.176': {sigla:'drp',nome:'ETA Dores do Rio Preto'},
+  '172.22.177': {sigla:'dsl',nome:'ETA Divino São Lourenço'},
+  '172.22.178': {sigla:'eco',nome:'ETA Ecoporanga'},
+  '172.22.180': {sigla:'fun',nome:'ETA Fundão'},
+  '172.22.182': {sigla:'iri',nome:'ETA Iriri'},
+  '172.22.184': {sigla:'irp',nome:'ETA Irupi'},
+  '172.22.186': {sigla:'ljt',nome:'ETA Laranja da Terra'},
+  '172.22.188': {sigla:'mtp',nome:'ETA Mantenópolis'},
+  '172.22.189': {sigla:'muq',nome:'Escritório Muqui'},
+  '172.22.190': {sigla:'muq',nome:'ETA Muqui'},
+  '172.22.191': {sigla:'muq',nome:'ETA Camará'},
+  '172.22.192': {sigla:'nve',nome:'ETA Nova Venécia'},
+  '172.22.194': {sigla:'pia',nome:'ETA Piaçu'},
+  '172.22.196': {sigla:'pma',nome:'ETA Piúma'},
+  '172.22.198': {sigla:'prk',nome:'ETA Presidente Kennedy'},
+  '172.22.200': {sigla:'rns',nome:'ETA Rio Novo do Sul'},
+  '172.22.201': {sigla:'slp',nome:'Escritório de Santa Leopoldina'},
+  '172.22.202': {sigla:'slp',nome:'ETA Santa Leopoldina'},
+  '172.22.203': {sigla:'smj',nome:'ETA Garrafão'},
+  '172.22.204': {sigla:'ste',nome:'ETA Santa Teresa'},
+  '172.22.205': {sigla:'ste',nome:'ETE Santa Teresa'},
+  '172.22.206': {sigla:'sac',nome:'ETA Santo Antônio do Canaã'},
+  '172.22.207': {sigla:'vza',nome:'ETA Várzea Alegre'},
+  '172.22.208': {sigla:'sjc',nome:'ETA São José do Calçado'},
+  '172.22.209': {sigla:'sjc',nome:'Escritório de São José do Calçado'},
+  '172.22.210': {sigla:'src',nome:'ETA São Roque do Canaã'},
+  '172.22.212': {sigla:'spl',nome:'ETA Serra Pelada'},
+  '172.22.214': {sigla:'tmb',nome:'ETA Timbuí'},
+  '172.22.216': {sigla:'vni',nome:'ETA Venda Nova do Imigrante'},
+  '172.22.218': {sigla:'smj',nome:'ETA Santa Maria de Jetiba'},
+  '172.22.22': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.22.220': {sigla:'irp',nome:'Escritório Irupi'},
+  '172.22.222': {sigla:'adn',nome:'Água Doce do Norte'},
+  '172.22.223': {sigla:'adn',nome:'ETA Água Doce do Norte'},
+  '172.22.224': {sigla:'erm',nome:'ETA Reis Magos'},
+  '172.22.226': {sigla:'vpv',nome:'Escritório Vila Pavão'},
+  '172.22.228': {sigla:'src',nome:'ETE Manguinhos'},
+  '172.22.23': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.22.230': {sigla:'ara',nome:'ETE Araças'},
+  '172.22.232': {sigla:'brj',nome:'Escritório Brejetuba'},
+  '172.22.234': {sigla:'ljt',nome:'Escritório Laranja da Terra'},
+  '172.22.236': {sigla:'afc',nome:'Escritório Afonso Cláudio'},
+  '172.22.237': {sigla:'muc',nome:'Escritório Mucurici'},
+  '172.22.238': {sigla:'ita',nome:'Itaúnas'},
+  '172.22.240': {sigla:'muc',nome:'Mucurici'},
+  '172.22.242': {sigla:'vpv',nome:'Vila Pavão'},
+  '172.22.244': {sigla:'nve',nome:'ETE Nova Venécia'},
+  '172.22.246': {sigla:'arn',nome:'ETA Alto Rio Novo'},
+  '172.22.248': {sigla:'prk',nome:'Escritório Presidente Kennedy'},
+  '172.22.250': {sigla:'sgp',nome:'ETA São Gabriel da Palha'},
+  '172.22.252': {sigla:'vlv',nome:'Vila Valério'},
+  '172.22.253': {sigla:'vlv',nome:'ETA Vila Valério'},
+  '172.22.26': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.22.28': {sigla:'agu',nome:'Muquiçaba Atendimento'},
+  '172.22.30': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.22.32': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.22.34': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.22.36': {sigla:'pbv',nome:'Polo Boa Vista'},
+  '172.22.44': {sigla:'ves',nome:'Vale Esperança'},
+  '172.22.46': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.22.48': {sigla:'gua',nome:'Guarapari'},
+  '172.22.50': {sigla:'cas',nome:'Castelo'},
+  '172.22.52': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.22.54': {sigla:'nve',nome:'Nova Venécia'},
+  '172.22.56': {sigla:'ste',nome:'Santa Teresa'},
+  '172.22.58': {sigla:'cba',nome:'Conceição da Barra'},
+  '172.22.60': {sigla:'pma',nome:'Piúma'},
+  '172.22.62': {sigla:'atv',nome:'Pólo Atílio Vivácqua'},
+  '172.22.64': {sigla:'nve',nome:'Escritório Nova Venécia (atendimento)'},
+  '172.22.66': {sigla:'drp',nome:'Escritório Dores do Rio Preto'},
+  '172.22.68': {sigla:'mfl',nome:'Marechal Floriano'},
+  '172.22.70': {sigla:'mfl',nome:'Escritório Marechal Floriano'},
+  '172.22.72': {sigla:'dmt',nome:'Domingos Martins'},
+  '172.22.73': {sigla:'src',nome:'Escritório São Roque do Canaã'},
+  '172.22.74': {sigla:'fun',nome:'Fundão'},
+  '172.22.76': {sigla:'dsl',nome:'Escritório Divino São Lourenço'},
+  '172.22.78': {sigla:'anc',nome:'ETA Ubú'},
+  '172.22.79': {sigla:'anc',nome:'ETE Ubú'},
+  '172.22.80': {sigla:'afc',nome:'Afonso Claudio'},
+  '172.22.82': {sigla:'vnv',nome:'Venda Nova do Imigrante'},
+  '172.22.84': {sigla:'sgp',nome:'São Gabriel da Palha'},
+  '172.22.86': {sigla:'eco',nome:'Ecoporanga'},
+  '172.22.87': {sigla:'pcn',nome:'Escritório de Pedro Canário'},
+  '172.22.88': {sigla:'pcn',nome:'Pedro Canário'},
+  '172.22.89': {sigla:'mtn',nome:'Escritório de Montanha'},
+  '172.22.90': {sigla:'mtn',nome:'Montanha'},
+  '172.22.91': {sigla:'pnh',nome:'Escritório Pinheiros'},
+  '172.22.92': {sigla:'pnh',nome:'Pinheiros'},
+  '172.22.93': {sigla:'pnh',nome:'ETA Pinheiros'},
+  '172.22.94': {sigla:'bjn',nome:'Bom Jesus do Norte'},
+  '172.22.95': {sigla:'bjn',nome:'Escritório de Bom Jesus do Norte'},
+  '172.22.96': {sigla:'pma',nome:'Piúma'},
+  '172.22.98': {sigla:'scl',nome:'Santa Clara'},
+  '172.23.10': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.104': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.23.105': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.23.106': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.23.11': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.112': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.23.113': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.23.114': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.23.116': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.117': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.118': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.119': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.12': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.120': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.121': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.122': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.123': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.124': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.125': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.126': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.127': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.128': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.129': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.13': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.130': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.131': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.132': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.133': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.134': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.135': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.136': {sigla:'gua',nome:'Guarapari'},
+  '172.23.137': {sigla:'gua',nome:'Guarapari'},
+  '172.23.138': {sigla:'gua',nome:'Guarapari'},
+  '172.23.139': {sigla:'gua',nome:'Guarapari'},
+  '172.23.14': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.140': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.141': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.142': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.143': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.15': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.153': {sigla:'scl',nome:'Santa Clara'},
+  '172.23.154': {sigla:'smr',nome:'ETA e Elevatória Santa Maria'},
+  '172.23.155': {sigla:'erm',nome:'ETA Reis Magos'},
+  '172.23.156': {sigla:'ara',nome:'ETE Araçás'},
+  '172.23.157': {sigla:'cac',nome:'ETA Caçaroca / Elevatória Baixo Recalque'},
+  '172.23.158': {sigla:'cob',nome:'Elevatória Alto Recalque'},
+  '172.23.159': {sigla:'dbc',nome:'ETA Duas Bocas'},
+  '172.23.16': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.160': {sigla:'egu',nome:'ETA Guarapari'},
+  '172.23.161': {sigla:'mqc',nome:'Polo de Esgoto - Muquiçaba'},
+  '172.23.162': {sigla:'via',nome:'Escritório Viana'},
+  '172.23.163': {sigla:'via',nome:'ETA Viana'},
+  '172.23.164': {sigla:'juc',nome:'ETA Jucu / Antártica'},
+  '172.23.165': {sigla:'juc',nome:'ETA Jucu Nova'},
+  '172.23.17': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.18': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.19': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.20': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.25': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.26': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.27': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.28': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.29': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.30': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.31': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.23.64': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.65': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.66': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.67': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.68': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.69': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.70': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.71': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.72': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.73': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.74': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.75': {sigla:'rbs',nome:'Rui Barbosa'},
+  '172.23.82': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.23.83': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.23.84': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.23.85': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.23.86': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.23.87': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.23.96': {sigla:'avt',nome:'Atendimento Vitória'},
+  '172.23.97': {sigla:'avt',nome:'Atendimento Vitória'},
+  '172.23.98': {sigla:'avt',nome:'Atendimento Vitória'},
+  '172.24.10': {sigla:'pcn',nome:'ETA Pedro Canário'},
+  '172.24.11': {sigla:'pcn',nome:'ETA Floresta do Sul'},
+  '172.24.12': {sigla:'crn',nome:'ETA Cristal do Norte'},
+  '172.24.13': {sigla:'mtn',nome:'Escritório Montanha'},
+  '172.24.14': {sigla:'mtn',nome:'ETA Montanha'},
+  '172.24.15': {sigla:'mtn',nome:'ETA Vinhatico'},
+  '172.24.16': {sigla:'muc',nome:'Escritório Mucurici'},
+  '172.24.17': {sigla:'muc',nome:'ETA Mucurici'},
+  '172.24.18': {sigla:'muc',nome:'ETA Itabaiana'},
+  '172.24.19': {sigla:'muc',nome:'ETE Mucurici'},
+  '172.24.2': {sigla:'cba',nome:'Conceição da Barra'},
+  '172.24.20': {sigla:'eco',nome:'Escritório Ecoporanga'},
+  '172.24.200': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.201': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.202': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.203': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.204': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.24.205': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.24.206': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.24.207': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.24.21': {sigla:'eco',nome:'ETA Ecoporanga'},
+  '172.24.22': {sigla:'eco',nome:'ETE Ecoporanga'},
+  '172.24.23': {sigla:'eco',nome:'ETA Cotaxé'},
+  '172.24.24': {sigla:'eco',nome:'ETA Imburana'},
+  '172.24.25': {sigla:'eco',nome:'ETA Prata dos Baianos'},
+  '172.24.26': {sigla:'pbl',nome:'Escritório Ponto Belo'},
+  '172.24.27': {sigla:'pbl',nome:'ETA Ponto Belo'},
+  '172.24.28': {sigla:'pbl',nome:'ETA Itamira'},
+  '172.24.29': {sigla:'pnh',nome:'Pinheiros'},
+  '172.24.3': {sigla:'cba',nome:'Escritório Conceição da Barra'},
+  '172.24.30': {sigla:'pnh',nome:'Escritório Pinheiros'},
+  '172.24.31': {sigla:'pnh',nome:'ETA Pinheiros'},
+  '172.24.32': {sigla:'pnh',nome:'ETE Pinheiros'},
+  '172.24.33': {sigla:'pnh',nome:'ETA São João Do Sobrado'},
+  '172.24.34': {sigla:'bes',nome:'Escritório e ETA Boa Esperança'},
+  '172.24.36': {sigla:'nve',nome:'Escritório Nova Venécia'},
+  '172.24.37': {sigla:'nve',nome:'ETA Nova Venécia'},
+  '172.24.38': {sigla:'nve',nome:'ETE Nova Venécia'},
+  '172.24.39': {sigla:'vpv',nome:'Escritório Vila Pavão'},
+  '172.24.4': {sigla:'bri',nome:'Escritório Braço do Rio'},
+  '172.24.40': {sigla:'vpv',nome:'ETA Vila Pavão'},
+  '172.24.42': {sigla:'bsf',nome:'Almoxarifado / ETA Barra de São Francisco'},
+  '172.24.43': {sigla:'bsf',nome:'ETE Barra de São Francisco'},
+  '172.24.44': {sigla:'bsf',nome:'ETA Paulista'},
+  '172.24.45': {sigla:'adn',nome:'Escritório Água Doce do Norte'},
+  '172.24.46': {sigla:'adn',nome:'ETA Água Doce do Norte'},
+  '172.24.47': {sigla:'adn',nome:'ETA Gov. Lacerda de Aguiar'},
+  '172.24.48': {sigla:'adn',nome:'ETA Santo Agostinho'},
+  '172.24.49': {sigla:'mtp',nome:'Mantenópolis'},
+  '172.24.5': {sigla:'cba',nome:'ETA Conceição da Barra'},
+  '172.24.50': {sigla:'mtp',nome:'ETA Mantenópolis'},
+  '172.24.51': {sigla:'mtp',nome:'ETE Mantenópolis'},
+  '172.24.52': {sigla:'mtp',nome:'ETA Santa Luzia de Mantenópolis'},
+  '172.24.53': {sigla:'mtp',nome:'ETA São José de Mantenópolis'},
+  '172.24.54': {sigla:'arn',nome:'Escritório Alto Rio Novo'},
+  '172.24.55': {sigla:'arn',nome:'ETA Alto Rio Novo'},
+  '172.24.56': {sigla:'abc',nome:'Escritório Águia Branca'},
+  '172.24.57': {sigla:'abc',nome:'ETA Águia Branca'},
+  '172.24.58': {sigla:'sgp',nome:'São Gabriel da Palha'},
+  '172.24.59': {sigla:'sgp',nome:'ETA São Gabriel da Palha'},
+  '172.24.6': {sigla:'bri',nome:'ETA Braço do Rio'},
+  '172.24.60': {sigla:'sgp',nome:'ETE São Gabriel da Palha'},
+  '172.24.61': {sigla:'vlv',nome:'Escritório Vila Valério'},
+  '172.24.62': {sigla:'vlv',nome:'ETA Vila Valério'},
+  '172.24.63': {sigla:'vlv',nome:'ETE Vila Valério'},
+  '172.24.64': {sigla:'pnc',nome:'Escritório Pancas'},
+  '172.24.65': {sigla:'pnc',nome:'ETA Pancas'},
+  '172.24.66': {sigla:'pnc',nome:'ETA Vila Verde'},
+  '172.24.7': {sigla:'ita',nome:'ETA Itaúnas'},
+  '172.24.8': {sigla:'ita',nome:'ETE Itaúnas'},
+  '172.24.9': {sigla:'pcn',nome:'Escritório Pedro Canário'},
+  '172.25.10': {sigla:'rns',nome:'ETA Rio Novo do Sul'},
+  '172.25.11': {sigla:'prk',nome:'Escritório Presidente Kennedy'},
+  '172.25.12': {sigla:'prk',nome:'ETA Presidente Kennedy'},
+  '172.25.13': {sigla:'atv',nome:'Escritório Atílio Vivacqua'},
+  '172.25.14': {sigla:'atv',nome:'ETA Atílio Vivacqua'},
+  '172.25.15': {sigla:'muq',nome:'ETA Camará'},
+  '172.25.16': {sigla:'atv',nome:'Pólo Atílio Vivacqua'},
+  '172.25.17': {sigla:'muq',nome:'Escritório Muqui'},
+  '172.25.18': {sigla:'muq',nome:'ETA Muqui'},
+  '172.25.19': {sigla:'bjn',nome:'Bom Jesus do Norte'},
+  '172.25.2': {sigla:'anc',nome:'Escritório Anchieta'},
+  '172.25.20': {sigla:'bjn',nome:'Escritório Bom Jesus do Norte'},
+  '172.25.200': {sigla:'cas',nome:'Castelo'},
+  '172.25.201': {sigla:'cas',nome:'Castelo'},
+  '172.25.202': {sigla:'cas',nome:'Castelo'},
+  '172.25.203': {sigla:'cas',nome:'Castelo'},
+  '172.25.204': {sigla:'ste',nome:'Santa Teresa'},
+  '172.25.205': {sigla:'ste',nome:'Santa Teresa'},
+  '172.25.206': {sigla:'ste',nome:'Santa Teresa'},
+  '172.25.207': {sigla:'ste',nome:'Santa Teresa'},
+  '172.25.21': {sigla:'bjn',nome:'ETA Bom Jesus do Norte'},
+  '172.25.22': {sigla:'bjn',nome:'ETE Bom Jesus do Norte'},
+  '172.25.23': {sigla:'api',nome:'Escritório Apiacá'},
+  '172.25.24': {sigla:'api',nome:'ETA Apiacá'},
+  '172.25.25': {sigla:'sjc',nome:'São José do Calçado'},
+  '172.25.26': {sigla:'sjc',nome:'Escritório São José do Calçado'},
+  '172.25.27': {sigla:'sjc',nome:'ETA São José do Calçado'},
+  '172.25.28': {sigla:'drp',nome:'Escritório Dores do Rio Preto'},
+  '172.25.29': {sigla:'drp',nome:'ETA Dores do Rio Preto'},
+  '172.25.3': {sigla:'iri',nome:'ETA Iriri'},
+  '172.25.30': {sigla:'drp',nome:'ETA Pedra Menina'},
+  '172.25.31': {sigla:'dsl',nome:'Escritório Divino São Lourenço'},
+  '172.25.32': {sigla:'dsl',nome:'ETA Divino São Lourenço'},
+  '172.25.33': {sigla:'irp',nome:'Escritório Irupi'},
+  '172.25.34': {sigla:'irp',nome:'ETA Irupi'},
+  '172.25.35': {sigla:'iun',nome:'Escritório Iúna'},
+  '172.25.36': {sigla:'iun',nome:'ETA Iúna'},
+  '172.25.37': {sigla:'iun',nome:'ETA Pequiá'},
+  '172.25.38': {sigla:'ibt',nome:'Ibatiba'},
+  '172.25.39': {sigla:'ibt',nome:'ETA Ibatiba'},
+  '172.25.4': {sigla:'anc',nome:'ETA Ubú'},
+  '172.25.40': {sigla:'mfr',nome:'Escritório Muniz Freire'},
+  '172.25.41': {sigla:'mfr',nome:'ETA Muniz Freire'},
+  '172.25.42': {sigla:'arz',nome:'ETA Coqueiral'},
+  '172.25.43': {sigla:'pia',nome:'ETA Piaçu'},
+  '172.25.44': {sigla:'arz',nome:'ETA Barra do Riacho'},
+  '172.25.46': {sigla:'cas',nome:'Escritório Castelo'},
+  '172.25.47': {sigla:'cas',nome:'ETA / Almoxarifado Castelo'},
+  '172.25.48': {sigla:'cas',nome:'ETE Castelo'},
+  '172.25.49': {sigla:'cca',nome:'Escritório Conceição de Castelo'},
+  '172.25.5': {sigla:'arz',nome:'ETA Barra do Sahy'},
+  '172.25.50': {sigla:'cca',nome:'ETA Conceição do Castelo'},
+  '172.25.51': {sigla:'brj',nome:'Escritório Brejetuba'},
+  '172.25.52': {sigla:'brj',nome:'ETA Brejetuba'},
+  '172.25.53': {sigla:'ljt',nome:'Escritório Laranja da Terra'},
+  '172.25.54': {sigla:'ljt',nome:'ETA Laranja da Terra'},
+  '172.25.55': {sigla:'arz',nome:'ETA Vila do Riacho'},
+  '172.25.56': {sigla:'ljt',nome:'ETA Sobreiro'},
+  '172.25.57': {sigla:'afc',nome:'Afonso Cláudio'},
+  '172.25.58': {sigla:'afc',nome:'Escritório Afonso Cláudio'},
+  '172.25.59': {sigla:'afc',nome:'ETA Afonso Cláudio'},
+  '172.25.6': {sigla:'pma',nome:'Escritório Piúma'},
+  '172.25.60': {sigla:'afc',nome:'ETE Afonso Cláudio'},
+  '172.25.61': {sigla:'spl',nome:'ETA Serra Pelada'},
+  '172.25.62': {sigla:'vnv',nome:'Venda Nova do Imigrante'},
+  '172.25.63': {sigla:'vnv',nome:'Escritório Venda Nova'},
+  '172.25.64': {sigla:'vnv',nome:'ETA Venda Nova do Imigrante'},
+  '172.25.65': {sigla:'vnv',nome:'ETE Venda Nova do Imigrante'},
+  '172.25.66': {sigla:'dmt',nome:'Escritório Domingos Martins'},
+  '172.25.67': {sigla:'dmt',nome:'ETE Domingos Martins'},
+  '172.25.68': {sigla:'arc',nome:'ETA Aracê'},
+  '172.25.69': {sigla:'dmt',nome:'ETE Vila Pedra Azul'},
+  '172.25.7': {sigla:'pma',nome:'Pólo Piúma'},
+  '172.25.70': {sigla:'dmt',nome:'ETE Vivendas de Pedra Azul'},
+  '172.25.71': {sigla:'poa',nome:'ETA Ponto Alto'},
+  '172.25.72': {sigla:'mfl',nome:'Escritório Marechal Floriano'},
+  '172.25.73': {sigla:'mfl',nome:'ETA Marechal Floriano'},
+  '172.25.74': {sigla:'mfl',nome:'ETE Marechal Floriano'},
+  '172.25.75': {sigla:'smj',nome:'Escritório Santa Maria de Jetibá'},
+  '172.25.76': {sigla:'smj',nome:'ETA Santa Maria de Jetibá'},
+  '172.25.77': {sigla:'smj',nome:'ETA Garrafão'},
+  '172.25.78': {sigla:'smj',nome:'ETA Alto Rio Possmouser'},
+  '172.25.79': {sigla:'smj',nome:'ETE Santa Maria de Jetibá'},
+  '172.25.8': {sigla:'pma',nome:'ETA Piúma'},
+  '172.25.81': {sigla:'ste',nome:'Escritório Santa Teresa'},
+  '172.25.82': {sigla:'ste',nome:'ETA Santa Teresa'},
+  '172.25.83': {sigla:'sac',nome:'ETA Santo Antônio do Canaã'},
+  '172.25.84': {sigla:'ste',nome:'ETE Santa Teresa'},
+  '172.25.85': {sigla:'vza',nome:'ETA Várzea Alegre'},
+  '172.25.86': {sigla:'src',nome:'Escritório São Roque do Canaã'},
+  '172.25.87': {sigla:'src',nome:'ETA São Roque do Canaã'},
+  '172.25.88': {sigla:'slp',nome:'Escritório Santa Leopoldina'},
+  '172.25.89': {sigla:'slp',nome:'ETA Santa Leopoldina'},
+  '172.25.9': {sigla:'rns',nome:'Escritório Rio Novo do Sul'},
+  '172.25.90': {sigla:'fun',nome:'Escritório Fundão'},
+  '172.25.91': {sigla:'fun',nome:'ETA Fundão'},
+  '172.25.92': {sigla:'tmb',nome:'ETA Timbuí'},
+  '172.25.93': {sigla:'fun',nome:'Escritório Praia Grande'},
+  '172.25.94': {sigla:'arz',nome:'Escritório Coqueiral (Aracruz)'},
+};
+
+const REDES_SIGLA = {
+  'abc': 'Escritório Águia Branca',
+  'acb': 'Águia Branca',
+  'acg': 'Faça Fácil Cariacica',
+  'adn': 'Água Doce do Norte',
+  'afc': 'Afonso Claudio',
+  'agu': 'Muquiçaba Atendimento',
+  'alj': 'Atendimento Laranjeiras',
+  'anc': 'Anchieta',
+  'api': 'Apiacá',
+  'ara': 'ETE Araças',
+  'arc': 'Aracê',
+  'arn': 'Alto Rio Novo',
+  'arz': 'ETA Barra do Sahy',
+  'atv': 'Atílio Vivacqua',
+  'avt': 'Atendimento Vitória',
+  'avv': 'Atendimento Vila Velha',
+  'bes': 'Boa Esperança',
+  'bjn': 'Bom Jesus do Norte',
+  'bri': 'Braço do Rio',
+  'brj': 'ETA Brejetuba',
+  'bsf': 'Barra de São Francisco',
+  'cac': 'ETA Caçaroca/Baixo Recalque',
+  'cas': 'Castelo',
+  'cba': 'Conceição da Barra',
+  'cca': 'Conceição do Castelo',
+  'cob': 'Elevatória Alto Recalque',
+  'coc': 'Centro Operativo de Carapina',
+  'crn': 'ETA Cristal do Norte',
+  'dbc': 'ETA Duas Bocas',
+  'dmt': 'Domingos Martins',
+  'drp': 'Escritório Dores do Rio Preto',
+  'dsl': 'Escritório Divino São Lourenço',
+  'ecb': 'ETA Cobi',
+  'ecc': 'Escritório Call Center',
+  'eco': 'Ecoporanga',
+  'egu': 'ETA Guarapari',
+  'ejc': 'ETE Camburi',
+  'erm': 'ETA Reis Magos',
+  'fun': 'Fundão',
+  'gua': 'Guarapari',
+  'ibt': 'Ibatiba',
+  'iri': 'ETA Iriri',
+  'irp': 'ETA Irupi',
+  'ita': 'Itaúnas',
+  'iun': 'Iúna',
+  'juc': 'ETA Jucu/Antártica',
+  'ljt': 'ETA Laranja da Terra',
+  'mfl': 'Marechal Floriano',
+  'mfr': 'ETA Muniz Freire',
+  'mqc': 'Muquiçaba - Polo de Esgoto',
+  'mtn': 'Montanha',
+  'mtp': 'Mantenópolis',
+  'muc': 'Mucurici',
+  'muq': 'Escritório Muqui',
+  'nve': 'Nova Venécia',
+  'pbl': 'Escritório Ponto Belo',
+  'pbv': 'Polo Boa Vista',
+  'pcn': 'Pedro Canário',
+  'pia': 'ETA Piaçu',
+  'plb': 'Ponto Belo',
+  'pma': 'Piúma',
+  'pnc': 'Pancas',
+  'pnh': 'Pinheiros',
+  'poa': 'ETA Ponto Alto',
+  'prk': 'ETA Presidente Kennedy',
+  'rbs': 'Rui Barbosa',
+  'rns': 'Rio Novo do Sul',
+  'sac': 'ETA Santo Antônio do Canaã',
+  'scl': 'Santa Clara',
+  'sgp': 'São Gabriel da Palha',
+  'sjc': 'São José do Calçado',
+  'slp': 'Escritório de Santa Leopoldina',
+  'slu': 'Santa Lúcia',
+  'smj': 'Santa Maria de Jetiba',
+  'smr': 'ETA/Elevatória Santa Maria',
+  'spl': 'ETA Serra Pelada',
+  'src': 'Escritório São Roque do Canaã',
+  'ste': 'Santa Teresa',
+  'tmb': 'ETA Timbuí',
+  'ves': 'Vale Esperança',
+  'via': 'ETA Viana',
+  'vit': 'Escritório Central (Bemge)',
+  'vlv': 'Vila Valério',
+  'vni': 'ETA Venda Nova do Imigrante',
+  'vnv': 'Venda Nova do Imigrante',
+  'vpv': 'Vila Pavão',
+  'vza': 'ETA Várzea Alegre',
+};
+
+function resolverLocal(sw) {
+  if (sw.local && sw.local !== 'undefined' && sw.local !== '—' && sw.local !== '') return sw.local;
+  if (sw.area  && sw.area  !== 'undefined' && sw.area  !== '—' && sw.area  !== '') return sw.area;
+  if (sw.ip) {
+    var pts = sw.ip.split('.');
+    var p24 = pts.slice(0,3).join('.');
+    var p16 = pts.slice(0,2).join('.');
+    if (REDES_PREFIX[p24]) return REDES_PREFIX[p24].nome;
+    if (REDES_PREFIX[p16]) return REDES_PREFIX[p16].nome;
+  }
+  if (sw.hostname || sw.sysName) {
+    var hn = (sw.hostname || sw.sysName || '').toUpperCase();
+    var m = hn.match(/^([A-Z]{2,4})-/);
+    if (m) { var s = m[1].toLowerCase(); if (REDES_SIGLA[s]) return REDES_SIGLA[s]; }
+  }
+  return '—';
+}
+
+// ── renderSwitches sem template literal ──────────────────────────
+function renderSwitches(){
+  var sws=STATE.switches||[];
+  var q=(document.getElementById('sw-search-input')?.value||'').toLowerCase();
+  var fSt=document.getElementById('sw-filter-status')?.value||'';
+  var fTp=document.getElementById('sw-filter-tipo')?.value||'';
+  var fLo=document.getElementById('sw-filter-local')?.value||'';
+  var lista=sws.filter(function(s){
+    var t=(s.tipo||'').toLowerCase();
+    if(t==='firewall'||t==='impressora'||t==='printer')return false;
+    if(fSt&&(s.status||'')!==fSt)return false;
+    if(fTp&&t!==fTp)return false;
+    if(fLo&&!resolverLocal(s).toLowerCase().includes(fLo.toLowerCase()))return false;
+    if(q&&!((s.ip||'')+' '+(s.hostname||'')+' '+(s.sysName||'')+' '+resolverLocal(s)).toLowerCase().includes(q))return false;
+    return true;
+  });
+  var total=sws.filter(function(s){var t=(s.tipo||'').toLowerCase();return t!=='firewall'&&t!=='impressora'&&t!=='printer';});
+  var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('sw-total',total.length);sv('sw-online',total.filter(function(s){return s.reachable||(s.status||'')==='online';}).length);sv('sw-offline',total.filter(function(s){return(s.status||'')==='offline';}).length);sv('sw-alertas',total.filter(function(s){return(s.status||'')==='alerta'||(s.status||'')==='critico';}).length);sv('sw-portas-total',total.reduce(function(a,s){return a+(s.totalPortas||0);},0));sv('sw-portas-uso',total.reduce(function(a,s){return a+(s.portasUso||0);},0));
+  var cont=document.getElementById('sw-cards-grid')||document.getElementById('sw-grid');if(!cont)return;
+  if(!lista.length){cont.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🔀</div><div style="font-weight:600;margin-top:8px">Nenhum dispositivo encontrado</div></div>';return;}
+  cont.innerHTML=lista.map(function(s){
+    var t=(s.tipo||'switch').toLowerCase(),bg={switch:'#2563EB',router:'#EA580C',ap:'#0891B2','switch-core':'#0F172A','switch-acesso':'#1D4ED8','switch-distribuicao':'#1E40AF'}[t]||'#64748B',ico={switch:'🔀',router:'🌐',ap:'📡','switch-core':'🔀'}[t]||'🔌';
+    var online=s.reachable||(s.status||'')==='online'||(s.status||'')==='ativo',sc=online?'#059669':(s.status||'')==='offline'?'#6B7280':(s.status||'')==='critico'?'#DC2626':'#D97706',sl=online?'Online':((s.status||'?').charAt(0).toUpperCase()+(s.status||'?').slice(1));
+    var hn=s.hostname||s.sysName||s.ip||'—',mm=[s.marca,s.modelo].filter(function(v){return v&&v!=='undefined';}).join(' ')||(s.sysDescr?s.sysDescr.split(',')[0].trim().slice(0,40):'—');
+    var loc=resolverLocal(s),up=s.uptimeH!=null?(s.uptimeH>=24?Math.floor(s.uptimeH/24)+'d '+Math.round(s.uptimeH%24)+'h':Math.round(s.uptimeH)+'h'):(s.uptime||'—');
+    var pct=s.totalPortas?Math.round((s.portasUso||0)/s.totalPortas*100):0,pl=s.totalPortas&&s.totalPortas!=='undefined'?(s.portasUso||0)+'/'+s.totalPortas:'—';
+    var lat='—';if(s.latencyMs!=null){var lc=s.latencyMs>20?'#DC2626':s.latencyMs>5?'#D97706':'#059669';lat='<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+lc+';width:'+Math.min(Math.round(s.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div><span style="font-size:11px;color:var(--g500)">'+s.latencyMs.toFixed(1)+'ms</span></div>';}
+    var pb='';if(s.totalPortas&&t!=='ap'&&t!=='firewall'){var pc=pct>85?'#DC2626':pct>70?'#D97706':'#059669';pb='<div style="margin-top:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Portas: '+pl+'</span><span>'+pct+'%</span></div><div style="background:var(--g200);border-radius:4px;height:5px;overflow:hidden"><div style="background:'+pc+';width:'+pct+'%;height:100%;border-radius:4px"></div></div></div>';}
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden">'
+      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);border-radius:10px 10px 0 0;padding:12px 14px;display:flex;align-items:center;gap:10px">'
+        +'<div style="width:36px;height:36px;border-radius:8px;background:'+bg+';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">'+ico+'</div>'
+        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;font-family:monospace;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
+        +'<div style="font-size:10.5px;color:#94A3B8;margin-top:1px">'+escapeHtml(mm)+'</div></div>'
+        +'<span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;flex-shrink:0">'+sl+'</span>'
+      +'</div>'
+      +'<div style="padding:12px 14px">'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-bottom:10px">'
+          +'<div><span style="color:var(--g400)">IP</span> <span style="font-family:monospace;font-weight:600">'+escapeHtml(s.ip||'—')+'</span></div>'
+          +'<div><span style="color:var(--g400)">Local</span> <span style="font-weight:600">'+escapeHtml(loc)+'</span></div>'
+          +'<div><span style="color:var(--g400)">Uptime</span> <span style="font-weight:600">'+escapeHtml(String(up))+'</span></div>'
+          +'<div><span style="color:var(--g400)">Tipo</span> <span>'+escapeHtml(t)+'</span></div>'
+        +'</div>'
+        +'<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Latência</span>'+(s.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP</span>':'')+'</div>'+lat+'</div>'+pb
+      +'</div>'
+      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="abrirGerenciarSwitch(this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Gerenciar</button>'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="abrirHistSwitch(this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Historico</button>'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Ping</button>'
+        +'<button data-sid="'+escapeHtml(s.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.sid)" style="flex:1;border:none;background:none;padding:8px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer">SSH</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+
+// ── Servidores ────────────────────────────────────────────────────
 function _sn(a){var cs=[a.hostname,a.sysName,a.nome,a.desc,a.name,a.pat];for(var i=0;i<cs.length;i++){var s=(cs[i]||'').trim();if(s&&s!==a.ip&&s.length>2)return s;}return '';}
 function isVirtualServidor(a){return /vserv|vmserver|vm-/i.test(_sn(a))||(a.tipo||'').toLowerCase()==='server-linux';}
 function isFisicoServidor(a){var h=_sn(a),t=(a.tipo||'').toLowerCase();return(/serv/i.test(h)&&!isVirtualServidor(a))||(t==='servidor'&&!isVirtualServidor(a));}
@@ -17209,62 +17306,36 @@ function renderServidores(){
   if(q)lista=lista.filter(function(a){return['hostname','ip','desc','area','pat'].some(function(f){return(a[f]||'').toLowerCase().includes(q);});});
   var todos=(STATE.ativos||[]).filter(isServidor);
   var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
-  sv('srv-kpi-total',todos.length);sv('srv-kpi-fisicos',todos.filter(isFisicoServidor).length);sv('srv-kpi-virtuais',todos.filter(isVirtualServidor).length);
-  sv('srv-kpi-online',todos.filter(function(a){return a.reachable||(a.status||'').toLowerCase()==='online';}).length);
-  sv('srv-kpi-offline',todos.filter(function(a){return(a.status||'').toLowerCase()==='offline';}).length);
+  sv('srv-kpi-total',todos.length);sv('srv-kpi-fisicos',todos.filter(isFisicoServidor).length);sv('srv-kpi-virtuais',todos.filter(isVirtualServidor).length);sv('srv-kpi-online',todos.filter(function(a){return a.reachable||(a.status||'').toLowerCase()==='online';}).length);sv('srv-kpi-offline',todos.filter(function(a){return(a.status||'').toLowerCase()==='offline';}).length);
   var grid=document.getElementById('srv-grid');if(!grid)return;
-  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:48px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum servidor encontrado</div><div style="font-size:12px;margin-top:6px">Hostnames SERV*/VSERV* ou tipo=servidor</div></div>';return;}
+  if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:48px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum servidor encontrado</div></div>';return;}
   lista.sort(function(a,b){var ord={critico:0,offline:1,alerta:2,online:3,ativo:4};return(ord[(a.status||'').toLowerCase()]||5)-(ord[(b.status||'').toLowerCase()]||5)||(_sn(a)||'').localeCompare(_sn(b)||'');});
   function mb(l,v,d,w){if(v==null)return '';var co=v>=d?'#DC2626':v>=w?'#D97706':'#059669';return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:2px"><span>'+l+'</span><span style="color:'+co+';font-weight:700">'+v+'%</span></div><div style="background:var(--g200);border-radius:3px;height:4px"><div style="background:'+co+';width:'+Math.min(v,100)+'%;height:100%;border-radius:3px"></div></div></div>';}
   grid.innerHTML=lista.map(function(a){
-    var hn=_sn(a)||a.ip||'—',iv=isVirtualServidor(a),tc=iv?'#7C3AED':'#2563EB';
-    var st=(a.status||'desconhecido').toLowerCase(),online=a.reachable||st==='online'||st==='ativo';
-    var sc=online?'#059669':st==='critico'?'#DC2626':st==='offline'?'#6B7280':'#D97706';
-    var localSrv=resolverLocal(a);
-    var up=a.uptimeHoras!=null?(a.uptimeHoras>=24?Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h':Math.round(a.uptimeHoras)+'h'):null;
-    var ls=a.lastSeen?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
-    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tc+'">'
-      +'<div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between">'
-        +'<div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(iv?'☁️':'🖥️')+'</span>'
-          +'<div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div>'
-          +'<div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(localSrv)+'</div></div></div>'
-        +'<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px">'
-          +'<span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span>'
-          +'<span style="background:'+tc+'22;color:'+tc+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+(iv?'Virtual':'Fisico')+'</span>'
-        +'</div>'
-      +'</div>'
-      +'<div style="padding:14px 16px">'+(a.cpuPct!=null||a.memPct!=null?mb('CPU',a.cpuPct,90,70)+mb('RAM',a.memPct,90,80):'<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Agente nao instalado</div>')
-        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:4px">'
-          +'<div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').slice(0,28))+'</span></div>'
-          +'<div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(up||'—')+'</span></div>'
-        +'</div></div>'
-      +'<div style="display:flex;border-top:0.5px solid var(--g100)">'
-        +'<button data-pid="'+escapeHtml(a.pat||a.id)+'" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Historico</button>'
-        +'<button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Chamado</button>'
-        +'<button data-aid="'+escapeHtml(a.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">Ping</button>'
-      +'</div></div>';
+    var hn=_sn(a)||a.ip||'—',iv=isVirtualServidor(a),tc=iv?'#7C3AED':'#2563EB',st=(a.status||'desconhecido').toLowerCase(),online=a.reachable||st==='online'||st==='ativo',sc=online?'#059669':st==='critico'?'#DC2626':st==='offline'?'#6B7280':'#D97706';
+    var up=a.uptimeHoras!=null?(a.uptimeHoras>=24?Math.floor(a.uptimeHoras/24)+'d '+Math.round(a.uptimeHoras%24)+'h':Math.round(a.uptimeHoras)+'h'):null,ls=a.lastSeen?new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+tc+'"><div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between"><div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">'+(iv?'☁️':'🖥️')+'</span><div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(hn)+'</div><div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(a.ip||'—')+' · '+escapeHtml(resolverLocal(a))+'</div></div></div><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:8px"><span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span><span style="background:'+tc+'22;color:'+tc+';font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px">'+(iv?'Virtual':'Fisico')+'</span></div></div><div style="padding:14px 16px">'+(a.cpuPct!=null||a.memPct!=null?mb('CPU',a.cpuPct,90,70)+mb('RAM',a.memPct,90,80):'<div style="font-size:11px;color:var(--g400);margin-bottom:10px">Agente nao instalado</div>')+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px;margin-top:4px"><div><span style="color:var(--g400)">OS:</span> <span>'+escapeHtml((a.osNome||'—').slice(0,28))+'</span></div><div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+(up||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button data-pid="'+escapeHtml(a.pat||a.id)+'" onclick="abrirHistorico(this.dataset.pid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Historico</button><button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Chamado</button><button data-aid="'+escapeHtml(a.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">Ping</button></div></div>';
   }).join('');
 }
 
-// ═══ FIREWALLS ════════════════════════════════════════════════════════════════
+// ── Firewalls ─────────────────────────────────────────────────────
 function getFirewalls(){return(STATE.switches||[]).filter(function(s){var t=(s.tipo||'').toLowerCase(),desc=(s.sysDescr||s.desc||'').toLowerCase(),oid=(s.sysOid||'').toLowerCase();return t==='firewall'||oid.includes('1.3.6.1.4.1.12356.')||oid.includes('1.3.6.1.4.1.25461.')||desc.includes('fortigate')||desc.includes('fortinet')||desc.includes('pfsense')||desc.includes('firewall');});}
 function renderFirewalls(){
   var q=(document.getElementById('fw-search')?.value||'').toLowerCase(),fSt=document.getElementById('fw-filter-status')?.value||'';
   var todos=getFirewalls(),lista=todos.filter(function(f){return(!fSt||(f.status||'').toLowerCase()===fSt)&&(!q||(f.hostname||f.sysName||f.ip||'').toLowerCase().includes(q));});
   var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
-  sv('fw-kpi-total',todos.length);sv('fw-kpi-online',todos.filter(function(f){return f.reachable||(f.status||'').toLowerCase()==='online';}).length);
-  sv('fw-kpi-offline',todos.filter(function(f){return(f.status||'').toLowerCase()==='offline';}).length);sv('fw-kpi-sem-snmp',todos.filter(function(f){return!f.hasSnmp;}).length);
+  sv('fw-kpi-total',todos.length);sv('fw-kpi-online',todos.filter(function(f){return f.reachable||(f.status||'').toLowerCase()==='online';}).length);sv('fw-kpi-offline',todos.filter(function(f){return(f.status||'').toLowerCase()==='offline';}).length);sv('fw-kpi-sem-snmp',todos.filter(function(f){return!f.hasSnmp;}).length);
   var grid=document.getElementById('fw-grid');if(!grid)return;
   if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:40px">🔥</div><div style="font-weight:600;margin-top:8px">Nenhum firewall detectado</div><div style="font-size:12px;margin-top:6px">OID Fortinet 1.3.6.1.4.1.12356.* ou sysDescr com FortiGate/pfSense</div></div>';return;}
-  grid.innerHTML=lista.map(function(f){var hn=f.hostname||f.sysName||f.ip||'—',st=(f.status||'?').toLowerCase(),online=f.reachable||st==='online'||st==='ativo',sc=online?'#059669':st==='alerta'?'#D97706':st==='offline'?'#DC2626':'#6B7280';var lat='—';if(f.latencyMs!=null){var lc=f.latencyMs>20?'#DC2626':f.latencyMs>5?'#D97706':'#059669';lat='<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+lc+';width:'+Math.min(Math.round(f.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div><span style="font-size:11px;color:var(--g500)">'+f.latencyMs.toFixed(1)+'ms</span></div>';}var up=f.uptimeH!=null?(f.uptimeH>=24?Math.floor(f.uptimeH/24)+'d '+Math.round(f.uptimeH%24)+'h':Math.round(f.uptimeH)+'h'):'—';return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+sc+'"><div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between"><div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">🔥</span><div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(hn)+'</div><div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(f.ip||'—')+'</div></div></div><span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-left:8px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span></div><div style="padding:14px 16px"><div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:4px"><span>Latencia</span>'+(f.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP</span>':'')+'</div>'+lat+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px"><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(resolverLocal(f))+'</span></div><div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+escapeHtml(up)+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Chamado</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Ping</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">SSH</button></div></div>';}).join('');
+  grid.innerHTML=lista.map(function(f){var hn=f.hostname||f.sysName||f.ip||'—',st=(f.status||'?').toLowerCase(),online=f.reachable||st==='online'||st==='ativo',sc=online?'#059669':st==='alerta'?'#D97706':st==='offline'?'#DC2626':'#6B7280';var lat='—';if(f.latencyMs!=null){var lc=f.latencyMs>20?'#DC2626':f.latencyMs>5?'#D97706':'#059669';lat='<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+lc+';width:'+Math.min(Math.round(f.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div><span style="font-size:11px;color:var(--g500)">'+f.latencyMs.toFixed(1)+'ms</span></div>';}var up=f.uptimeH!=null?(f.uptimeH>=24?Math.floor(f.uptimeH/24)+'d '+Math.round(f.uptimeH%24)+'h':Math.round(f.uptimeH)+'h'):'—';return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+sc+'"><div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between"><div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">🔥</span><div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(hn)+'</div><div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(f.ip||'—')+' · '+escapeHtml(resolverLocal(f))+'</div></div></div><span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-left:8px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span></div><div style="padding:14px 16px"><div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Latência</span>'+(f.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP</span>':'')+'</div>'+lat+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px"><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(resolverLocal(f))+'</span></div><div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+escapeHtml(up)+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Chamado</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Ping</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">SSH</button></div></div>';}).join('');
 }
 
-// ═══ TOPOLOGIA ════════════════════════════════════════════════════════════════
+// ── Topologia ─────────────────────────────────────────────────────
 var _tz=1,_to={x:0,y:0},_tp={};
 function renderTopologia(){
   var cont=document.getElementById('topo-container'),svgEl=document.getElementById('topo-svg');if(!svgEl||!cont)return;
   var W=cont.clientWidth||900,H=cont.clientHeight||620;
-  var fA=document.getElementById('topo-filter-area');if(fA){var areas=[...new Set((STATE.switches||[]).map(function(d){return resolverLocal(d);}).filter(Boolean))].sort();fA.innerHTML='<option value="">Todas as areas</option>'+areas.map(function(a){return'<option>'+escapeHtml(a)+'</option>';}).join('');}
+  var fA=document.getElementById('topo-filter-area');if(fA){var areas=[...new Set((STATE.switches||[]).map(function(d){return resolverLocal(d);}).filter(function(x){return x&&x!=='—';}))].sort();fA.innerHTML='<option value="">Todas as areas</option>'+areas.map(function(a){return'<option>'+escapeHtml(a)+'</option>';}).join('');}
   var fAv=fA?fA.value:'',ck=function(id){return document.getElementById(id)?.checked!==false;};
   var typs=new Set([...(ck('topo-show-fw')?['firewall']:[]),...(ck('topo-show-rt')?['router']:[]),...(ck('topo-show-sw')?['switch','switch-core','switch-acesso','switch-distribuicao']:[]),...(ck('topo-show-ap')?['ap']:[])]);
   var devs=(STATE.switches||[]).filter(function(d){return typs.has((d.tipo||'').toLowerCase())&&(!fAv||resolverLocal(d)===fAv);});
@@ -17281,16 +17352,179 @@ function renderTopologia(){
   var lc=0,ls=new Set();devs.forEach(function(d){var fi=d.id||d.ip,fr=pos[fi];if(!fr||!Array.isArray(d.lldpVizinhos))return;d.lldpVizinhos.forEach(function(v){var tn=Object.values(pos).find(function(p){return(p.d.hostname||p.d.sysName||'').toLowerCase()===(v.remoteHost||'').toLowerCase()||p.d.ip===v.remoteIp;});if(!tn)return;var ti=tn.d.id||tn.d.ip,key=[fi,ti].sort().join('>');if(ls.has(key))return;ls.add(key);lc++;var line=document.createElementNS('http://www.w3.org/2000/svg','line');line.setAttribute('x1',fr.x);line.setAttribute('y1',fr.y);line.setAttribute('x2',tn.x);line.setAttribute('y2',tn.y);line.setAttribute('stroke','#2563EB');line.setAttribute('stroke-width','2');line.setAttribute('opacity','0.6');gL.appendChild(line);});});
   sv('topo-kpi-links',lc);
   if(lc===0){var ba={};Object.values(pos).forEach(function(p){var k=resolverLocal(p.d)||'geral';if(!ba[k])ba[k]={fw:[],rt:[],sw:[]};var t=(p.d.tipo||'').toLowerCase();if(t==='firewall')ba[k].fw.push(p);else if(t==='router')ba[k].rt.push(p);else ba[k].sw.push(p);});Object.values(ba).forEach(function(ar){ar.fw.concat(ar.rt).forEach(function(up){ar.sw.forEach(function(sw){var l=document.createElementNS('http://www.w3.org/2000/svg','line');l.setAttribute('x1',sw.x);l.setAttribute('y1',sw.y);l.setAttribute('x2',up.x);l.setAttribute('y2',up.y);l.setAttribute('stroke','#CBD5E1');l.setAttribute('stroke-width','1.5');l.setAttribute('stroke-dasharray','5,4');l.setAttribute('opacity','0.5');gL.appendChild(l);});});});}
-  var showLbls=ck('topo-show-labels');
-  Object.values(pos).forEach(function(item){var x=item.x,y=item.y,d=item.d,tipo=(d.tipo||'switch').toLowerCase(),color=CLR[tipo]||'#64748B',icon={firewall:'🔥',router:'🌐',switch:'🔀','switch-core':'🔀',ap:'📡'}[tipo]||'🔌',label=(d.hostname||d.sysName||d.ip||'').slice(0,14);var g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('cursor','pointer');g.setAttribute('data-id',d.id||d.ip);var ci=document.createElementNS('http://www.w3.org/2000/svg','circle');ci.setAttribute('cx',x);ci.setAttribute('cy',y);ci.setAttribute('r',R);ci.setAttribute('fill',color);ci.setAttribute('opacity',(d.reachable||(d.status||'')==='online')?'1':'0.5');g.appendChild(ci);var ic=document.createElementNS('http://www.w3.org/2000/svg','text');ic.setAttribute('x',x);ic.setAttribute('y',y+1);ic.setAttribute('text-anchor','middle');ic.setAttribute('dominant-baseline','central');ic.setAttribute('font-size','13');ic.setAttribute('pointer-events','none');ic.textContent=icon;g.appendChild(ic);if(showLbls&&label){var lb=document.createElementNS('http://www.w3.org/2000/svg','text');lb.setAttribute('x',x);lb.setAttribute('y',y+R+13);lb.setAttribute('text-anchor','middle');lb.setAttribute('font-size','9');lb.setAttribute('fill','#334155');lb.setAttribute('font-weight','600');lb.setAttribute('pointer-events','none');lb.textContent=label;gLb.appendChild(lb);}g.addEventListener('mouseenter',function(){ci.setAttribute('r',String(R+3));});g.addEventListener('mouseleave',function(){ci.setAttribute('r',String(R));});gN.appendChild(g);});
+  var showLbls=ck('topo-show-labels');Object.values(pos).forEach(function(item){var x=item.x,y=item.y,d=item.d,tipo=(d.tipo||'switch').toLowerCase(),color=CLR[tipo]||'#64748B',icon={firewall:'🔥',router:'🌐',switch:'🔀','switch-core':'🔀',ap:'📡'}[tipo]||'🔌',label=(d.hostname||d.sysName||d.ip||'').slice(0,14);var g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('cursor','pointer');g.setAttribute('data-id',d.id||d.ip);var ci=document.createElementNS('http://www.w3.org/2000/svg','circle');ci.setAttribute('cx',x);ci.setAttribute('cy',y);ci.setAttribute('r',R);ci.setAttribute('fill',color);ci.setAttribute('opacity',(d.reachable||(d.status||'')==='online')?'1':'0.5');g.appendChild(ci);var ic=document.createElementNS('http://www.w3.org/2000/svg','text');ic.setAttribute('x',x);ic.setAttribute('y',y+1);ic.setAttribute('text-anchor','middle');ic.setAttribute('dominant-baseline','central');ic.setAttribute('font-size','13');ic.setAttribute('pointer-events','none');ic.textContent=icon;g.appendChild(ic);if(showLbls&&label){var lb=document.createElementNS('http://www.w3.org/2000/svg','text');lb.setAttribute('x',x);lb.setAttribute('y',y+R+13);lb.setAttribute('text-anchor','middle');lb.setAttribute('font-size','9');lb.setAttribute('fill','#334155');lb.setAttribute('font-weight','600');lb.setAttribute('pointer-events','none');lb.textContent=label;gLb.appendChild(lb);}g.addEventListener('mouseenter',function(){ci.setAttribute('r',String(R+3));});g.addEventListener('mouseleave',function(){ci.setAttribute('r',String(R));});gN.appendChild(g);});
   var nc=cont.cloneNode(false);while(cont.firstChild)nc.appendChild(cont.firstChild);cont.parentNode.replaceChild(nc,cont);var drag=false,sx=0,sy=0,sox=0,soy=0;nc.addEventListener('mousedown',function(e){if(e.target.closest('g[data-id]'))return;drag=true;sx=e.clientX;sy=e.clientY;sox=_to.x;soy=_to.y;nc.style.cursor='grabbing';});window.addEventListener('mousemove',function(e){if(!drag)return;_to.x=sox+(e.clientX-sx);_to.y=soy+(e.clientY-sy);svgEl.style.transform='translate('+_to.x+'px,'+_to.y+'px) scale('+_tz+')';svgEl.style.transformOrigin='0 0';});window.addEventListener('mouseup',function(){drag=false;nc.style.cursor='grab';});nc.addEventListener('wheel',function(e){e.preventDefault();_tz=Math.max(0.3,Math.min(3,_tz*(e.deltaY>0?0.9:1.1)));svgEl.style.transform='translate('+_to.x+'px,'+_to.y+'px) scale('+_tz+')';svgEl.style.transformOrigin='0 0';},{passive:false});
 }
 function topoZoom(f){_tz=Math.max(0.3,Math.min(3,_tz*f));var s=document.getElementById('topo-svg');if(s){s.style.transform='translate('+_to.x+'px,'+_to.y+'px) scale('+_tz+')';s.style.transformOrigin='0 0';}}
 function topoReset(){_tz=1;_to={x:0,y:0};_tp={};var s=document.getElementById('topo-svg');if(s)s.style.transform='';renderTopologia();}
 function topoExportar(){var s=document.getElementById('topo-svg');if(!s)return;var b=new Blob([s.outerHTML],{type:'image/svg+xml'});var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download='topologia-'+new Date().toISOString().split('T')[0]+'.svg';a.click();URL.revokeObjectURL(u);}
 
-// ═══ MONITORES ════════════════════════════════════════════════════════════════
+// ── Monitores ─────────────────────────────────────────────────────
 function coletarTodosMonitores(){var r=[];(STATE.ativos||[]).forEach(function(av){var ms=[];try{ms=typeof av.monitoresConectados==='string'?JSON.parse(av.monitoresConectados):(Array.isArray(av.monitoresConectados)?av.monitoresConectados:[]);}catch(e){}ms.forEach(function(m){if(!m.serial)return;var c=(STATE.monitoresCadastrados||[]).find(function(x){return x.serial===m.serial;});r.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:(c&&c.pat)||m.pat||'',pcAtual:av.hostname||av.ip||'—',area:resolverLocal(av),qtdMovimentos:0});});});(STATE.monitoresCadastrados||[]).forEach(function(c){if(r.find(function(m){return m.serial===c.serial;}))return;r.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',pcAtual:c.pcVinculado||'—',area:c.area||'',qtdMovimentos:0});});return r;}
-function renderMonitores(){var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase(),fSt=document.getElementById('mon-filter-status-monitores')?.value||'';var grid=document.getElementById('mon-grid'),todos=coletarTodosMonitores();var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);if(!grid)return;var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'">'+'<div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem PAT</span>')+'</div>'+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div>'+'<div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');}
+function renderMonitores(){var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase(),fSt=document.getElementById('mon-filter-status-monitores')?.value||'';var grid=document.getElementById('mon-grid'),todos=coletarTodosMonitores();var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);if(!grid)return;var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'"><div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem PAT</span>')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');}
 function abrirAtribuirPATMonitor(s){openModal('modal-atribuir-pat-monitor');window._monitorAtualSerial=s;}
 function abrirCadastroMonitorManual(){openModal('modal-monitor-manual');}
+
+// ═══ REDES — Faixas de rede por localidade ════════════════════════════════════
+// Dados são salvos no Firestore em /config/redes_custom para overrides de admins.
+// O mapa padrão vem de REDES_PREFIX (redes.txt embutido).
+
+var STATE_REDES = null; // cache das redes customizadas
+
+function isAdmin() {
+  return CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.perfil === 'admin');
+}
+
+function renderRedes() {
+  var grid = document.getElementById('redes-grid');
+  var editBtn = document.getElementById('redes-add-btn');
+  if (!grid) return;
+
+  // Controle de acesso visual
+  if (editBtn) editBtn.style.display = isAdmin() ? '' : 'none';
+
+  var q = (document.getElementById('redes-search')?.value || '').toLowerCase();
+  var fSigla = document.getElementById('redes-filter-sigla')?.value || '';
+
+  // Mescla redes do redes.txt com overrides do Firestore
+  var redesList = buildRedesList();
+
+  // Filtra
+  var lista = redesList.filter(function(r) {
+    if (fSigla && r.sigla !== fSigla) return false;
+    if (q && !(r.prefix + ' ' + r.sigla + ' ' + r.nome).toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // KPIs
+  var siglasUnicas = new Set(redesList.map(function(r){return r.sigla;})).size;
+  var sv = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  sv('redes-kpi-total', redesList.length);
+  sv('redes-kpi-localidades', siglasUnicas);
+  sv('redes-kpi-custom', (STATE_REDES || []).length);
+
+  // Popula filtro de sigla
+  var fSiglaEl = document.getElementById('redes-filter-sigla');
+  if (fSiglaEl && fSiglaEl.options.length <= 1) {
+    var siglas = [...new Set(redesList.map(function(r){return r.sigla;}).filter(Boolean))].sort();
+    siglas.forEach(function(s) {
+      var opt = document.createElement('option');
+      opt.value = s; opt.textContent = s.toUpperCase() + ' — ' + (REDES_SIGLA[s] || s);
+      fSiglaEl.appendChild(opt);
+    });
+  }
+
+  if (!lista.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🌐</div><div style="font-weight:600;margin-top:8px">Nenhuma rede encontrada</div></div>';
+    return;
+  }
+
+  // Agrupa por localidade
+  var byLocal = {};
+  lista.forEach(function(r) {
+    var key = r.sigla;
+    if (!byLocal[key]) byLocal[key] = {sigla: r.sigla, nome: r.nome, redes: []};
+    byLocal[key].redes.push(r);
+  });
+
+  grid.innerHTML = Object.values(byLocal).sort(function(a,b){return a.nome.localeCompare(b.nome);}).map(function(loc) {
+    var redesHtml = loc.redes.sort(function(a,b){return a.prefix.localeCompare(b.prefix);}).map(function(r) {
+      var isCustom = r.custom;
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-radius:6px;background:var(--g50);margin-bottom:4px">'
+        + '<div style="display:flex;align-items:center;gap:10px">'
+          + '<span style="font-family:monospace;font-size:12px;font-weight:600;color:var(--accent)">' + escapeHtml(r.prefix) + '.0/24</span>'
+          + '<span style="font-size:11px;color:var(--g500)">' + escapeHtml(r.desc || r.nome) + '</span>'
+          + (isCustom ? '<span style="font-size:9px;background:#EFF6FF;color:#2563EB;padding:1px 5px;border-radius:6px;font-weight:700">editado</span>' : '')
+        + '</div>'
+        + (isAdmin() ? '<div style="display:flex;gap:4px">'
+            + '<button data-id="'+escapeHtml(r.id||'')+'" data-prefix="'+escapeHtml(r.prefix)+'" data-sigla="'+escapeHtml(r.sigla)+'" data-nome="'+escapeHtml(r.desc||r.nome)+'" onclick="abrirEditarRede(this.dataset)" style="border:none;background:none;padding:3px 6px;cursor:pointer;color:var(--g400);font-size:12px" title="Editar">✏️</button>'
+            + (isCustom ? '<button data-id="'+escapeHtml(r.id||'')+'" onclick="excluirRede(this.dataset.id)" style="border:none;background:none;padding:3px 6px;cursor:pointer;color:var(--danger);font-size:12px" title="Remover override">🗑️</button>' : '')
+          + '</div>' : '')
+      + '</div>';
+    }).join('');
+
+    return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden">'
+      + '<div style="padding:12px 16px;background:linear-gradient(90deg,var(--g900,#0F172A),var(--g800,#1E293B));display:flex;align-items:center;justify-content:space-between">'
+        + '<div><div style="font-weight:800;font-size:13px;color:#F1F5F9">'+escapeHtml(loc.nome)+'</div>'
+          + '<div style="font-size:10.5px;color:#94A3B8;margin-top:2px;font-family:monospace">'+escapeHtml(loc.sigla.toUpperCase())+' · '+loc.redes.length+' faixa'+(loc.redes.length>1?'s':'')+'</div></div>'
+        + (isAdmin() ? '<button onclick="abrirAddRede(\''+escapeHtml(loc.sigla)+'\',\''+escapeHtml(loc.nome)+'\')" style="border:1px solid #ffffff22;background:#ffffff11;color:#94A3B8;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px">+ Faixa</button>' : '')
+      + '</div>'
+      + '<div style="padding:12px 16px">' + redesHtml + '</div>'
+    + '</div>';
+  }).join('');
+}
+
+function buildRedesList() {
+  // Começa com redes padrão do redes.txt
+  var lista = Object.entries(REDES_PREFIX).map(function(e) {
+    return {prefix: e[0], sigla: e[1].sigla, nome: REDES_SIGLA[e[1].sigla] || e[1].nome, desc: e[1].nome, custom: false, id: ''};
+  });
+  // Aplica overrides do Firestore
+  if (STATE_REDES && STATE_REDES.length) {
+    STATE_REDES.forEach(function(r) {
+      var idx = lista.findIndex(function(x){return x.prefix === r.prefix;});
+      if (idx >= 0) {
+        lista[idx] = Object.assign({}, lista[idx], r, {custom: true});
+      } else {
+        lista.push(Object.assign({}, r, {custom: true}));
+      }
+    });
+  }
+  return lista;
+}
+
+function abrirAddRede(sigla, nome) {
+  if (!isAdmin()) return;
+  document.getElementById('rede-modal-title').textContent = 'Adicionar Faixa de Rede';
+  document.getElementById('rede-id').value = '';
+  document.getElementById('rede-prefix').value = '';
+  document.getElementById('rede-sigla').value = sigla || '';
+  document.getElementById('rede-nome').value = nome || (sigla ? (REDES_SIGLA[sigla] || '') : '');
+  document.getElementById('rede-desc').value = '';
+  openModal('modal-rede');
+}
+
+function abrirEditarRede(dataset) {
+  if (!isAdmin()) return;
+  document.getElementById('rede-modal-title').textContent = 'Editar Faixa de Rede';
+  document.getElementById('rede-id').value    = dataset.id    || '';
+  document.getElementById('rede-prefix').value= dataset.prefix|| '';
+  document.getElementById('rede-sigla').value = dataset.sigla || '';
+  document.getElementById('rede-nome').value  = REDES_SIGLA[dataset.sigla] || dataset.nome || '';
+  document.getElementById('rede-desc').value  = dataset.nome  || '';
+  openModal('modal-rede');
+}
+
+function salvarRede() {
+  if (!isAdmin()) return;
+  var id     = document.getElementById('rede-id').value.trim();
+  var prefix = document.getElementById('rede-prefix').value.trim().replace(/\.0\/24$/,'').replace(/\.$/,'');
+  var sigla  = document.getElementById('rede-sigla').value.trim().toLowerCase();
+  var nome   = document.getElementById('rede-nome').value.trim();
+  var desc   = document.getElementById('rede-desc').value.trim();
+
+  if (!prefix || !sigla || !nome) { showToast('Preencha todos os campos obrigatórios','danger',3000); return; }
+
+  var data = { prefix: prefix, sigla: sigla, nome: nome, desc: desc || nome, atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?.email || '' };
+  var col = db.collection('config_redes');
+  var prom = id ? col.doc(id).set(data, {merge:true}) : col.add(data);
+  prom.then(function(){ showToast('Rede salva com sucesso','success',2000); closeModal('modal-rede'); })
+      .catch(function(e){ showToast('Erro: '+e.message,'danger',4000); });
+}
+
+function excluirRede(id) {
+  if (!isAdmin() || !id) return;
+  if (!confirm('Remover o override desta faixa? A faixa original do redes.txt será restaurada.')) return;
+  db.collection('config_redes').doc(id).delete()
+    .then(function(){ showToast('Override removido','success',2000); })
+    .catch(function(e){ showToast('Erro: '+e.message,'danger',4000); });
+}
+
+// Listener do Firestore para redes customizadas
+function iniciarListenerRedes() {
+  if (!db) return;
+  db.collection('config_redes').onSnapshot(function(snap) {
+    STATE_REDES = snap.docs.map(function(d){ return Object.assign({id: d.id}, d.data()); });
+    if (isPageActive('redes')) renderRedes();
+  }, function(e){ console.warn('[Redes] erro listener:', e.message); });
+}

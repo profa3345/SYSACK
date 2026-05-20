@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202605201647 -->
+<!-- build: 202605201706 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -211,6 +211,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       <a class="nav-i nav-sub" data-page="monitor-rede"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2" fill="currentColor"/><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1" opacity=".4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Monitor de Rede <span class="nav-badge" id="nb-monitor-critico">0</span></a>
       <a class="nav-i nav-sub" data-page="firewalls"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M1 6h14M5 6v8M5 9h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Firewalls <span class="nav-badge" id="nb-firewalls">0</span></a>
       <a class="nav-i nav-sub" data-page="topologia"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="2" cy="3" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="14" cy="3" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="2" cy="13" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="14" cy="13" r="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M3 4l4 3M9 9l3 3M13 4l-4 3M7 9l-3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Topologia</a>
+      <a class="nav-i nav-sub" data-page="redes"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M1 5h14M1 10h14M5 1v14M11 1v14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Faixas de Rede</a>
       <a class="nav-i nav-sub" data-page="monitor-rede">
         <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2" fill="currentColor"/><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1" opacity=".4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         Monitor de Rede
@@ -3049,106 +3050,49 @@ window.dispatchEvent(new Event('firebase-ready'));
 
     <!-- EMPREGADOS & AUSÊNCIAS -->
     <div class="page" id="page-firewalls">
-      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🔥 Firewalls</h2>
-        <p class="text-sm text-muted">Detectados via SNMP — Fortinet e pfSense</p></div>
-        <div class="flex gap-8">
-          <input class="form-control" id="fw-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP..." oninput="renderFirewalls()">
-          <select class="form-control" id="fw-filter-status" style="width:140px;margin:0" onchange="renderFirewalls()">
-            <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option>
-          </select>
-        </div>
-      </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
-        <div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="fw-kpi-total">—</div></div>
-        <div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="fw-kpi-online">—</div></div>
-        <div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="fw-kpi-offline">—</div></div>
-        <div class="stat-card orange"><div class="stat-label">Sem SNMP</div><div class="stat-value" id="fw-kpi-sem-snmp">—</div></div>
-      </div>
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🔥 Firewalls</h2><p class="text-sm text-muted">Detectados via SNMP — Fortinet e pfSense</p></div><div class="flex gap-8"><input class="form-control" id="fw-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP..." oninput="renderFirewalls()"><select class="form-control" id="fw-filter-status" style="width:140px;margin:0" onchange="renderFirewalls()"><option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option></select></div></div>
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px"><div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="fw-kpi-total">—</div></div><div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="fw-kpi-online">—</div></div><div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="fw-kpi-offline">—</div></div><div class="stat-card orange"><div class="stat-label">Sem SNMP</div><div class="stat-value" id="fw-kpi-sem-snmp">—</div></div></div>
       <div id="fw-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px"></div>
     </div>
 
     <div class="page" id="page-topologia">
-      <div class="flex items-center justify-between mb-16" style="flex-wrap:wrap;gap:12px">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🗺️ Topologia de Rede</h2>
-        <p class="text-sm text-muted">Mapa físico via LLDP/CDP</p></div>
-        <div class="flex gap-8" style="align-items:center">
-          <select id="topo-filter-area" class="form-control" style="width:180px;margin:0" onchange="renderTopologia()"><option value="">Todas as áreas</option></select>
-          <button class="btn btn-ghost btn-sm" onclick="topoZoom(1.2)">🔍+</button>
-          <button class="btn btn-ghost btn-sm" onclick="topoZoom(0.8)">🔍−</button>
-          <button class="btn btn-ghost btn-sm" onclick="topoReset()">⟳</button>
-          <button class="btn btn-ghost btn-sm" onclick="topoExportar()">📥 SVG</button>
-        </div>
-      </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">
-        <div class="stat-card blue"><div class="stat-label">Dispositivos</div><div class="stat-value" id="topo-kpi-total">—</div></div>
-        <div class="stat-card violet"><div class="stat-label">Links LLDP</div><div class="stat-value" id="topo-kpi-links">—</div></div>
-        <div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="topo-kpi-online">—</div></div>
-        <div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="topo-kpi-offline">—</div></div>
-        <div class="stat-card orange"><div class="stat-label">Sem LLDP</div><div class="stat-value" id="topo-kpi-sem-lldp">—</div></div>
-      </div>
-      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:14px;overflow:hidden">
-        <div style="padding:10px 16px;border-bottom:1px solid var(--g100);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <span style="font-size:11px;font-weight:600;color:var(--g500)">MOSTRAR:</span>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-fw" checked onchange="renderTopologia()"> 🔥 Firewalls</label>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-rt" checked onchange="renderTopologia()"> 🌐 Roteadores</label>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-sw" checked onchange="renderTopologia()"> 🔀 Switches</label>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-ap" checked onchange="renderTopologia()"> 📡 APs</label>
-          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-labels" checked onchange="renderTopologia()"> 🏷️ Labels</label>
-          <div style="margin-left:auto;font-size:11px;color:var(--g400)" id="topo-last-update"></div>
-        </div>
-        <div id="topo-container" style="width:100%;height:620px;overflow:hidden;cursor:grab;position:relative;background:radial-gradient(circle at 50% 50%,#f8fafc,#f1f5f9)">
-          <svg id="topo-svg" style="width:100%;height:100%" xmlns="http://www.w3.org/2000/svg">
-            <g id="topo-g-links"></g><g id="topo-g-nodes"></g><g id="topo-g-labels"></g>
-          </svg>
-        </div>
-      </div>
+      <div class="flex items-center justify-between mb-16" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🗺️ Topologia de Rede</h2><p class="text-sm text-muted">Mapa físico via LLDP/CDP</p></div><div class="flex gap-8" style="align-items:center"><select id="topo-filter-area" class="form-control" style="width:180px;margin:0" onchange="renderTopologia()"><option value="">Todas as áreas</option></select><button class="btn btn-ghost btn-sm" onclick="topoZoom(1.2)">🔍+</button><button class="btn btn-ghost btn-sm" onclick="topoZoom(0.8)">🔍−</button><button class="btn btn-ghost btn-sm" onclick="topoReset()">⟳</button><button class="btn btn-ghost btn-sm" onclick="topoExportar()">📥 SVG</button></div></div>
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px"><div class="stat-card blue"><div class="stat-label">Dispositivos</div><div class="stat-value" id="topo-kpi-total">—</div></div><div class="stat-card violet"><div class="stat-label">Links LLDP</div><div class="stat-value" id="topo-kpi-links">—</div></div><div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="topo-kpi-online">—</div></div><div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="topo-kpi-offline">—</div></div><div class="stat-card orange"><div class="stat-label">Sem LLDP</div><div class="stat-value" id="topo-kpi-sem-lldp">—</div></div></div>
+      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:14px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--g100);display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;font-weight:600;color:var(--g500)">MOSTRAR:</span><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-fw" checked onchange="renderTopologia()"> 🔥 Firewalls</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-rt" checked onchange="renderTopologia()"> 🌐 Roteadores</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-sw" checked onchange="renderTopologia()"> 🔀 Switches</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-ap" checked onchange="renderTopologia()"> 📡 APs</label><label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="topo-show-labels" checked onchange="renderTopologia()"> 🏷️ Labels</label><div style="margin-left:auto;font-size:11px;color:var(--g400)" id="topo-last-update"></div></div><div id="topo-container" style="width:100%;height:620px;overflow:hidden;cursor:grab;position:relative;background:radial-gradient(circle at 50% 50%,#f8fafc,#f1f5f9)"><svg id="topo-svg" style="width:100%;height:100%" xmlns="http://www.w3.org/2000/svg"><g id="topo-g-links"></g><g id="topo-g-nodes"></g><g id="topo-g-labels"></g></svg></div></div>
     </div>
 
     <div class="page" id="page-servidores">
-      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Servidores</h2>
-        <p class="text-sm text-muted">Físicos: SERV* · Virtuais: VSERV*, VMSERVER*</p></div>
-        <div class="flex gap-8" style="flex-wrap:wrap">
-          <div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px">
-            <button class="srv-tab-btn" style="background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('todos',this)">Todos</button>
-            <button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('fisico',this)">🖥️ Físicos</button>
-            <button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('virtual',this)">☁️ Virtuais</button>
-          </div>
-          <input class="form-control" id="srv-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP..." oninput="renderServidores()">
-          <select class="form-control" id="srv-filter-status" style="width:140px;margin:0" onchange="renderServidores()">
-            <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option>
-          </select>
-        </div>
-      </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
-        <div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="srv-kpi-total">—</div></div>
-        <div class="stat-card gray"><div class="stat-label">Físicos</div><div class="stat-value" id="srv-kpi-fisicos">—</div></div>
-        <div class="stat-card violet"><div class="stat-label">Virtuais</div><div class="stat-value" id="srv-kpi-virtuais">—</div></div>
-        <div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="srv-kpi-online">—</div></div>
-        <div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="srv-kpi-offline">—</div></div>
-      </div>
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Servidores</h2><p class="text-sm text-muted">Físicos: SERV* · Virtuais: VSERV*, VMSERVER*</p></div><div class="flex gap-8" style="flex-wrap:wrap"><div style="display:flex;background:var(--g100);border-radius:8px;padding:3px;gap:2px"><button class="srv-tab-btn" style="background:#fff;color:var(--g900);box-shadow:0 1px 3px rgba(0,0,0,.1);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('todos',this)">Todos</button><button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('fisico',this)">🖥️ Físicos</button><button class="srv-tab-btn" style="background:transparent;color:var(--g500);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" onclick="srvTab('virtual',this)">☁️ Virtuais</button></div><input class="form-control" id="srv-search" style="width:220px;margin:0" placeholder="🔍 Hostname, IP..." oninput="renderServidores()"><select class="form-control" id="srv-filter-status" style="width:140px;margin:0" onchange="renderServidores()"><option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option></select></div></div>
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px"><div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="srv-kpi-total">—</div></div><div class="stat-card gray"><div class="stat-label">Físicos</div><div class="stat-value" id="srv-kpi-fisicos">—</div></div><div class="stat-card violet"><div class="stat-label">Virtuais</div><div class="stat-value" id="srv-kpi-virtuais">—</div></div><div class="stat-card green"><div class="stat-label">Online</div><div class="stat-value" id="srv-kpi-online">—</div></div><div class="stat-card red"><div class="stat-label">Offline</div><div class="stat-value" id="srv-kpi-offline">—</div></div></div>
       <div id="srv-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px"></div>
     </div>
 
     <div class="page" id="page-monitores">
+      <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px"><div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Monitores</h2><p class="text-sm text-muted">Detectados via WMI</p></div><div class="flex gap-8"><input class="form-control" id="mon-search-monitores" style="width:220px;margin:0" placeholder="🔍 Serial, PAT, modelo..." oninput="renderMonitores()"><select class="form-control" id="mon-filter-status-monitores" style="width:160px;margin:0" onchange="renderMonitores()"><option value="">Todos</option><option value="sem-pat">Sem PAT</option><option value="com-pat">Com PAT</option></select></div></div>
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px"><div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="mon-kpi-total">—</div></div><div class="stat-card red"><div class="stat-label">Sem PAT</div><div class="stat-value" id="mon-kpi-sem-pat">—</div></div><div class="stat-card green"><div class="stat-label">Com PAT</div><div class="stat-value" id="mon-kpi-com-pat">—</div></div><div class="stat-card orange"><div class="stat-label">Movidos</div><div class="stat-value" id="mon-kpi-movidos">—</div></div></div>
+      <div id="mon-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px"></div>
+    </div>
+
+    <div class="page" id="page-redes">
       <div class="flex items-center justify-between mb-20" style="flex-wrap:wrap;gap:12px">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">🖥️ Monitores</h2>
-        <p class="text-sm text-muted">Detectados via WMI com agente instalado</p></div>
-        <div class="flex gap-8">
-          <input class="form-control" id="mon-search-monitores" style="width:220px;margin:0" placeholder="🔍 Serial, PAT, modelo..." oninput="renderMonitores()">
-          <select class="form-control" id="mon-filter-status-monitores" style="width:160px;margin:0" onchange="renderMonitores()">
-            <option value="">Todos</option><option value="sem-pat">Sem PAT</option><option value="com-pat">Com PAT</option>
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🌐 Faixas de Rede</h2>
+          <p class="text-sm text-muted">Mapa de subnets por localidade — baseado em redes.txt</p>
+        </div>
+        <div class="flex gap-8" style="align-items:center;flex-wrap:wrap">
+          <input class="form-control" id="redes-search" style="width:220px;margin:0" placeholder="🔍 Prefixo, sigla, localidade..." oninput="renderRedes()">
+          <select class="form-control" id="redes-filter-sigla" style="width:180px;margin:0" onchange="renderRedes()">
+            <option value="">Todas as siglas</option>
           </select>
+          <button id="redes-add-btn" onclick="abrirAddRede('')" class="btn btn-primary btn-sm" style="display:none">+ Nova Área</button>
         </div>
       </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
-        <div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="mon-kpi-total">—</div></div>
-        <div class="stat-card red"><div class="stat-label">Sem PAT</div><div class="stat-value" id="mon-kpi-sem-pat">—</div></div>
-        <div class="stat-card green"><div class="stat-label">Com PAT</div><div class="stat-value" id="mon-kpi-com-pat">—</div></div>
-        <div class="stat-card orange"><div class="stat-label">Movidos</div><div class="stat-value" id="mon-kpi-movidos">—</div></div>
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+        <div class="stat-card blue"><div class="stat-label">Total de Faixas</div><div class="stat-value" id="redes-kpi-total">—</div></div>
+        <div class="stat-card green"><div class="stat-label">Localidades</div><div class="stat-value" id="redes-kpi-localidades">—</div></div>
+        <div class="stat-card violet"><div class="stat-label">Personalizadas</div><div class="stat-value" id="redes-kpi-custom">—</div></div>
       </div>
-      <div id="mon-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px"></div>
+      <div id="redes-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:14px"></div>
     </div>
 
     <div class="page" id="page-empregados">
@@ -5125,12 +5069,8 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:18px 24px;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
       <div style="display:flex;align-items:center;gap:12px">
         <div style="width:40px;height:40px;background:#2563EB22;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px">🔀</div>
-        <div>
-          <div id="ger-sw-nome" style="font-size:16px;font-weight:800;color:#F1F5F9;font-family:monospace">—</div>
-          <div style="display:flex;gap:12px;margin-top:4px">
-            <span id="ger-sw-status-live" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:#05966922;color:#059669;border:1px solid #05966944">Online</span>
-            <span id="ger-sw-ip-live" style="font-size:11px;color:#94A3B8;font-family:monospace">—</span>
-          </div>
+        <div><div id="ger-sw-nome" style="font-size:16px;font-weight:800;color:#F1F5F9;font-family:monospace">—</div>
+          <div style="display:flex;gap:12px;margin-top:4px"><span id="ger-sw-status-live" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:#05966922;color:#059669;border:1px solid #05966944">Online</span><span id="ger-sw-ip-live" style="font-size:11px;color:#94A3B8;font-family:monospace">—</span></div>
         </div>
       </div>
       <button onclick="closeModal('modal-gerenciar-switch')" style="background:none;border:none;color:#94A3B8;font-size:20px;cursor:pointer">✕</button>
@@ -5157,46 +5097,65 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div style="padding:12px 24px;border-top:1px solid var(--g100);display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0;background:var(--panel)">
       <button onclick="swAction('ping')" class="btn btn-secondary btn-sm">📶 Ping</button>
       <button onclick="swAction('ssh')" class="btn btn-secondary btn-sm">🖥️ SSH</button>
-      <button onclick="swAction('show-interfaces')" class="btn btn-secondary btn-sm">📊 Interfaces</button>
-      <button onclick="swAction('show-vlans')" class="btn btn-secondary btn-sm">🏷️ VLANs</button>
       <button onclick="swAction('backup-config')" class="btn btn-secondary btn-sm">💾 Backup</button>
       <button onclick="swAction('reboot')" class="btn btn-danger btn-sm" style="margin-left:auto">⚠️ Reiniciar</button>
     </div>
   </div>
 </div>
-
 <!-- MODAL: Ação Switch -->
 <div class="modal-overlay" id="modal-sw-action" style="display:none">
   <div class="modal" style="width:640px;max-width:98vw">
-    <div class="modal-header">
-      <h3 id="sw-action-title" class="modal-title">Ação</h3>
-      <button onclick="closeModal('modal-sw-action')" class="modal-close">✕</button>
-    </div>
+    <div class="modal-header"><h3 id="sw-action-title" class="modal-title">Ação</h3><button onclick="closeModal('modal-sw-action')" class="modal-close">✕</button></div>
     <div class="modal-body">
       <div id="sw-action-body" style="margin-bottom:12px;font-size:13px;color:var(--g600)"></div>
-      <div id="sw-action-motivo-group" style="display:none;margin-bottom:12px">
-        <label class="form-label">Motivo <span style="color:var(--danger)">*</span></label>
-        <textarea id="sw-action-motivo" class="form-control" rows="3" placeholder="Descreva o motivo..."></textarea>
-      </div>
+      <div id="sw-action-motivo-group" style="display:none;margin-bottom:12px"><label class="form-label">Motivo <span style="color:var(--danger)">*</span></label><textarea id="sw-action-motivo" class="form-control" rows="3" placeholder="Descreva o motivo..."></textarea></div>
       <div id="sw-action-terminal" style="display:none;background:#0F172A;color:#4ADE80;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;max-height:300px;overflow-y:auto;white-space:pre-wrap;line-height:1.6"></div>
     </div>
-    <div class="modal-footer">
-      <button onclick="closeModal('modal-sw-action')" class="btn btn-secondary">Cancelar</button>
-      <button id="sw-action-confirm" onclick="confirmSwAction()" class="btn btn-primary">Executar</button>
-    </div>
+    <div class="modal-footer"><button onclick="closeModal('modal-sw-action')" class="btn btn-secondary">Cancelar</button><button id="sw-action-confirm" onclick="confirmSwAction()" class="btn btn-primary">Executar</button></div>
   </div>
 </div>
 
+<!-- MODAL: Editar/Adicionar Faixa de Rede (somente admin) -->
+<div class="modal-overlay" id="modal-rede" style="display:none">
+  <div class="modal" style="width:520px;max-width:98vw">
+    <div class="modal-header">
+      <h3 id="rede-modal-title" class="modal-title">Adicionar Faixa de Rede</h3>
+      <button onclick="closeModal('modal-rede')" class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="rede-id">
+      <div class="form-group">
+        <label class="form-label">Prefixo de Rede <span style="color:var(--danger)">*</span></label>
+        <input class="form-control" id="rede-prefix" placeholder="Ex: 172.22.30" style="font-family:monospace">
+        <div style="font-size:11px;color:var(--g400);margin-top:4px">Digite apenas o prefixo /24, ex: 172.22.30 (sem .0/24)</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sigla <span style="color:var(--danger)">*</span></label>
+        <input class="form-control" id="rede-sigla" placeholder="Ex: alj" style="font-family:monospace;text-transform:lowercase" oninput="this.value=this.value.toLowerCase()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nome da Localidade <span style="color:var(--danger)">*</span></label>
+        <input class="form-control" id="rede-nome" placeholder="Ex: Atendimento Laranjeiras">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrição específica</label>
+        <input class="form-control" id="rede-desc" placeholder="Ex: ETA Laranjeiras (opcional)">
+        <div style="font-size:11px;color:var(--g400);margin-top:4px">Deixe vazio para usar o nome da localidade</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('modal-rede')" class="btn btn-secondary">Cancelar</button>
+      <button onclick="salvarRede()" class="btn btn-primary">💾 Salvar</button>
+    </div>
+  </div>
+</div>
 <script>
 function swTab(tab,el){
-  ['mapa','vlans','mac','log'].forEach(function(t){
-    var p=document.getElementById('ger-sw-tab-'+t);if(p)p.style.display=t===tab?'':'none';
-  });
+  ['mapa','vlans','mac','log'].forEach(function(t){var p=document.getElementById('ger-sw-tab-'+t);if(p)p.style.display=t===tab?'':' none';});
   document.querySelectorAll('.sw-tab-btn').forEach(function(b){b.style.color='var(--g500)';b.style.borderBottomColor='transparent';});
   if(el){el.style.color='var(--accent)';el.style.borderBottomColor='var(--accent)';}
 }
 </script>
-
 <script src="app.js"></script>
 </body>
 </html>
