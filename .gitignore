@@ -1,39 +1,39 @@
-# Dependências
-node_modules/
-
-# Variáveis de ambiente e segredos — NUNCA versionar
-.env
-.env.local
-.env.*.local
-
-# !! CRÍTICO: chave privada da Service Account do Firebase
-# Nunca adicionar ao repositório
-sysack-service-account.json
-service-account.json
-*-service-account.json
-*.serviceAccount.json
-firebase-adminsdk-*.json
-
-# Logs do agente
-logs/
-*.log
-*.log.old
-
-# Configuração local (contém API keys)
+# ── Segredos e configurações locais ──────────────────────────────────────────
 config.json
+*.env
+.env
+.env.*
+!.env.example
 
-# Artefatos de build
+# Firebase service accounts (NUNCA versionar)
+*service-account*.json
+*serviceAccount*.json
+firebase-adminsdk*.json
+sysack-service-account.json
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Node
+node_modules/
+package-lock.json
+
+# Build / dist
 dist/
-build/
-.firebase/
+.vercel/
 
-# Sistema operacional
+# OS
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# Editor
-.vscode/
+# IDE
+.vscode/settings.json
 .idea/
-*.swp
-*.swo
+
+# Agente Windows — binários e dados locais
+agent/data/
+agent/cache/
+*.exe
+*.msi
