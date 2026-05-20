@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202605201811 -->
+<!-- build: 202605201818 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2344,12 +2344,18 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
 
       <!-- STATS GLOBAIS -->
-      <div class="stats-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:18px">
-        <div class="stat-card blue">  <div class="stat-label">Total</div>      <div class="stat-value" id="mon-total">—</div></div>
-        <div class="stat-card green"> <div class="stat-label">Online</div>     <div class="stat-value" id="mon-online">—</div></div>
-        <div class="stat-card red">   <div class="stat-label">Offline</div>    <div class="stat-value" id="mon-offline">—</div></div>
-        <div class="stat-card orange"><div class="stat-label">Crítico</div>    <div class="stat-value" id="mon-critico">—</div></div>
-        <div class="stat-card yellow"><div class="stat-label">Alerta</div>     <div class="stat-value" id="mon-alerta">—</div></div>
+      <!-- KPIs clicáveis Monitor de Rede -->
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px">
+        <div id="mon-card-total" class="stat-card blue" style="cursor:pointer" onclick="monFiltrar('')" title="Ver todos">
+          <div class="stat-label">Total</div><div class="stat-value" id="mon-total">—</div></div>
+        <div id="mon-card-online" class="stat-card green" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('ok')" title="Filtrar online">
+          <div class="stat-label">Online ↗</div><div class="stat-value" id="mon-online">—</div></div>
+        <div id="mon-card-offline" class="stat-card red" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('offline')" title="Filtrar offline">
+          <div class="stat-label">Offline ↗</div><div class="stat-value" id="mon-offline">—</div></div>
+        <div id="mon-card-critico" class="stat-card orange" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('critico')" title="Filtrar críticos">
+          <div class="stat-label">Crítico ↗</div><div class="stat-value" id="mon-critico">—</div></div>
+        <div id="mon-card-alerta" class="stat-card yellow" style="cursor:pointer;transition:outline .15s" onclick="monFiltrar('alerta')" title="Filtrar alertas">
+          <div class="stat-label">Alerta ↗</div><div class="stat-value" id="mon-alerta">—</div></div>
         <div class="stat-card violet"><div class="stat-label">Uptime Rede</div><div class="stat-value" id="mon-uptime">—</div></div>
       </div>
 
@@ -2386,6 +2392,15 @@ window.dispatchEvent(new Event('firebase-ready'));
             <option value="ap">APs Wi-Fi</option>
           </select>
         </div>
+      <!-- Gráfico de distribuição por tipo -->
+      <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;padding:16px 20px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:13px;font-weight:700;color:var(--g900)">Distribuição por Tipo</div>
+          <button onclick="_monFiltro='';document.getElementById('mon-filter-status').value='';renderMonitorRede()" style="border:none;background:var(--g100);color:var(--g600);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">Limpar filtro</button>
+        </div>
+        <div id="mon-chart" style="min-height:60px"></div>
+      </div>
+
       </div>
 
       <!-- VIEW: TABELA -->
@@ -3086,16 +3101,16 @@ window.dispatchEvent(new Event('firebase-ready'));
 
       <!-- KPIs clicáveis -->
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px">
-        <div class="stat-card blue" style="cursor:default">
-          <div class="stat-label">Total</div>
+        <div id="srv-kpi-total-card" class="stat-card blue" style="cursor:pointer;transition:outline .15s" onclick="srvTab('todos',document.querySelector('.srv-tab-btn'));window._srvFiltroKpi='';document.getElementById('srv-filter-status').value='';renderServidores();" title="Ver todos os servidores">
+          <div class="stat-label">Total ↗</div>
           <div class="stat-value" id="srv-kpi-total">—</div>
         </div>
-        <div class="stat-card gray" style="cursor:default">
-          <div class="stat-label">Físicos</div>
+        <div id="srv-kpi-fisicos-card" class="stat-card gray" style="cursor:pointer;transition:outline .15s" onclick="srvTab('fisico',document.querySelectorAll('.srv-tab-btn')[1]);window._srvFiltroKpi='';document.getElementById('srv-filter-status').value='';renderServidores();" title="Ver servidores físicos">
+          <div class="stat-label">Físicos ↗</div>
           <div class="stat-value" id="srv-kpi-fisicos">—</div>
         </div>
-        <div class="stat-card violet" style="cursor:default">
-          <div class="stat-label">Virtuais</div>
+        <div id="srv-kpi-virtuais-card" class="stat-card violet" style="cursor:pointer;transition:outline .15s" onclick="srvTab('virtual',document.querySelectorAll('.srv-tab-btn')[2]);window._srvFiltroKpi='';document.getElementById('srv-filter-status').value='';renderServidores();" title="Ver servidores virtuais">
+          <div class="stat-label">Virtuais ↗</div>
           <div class="stat-value" id="srv-kpi-virtuais">—</div>
         </div>
         <div id="srv-kpi-online-card" class="stat-card green" style="cursor:pointer;transition:outline .15s" onclick="window._srvFiltroKpi=window._srvFiltroKpi==='online'?'':'online';document.getElementById('srv-filter-status').value=window._srvFiltroKpi||'';renderServidores();" title="Clique para filtrar online">
