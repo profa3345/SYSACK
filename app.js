@@ -355,11 +355,14 @@ window.initFCM = async function() {
     console.log('[Banco] ✓ Conectado — sysack-829e2');
     showToast('🗄️ Banco de Dados conectado', 'success');
 
-    // ── Listeners iniciados pelo loginSuccess após autenticação ─────
-    // NÃO iniciar aqui: a maioria das coleções exige isAuth() nas Rules.
-    // startFirestoreListeners() é chamado pelo loginSuccess() após o login.
-    // Coleções públicas (ativos, switches, empregados) também aguardam —
-    // assim evitamos erros de "Missing or insufficient permissions" no console.
+    // ── Inicia listeners públicos imediatamente (allow read: if true) ──
+    // ativos, switches, empregados não precisam de auth — carregam logo.
+    // Os demais listeners (chamados, aprovacoes, etc.) sobem via loginSuccess()
+    // após o Firebase Auth ter um token válido.
+    if (!window._listenersAtivos) {
+      console.log('[Banco] Iniciando listeners Firestore...');
+      setTimeout(startFirestoreListeners, 200);
+    }
 
   } catch (err) {
     console.warn('[Banco] Erro:', err.message || err);
@@ -781,7 +784,21 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
-  db.collection('impressoras').onSnapshot(function(snap){STATE.impressorasDisc=snap2arr(snap).map(norm);console.log('[Banco] impressoras:',STATE.impressorasDisc.length);_debounce('impressoras-render',function(){if(isPageActive('impressoras'))renderImpressoras();if(isPageActive('firewalls'))renderFirewalls();},600);},function(e){console.error('[Banco] impressoras:',e.message);});
+  db.collection('impressoras').onSnapshot(function(snap){
+    STATE.impressorasDisc = snap2arr(snap).map(norm);
+    console.log('[Banco] impressoras:', STATE.impressorasDisc.length);
+    _debounce('impressoras-render', function(){
+      if(isPageActive('impressoras')) renderImpressoras();
+    }, 600);
+  }, function(e){ console.error('[Banco] impressoras:', e.message); });
+
+  db.collection('firewalls').onSnapshot(function(snap){
+    STATE.firewallsDisc = snap2arr(snap).map(norm);
+    console.log('[Banco] firewalls:', STATE.firewallsDisc.length);
+    _debounce('firewalls-render', function(){
+      if(isPageActive('firewalls')) renderFirewalls();
+    }, 600);
+  }, function(e){ console.error('[Banco] firewalls:', e.message); });
 
   db.collection('switches').onSnapshot(function(snap) {
     STATE._assetsSw = snap2arr(snap).map(norm);
@@ -807,6 +824,36 @@ function startFirestoreListeners() {
       if(isPageActive('empregados'))renderEmpregados();
     },800);
   }, function(e){ console.error('[Banco] empregados erro:', e.message); });
+
+  // ── Listeners protegidos: só sobem se Firebase Auth tiver token válido ──
+  // Se não houver token ainda (sessão local sem auth Firebase), são iniciados
+  // pelo loginSuccess() após autenticação completa via startProtectedListeners().
+  if (auth && auth.currentUser) {
+    startProtectedListeners(snap2arr, norm);
+  }
+  // Caso contrário, loginSuccess() chama startProtectedListeners() depois.
+}
+
+function startProtectedListeners(snap2arr, norm) {
+  if (window._protectedListenersAtivos) return;
+  window._protectedListenersAtivos = true;
+
+  if (!snap2arr) {
+    snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+  if (!norm) {
+    norm = function(d) {
+      return Object.assign({}, d, {
+        pat:    d.pat    || d.patrimonio || '',
+        desc:   d.desc   || d.hostname   || '',
+        tipo:   d.tipo   || 'workstation',
+        area:   d.area   || '',
+        resp:   d.resp   || d.responsavel || '',
+        status: d.status || (d.reachable ? 'ativo' : 'offline'),
+        fonte:  d.fonte  || 'Discovery',
+      });
+    };
+  }
 
   // chamados
   db.collection('chamados').onSnapshot(function(snap) {
@@ -942,7 +989,7 @@ function startFirestoreListeners() {
     },1000);
   }, function(e){ console.error('[Banco] orgUnidades erro:', e.message); });
 
-  console.log('[Banco] Listeners iniciados');
+  console.log('[Banco] Listeners protegidos iniciados');
 }
 
 // ── FIRESTORE WRITE HELPERS ───────────────────────────────────
@@ -1928,7 +1975,8 @@ function loginSuccess(user, showWelcome = true) {
 
   // Inicia listeners do Firestore APÓS o usuário estar autenticado
   function _iniciarListeners() {
-    startFirestoreListeners();
+    startFirestoreListeners();      // públicos (ativos, switches, empregados)
+    startProtectedListeners();      // protegidos (chamados, aprovacoes, etc.)
     verificarConfigSeguranca?.();
     iniciarWatcherIP?.();
     iniciarWatcherAlertasIA?.();
@@ -12814,7 +12862,31 @@ let _impConfig = {
 let _impCharts = {};
 
 // Retorna impressoras do STATE (switches com tipo='printer')
-function getImpressoras(){var d=STATE.impressorasDisc||[];var a=(STATE.ativos||[]).filter(function(x){var t=(x.tipo||'').toLowerCase(),ds=(x.sysDescr||x.desc||x.hostname||'').toLowerCase();return t==='printer'||t==='impressora'||t==='printer-laser'||ds.includes('laserjet')||ds.includes('mfp')||ds.includes('xerox')||ds.includes('ricoh')||ds.includes('kyocera')||ds.includes('brother')||ds.includes('epson')||ds.includes('officejet')||ds.includes('color laserjet')||ds.includes('pagewide');});var sw=(STATE.switches||[]).filter(function(x){var t=(x.tipo||'').toLowerCase();return t==='printer'||t==='impressora';});var r=d.slice(),ch=function(x){return x.ip||x.hostname||x.id||'';},vs=new Set(r.map(ch).filter(Boolean));a.concat(sw).forEach(function(x){var k=ch(x);if(!k||!vs.has(k)){if(k)vs.add(k);r.push(x);}});return r;}
+function getImpressoras(){
+  function isPrinter(x){
+    var t=(x.tipo||'').toLowerCase();
+    var ds=(x.sysDescr||x.desc||x.descricao||x.hostname||x.nome||'').toLowerCase();
+    return t==='printer'||t==='impressora'||t==='printer-laser'
+      ||ds.includes('laserjet')||ds.includes('mfp')||ds.includes('xerox')
+      ||ds.includes('ricoh')||ds.includes('kyocera')||ds.includes('brother')
+      ||ds.includes('epson')||ds.includes('officejet')||ds.includes('color laserjet')
+      ||ds.includes('pagewide')||ds.includes('printer')||ds.includes('impressora');
+  }
+  var fontes=[
+    ...(STATE.impressorasDisc||[]),   // coleção 'impressoras' (fonte principal)
+    // Fallbacks para dados legados ainda não migrados:
+    ...(STATE.assetsGlpi||[]),        // coleção 'assets' (GLPI)
+    ...(STATE.ativos||[]),            // coleção 'ativos' (Discovery legado)
+    ...(STATE.switches||[]),          // coleção 'switches' (Discovery legado)
+  ];
+  var visto=new Set(), lista=[];
+  fontes.forEach(function(x){
+    if(!isPrinter(x)) return;
+    var k=x.ip||x.mac||x.patrimonio||x.pat||x.glpiId||x.id||'';
+    if(!visto.has(k)){ visto.add(k); lista.push(x); }
+  });
+  return lista;
+}
 
 function renderImpressoras() {
   const imps = getImpressoras();
@@ -18586,17 +18658,17 @@ function getFirewalls(){
       || desc.includes('cisco asa')
       || /^fw-|^fwl-|-fw\d|-fwl\d|firewall|-fw$/.test(hn);
   }
-  // Busca em switches E ativos (Discovery pode salvar em qualquer colecao)
   var visto = new Set();
   var lista = [];
-  [...(STATE.switches||[]), ...(STATE.ativos||[])].forEach(function(s){
+  // Fonte principal: coleção 'firewalls'
+  // Fallback: switches e ativos (dados legados ainda não migrados)
+  [...(STATE.firewallsDisc||[]),
+   ...(STATE.switches||[]),
+   ...(STATE.ativos||[]),
+  ].forEach(function(s){
     var key = s.ip||s.hostname||s.id||'';
     if(isFw(s) && key && !visto.has(key)){ visto.add(key); lista.push(s); }
   });
-  if (!lista.length) {
-    var allTipos = [...new Set((STATE.switches||[]).map(function(s){return s.tipo||'?';}))];
-    console.log('[Firewalls] 0 encontrados. Tipos nos switches:', allTipos.join(', '));
-  }
   return lista;
 }
 function renderFirewalls(){var q=(document.getElementById('fw-search')?.value||'').toLowerCase(),fSt=document.getElementById('fw-filter-status')?.value||'';var todos=getFirewalls(),lista=todos.filter(function(f){return(!fSt||(f.status||'').toLowerCase()===fSt)&&(!q||(f.hostname||f.sysName||f.ip||'').toLowerCase().includes(q));});var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('fw-kpi-total',todos.length);sv('fw-kpi-online',todos.filter(function(f){return f.reachable||(f.status||'').toLowerCase()==='online';}).length);sv('fw-kpi-offline',todos.filter(function(f){return(f.status||'').toLowerCase()==='offline';}).length);sv('fw-kpi-sem-snmp',todos.filter(function(f){return!f.hasSnmp;}).length);var grid=document.getElementById('fw-grid');if(!grid)return;if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:40px">🔥</div><div style="font-weight:600;margin-top:8px">Nenhum firewall detectado</div></div>';return;}grid.innerHTML=lista.map(function(f){var hn=f.hostname||f.sysName||f.ip||'—',st=(f.status||'?').toLowerCase(),online=f.reachable||st==='online'||st==='ativo',sc=online?'#059669':st==='alerta'?'#D97706':st==='offline'?'#DC2626':'#6B7280';var lat='—';if(f.latencyMs!=null){var lc=f.latencyMs>20?'#DC2626':f.latencyMs>5?'#D97706':'#059669';lat='<div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--g200);border-radius:3px;height:4px;overflow:hidden"><div style="background:'+lc+';width:'+Math.min(Math.round(f.latencyMs/50*100),100)+'%;height:100%;border-radius:3px"></div></div><span style="font-size:11px;color:var(--g500)">'+f.latencyMs.toFixed(1)+'ms</span></div>';}var up=f.uptimeH!=null?(f.uptimeH>=24?Math.floor(f.uptimeH/24)+'d '+Math.round(f.uptimeH%24)+'h':Math.round(f.uptimeH)+'h'):'—';return '<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-left:4px solid '+sc+'"><div style="background:linear-gradient(135deg,#0F172A,#1E293B);padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between"><div style="display:flex;gap:10px;min-width:0"><span style="font-size:22px;flex-shrink:0">🔥</span><div style="min-width:0"><div style="font-family:monospace;font-size:13px;font-weight:800;color:#F1F5F9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(hn)+'</div><div style="font-size:10.5px;color:#94A3B8;margin-top:2px">'+escapeHtml(f.ip||'—')+' · '+escapeHtml(resolverLocal(f))+'</div></div></div><span style="background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-left:8px">'+(online?'Online':st.charAt(0).toUpperCase()+st.slice(1))+'</span></div><div style="padding:14px 16px"><div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--g500);margin-bottom:3px"><span>Latência</span>'+(f.hasSnmp?'<span style="background:#EFF6FF;color:#2563EB;font-size:9px;padding:1px 5px;border-radius:8px">SNMP</span>':'')+'</div>'+lat+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11.5px"><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(resolverLocal(f))+'</span></div><div><span style="color:var(--g400)">Uptime:</span> <span style="font-weight:600">'+escapeHtml(up)+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(&quot;modal-novo-chamado&quot;)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Chamado</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ping&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer;border-right:0.5px solid var(--g100)">Ping</button><button data-aid="'+escapeHtml(f.id)+'" onclick="swActionDirect(&quot;ssh&quot;,this.dataset.aid)" style="flex:1;border:none;background:none;padding:9px;font-size:11.5px;font-weight:600;color:var(--g500);cursor:pointer">SSH</button></div></div>';}).join('');}
