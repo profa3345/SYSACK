@@ -2809,6 +2809,12 @@ function openModal(id) {
     if (abEl) abEl.value = iso;
     const bolhaNow = document.getElementById('ch-bolha-now');
     if (bolhaNow) bolhaNow.textContent = now.toLocaleString('pt-BR');
+    // Pré-preenche requerente com o usuário logado
+    const solEl = document.getElementById('ch-solicitante');
+    if (solEl && !solEl.value && CURRENT_USER) {
+      solEl.value = CURRENT_USER.nome || CURRENT_USER.email || '';
+      atualizarIniciais();
+    }
     const sel = document.getElementById('ch-tecnico');
     if (sel && STATE.tecnicos) {
       sel.innerHTML = '<option value="">— Selecione o técnico —</option>' +
