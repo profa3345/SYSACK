@@ -355,13 +355,11 @@ window.initFCM = async function() {
     console.log('[Banco] ✓ Conectado — sysack-829e2');
     showToast('🗄️ Banco de Dados conectado', 'success');
 
-    // ── Inicia listeners SEMPRE após Firebase conectar ─────────────
-    // As regras do Firestore permitem leitura pública (allow read: true)
-    // Não precisa esperar login — dados carregam imediatamente
-    if (!window._listenersAtivos) {
-      console.log('[Banco] Iniciando listeners Firestore...');
-      setTimeout(startFirestoreListeners, 200);
-    }
+    // ── Listeners iniciados pelo loginSuccess após autenticação ─────
+    // NÃO iniciar aqui: a maioria das coleções exige isAuth() nas Rules.
+    // startFirestoreListeners() é chamado pelo loginSuccess() após o login.
+    // Coleções públicas (ativos, switches, empregados) também aguardam —
+    // assim evitamos erros de "Missing or insufficient permissions" no console.
 
   } catch (err) {
     console.warn('[Banco] Erro:', err.message || err);
@@ -1838,6 +1836,9 @@ async function fazerLogin() {
       const credErrors = ['auth/user-not-found','auth/wrong-password','auth/invalid-credential','auth/invalid-email'];
       if (err?.code && !credErrors.includes(err.code)) {
         console.warn('[Auth] Banco error:', err?.code, err?.message);
+        if (err.code === 'auth/network-request-failed') {
+          console.warn('[Auth] Possível bloqueio por extensão (ad-blocker). Tentando autenticação local...');
+        }
       }
     }
   }
