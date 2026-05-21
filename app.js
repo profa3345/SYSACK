@@ -685,7 +685,7 @@ async function fsAdd(col, data, localArr, _fromSync = false) {
   if (FB_READY && db && window._fs) {
     try {
       const { collection, addDoc, serverTimestamp } = window._fs;
-      const ref = await addDoc(collection(db, col), {
+      const ref = await addDoc(collection(col), {
         ...data,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -1728,6 +1728,30 @@ async function salvarChamado() {
   closeModal('modal-novo-chamado');
   renderChamados();
   renderDashboard();
+
+  // Vincula chamado ao histórico do ativo pelo patrimônio
+  if (novo.pat && FB_READY) {
+    try {
+      const snapAt = await db.collection('ativos').where('pat', '==', novo.pat).limit(1).get();
+      if (!snapAt.empty) {
+        const ativoDoc = snapAt.docs[0];
+        const hist = {
+          tipo:      'chamado',
+          chamadoId: novo.id,
+          titulo:    novo.desc?.split('\n')[0] || novo.id,
+          status:    novo.status,
+          tecnico:   novo.tecnico || '',
+          data:      new Date().toISOString(),
+          criadoPor: CURRENT_USER?.nome || CURRENT_USER?.email || '',
+        };
+        await ativoDoc.ref.collection('historico').add(hist);
+        console.log('[Chamado] Vinculado ao ativo', novo.pat);
+      }
+    } catch (e) {
+      console.warn('[Chamado] Falha ao vincular ao ativo:', e.message);
+    }
+  }
+
   // Exibe confirmação com número do chamado em tela + dispara e-mail
   exibirConfirmacaoChamado(novo);
   // Envia e-mail de confirmação via Cloud Function
@@ -1738,7 +1762,7 @@ async function salvarChamado() {
       solicitante: novo.solicitante,
       prioridade:  novo.prioridade,
       email:       CURRENT_USER?.email || '',
-    }).catch(() => {}); // não bloqueia se falhar
+    }).catch(err => console.warn('[Email] Falha ao enviar confirmação:', err.message));
   }
 }
 
@@ -14911,7 +14935,7 @@ async function gerarIdChamado() {
   try {
     // Usa um documento de contador no Firestore com transaction
     const { getFirestore, doc, runTransaction, increment } = {}; // replaced by compat below
-    const db2     = app.firestore();
+    const db2     = db; // usa a instância global já inicializada
     const contRef = db2.collection('config').doc('contadores');
     const novoNum = await db2.runTransaction(async tx => {
       const snap   = await tx.get(contRef);
