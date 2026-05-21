@@ -12935,7 +12935,7 @@ function impRenderCards() {
   }
 
   grid.innerHTML = imps.map(imp => {
-    const toners    = imp.tonerLevels || [];
+    const toners    = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
     const statusCor = imp.status === 'critico' ? '#EF4444' : imp.status === 'alerta' ? '#F59E0B' : '#10B981';
     const statusBg  = imp.status === 'critico' ? '#FEF2F2' : imp.status === 'alerta' ? '#FFFBEB' : '#F0FDF4';
 
@@ -13000,7 +13000,7 @@ function impRenderToner() {
   const imps = getImpressoras();
 
   tbody.innerHTML = imps.map(imp => {
-    const toners = imp.tonerLevels || [];
+    const toners = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
     const getCor = (cor) => {
       const t = toners.find(t => t.cor === cor);
       if (!t) return '<td style="color:var(--g300);text-align:center">—</td>';
@@ -13092,7 +13092,7 @@ function impGerarSugestoesPedido() {
   const urgentes = [];
 
   imps.forEach(imp => {
-    const toners = imp.tonerLevels || [];
+    const toners = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
     toners.forEach(t => {
       if (t.pct < limite) {
         urgentes.push({
