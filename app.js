@@ -9005,78 +9005,58 @@ function copiarCmdInstall() {
 }
 
 function baixarInstaladorAgente() {
-  // Gera o script de instalacao do agente desktop
-  const script = `# SYSACK Agent Desktop Installer
-# Execute como Administrador
-param([switch]$Install,[switch]$Remove,[switch]$Status)
-$ErrorActionPreference = 'Stop'
-$InstallDir  = 'C:\Program Files\SYSACK\agent-desktop'
-$ServiceName = 'SYSACKAgentDesktop'
-$NodeUrl     = 'https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi'
-
-If ($Install) {
-  Write-Host 'Instalando SYSACK Agent Desktop...' -ForegroundColor Cyan
-  
-  # Verifica/instala Node.js
-  If (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Host 'Baixando Node.js...'
-    $tmp = "$env:TEMP\node-setup.msi"
-    Invoke-WebRequest -Uri $NodeUrl -OutFile $tmp -UseBasicParsing
-    Start-Process msiexec -ArgumentList "/i $tmp /quiet /norestart" -Wait
-    Remove-Item $tmp -Force
-    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH','Machine')
-    Write-Host 'Node.js instalado' -ForegroundColor Green
-  }
-  
-  # Cria diretório
-  New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-  
-  # Cria package.json
-  @{ name='sysack-agent-desktop'; version='2.0.0'; main='agent.js'; dependencies=@{ ws='8.16.0' } } |
-    ConvertTo-Json | Set-Content "$InstallDir\package.json"
-  
-  # Cria config
-  @{ firebaseProjectId='sysack-829e2'; firebaseApiKey='SUA_API_KEY'; agentId=$env:COMPUTERNAME; webSocketPort=9000 } |
-    ConvertTo-Json | Set-Content "$InstallDir\config.json"
-  
-  # Baixa o agente principal do SYSACK
-  Invoke-WebRequest -Uri "https://sysack.vercel.app/agent-desktop.js" -OutFile "$InstallDir\agent.js" -UseBasicParsing -ErrorAction SilentlyContinue
-  
-  # Instala dependências
-  Push-Location $InstallDir; npm install --production --silent; Pop-Location
-  
-  # Cria serviço Windows
-  $node = (Get-Command node).Path
-  sc.exe create $ServiceName binPath= "\"$node\" \"$InstallDir\agent.js\"" start= auto DisplayName= "SYSACK Agent Desktop" | Out-Null
-  sc.exe description $ServiceName "SYSACK - Gerenciamento remoto de computadores" | Out-Null
-  sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
-  Start-Service -Name $ServiceName
-  
-  Write-Host '================================================' -ForegroundColor Green
-  Write-Host 'SYSACK Agent Desktop instalado com sucesso!' -ForegroundColor Green
-  Write-Host "O computador $env:COMPUTERNAME aparecera no SYSACK em ~30s" -ForegroundColor Green
-  Write-Host '================================================' -ForegroundColor Green
-}
-
-If ($Remove) {
-  Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
-  sc.exe delete $ServiceName | Out-Null
-  Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
-  Write-Host 'SYSACK Agent Desktop removido.' -ForegroundColor Yellow
-}
-
-If ($Status) {
-  $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
-  If ($svc) { Write-Host "Status: $($svc.Status)" -ForegroundColor $(If ($svc.Status -eq 'Running') {'Green'} Else {'Yellow'}) } Else { Write-Host 'Status: NAO INSTALADO' -ForegroundColor Red }
-  Get-Content "$InstallDir\agent.log" -Tail 20 -ErrorAction SilentlyContinue
-}`;
-
+  // Instalador .bat — não precisa de assinatura digital, compatível com domínio CESAN
+  const linhas = [
+    '@echo off',
+    'chcp 65001 > nul',
+    'echo ============================================',
+    'echo  SYSACK Agent Desktop - Instalador v2.0',
+    'echo ============================================',
+    'echo.',
+    'net session >nul 2>&1',
+    'if %errorLevel% neq 0 (',
+    '    echo ERRO: Execute como Administrador.',
+    '    echo Clique com botao direito e selecione "Executar como administrador"',
+    '    pause & exit /b 1',
+    ')',
+    'set INSTALL_DIR=C:\\Program Files\\SYSACK\\agent-desktop',
+    'set SERVICE_NAME=SYSACKAgentDesktop',
+    'echo [1/5] Verificando Node.js...',
+    'node --version >nul 2>&1',
+    'if %errorLevel% neq 0 (',
+    '    echo Baixando Node.js v20...',
+    '    powershell -Command "Invoke-WebRequest -Uri https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi -OutFile $env:TEMP\\node-setup.msi -UseBasicParsing"',
+    '    msiexec /i "%TEMP%\\node-setup.msi" /quiet /norestart',
+    '    del "%TEMP%\\node-setup.msi" /f /q',
+    ') else ( echo Node.js ja instalado. )',
+    'echo [2/5] Criando diretorios...',
+    'if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"',
+    'echo [3/5] Criando configuracao...',
+    'echo {"name":"sysack-agent-desktop","version":"2.0.0","main":"agent.js","dependencies":{"ws":"8.16.0"}} > "%INSTALL_DIR%\\package.json"',
+    'echo {"firebaseProjectId":"sysack-829e2","agentId":"%COMPUTERNAME%","webSocketPort":9000} > "%INSTALL_DIR%\\config.json"',
+    'echo [4/5] Instalando dependencias npm...',
+    'cd /d "%INSTALL_DIR%" && call npm install --production --silent',
+    'echo [5/5] Registrando servico Windows...',
+    'sc query %SERVICE_NAME% >nul 2>&1 && (net stop %SERVICE_NAME% >nul 2>&1 & sc delete %SERVICE_NAME% >nul 2>&1 & timeout /t 2 /nobreak >nul)',
+    'for /f "tokens=*" %%i in ('where node') do set NODE_PATH=%%i',
+    'sc create %SERVICE_NAME% binPath= "\"%NODE_PATH%\" \"%INSTALL_DIR%\\agent.js\"" start= auto DisplayName= "SYSACK Agent Desktop"',
+    'sc description %SERVICE_NAME% "SYSACK - Monitoramento remoto"',
+    'sc failure %SERVICE_NAME% reset= 86400 actions= restart/5000/restart/10000/restart/30000',
+    'net start %SERVICE_NAME%',
+    'echo.',
+    'echo ============================================',
+    'echo  Instalacao concluida! %COMPUTERNAME%',
+    'echo  aparecera no SYSACK em ~30 segundos.',
+    'echo ============================================',
+    'pause',
+  ];
+  const script = linhas.join('\r\n');
   const blob = new Blob([script], { type:'text/plain;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  a.href = url; a.download = 'Install-SysackAgentDesktop.ps1'; a.click();
+  a.href = url; a.download = 'Instalar-SYSACK-Agent.bat'; a.click();
   URL.revokeObjectURL(url);
-  showToast('Instalador baixado! Execute como Administrador no PC alvo.', 'success', 5000);
+  showToast('Instalador baixado! Clique com botao direito → Executar como administrador.', 'success', 5000);
   closeModal('modal-ar-download');
 }
 
