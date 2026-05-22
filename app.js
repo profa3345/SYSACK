@@ -1682,11 +1682,23 @@ async function salvarChamado() {
       return showToast('Informe o novo local de uso', 'warning');
   }
 
+  // Coleta ativos vinculados via botão "Vincular Ativo"
+  const ativosVinculados = Array.from(
+    document.querySelectorAll('#ch-itens-vinculados [data-ativo-id]')
+  ).map(el => ({
+    id:    el.dataset.ativoId    || '',
+    pat:   el.dataset.ativoPat   || '',
+    docId: el.dataset.ativoDocId || '',
+  }));
+
   const novo = {
     id, tipo: document.getElementById('ch-tipo')?.value||'incidente',
     area: document.getElementById('ch-area')?.value||'TI',
     solicitante: sol, tecnico: document.getElementById('ch-tecnico')?.value||'',
-    pat: document.getElementById('ch-pat-antigo')?.value?.trim() || document.getElementById('ch-patrimonio')?.value||'',
+    pat: document.getElementById('ch-pat-antigo')?.value?.trim()
+      || (ativosVinculados[0]?.pat)
+      || document.getElementById('ch-patrimonio')?.value||'',
+    ativosVinculados,
     desc: titulo + (desc?'\n'+desc:''), obs: document.getElementById('ch-obs')?.value||'',
     status: temMovimentacao ? 'aguardando-aprovacao' : 'aberto',
     prioridade: document.getElementById('ch-prioridade')?.value||'media',
@@ -1729,26 +1741,33 @@ async function salvarChamado() {
   renderChamados();
   renderDashboard();
 
-  // Vincula chamado ao histórico do ativo pelo patrimônio
-  if (novo.pat && FB_READY) {
-    try {
-      const snapAt = await db.collection('ativos').where('pat', '==', novo.pat).limit(1).get();
-      if (!snapAt.empty) {
-        const ativoDoc = snapAt.docs[0];
-        const hist = {
-          tipo:      'chamado',
-          chamadoId: novo.id,
-          titulo:    novo.desc?.split('\n')[0] || novo.id,
-          status:    novo.status,
-          tecnico:   novo.tecnico || '',
-          data:      new Date().toISOString(),
-          criadoPor: CURRENT_USER?.nome || CURRENT_USER?.email || '',
-        };
-        await ativoDoc.ref.collection('historico').add(hist);
-        console.log('[Chamado] Vinculado ao ativo', novo.pat);
+  // Vincula chamado ao histórico de cada ativo vinculado
+  if (FB_READY && novo.ativosVinculados?.length) {
+    const hist = {
+      tipo:      'chamado',
+      chamadoId: novo.id,
+      titulo:    novo.desc?.split('\n')[0] || novo.id,
+      status:    novo.status,
+      tecnico:   novo.tecnico || '',
+      data:      new Date().toISOString(),
+      criadoPor: CURRENT_USER?.nome || CURRENT_USER?.email || '',
+    };
+    for (const av of novo.ativosVinculados) {
+      if (!av.docId) continue;
+      try {
+        // Tenta nas coleções possíveis
+        for (const col of ['ativos','switches','impressoras','firewalls']) {
+          const ref = db.collection(col).doc(av.docId);
+          const snap = await ref.get();
+          if (snap.exists) {
+            await ref.collection('historico').add(hist);
+            console.log(`[Chamado] Vinculado ao ativo ${av.pat} (${col})`);
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('[Chamado] Falha ao vincular ao ativo:', e.message);
       }
-    } catch (e) {
-      console.warn('[Chamado] Falha ao vincular ao ativo:', e.message);
     }
   }
 
@@ -2698,19 +2717,52 @@ function atualizarPrioridadeColor(sel) {
 }
 
 function vincularAtivoAoChamado() {
-  const pat = document.getElementById('ch-patrimonio')?.value?.trim();
+  const input = document.getElementById('ch-patrimonio');
+  const pat   = input?.value?.trim();
   if (!pat) return showToast('Informe o patrimônio', 'danger');
-  const ativo = STATE.ativos?.find(a => a.pat.toLowerCase() === pat.toLowerCase());
+
+  // Busca em todas as fontes: ativos, switches, impressoras
+  const fontes = [
+    ...(STATE.ativos       || []),
+    ...(STATE.switches     || []),
+    ...(STATE.impressorasDisc || []),
+    ...(STATE.firewallsDisc   || []),
+  ];
+  const q = pat.toLowerCase();
+  // Busca exata primeiro (pat ou hostname), depois parcial (desc/nome)
+  const ativo = fontes.find(a =>
+    (a.pat      || '').toLowerCase() === q ||
+    (a.hostname || '').toLowerCase() === q
+  ) || fontes.find(a =>
+    (a.desc  || '').toLowerCase().includes(q) ||
+    (a.nome  || '').toLowerCase().includes(q) ||
+    (a.hostname || '').toLowerCase().includes(q)
+  );
+
+  if (!ativo) {
+    showToast(`"${pat}" não encontrado — tente o patrimônio (PAT-0000) ou nome da máquina`, 'danger');
+    return;
+  }
+
   const container = document.getElementById('ch-itens-vinculados');
   if (!container) return;
-  const label = ativo ? `${ativo.pat} — ${ativo.desc}` : pat;
+
+  // Evita duplicata
+  if (container.querySelector(`[data-ativo-id="${ativo.id}"]`)) {
+    showToast('Ativo já vinculado', 'warning');
+    return;
+  }
+
+  const label = `${ativo.pat || ativo.hostname} — ${ativo.desc || ativo.nome || ''}`.trim();
   container.insertAdjacentHTML('beforeend', `
-    <div style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
-      🖥️ ${label}
+    <div data-ativo-id="${ativo.id}" data-ativo-pat="${ativo.pat||''}" data-ativo-doc-id="${ativo.id}"
+         style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
+      🖥️ ${escapeHtml(label)}
       <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
     </div>`);
-  document.getElementById('ch-patrimonio').value = '';
-  showToast(`✓ Ativo ${pat} vinculado!`);
+
+  input.value = '';
+  showToast(`✓ Ativo ${ativo.pat || ativo.hostname} vinculado!`);
 }
 
 function vincularSmartphone() {
