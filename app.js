@@ -212,12 +212,9 @@ function showOfflineBar(msg) {
 }
 
 async function initBanco() {
-  // Aguarda os scripts compat carregarem
-  const ready = await new Promise(resolve => {
-    if (window._fbLoaded !== undefined) return resolve(window._fbLoaded);
-    window.addEventListener('firebase-ready', () => resolve(window._fbLoaded), { once: true });
-    setTimeout(() => resolve(!!window.firebase), 10000);
-  });
+  // Firebase SDK já está inline no index.html — _fbLoaded já é true quando chegamos aqui
+  // Verifica diretamente sem esperar evento (evita race condition + 10s de timeout)
+  const ready = window._fbLoaded || !!window.firebase;
 
   if (!ready && !window.firebase) {
     const tip = location.protocol === 'file:'
@@ -1988,10 +1985,13 @@ async function fazerLogin() {
 
   setLoginLoading(true);
 
-  // ── Tentativa 1: Banco Auth ────────────────────────────
+  // ── Tentativa 1: Banco Auth (timeout 4s — ad-blocker pode bloquear) ─────────
   if (FB_READY && auth) {
     try {
-      const cred   = await auth.signInWithEmailAndPassword(emailNorm, senha);
+      const cred   = await Promise.race([
+        auth.signInWithEmailAndPassword(emailNorm, senha),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('auth/timeout')), 4000)),
+      ]);
       const fbUser = cred.user;
 
       // 1. Tenta custom claims (token JWT — mais seguro, não pode ser alterado pelo cliente)
@@ -2029,7 +2029,9 @@ async function fazerLogin() {
     } catch (err) {
       // Só loga se não for erro de credencial inválida
       const credErrors = ['auth/user-not-found','auth/wrong-password','auth/invalid-credential','auth/invalid-email'];
-      if (err?.code && !credErrors.includes(err.code)) {
+      if (err?.message === 'auth/timeout') {
+        console.warn('[Auth] Timeout — Firebase Auth bloqueado (ad-blocker?). Tentando autenticação local...');
+      } else if (err?.code && !credErrors.includes(err.code)) {
         console.warn('[Auth] Banco error:', err?.code, err?.message);
         if (err.code === 'auth/network-request-failed') {
           console.warn('[Auth] Possível bloqueio por extensão (ad-blocker). Tentando autenticação local...');
@@ -2039,8 +2041,6 @@ async function fazerLogin() {
   }
 
   // ── Tentativa 2: fallback local (usado quando Firebase Auth não está acessível) ──
-  // Habilitado em produção quando Firebase Auth falhar por rede corporativa
-  await new Promise(r => setTimeout(r, 200));
   const local = LOCAL_USERS[emailRaw.toLowerCase()] ||
                 LOCAL_USERS[emailNorm.toLowerCase()] ||
                 LOCAL_USERS[emailRaw];
