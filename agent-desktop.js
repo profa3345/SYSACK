@@ -178,11 +178,13 @@ async function reportar() {
       uptime:         getUptime(),
       versaoAgente:   '2.0.0',
       ultimaAtualizacao: now,
+      lastSeen:       now,
+      osNome:         getOsInfo(),
       status:         'online',
       plataforma:     process.platform,
     };
 
-    await firestoreSet(`agentes_desktop/${AGENT_ID}`, dados);
+    await firestoreSet(`agents/${AGENT_ID}`, dados);
     log(`[OK] Dados enviados — CPU: ${cpu}% | RAM: ${mem.pct}% | Usuário: ${user}`);
   } catch(e) {
     log(`[ERRO] ${e.message}`);
