@@ -869,9 +869,11 @@ function startProtectedListeners(snap2arr, norm) {
     };
   }
 
-  // chamados
+  // chamados (listener simples — badge e dashboard)
   db.collection('chamados').onSnapshot(function(snap) {
     STATE.chamados = snap2arr(snap);
+    var abertos = STATE.chamados.filter(function(c){return c.status!=='concluido'&&c.status!=='fechado';});
+    nbUpdate('nb-chamados', abertos.length);
     renderDashboard();
     console.log('[Banco] chamados:', STATE.chamados.length);
   }, function(e){ console.error('[Banco] chamados erro:', e.message); });
@@ -886,9 +888,11 @@ function startProtectedListeners(snap2arr, norm) {
     },600);
   }, function(e){ console.error('[Banco] aprovacoes erro:', e.message); });
 
-  // Chamados — listener completo (não só abertos)
+  // Chamados — listener completo com ordenação
   db.collection('chamados').orderBy('createdAt','desc').limit(500).onSnapshot(function(snap){
     STATE.chamados = snap2arr(snap);
+    var abertos = STATE.chamados.filter(function(c){return c.status!=='concluido'&&c.status!=='fechado';});
+    nbUpdate('nb-chamados', abertos.length);
     _debounce('chamados-rel',function(){
       if(isPageActive('chamados')) renderChamados();
       if(isPageActive('relatorios')) relAtualizarCards();
