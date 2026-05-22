@@ -17233,7 +17233,7 @@ function iniciarWatcherAlertasIA() {
   if (!onSnapshot) return;
 
   onSnapshot(
-    query(collection(db_local, 'alertas_ia'), orderBy('createdAt', 'desc'), limit(5)),
+    query(collection('alertas_ia'), orderBy('createdAt', 'desc'), limit(5)),
     snap => {
       const alertas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       renderAlertasIA(alertas);
@@ -17289,14 +17289,14 @@ async function carregarPaginaChamados(pagina = 0) {
 
   try {
     let q = query(
-      collection(db, 'chamados'),
+      collection('chamados'),
       orderBy('createdAt', 'desc'),
       limit(PAGINATION.chamados.pageSize)
     );
 
     if (pagina > 0 && PAGINATION.chamados.lastDoc) {
       q = query(
-        collection(db, 'chamados'),
+        collection('chamados'),
         orderBy('createdAt', 'desc'),
         startAfter(PAGINATION.chamados.lastDoc),
         limit(PAGINATION.chamados.pageSize)
@@ -17465,7 +17465,7 @@ window.salvarMovSAP = function(){
   };
   if(window._fs && db){
     var {collection, addDoc} = window._fs;
-    addDoc(collection(db,'movimentacoes'), doc)
+    addDoc(collection('movimentacoes'), doc)
       .then(function(){
         showToast('Movimentação registrada como Pendente ✓','success');
         closeModal('modal-mov-sap');
