@@ -851,13 +851,10 @@ function startFirestoreListeners() {
 
 function startProtectedListeners(snap2arr, norm) {
   if (window._protectedListenersAtivos) return;
-  // Só inicia se Firebase Auth tiver token válido
-  if (!auth?.currentUser) {
-    console.warn('[Listeners] startProtectedListeners chamado sem Firebase Auth — aguardando background auth');
-    return;
-  }
+  // Inicia mesmo sem Firebase Auth — coleções agora têm allow read: if true
+  // Escrita ainda é protegida pelo Firebase Auth nas Rules
   window._protectedListenersAtivos = true;
-  console.log('[Banco] Iniciando listeners protegidos (auth válido) ✓');
+  console.log('[Banco] Iniciando listeners protegidos ✓');
 
   if (!snap2arr) {
     snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -3225,7 +3222,18 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 // ============================================================
 // TOAST
 // ============================================================
+function _fixToastPosition() {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.style.position  = 'fixed';
+  t.style.top       = '16px';
+  t.style.right     = '20px';
+  t.style.bottom    = '';
+  t.style.zIndex    = '99999';
+}
+
 function showToast(msg, type='success', duration=2500) {
+  _fixToastPosition();
   const container = document.getElementById('toast');
   const t = document.createElement('div');
   const c = {success:['#0F172A','#10B981','#fff'], danger:['#FEF2F2','#DC2626','#991B1B'], warning:['#FFFBEB','#D97706','#92400E'], info:['#EFF6FF','#2563EB','#1E40AF']};
