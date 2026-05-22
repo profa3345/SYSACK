@@ -2631,20 +2631,30 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div id="mon-view-mapa-wrap" style="display:none">
 
         <!-- Toolbar do mapa -->
-        <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px 12px 0 0;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--g100)">
-          <div style="display:flex;align-items:center;gap:12px">
-            <span style="font-size:13px;font-weight:700;color:var(--g900)">🗺️ Mapa de Rede por Localidade</span>
-            <span style="font-size:11px;color:var(--g400)">Clique no card para expandir · Quadradinhos = status dos dispositivos</span>
+        <div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px 12px 0 0;border-bottom:1px solid var(--g100)">
+          <!-- Linha 1: título + controles zoom/PDF -->
+          <div style="padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <span style="font-size:13px;font-weight:700;color:var(--g900)">🗺️ Mapa de Rede</span>
+            <div style="display:flex;gap:5px;align-items:center">
+              <button onclick="mapaZoom(1.15)" style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700" title="Ampliar">+</button>
+              <button onclick="mapaZoom(0.87)" style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700" title="Reduzir">−</button>
+              <button onclick="mapaZoom(1)"    style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Tamanho original">1:1</button>
+              <div style="width:1px;height:18px;background:var(--g200);margin:0 2px"></div>
+              <button onclick="mapaImprimir()" style="border:1px solid var(--accent,#2563EB);background:var(--accent,#2563EB);color:#fff;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Imprimir PDF legível">🖨️ PDF</button>
+            </div>
           </div>
-          <div style="display:flex;gap:5px;align-items:center">
-            <button onclick="mapaZoom(1.15)" style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700" title="Ampliar">+</button>
-            <button onclick="mapaZoom(0.87)" style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700" title="Reduzir">−</button>
-            <button onclick="mapaZoom(1)"    style="border:1px solid var(--g200);background:var(--panel);color:var(--g700);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Tamanho original">1:1</button>
-            <div style="width:1px;height:18px;background:var(--g200);margin:0 2px"></div>
-            <button onclick="Object.keys(_mapaExpanded).forEach(function(k){_mapaExpanded[k]=true});renderMapaRede()" style="border:1px solid var(--g200);background:var(--panel);color:var(--g600);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Expandir tudo">⊞ Tudo</button>
-            <button onclick="Object.keys(_mapaExpanded).forEach(function(k){_mapaExpanded[k]=false});renderMapaRede()" style="border:1px solid var(--g200);background:var(--panel);color:var(--g600);padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Colapsar tudo">⊟ Recolher</button>
-            <div style="width:1px;height:18px;background:var(--g200);margin:0 2px"></div>
-            <button onclick="mapaImprimir()" style="border:1px solid var(--accent,#2563EB);background:var(--accent,#2563EB);color:#fff;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Imprimir PDF legível">🖨️ PDF</button>
+          <!-- Linha 2: tabs de modo -->
+          <div style="display:flex;border-top:1px solid var(--g100)">
+            <button id="mapa-btn-geral" class="mapa-mode-btn"
+              onclick="mapaSetMode('geral',this)"
+              style="flex:1;padding:8px 14px;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:700;color:var(--accent,#2563EB);border-bottom:2px solid var(--accent,#2563EB);transition:all .15s">
+              📊 Visão Geral (Gráfico)
+            </button>
+            <button id="mapa-btn-areas" class="mapa-mode-btn"
+              onclick="mapaSetMode('areas',this)"
+              style="flex:1;padding:8px 14px;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--g500);border-bottom:2px solid transparent;transition:all .15s">
+              🗂️ Por Localidade
+            </button>
           </div>
         </div>
 
@@ -3745,23 +3755,13 @@ window.dispatchEvent(new Event('firebase-ready'));
           </div>
         </div>
 
-        <!-- RESPOSTA / ACOMPANHAMENTO -->
+        <!-- INFORMAÇÕES ADICIONAIS DO SOLICITANTE -->
         <div style="border:1px solid var(--g200);border-radius:10px;background:var(--g50);padding:14px 16px;margin-bottom:16px">
           <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:10px;display:flex;align-items:center;gap:8px">
-            💬 Acompanhamento / Resposta Inicial
+            📝 Informações Adicionais
             <span style="font-size:10px;font-weight:500;color:var(--g400)">(opcional)</span>
           </div>
-          <textarea class="form-control" id="ch-obs" rows="3" placeholder="Adicione informações complementares, observações ou a resposta inicial ao chamado..." style="background:#fff"></textarea>
-          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-            <label class="form-label" style="margin:0;display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:500;font-size:12px">
-              <input type="checkbox" style="accent-color:var(--accent)"> Solução
-            </label>
-            <label class="form-label" style="margin:0;display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:500;font-size:12px">
-              <input type="checkbox" style="accent-color:var(--accent)"> Privado
-            </label>
-            <div style="flex:1"></div>
-            <button class="btn btn-ghost btn-sm">📎 Anexar arquivo</button>
-          </div>
+          <textarea class="form-control" id="ch-obs" rows="3" placeholder="Adicione detalhes que possam ajudar no atendimento: quando começou, mensagens de erro, o que já tentou fazer..." style="background:#fff"></textarea>
         </div>
 
         <!-- ITENS VINCULADOS -->
