@@ -9034,6 +9034,8 @@ function baixarInstaladorAgente() {
     'echo [3/5] Criando configuracao...',
     'echo {"name":"sysack-agent-desktop","version":"2.0.0","main":"agent.js","dependencies":{"ws":"8.16.0"}} > "%INSTALL_DIR%\\package.json"',
     'echo {"firebaseProjectId":"sysack-829e2","agentId":"%COMPUTERNAME%","webSocketPort":9000} > "%INSTALL_DIR%\\config.json"',
+    'echo [3b/5] Baixando agente SYSACK...',
+    'powershell -Command "Invoke-WebRequest -Uri https://sysack.vercel.app/agent-desktop.js -OutFile \"%INSTALL_DIR%\\agent.js\" -UseBasicParsing"',
     'echo [4/5] Instalando dependencias npm...',
     'cd /d "%INSTALL_DIR%" && call npm install --production --silent',
     'echo [5/5] Registrando servico Windows...',
