@@ -2155,20 +2155,23 @@ async function _fazerLoginInterno() {
   const local = LOCAL_USERS[emailRaw.toLowerCase()] ||
                 LOCAL_USERS[emailNorm.toLowerCase()] ||
                 LOCAL_USERS[emailRaw];
+  console.log('[Auth] Fallback local — usuario encontrado:', !!local, '| email:', emailRaw);
   // Valida senha via SHA-256 (async) ou senha plain text legado
   let senhaOk = false;
   if (local) {
     if (local._hash) {
       try {
         const hash = await _sha256(senha);
+        console.log('[Auth] Hash calculado:', hash.slice(0,16), '| esperado:', local._hash.slice(0,16), '| match:', hash === local._hash);
         senhaOk = (hash === local._hash);
-      } catch { senhaOk = false; }
+      } catch(e) { console.error('[Auth] _sha256 erro:', e); senhaOk = false; }
     } else if (local.password) {
       const senhaNorm = senha.replace(/0/g, 'o').replace(/O/g, 'o');
       const localPass = local.password.replace(/0/g, 'o').replace(/O/g, 'o');
       senhaOk = (local.password === senha || localPass === senhaNorm);
     }
   }
+  console.log('[Auth] senhaOk:', senhaOk);
   if (local && senhaOk) {
     const user = {
       uid:         local.uid,
