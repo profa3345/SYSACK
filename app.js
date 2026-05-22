@@ -1652,6 +1652,19 @@ function chToggleNomenclatura(val) {
 }
 
 async function salvarChamado() {
+  // Evita duplo clique
+  const btnSalvar = document.getElementById('btn-salvar-chamado');
+  if (btnSalvar?._salvando) return;
+  if (btnSalvar) { btnSalvar._salvando = true; btnSalvar.disabled = true; btnSalvar.innerHTML = '⏳ Salvando...'; }
+
+  try {
+    await _salvarChamadoInterno();
+  } finally {
+    if (btnSalvar) { btnSalvar._salvando = false; btnSalvar.disabled = false; btnSalvar.innerHTML = '💾 Salvar Chamado'; }
+  }
+}
+
+async function _salvarChamadoInterno() {
   const titulo = document.getElementById('ch-titulo')?.value?.trim();
   const sol    = document.getElementById('ch-solicitante')?.value?.trim();
   const desc   = document.getElementById('ch-descricao')?.value?.trim();

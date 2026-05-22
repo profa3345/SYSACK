@@ -3697,7 +3697,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div style="flex:1"></div>
       <button class="btn btn-primary btn-sm" onclick="salvarChamado()">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 6l3.5 4L11 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        + Adicionar
+        💾 Salvar Chamado
       </button>
       <button class="btn btn-ghost btn-sm">🔍 Pesquisar</button>
       <button class="btn btn-ghost btn-sm">☰ Listas</button>
@@ -3767,13 +3767,48 @@ window.dispatchEvent(new Event('firebase-ready'));
         <!-- ITENS VINCULADOS -->
         <div style="border:1px solid var(--g200);border-radius:10px;background:#fff;padding:14px 16px">
           <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:10px">🖥️ Itens Associados</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <input class="form-control" id="ch-patrimonio" style="width:200px;margin:0" placeholder="Patrimônio (PAT-0000) ou nome da máquina...">
-            <button class="btn btn-secondary btn-sm" onclick="vincularAtivoAoChamado()">+ Vincular Ativo</button>
-            <button class="btn btn-ghost btn-sm" onclick="sugerirAtivosPorHistorico()" title="Busca computadores onde você logou nos últimos 5 dias">🕐 Meus Computadores</button>
-            <input class="form-control" id="ch-smartphone-busca" style="width:200px;margin:0" placeholder="Nome, login, matrícula ou IMEI do smartphone...">
-            <button class="btn btn-ghost btn-sm" onclick="vincularSmartphone()">📱 Vincular Smartphone</button>
-            <button class="btn btn-ghost btn-sm" onclick="sugerirSmartphonesPorEmpregado()" title="Busca smartphones vinculados ao seu nome">🕐 Meus Smartphones</button>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-start">
+            <!-- Computadores / Ativos -->
+            <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px">
+              <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.4px">🖥️ Vincular Computador / Ativo</div>
+              <div style="font-size:11px;color:var(--g400);margin-top:-2px">Escolha uma das opções abaixo:</div>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <input class="form-control" id="ch-patrimonio" style="width:170px;margin:0;font-size:12px" placeholder="Patrimônio ou nome...">
+                <button class="btn btn-secondary btn-sm" onclick="vincularAtivoAoChamado()">Buscar e vincular</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;height:1px;background:var(--g150)"></div>
+                <span style="font-size:10.5px;color:var(--g400);font-weight:600">OU</span>
+                <div style="flex:1;height:1px;background:var(--g150)"></div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="sugerirAtivosPorHistorico()"
+                      style="display:flex;align-items:center;gap:6px;justify-content:center;border:1px dashed var(--g300)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                Deixar o sistema sugerir pelo meu histórico de login
+              </button>
+            </div>
+
+            <div style="width:1px;background:var(--g200);align-self:stretch;margin:0 4px"></div>
+
+            <!-- Smartphones -->
+            <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px">
+              <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.4px">📱 Vincular Smartphone</div>
+              <div style="font-size:11px;color:var(--g400);margin-top:-2px">Escolha uma das opções abaixo:</div>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <input class="form-control" id="ch-smartphone-busca" style="width:170px;margin:0;font-size:12px" placeholder="Nome, matrícula ou IMEI...">
+                <button class="btn btn-ghost btn-sm" onclick="vincularSmartphone()">Buscar e vincular</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;height:1px;background:var(--g150)"></div>
+                <span style="font-size:10.5px;color:var(--g400);font-weight:600">OU</span>
+                <div style="flex:1;height:1px;background:var(--g150)"></div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="sugerirSmartphonesPorEmpregado()"
+                      style="display:flex;align-items:center;gap:6px;justify-content:center;border:1px dashed var(--g300)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                Deixar o sistema sugerir pelo meu nome
+              </button>
+            </div>
           </div>
           <div id="ch-itens-vinculados" style="display:flex;flex-wrap:wrap;gap:8px"></div>
         </div>
@@ -4153,9 +4188,9 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div class="modal-footer" style="background:var(--g50)">
       <button class="btn btn-ghost" onclick="closeModal('modal-novo-chamado')">Cancelar</button>
       <button class="btn btn-secondary btn-sm" onclick="salvarRascunhoChamado()">💾 Salvar Rascunho</button>
-      <button class="btn btn-primary" onclick="salvarChamado()">
+      <button class="btn btn-primary" id="btn-salvar-chamado" onclick="salvarChamado()">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1 6.5l4 4.5 7-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        + Adicionar Chamado
+        💾 Salvar Chamado
       </button>
     </div>
   </div>
