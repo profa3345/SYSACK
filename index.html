@@ -2982,35 +2982,19 @@ window.dispatchEvent(new Event('firebase-ready'));
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">Metodo de instalacao</label>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--g200);border-radius:8px;cursor:pointer">
-                <input type="radio" name="ar-install-method" value="script" checked style="margin-top:3px">
-                <div>
-                  <div style="font-weight:700;font-size:13px">Script PowerShell (recomendado)</div>
-                  <div style="font-size:12px;color:var(--g400)">Execute como Administrador no PC alvo. Instala Node.js se necessario.</div>
-                </div>
-              </label>
-              <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--g200);border-radius:8px;cursor:pointer">
-                <input type="radio" name="ar-install-method" value="gpo" style="margin-top:3px">
-                <div>
-                  <div style="font-weight:700;font-size:13px">Via GPO (todos os PCs do dominio)</div>
-                  <div style="font-size:12px;color:var(--g400)">Distribui automaticamente via Group Policy. Ideal para 10+ PCs.</div>
-                </div>
-              </label>
-            </div>
+          <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px;color:#1E40AF">
+            📥 Clique em <strong>Baixar Instalador</strong> para baixar o arquivo <code>.bat</code><br>
+            Em seguida, clique com o botão direito no arquivo → <strong>Executar como administrador</strong>
           </div>
 
           <div style="background:#0F172A;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:#94A3B8;margin-bottom:12px">
-            <div style="color:#64748B;margin-bottom:6px"># Execute como Administrador:</div>
-            <div style="color:#10B981">Invoke-WebRequest -Uri "https://sysack.vercel.app/install-agent.ps1" -OutFile install.ps1</div>
-            <div style="color:#10B981">.\install.ps1 -Install</div>
+            <div style="color:#64748B;margin-bottom:6px">:: Clique com botão direito → Executar como administrador</div>
+            <div style="color:#10B981">Instalar-SYSACK-Agent.bat</div>
           </div>
 
           <div style="font-size:12px;color:var(--g400)">
-            Requisitos: Windows 10/11 ou Windows Server 2016+ | Node.js 18+ | PowerShell 5+<br>
-            O agente roda como Servico Windows (SYSTEM) e usa ~50MB de RAM.
+            Requisitos: Windows 10/11 ou Windows Server 2016+<br>
+            O agente roda como Serviço Windows (SYSTEM) e usa ~50MB de RAM.
           </div>
         </div>
         <div class="modal-footer">
