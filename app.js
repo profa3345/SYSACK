@@ -1602,6 +1602,102 @@ function abrirAtendimento(chamadoId) {
   openModal('modal-atender-chamado');
 }
 
+
+// ── Toggle troca de máquina ───────────────────────────────────────
+function toggleTrocaMaquina(val) {
+  const sub = document.getElementById('sub-troca-maquina');
+  if (sub) sub.style.display = val === 'sim' ? '' : 'none';
+  document.getElementById('ro-troca-sim')?.classList.toggle('checked', val === 'sim');
+  document.getElementById('ro-troca-nao')?.classList.toggle('checked', val === 'nao');
+  if (val === 'nao') {
+    // Limpa seleção de nova máquina
+    document.getElementById('at-nova-maq-busca').value = '';
+    document.getElementById('at-nova-maq-selecionada').style.display = 'none';
+    document.getElementById('at-nova-maq-resultados').style.display = 'none';
+    document.getElementById('at-pat-novo').value = '';
+  }
+}
+
+// ── Busca nova máquina no sistema ─────────────────────────────────
+function atBuscarNovaMaquina(q) {
+  const res = document.getElementById('at-nova-maq-resultados');
+  if (!q || q.length < 2) { res.style.display = 'none'; return; }
+
+  const qLow = q.toLowerCase();
+  const fontes = [...(STATE.ativos||[]), ...(STATE.switches||[])];
+  const encontrados = fontes.filter(a =>
+    (a.pat||'').toLowerCase().includes(qLow) ||
+    (a.desc||'').toLowerCase().includes(qLow) ||
+    (a.hostname||'').toLowerCase().includes(qLow)
+  ).slice(0, 8);
+
+  if (!encontrados.length) {
+    res.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhuma máquina encontrada — use o campo abaixo para cadastrar.</div>';
+    res.style.display = '';
+    return;
+  }
+
+  res.innerHTML = encontrados.map(a => `
+    <div onclick="atSelecionarNovaMaquina('${a.id}','${escapeHtml(a.pat||'')}','${escapeHtml(a.desc||a.hostname||'')}')"
+         style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);font-size:12.5px;
+                display:flex;gap:10px;align-items:center"
+         onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <span style="font-weight:700;color:var(--accent);min-width:80px">${escapeHtml(a.pat||a.hostname||'')}</span>
+      <span style="color:var(--g600)">${escapeHtml(a.desc||a.hostname||'')}</span>
+      <span style="color:var(--g400);font-size:11px;margin-left:auto">${a.area||''}</span>
+    </div>`).join('');
+  res.style.display = '';
+}
+
+// ── Seleciona nova máquina do resultado da busca ──────────────────
+function atSelecionarNovaMaquina(id, pat, desc) {
+  document.getElementById('at-nova-maq-busca').value = pat + (desc ? ' — ' + desc : '');
+  document.getElementById('at-nova-maq-resultados').style.display = 'none';
+  document.getElementById('at-pat-novo').value = pat;
+  const sel = document.getElementById('at-nova-maq-selecionada');
+  sel.innerHTML = '✅ Selecionada: <strong>' + escapeHtml(pat) + '</strong>' + (desc ? ' — ' + escapeHtml(desc) : '');
+  sel.style.display = '';
+  // Limpa campos de cadastro manual
+  document.getElementById('at-nova-maq-pat').value = '';
+  document.getElementById('at-nova-maq-desc').value = '';
+}
+
+// ── Registra nova máquina no sistema ─────────────────────────────
+async function atRegistrarNovaMaquina() {
+  const pat  = document.getElementById('at-nova-maq-pat')?.value?.trim();
+  const desc = document.getElementById('at-nova-maq-desc')?.value?.trim();
+  const serie = document.getElementById('at-nova-maq-serie')?.value?.trim();
+  if (!pat)  return showToast('Informe o patrimônio da nova máquina', 'danger');
+  if (!desc) return showToast('Informe a descrição da nova máquina', 'danger');
+
+  // Verifica se já existe
+  const existe = (STATE.ativos||[]).find(a => (a.pat||'').toLowerCase() === pat.toLowerCase());
+  if (existe) {
+    atSelecionarNovaMaquina(existe.id, existe.pat, existe.desc||existe.hostname||'');
+    showToast('Máquina já existe no sistema — selecionada automaticamente', 'info');
+    return;
+  }
+
+  const novo = {
+    pat, desc, serie: serie||'', tipo: 'workstation',
+    status: 'ativo', fonte: 'manual', area: '',
+    createdAt: new Date().toISOString(),
+    createdBy: CURRENT_USER?.nome || '',
+  };
+
+  const id = await fsAdd('ativos', novo);
+  if (id) {
+    novo.id = id;
+    if (!STATE.ativos) STATE.ativos = [];
+    STATE.ativos.unshift(novo);
+    atSelecionarNovaMaquina(id, pat, desc);
+    showToast('✅ Máquina ' + pat + ' registrada no sistema!', 'success');
+    document.getElementById('at-nova-maq-pat').value = '';
+    document.getElementById('at-nova-maq-desc').value = '';
+    document.getElementById('at-nova-maq-serie').value = '';
+  }
+}
+
 function toggleMudouLugar(val) {
   document.getElementById('sub-mudou-lugar').style.display = val==='sim'?'':'none';
   document.getElementById('ro-nao').classList.toggle('checked', val==='nao');

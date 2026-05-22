@@ -4251,11 +4251,49 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
       <div id="sub-mudou-lugar" style="display:none">
         <div class="alert alert-warning"><span>⚠️</span><span>Movimentação de ativo exige <strong>aprovação do gestor</strong>. O fluxo ficará pausado até a autorização. Email será enviado automaticamente.</span></div>
-        <div class="form-row c2">
-          <div class="form-group">
-            <label class="form-label req">Patrimônio da Nova Máquina</label>
-            <input class="form-control" id="at-pat-novo" placeholder="PAT-0000">
+
+        <!-- Pergunta se houve troca da máquina -->
+        <div class="form-group" style="margin-bottom:14px">
+          <label class="form-label fw-700" style="font-size:13px;margin-bottom:10px">Foi necessário substituir a máquina por outra?</label>
+          <div class="radio-group">
+            <label class="radio-opt" id="ro-troca-nao"><input type="radio" name="troca-maquina" value="nao" onclick="toggleTrocaMaquina('nao')" checked> Não — mesma máquina, só mudou de lugar</label>
+            <label class="radio-opt" id="ro-troca-sim"><input type="radio" name="troca-maquina" value="sim" onclick="toggleTrocaMaquina('sim')"> Sim — foi entregue uma máquina diferente ao usuário</label>
           </div>
+        </div>
+
+        <!-- Campos da nova máquina — visível só se troca=sim -->
+        <div id="sub-troca-maquina" style="display:none;border-left:3px solid var(--accent);padding-left:14px;margin-bottom:14px">
+          <p style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px">🖥️ Nova Máquina Entregue ao Usuário</p>
+          <div class="form-group" style="margin-bottom:10px">
+            <label class="form-label req">Buscar máquina existente no sistema</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input class="form-control" id="at-nova-maq-busca" placeholder="Patrimônio ou nome da máquina..." oninput="atBuscarNovaMaquina(this.value)" style="flex:1">
+              <button class="btn btn-secondary btn-sm" type="button" onclick="atBuscarNovaMaquina(document.getElementById('at-nova-maq-busca').value)">Buscar</button>
+            </div>
+            <div id="at-nova-maq-resultados" style="display:none;margin-top:6px;border:1px solid var(--g200);border-radius:8px;max-height:160px;overflow-y:auto;background:#fff"></div>
+            <div id="at-nova-maq-selecionada" style="display:none;margin-top:8px;padding:8px 12px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--accent)"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <div style="flex:1;height:1px;background:var(--g150)"></div>
+            <span style="font-size:10.5px;color:var(--g400);font-weight:600">OU</span>
+            <div style="flex:1;height:1px;background:var(--g150)"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cadastrar nova máquina (patrimônio ainda não registrado)</label>
+            <div class="form-row c2" style="margin-top:6px">
+              <input class="form-control" id="at-nova-maq-pat" placeholder="Patrimônio (PAT-0000)">
+              <input class="form-control" id="at-nova-maq-desc" placeholder="Descrição (ex: Dell Optiplex 7090)">
+            </div>
+            <div class="form-row c2" style="margin-top:8px">
+              <input class="form-control" id="at-nova-maq-serie" placeholder="Número de série (opcional)">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="atRegistrarNovaMaquina()" style="align-self:flex-end">+ Registrar no sistema</button>
+            </div>
+          </div>
+          <input type="hidden" id="at-pat-novo">
+        </div>
+
+        <div class="form-row c2" style="margin-top:8px">
+          <div style="display:none"><input id="at-pat-novo-hidden"></div>
           <div class="form-group">
             <label class="form-label req">Destino da Máquina Antiga</label>
             <select class="form-control" id="at-destino-antigo" onchange="toggleDestinoAntigo()">
