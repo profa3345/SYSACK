@@ -840,13 +840,9 @@ function startFirestoreListeners() {
     },800);
   }, function(e){ console.error('[Banco] empregados erro:', e.message); });
 
-  // ── Listeners protegidos: só sobem se Firebase Auth tiver token válido ──
-  // Se não houver token ainda (sessão local sem auth Firebase), são iniciados
-  // pelo loginSuccess() após autenticação completa via startProtectedListeners().
-  if (auth && auth.currentUser) {
-    startProtectedListeners(snap2arr, norm);
-  }
-  // Caso contrário, loginSuccess() chama startProtectedListeners() depois.
+  // Coleções protegidas agora têm allow read: if true nas Firestore Rules
+  // Pode subir sem Firebase Auth — escrita ainda é protegida
+  startProtectedListeners(snap2arr, norm);
 }
 
 function startProtectedListeners(snap2arr, norm) {
