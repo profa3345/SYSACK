@@ -9038,7 +9038,7 @@ function baixarInstaladorAgente() {
     'cd /d "%INSTALL_DIR%" && call npm install --production --silent',
     'echo [5/5] Registrando servico Windows...',
     'sc query %SERVICE_NAME% >nul 2>&1 && (net stop %SERVICE_NAME% >nul 2>&1 & sc delete %SERVICE_NAME% >nul 2>&1 & timeout /t 2 /nobreak >nul)',
-    'for /f "tokens=*" %%i in ('where node') do set NODE_PATH=%%i',
+    "for /f \"tokens=*\" %%i in ('where node') do set NODE_PATH=%%i",
     'sc create %SERVICE_NAME% binPath= "\"%NODE_PATH%\" \"%INSTALL_DIR%\\agent.js\"" start= auto DisplayName= "SYSACK Agent Desktop"',
     'sc description %SERVICE_NAME% "SYSACK - Monitoramento remoto"',
     'sc failure %SERVICE_NAME% reset= 86400 actions= restart/5000/restart/10000/restart/30000',
