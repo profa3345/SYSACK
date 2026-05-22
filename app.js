@@ -1691,6 +1691,15 @@ async function salvarChamado() {
     docId: el.dataset.ativoDocId || '',
   }));
 
+  // Coleta smartphones vinculados via botão "Vincular Smartphone"
+  const smartphonesVinculados = Array.from(
+    document.querySelectorAll('#ch-itens-vinculados [data-sm-id]')
+  ).map(el => ({
+    id:   el.dataset.smId   || '',
+    pat:  el.dataset.smPat  || '',
+    imei: el.dataset.smImei || '',
+  }));
+
   const novo = {
     id, tipo: document.getElementById('ch-tipo')?.value||'incidente',
     area: document.getElementById('ch-area')?.value||'TI',
@@ -1699,6 +1708,7 @@ async function salvarChamado() {
       || (ativosVinculados[0]?.pat)
       || document.getElementById('ch-patrimonio')?.value||'',
     ativosVinculados,
+    smartphonesVinculados,
     desc: titulo + (desc?'\n'+desc:''), obs: document.getElementById('ch-obs')?.value||'',
     status: temMovimentacao ? 'aguardando-aprovacao' : 'aberto',
     prioridade: document.getElementById('ch-prioridade')?.value||'media',
@@ -1740,6 +1750,28 @@ async function salvarChamado() {
   closeModal('modal-novo-chamado');
   renderChamados();
   renderDashboard();
+
+  // Vincula chamado ao histórico de cada smartphone vinculado
+  if (FB_READY && novo.smartphonesVinculados?.length) {
+    const histSm = {
+      tipo:      'chamado',
+      chamadoId: novo.id,
+      titulo:    novo.desc?.split('\n')[0] || novo.id,
+      status:    novo.status,
+      tecnico:   novo.tecnico || '',
+      data:      new Date().toISOString(),
+      criadoPor: CURRENT_USER?.nome || CURRENT_USER?.email || '',
+    };
+    for (const sv of novo.smartphonesVinculados) {
+      if (!sv.id) continue;
+      try {
+        await db.collection('smartphones').doc(sv.id).collection('historico').add(histSm);
+        console.log(`[Chamado] Vinculado ao smartphone ${sv.pat}`);
+      } catch (e) {
+        console.warn('[Chamado] Falha ao vincular ao smartphone:', e.message);
+      }
+    }
+  }
 
   // Vincula chamado ao histórico de cada ativo vinculado
   if (FB_READY && novo.ativosVinculados?.length) {
@@ -2766,7 +2798,55 @@ function vincularAtivoAoChamado() {
 }
 
 function vincularSmartphone() {
-  showToast('Selecione um smartphone pelo módulo MDM → Chamado', 'info');
+  const input = document.getElementById('ch-smartphone-busca');
+  const q     = (input?.value || '').trim().toLowerCase();
+  if (!q) return showToast('Informe o login, matrícula ou IMEI do smartphone', 'danger');
+
+  const sms = STATE.smartphones || [];
+
+  // Busca exata primeiro: empMat, imei1, imei2, pat
+  let sm = sms.find(s =>
+    (s.empMat  || '').toLowerCase() === q ||
+    (s.imei1   || '').toLowerCase() === q ||
+    (s.imei2   || '').toLowerCase() === q ||
+    (s.pat     || '').toLowerCase() === q
+  );
+
+  // Busca parcial: nome do empregado, login AD, modelo
+  if (!sm) {
+    sm = sms.find(s =>
+      (s.empNome   || '').toLowerCase().includes(q) ||
+      (s.empLogin  || '').toLowerCase().includes(q) ||
+      (s.empMat    || '').toLowerCase().includes(q) ||
+      (s.modelo    || '').toLowerCase().includes(q) ||
+      ((s.marca||'')+' '+(s.modelo||'')).toLowerCase().includes(q)
+    );
+  }
+
+  if (!sm) {
+    showToast(`"${input.value}" não encontrado — tente login, matrícula ou IMEI`, 'danger');
+    return;
+  }
+
+  const container = document.getElementById('ch-itens-vinculados');
+  if (!container) return;
+
+  // Evita duplicata
+  if (container.querySelector(`[data-sm-id="${sm.id}"]`)) {
+    showToast('Smartphone já vinculado', 'warning');
+    return;
+  }
+
+  const label = `${sm.marca} ${sm.modelo} (${sm.pat})${sm.empNome && sm.empNome !== '—' ? ' — ' + sm.empNome : ''}`;
+  container.insertAdjacentHTML('beforeend', `
+    <div data-sm-id="${sm.id}" data-sm-pat="${sm.pat||''}" data-sm-imei="${sm.imei1||''}"
+         style="display:inline-flex;align-items:center;gap:5px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:#166534">
+      📱 ${escapeHtml(label)}
+      <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
+    </div>`);
+
+  input.value = '';
+  showToast(`✓ Smartphone ${sm.marca} ${sm.modelo} (${sm.empNome || sm.pat}) vinculado!`);
 }
 
 function salvarRascunhoChamado() {
@@ -3144,7 +3224,15 @@ function renderMDM() {
   const fs = document.getElementById('mdm-filter-status')?.value||'';
   const fm = document.getElementById('mdm-filter-marca')?.value||'';
   const filtered = sms.filter(s => {
-    const matchQ = !q || s.modelo.toLowerCase().includes(q) || s.imei1.includes(q) || (s.empNome||'').toLowerCase().includes(q) || s.pat.toLowerCase().includes(q);
+    const matchQ = !q
+      || (s.modelo    ||'').toLowerCase().includes(q)
+      || (s.imei1     ||'').includes(q)
+      || (s.imei2     ||'').includes(q)
+      || (s.empNome   ||'').toLowerCase().includes(q)
+      || (s.empLogin  ||'').toLowerCase().includes(q)
+      || (s.empMat    ||'').toLowerCase().includes(q)
+      || (s.pat       ||'').toLowerCase().includes(q)
+      || (s.marca     ||'').toLowerCase().includes(q);
     const matchS = !fs || s.status === fs;
     const matchM = !fm || s.marca === fm;
     return matchQ && matchS && matchM;
@@ -3166,7 +3254,11 @@ function renderMDM() {
         <td><div style="font-weight:600">${s.marca} ${s.modelo}</div><div style="font-size:10.5px;color:var(--g400)">${s.so} ${s.versao}</div></td>
         <td class="td-mono imei-field">${s.imei1}</td>
         <td>${s.linha||'—'}<br><span style="font-size:10.5px;color:var(--g400)">${s.operadora||''}</span></td>
-        <td><div style="font-weight:600">${s.empNome||'—'}</div><div style="font-size:10.5px;color:var(--g400)">${s.empSetor||''}</div></td>
+        <td>
+          <div style="font-weight:600">${s.empNome||'—'}</div>
+          <div style="font-size:10.5px;color:var(--g400)">${s.empLogin?'🔑 '+s.empLogin:''}</div>
+          <div style="font-size:10.5px;color:var(--g400)">${s.empSetor||''}</div>
+        </td>
         <td class="td-mono">${s.empMat||'—'}</td>
         <td>${s.empSetor||'—'}</td>
         <td class="td-mono">${s.ultimaTroca ? new Date(s.ultimaTroca).toLocaleDateString('pt-BR') : '—'}</td>
@@ -3191,10 +3283,12 @@ function renderMDM() {
         </div>
         <div class="mdm-card-body">
           <div class="mdm-card-field"><span class="lbl">IMEI 1</span><span class="val imei-field">${s.imei1}</span></div>
+          ${s.imei2?`<div class="mdm-card-field"><span class="lbl">IMEI 2</span><span class="val imei-field">${s.imei2}</span></div>`:''}
           <div class="mdm-card-field"><span class="lbl">Linha</span><span class="val">${s.linha||'—'}</span></div>
           <div class="mdm-card-field"><span class="lbl">Empregado</span><span class="val">${s.empNome||'—'}</span></div>
-          <div class="mdm-card-field"><span class="lbl">Setor</span><span class="val">${s.empSetor||'—'}</span></div>
+          ${s.empLogin?`<div class="mdm-card-field"><span class="lbl">Login</span><span class="val">${s.empLogin}</span></div>`:''}
           <div class="mdm-card-field"><span class="lbl">Matrícula</span><span class="val">${s.empMat||'—'}</span></div>
+          <div class="mdm-card-field"><span class="lbl">Setor</span><span class="val">${s.empSetor||'—'}</span></div>
           <div class="mdm-card-field"><span class="lbl">Última Troca</span><span class="val">${s.ultimaTroca?new Date(s.ultimaTroca).toLocaleDateString('pt-BR'):'—'}</span></div>
           <div class="mdm-card-field"><span class="lbl">S.O.</span><span class="val">${s.so} ${s.versao}</span></div>
         </div>
