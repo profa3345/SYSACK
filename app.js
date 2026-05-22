@@ -473,6 +473,11 @@ async function offlineRestaurarBlobs(data) {
 // Enfileira uma operação para sync posterior
 // Fotos/blobs são salvas separadamente no store de blobs
 async function offlineEnqueue(tipo, col, docId, data) {
+  // Valida col antes de enfileirar — evita operações inválidas no IndexedDB
+  if (!col || typeof col !== 'string' || col.trim() === '') {
+    console.error('[OfflineQueue] col inválida, operação descartada:', { tipo, col, data });
+    return;
+  }
   try {
     const db    = await getOfflineDB();
     const opId  = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -600,10 +605,14 @@ async function offlineSync() {
 
   atualizarBannerOffline();
   if (ok > 0) showToast(`✅ ${ok} operação(ões) sincronizada(s) com sucesso!`, 'success', 4000);
-  if (erros > 0) showToast(`⚠️ ${erros} operação(ões) com erro — serão refeitas.`, 'warning', 5000);
+  if (erros > 0) showToast(`⚠️ ${erros} operação(ões) com erro — serão refeitas automaticamente.`, 'warning', 5000);
 
-  // Limpa IndexedDB completamente se tudo foi sincronizado
-  offlineLimparTudo();
+  // Só limpa tudo se não houve erros — preserva operações pendentes para retry
+  if (erros === 0) {
+    offlineLimparTudo();
+  } else {
+    console.log(`[OfflineSync] ${erros} operação(ões) mantidas para retry.`);
+  }
 }
 
 // Banner de status offline
@@ -678,8 +687,9 @@ const COLS_COM_FILA_OFFLINE = new Set([
 async function fsAdd(col, data, localArr, _fromSync = false) {
   // Valida col — evita crash no Firestore com coleção inválida
   if (!col || typeof col !== 'string' || col.trim() === '') {
-    console.error('[Banco] fsAdd: col inválida:', col);
-    return null;
+    const err = new Error(`fsAdd: col inválida ou undefined (recebeu: ${JSON.stringify(col)})`);
+    console.error('[Banco]', err.message);
+    throw err; // propaga para offlineSync poder tratar
   }
 
   const temFirebaseAuth = !!(auth?.currentUser);
