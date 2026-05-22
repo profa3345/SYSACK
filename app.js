@@ -1018,7 +1018,7 @@ window.auditLog = function(action, module, resourceId, resourceType, details = {
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
   if (FB_READY && db && window._fs) {
     const { collection, addDoc, serverTimestamp } = window._fs;
-    addDoc(col('audit_logs'), {
+    addDoc(collection('audit_logs'), {
       userId: CURRENT_USER.uid, userName: CURRENT_USER.nome,
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
@@ -2223,14 +2223,13 @@ async function _fazerLoginInterno() {
       // Só loga se não for erro de credencial inválida
       const credErrors = ['auth/user-not-found','auth/wrong-password','auth/invalid-credential','auth/invalid-email'];
       if (err?.message === 'auth/timeout') {
-        console.warn('[Auth] Timeout — tentando autenticação local...');
-      } else if (err?.code && credErrors.includes(err.code)) {
-        // Usuário não existe no Firebase — tenta fallback local
-        console.warn('[Auth] Usuário não encontrado no Firebase — tentando local...');
-      } else if (err?.code) {
+        console.warn('[Auth] Timeout — Firebase Auth bloqueado (ad-blocker?). Tentando autenticação local...');
+      } else if (err?.code && !credErrors.includes(err.code)) {
         console.warn('[Auth] Banco error:', err?.code, err?.message);
+        if (err.code === 'auth/network-request-failed') {
+          console.warn('[Auth] Possível bloqueio por extensão (ad-blocker). Tentando autenticação local...');
+        }
       }
-      // Sempre continua para o fallback local
     }
   }
 
