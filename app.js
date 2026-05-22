@@ -1018,7 +1018,7 @@ window.auditLog = function(action, module, resourceId, resourceType, details = {
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
   if (FB_READY && db && window._fs) {
     const { collection, addDoc, serverTimestamp } = window._fs;
-    addDoc(collection('audit_logs'), {
+    addDoc(col('audit_logs'), {
       userId: CURRENT_USER.uid, userName: CURRENT_USER.nome,
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
@@ -9067,7 +9067,7 @@ If ($Remove) {
 
 If ($Status) {
   $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
-  Write-Host "Status: $($svc?.Status ?? 'NAO INSTALADO')" -ForegroundColor $(If ($svc?.Status -eq 'Running') {'Green'} Else {'Red'})
+  If ($svc) { Write-Host "Status: $($svc.Status)" -ForegroundColor $(If ($svc.Status -eq 'Running') {'Green'} Else {'Yellow'}) } Else { Write-Host 'Status: NAO INSTALADO' -ForegroundColor Red }
   Get-Content "$InstallDir\agent.log" -Tail 20 -ErrorAction SilentlyContinue
 }`;
 
@@ -16105,7 +16105,7 @@ function iniciarWatcherIP() {
   const { collection, onSnapshot } = window._fs;
 
   // Ouve mudanças na coleção de ativos — quando IP muda, verifica
-  const unsub = onSnapshot(collection('ativos'), snapshot => {
+  const unsub = onSnapshot(collection(db_local, 'ativos'), snapshot => {
     snapshot.docChanges().forEach(change => {
       if (change.type === 'modified') {
         const data = change.doc.data();
@@ -17233,7 +17233,7 @@ function iniciarWatcherAlertasIA() {
   if (!onSnapshot) return;
 
   onSnapshot(
-    query(collection('alertas_ia'), orderBy('createdAt', 'desc'), limit(5)),
+    query(collection(db_local, 'alertas_ia'), orderBy('createdAt', 'desc'), limit(5)),
     snap => {
       const alertas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       renderAlertasIA(alertas);
@@ -17289,14 +17289,14 @@ async function carregarPaginaChamados(pagina = 0) {
 
   try {
     let q = query(
-      collection('chamados'),
+      collection(db, 'chamados'),
       orderBy('createdAt', 'desc'),
       limit(PAGINATION.chamados.pageSize)
     );
 
     if (pagina > 0 && PAGINATION.chamados.lastDoc) {
       q = query(
-        collection('chamados'),
+        collection(db, 'chamados'),
         orderBy('createdAt', 'desc'),
         startAfter(PAGINATION.chamados.lastDoc),
         limit(PAGINATION.chamados.pageSize)
@@ -17465,7 +17465,7 @@ window.salvarMovSAP = function(){
   };
   if(window._fs && db){
     var {collection, addDoc} = window._fs;
-    addDoc(collection('movimentacoes'), doc)
+    addDoc(collection(db,'movimentacoes'), doc)
       .then(function(){
         showToast('Movimentação registrada como Pendente ✓','success');
         closeModal('modal-mov-sap');
