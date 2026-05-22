@@ -97,7 +97,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       🔒 Usuário ou senha incorretos. Verifique e tente novamente.
     </div>
 
-    <form id="login-form" onsubmit="event.preventDefault();fazerLogin()" autocomplete="on">
+    <form id="login-form" onsubmit="event.preventDefault()" autocomplete="on">
     <!-- EMAIL -->
     <div class="login-field">
       <label for="login-email">E-mail ou usuário</label>
@@ -129,7 +129,7 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <!-- BOTÃO -->
-    <button class="login-btn" id="login-btn" type="submit">
+    <button class="login-btn" id="login-btn" type="button" onclick="fazerLogin()">
       <span class="btn-spinner"></span>
       <span class="btn-text">Entrar no sistema</span>
     </button>
@@ -373,7 +373,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         <span class="notif-count" id="notif-count-badge">5</span>
       </button>
       <div class="tb-div"></div>
-      <div class="tb-avatar">JM<div class="ring"></div></div>
+      <div class="tb-avatar" onclick="abrirMenuUsuario()" style="cursor:pointer" title="Meu perfil">JM<div class="ring"></div></div>
     </div>
   </div>
 
@@ -5871,5 +5871,48 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
 </div>
 
 <script src="app.js"></script>
+
+<!-- Modal: Menu do Usuário -->
+<div class="modal-overlay" id="modal-usuario-menu" onclick="if(event.target===this)closeModal('modal-usuario-menu')">
+  <div class="modal" style="width:360px">
+    <div class="modal-header">
+      <h3>👤 Meu Perfil</h3>
+      <button class="close-btn" onclick="closeModal('modal-usuario-menu')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--g100);margin-bottom:16px">
+        <div style="width:48px;height:48px;background:var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:16px" id="perfil-avatar-ini">JM</div>
+        <div>
+          <div style="font-weight:700;font-size:14px" id="perfil-nome">—</div>
+          <div style="font-size:12px;color:var(--g500)" id="perfil-email">—</div>
+          <div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px" id="perfil-role">—</div>
+        </div>
+      </div>
+
+      <!-- Alterar Senha -->
+      <div style="margin-bottom:8px">
+        <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:10px">🔐 Alterar Senha</div>
+        <div class="form-group" style="margin-bottom:8px">
+          <label class="form-label">Senha Atual</label>
+          <input class="form-control" type="password" id="perfil-senha-atual" placeholder="Digite sua senha atual">
+        </div>
+        <div class="form-group" style="margin-bottom:8px">
+          <label class="form-label">Nova Senha</label>
+          <input class="form-control" type="password" id="perfil-senha-nova" placeholder="Mínimo 8 caracteres">
+        </div>
+        <div class="form-group" style="margin-bottom:14px">
+          <label class="form-label">Confirmar Nova Senha</label>
+          <input class="form-control" type="password" id="perfil-senha-confirm" placeholder="Repita a nova senha">
+        </div>
+        <div id="perfil-senha-msg" style="display:none;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:10px"></div>
+        <button class="btn btn-primary w-full" onclick="alterarSenha()">🔐 Alterar Senha</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="fazerLogout()">🚪 Sair do sistema</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

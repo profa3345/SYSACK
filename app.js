@@ -1608,6 +1608,88 @@ function abrirAtendimento(chamadoId) {
 
 
 // ── Toggle troca de máquina ───────────────────────────────────────
+
+// ── Menu do usuário / Perfil ──────────────────────────────────────
+function abrirMenuUsuario() {
+  const u = SESSION_USER || CURRENT_USER;
+  if (!u) return;
+  const ini = (u.nome||'??').split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
+  const el = document.getElementById('perfil-avatar-ini');
+  if (el) el.textContent = ini;
+  sv('perfil-nome',  u.nome  || '—');
+  sv('perfil-email', u.email || '—');
+  sv('perfil-role',  ({admin:'Administrador',gestor:'Gestor',tecnico:'Técnico',viewer:'Visualizador',mdm_admin:'Administrador MDM'})[u.role] || u.role || '—');
+  // Limpa campos
+  ['perfil-senha-atual','perfil-senha-nova','perfil-senha-confirm'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  const msg = document.getElementById('perfil-senha-msg');
+  if (msg) msg.style.display = 'none';
+  openModal('modal-usuario-menu');
+}
+
+async function alterarSenha() {
+  const atual   = document.getElementById('perfil-senha-atual')?.value || '';
+  const nova    = document.getElementById('perfil-senha-nova')?.value || '';
+  const confirm = document.getElementById('perfil-senha-confirm')?.value || '';
+  const msg     = document.getElementById('perfil-senha-msg');
+
+  function showMsg(txt, ok) {
+    msg.textContent = txt;
+    msg.style.background = ok ? '#F0FDF4' : '#FEF2F2';
+    msg.style.color = ok ? '#166534' : '#991B1B';
+    msg.style.border = ok ? '1px solid #86EFAC' : '1px solid #FECACA';
+    msg.style.display = '';
+  }
+
+  if (!atual)   return showMsg('Informe sua senha atual.', false);
+  if (!nova)    return showMsg('Informe a nova senha.', false);
+  if (nova.length < 8) return showMsg('A nova senha deve ter pelo menos 8 caracteres.', false);
+  if (nova !== confirm) return showMsg('A confirmação não coincide com a nova senha.', false);
+
+  // Valida senha atual
+  const hashAtual = await _sha256(atual);
+  const u = SESSION_USER || CURRENT_USER;
+  const local = LOCAL_USERS[(u?.email||'').toLowerCase()] || LOCAL_USERS[(u?.email||'')];
+  if (local?._hash && hashAtual !== local._hash) {
+    return showMsg('Senha atual incorreta.', false);
+  }
+
+  const hashNova = await _sha256(nova);
+
+  // 1. Atualiza Firebase Auth (se disponível)
+  if (auth?.currentUser) {
+    try {
+      await auth.currentUser.updatePassword(nova);
+      showMsg('✅ Senha alterada com sucesso!', true);
+    } catch (e) {
+      if (e.code === 'auth/requires-recent-login') {
+        showMsg('Por segurança, faça login novamente antes de alterar a senha.', false);
+      } else {
+        showMsg('Erro ao alterar no Firebase: ' + e.message, false);
+      }
+      return;
+    }
+  }
+
+  // 2. Atualiza no Firestore /users/{uid}
+  if (FB_READY && db && u?.uid) {
+    try {
+      await db.collection('users').doc(u.uid).set({ _hash: hashNova }, { merge: true });
+    } catch(e) { console.warn('[Senha] Erro ao salvar no Firestore:', e.message); }
+  }
+
+  // 3. Atualiza LOCAL_USERS em memória (sessão atual)
+  if (local) local._hash = hashNova;
+
+  showMsg('✅ Senha alterada com sucesso! Use a nova senha no próximo login.', true);
+  setTimeout(() => {
+    ['perfil-senha-atual','perfil-senha-nova','perfil-senha-confirm'].forEach(id => {
+      const el = document.getElementById(id); if(el) el.value = '';
+    });
+  }, 2000);
+}
+
 function toggleTrocaMaquina(val) {
   const sub = document.getElementById('sub-troca-maquina');
   if (sub) sub.style.display = val === 'sim' ? '' : 'none';
@@ -1975,7 +2057,7 @@ const LOCAL_USERS = {
   // ── Usuários CESAN (fallback quando Firebase Auth não acessível) ──
   'ana.penha': {
     email:    'ana.penha@cesan.com.br',
-    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
     nome:     'Ana Penha',
     avatar:   'AP',
     role:     'admin',
@@ -1984,7 +2066,7 @@ const LOCAL_USERS = {
   },
   'ana.penha@cesan.com.br': {
     email:    'ana.penha@cesan.com.br',
-    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
     nome:     'Ana Penha',
     avatar:   'AP',
     role:     'admin',
@@ -1993,7 +2075,7 @@ const LOCAL_USERS = {
   },
   'apaula': {
     email:    'apaulalimaster@gmail.com',
-    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
     nome:     'Ana Paula',
     avatar:   'AP',
     role:     'admin',
@@ -2002,7 +2084,7 @@ const LOCAL_USERS = {
   },
   'apaulalimaster@gmail.com': {
     email:    'apaulalimaster@gmail.com',
-    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
     nome:     'Ana Paula',
     avatar:   'AP',
     role:     'admin',
@@ -2011,7 +2093,7 @@ const LOCAL_USERS = {
   },
   'admin': {
     email:    'admin@cesan.com.br',
-    _hash:    'c9b2ae28dbada5f022e87ea5951ee02579b950bd9d2ae1ccbac104130c17ad1d',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
     nome:     'Administrador SYSACK',
     avatar:   'AD',
     role:     'admin',
