@@ -1588,6 +1588,17 @@ function abrirAtendimento(chamadoId) {
   if (!ch) return;
   document.getElementById('atender-ch-id').textContent = chamadoId;
   document.getElementById('at-patrimonio').value = ch.pat||'';
+
+  // Preenche a descrição original do chamado para o técnico ver
+  const descEl = document.getElementById('at-descricao-original');
+  const obsEl  = document.getElementById('at-obs-original');
+  const nomEl  = document.getElementById('at-solicitante-nome');
+  if (nomEl) nomEl.textContent = ch.solicitante
+    ? '👤 ' + ch.solicitante + (ch.area ? ' — ' + ch.area : '')
+    : '';
+  if (descEl) descEl.textContent = ch.desc || '';
+  if (obsEl)  obsEl.textContent  = ch.obs  ? '📝 Informações adicionais: ' + ch.obs : '';
+
   openModal('modal-atender-chamado');
 }
 
@@ -1967,6 +1978,13 @@ function _tentarFirebaseAuthBackground(email, senha, tentativa = 1) {
 }
 
 async function fazerLogin() {
+  // Evita duplo disparo (form submit + onclick)
+  if (window._loginEmAndamento) return;
+  window._loginEmAndamento = true;
+  try { await _fazerLoginInterno(); } finally { window._loginEmAndamento = false; }
+}
+
+async function _fazerLoginInterno() {
   // emailRaw = o que o usuário digitou (ex: 'admin')
   // emailNorm = normalizado com @ (ex: 'admin@adsi.com.br')
   const emailRaw  = (document.getElementById('login-email')?.value || '').trim();
@@ -1978,12 +1996,12 @@ async function fazerLogin() {
 
   setLoginLoading(true);
 
-  // ── Tentativa 1: Banco Auth (timeout 4s — ad-blocker pode bloquear) ─────────
+  // ── Tentativa 1: Banco Auth (timeout 3s — rede pode bloquear) ─────────────
   if (FB_READY && auth) {
     try {
       const cred   = await Promise.race([
         auth.signInWithEmailAndPassword(emailNorm, senha),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('auth/timeout')), 4000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('auth/timeout')), 3000)),
       ]);
       const fbUser = cred.user;
 
