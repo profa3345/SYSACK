@@ -685,15 +685,22 @@ async function fsAdd(col, data, localArr, _fromSync = false) {
   if (FB_READY && db && window._fs) {
     try {
       const { collection, addDoc, serverTimestamp } = window._fs;
-      const ref = await addDoc(collection(col), {
-        ...data,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        createdBy: CURRENT_USER?.uid || '',
-      });
+      // Timeout de 8s para não travar quando Firebase Auth está bloqueado
+      const ref = await Promise.race([
+        addDoc(collection(col), {
+          ...data,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          createdBy: CURRENT_USER?.uid || '',
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('fsAdd timeout')), 8000)),
+      ]);
       auditLog('CREATE', col, ref.id, col, { after: data });
       return ref.id;
-    } catch (err) { console.error('[Banco] fsAdd:', err); }
+    } catch (err) {
+      console.error('[Banco] fsAdd:', err.message);
+      // Se for timeout ou permission, cai no offline queue abaixo
+    }
   }
 
   // Offline: enfileira — mas NUNCA reenfileira se já veio da fila (evita loop)
@@ -2748,6 +2755,169 @@ function atualizarPrioridadeColor(sel) {
   sel.style.fontWeight = '700';
 }
 
+
+// ── Sugere ativos pelo histórico de login do usuário (últimos 5 dias) ─────────
+async function sugerirAtivosPorHistorico() {
+  const emp = _empregadoLogado();
+  if (!emp) return showToast('Usuário não identificado no sistema', 'warning');
+
+  showToast('🔍 Buscando seus computadores recentes...', 'info', 2000);
+
+  // Busca ativos onde o emp.mat aparece em usuarios_historico nos últimos 5 dias
+  const cincoAtras = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  let candidatos = [];
+
+  try {
+    if (FB_READY && auth?.currentUser) {
+      // Usa Cloud Function que já existe para histórico de usuários
+      // Busca todos os ativos onde esse empregado logou recentemente
+      const data = await Promise.race([
+        callFunction('getAtivosDoUsuario', { mat: emp.mat, desde: cincoAtras }),
+        new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 6000)),
+      ]);
+      candidatos = data?.ativos || [];
+    }
+  } catch (e) {
+    console.warn('[Sugerir] Cloud Function indisponível, usando STATE.ativos:', e.message);
+  }
+
+  // Fallback: busca em STATE.ativos pelo campo resp/matriculaResp
+  if (!candidatos.length) {
+    candidatos = (STATE.ativos || []).filter(a =>
+      (a.matriculaResp || a.responsavelMat || a.resp || '').toLowerCase()
+        .includes((emp.mat || '').toLowerCase())
+    ).slice(0, 10);
+  }
+
+  if (!candidatos.length) {
+    showToast('Nenhum computador encontrado nos últimos 5 dias', 'warning');
+    return;
+  }
+
+  _exibirSeletorVinculo('computador', candidatos, (selecionados) => {
+    selecionados.forEach(ativo => {
+      // Reutiliza a lógica existente de vincular
+      const container = document.getElementById('ch-itens-vinculados');
+      if (!container || container.querySelector(`[data-ativo-id="${ativo.id}"]`)) return;
+      const label = `${ativo.pat || ativo.hostname} — ${ativo.desc || ''}`.trim();
+      container.insertAdjacentHTML('beforeend', `
+        <div data-ativo-id="${ativo.id}" data-ativo-pat="${ativo.pat||''}" data-ativo-doc-id="${ativo.id}"
+             style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
+          🖥️ ${escapeHtml(label)}
+          <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
+        </div>`);
+    });
+    showToast(`✓ ${selecionados.length} ativo(s) vinculado(s)!`);
+  });
+}
+
+// ── Sugere smartphones vinculados ao empregado logado ─────────────────────────
+function sugerirSmartphonesPorEmpregado() {
+  const emp = _empregadoLogado();
+  if (!emp) return showToast('Usuário não identificado no sistema', 'warning');
+
+  const sms = (STATE.smartphones || []).filter(s =>
+    (s.empMat  || '').toLowerCase() === (emp.mat   || '').toLowerCase() ||
+    (s.empNome || '').toLowerCase() === (emp.nome  || '').toLowerCase()
+  );
+
+  if (!sms.length) {
+    showToast(`Nenhum smartphone vinculado a ${emp.nome}`, 'warning');
+    return;
+  }
+
+  _exibirSeletorVinculo('smartphone', sms, (selecionados) => {
+    selecionados.forEach(sm => {
+      const container = document.getElementById('ch-itens-vinculados');
+      if (!container || container.querySelector(`[data-sm-id="${sm.id}"]`)) return;
+      const label = `${sm.marca} ${sm.modelo} (${sm.pat})${sm.empNome && sm.empNome !== '—' ? ' — ' + sm.empNome : ''}`;
+      container.insertAdjacentHTML('beforeend', `
+        <div data-sm-id="${sm.id}" data-sm-pat="${sm.pat||''}" data-sm-imei="${sm.imei1||''}"
+             style="display:inline-flex;align-items:center;gap:5px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:#166534">
+          📱 ${escapeHtml(label)}
+          <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
+        </div>`);
+    });
+    showToast(`✓ ${selecionados.length} smartphone(s) vinculado(s)!`);
+  });
+}
+
+// ── Helper: retorna o empregado correspondente ao usuário logado ──────────────
+function _empregadoLogado() {
+  if (!CURRENT_USER) return null;
+  const emailLogin = (CURRENT_USER.email || '').toLowerCase();
+  const loginPart  = emailLogin.split('@')[0];
+  return (STATE.empregados || []).find(e =>
+    (e.email || '').toLowerCase() === emailLogin ||
+    (e.login || '').toLowerCase() === loginPart  ||
+    (e.login || '').toLowerCase() === emailLogin
+  ) || (CURRENT_USER.nome ? { nome: CURRENT_USER.nome, mat: '', email: emailLogin } : null);
+}
+
+// ── Helper: exibe modal de seleção de ativos/smartphones ─────────────────────
+function _exibirSeletorVinculo(tipo, itens, onConfirm) {
+  const isPhone = tipo === 'smartphone';
+  const titulo  = isPhone
+    ? `📱 Smartphones vinculados a você`
+    : `🖥️ Computadores recentes (últimos 5 dias)`;
+
+  const linhas = itens.map((item, i) => {
+    const label = isPhone
+      ? `${item.marca} ${item.modelo} — PAT: ${item.pat} — IMEI: ${item.imei1||'—'}`
+      : `${item.pat || item.hostname} — ${item.desc || item.nome || ''} — ${item.area || ''}`;
+    return `
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;
+             border:1px solid var(--g200);margin-bottom:8px;cursor:pointer;background:#fff;
+             transition:background .15s" onmouseover="this.style.background='var(--g50)'"
+             onmouseout="this.style.background='#fff'">
+        <input type="checkbox" data-idx="${i}" style="width:16px;height:16px;accent-color:var(--accent)"
+               ${itens.length === 1 ? 'checked' : ''}>
+        <span style="font-size:12.5px;font-weight:600;color:var(--g700)">${escapeHtml(label)}</span>
+      </label>`;
+  }).join('');
+
+  const pergunta = isPhone
+    ? `O chamado é referente a qual smartphone?`
+    : `O chamado é referente a qual computador?`;
+
+  const html = `
+    <div id="modal-sugerir-vinculo" style="position:fixed;inset:0;z-index:10100;display:flex;
+         align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
+      <div style="background:#fff;border-radius:14px;padding:24px;width:480px;max-width:95vw;
+                  max-height:80vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.18)">
+        <div style="font-size:14px;font-weight:700;color:var(--g800);margin-bottom:6px">${titulo}</div>
+        <div style="font-size:12px;color:var(--g500);margin-bottom:16px">${pergunta}</div>
+        <div style="overflow-y:auto;flex:1;margin-bottom:16px">${linhas}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm"
+                  onclick="document.getElementById('modal-sugerir-vinculo').remove()">
+            Cancelar
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="_confirmarSeletorVinculo()">
+            ✓ Vincular Selecionados
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Guarda referência para o callback
+  window._seletorVinculoItens    = itens;
+  window._seletorVinculoCallback = onConfirm;
+}
+
+function _confirmarSeletorVinculo() {
+  const modal = document.getElementById('modal-sugerir-vinculo');
+  if (!modal) return;
+  const checks  = modal.querySelectorAll('input[type=checkbox]:checked');
+  const indices = Array.from(checks).map(c => parseInt(c.dataset.idx));
+  const selecionados = indices.map(i => window._seletorVinculoItens[i]).filter(Boolean);
+  modal.remove();
+  if (!selecionados.length) return showToast('Nenhum item selecionado', 'warning');
+  window._seletorVinculoCallback?.(selecionados);
+}
+
 function vincularAtivoAoChamado() {
   const input = document.getElementById('ch-patrimonio');
   const pat   = input?.value?.trim();
@@ -2941,10 +3111,36 @@ function openModal(id) {
     if (abEl) abEl.value = iso;
     const bolhaNow = document.getElementById('ch-bolha-now');
     if (bolhaNow) bolhaNow.textContent = now.toLocaleString('pt-BR');
-    // Pré-preenche requerente com o usuário logado
+    // Pré-preenche requerente com o empregado correspondente ao usuário logado
     const solEl = document.getElementById('ch-solicitante');
     if (solEl && !solEl.value && CURRENT_USER) {
-      solEl.value = CURRENT_USER.nome || CURRENT_USER.email || '';
+      // Tenta achar o empregado pelo email ou login (sAMAccountName)
+      const emailLogin = (CURRENT_USER.email || '').toLowerCase();
+      const loginPart  = emailLogin.split('@')[0]; // ex: "ana.penha"
+      const emp = (STATE.empregados || []).find(e =>
+        (e.email || '').toLowerCase() === emailLogin ||
+        (e.login || '').toLowerCase() === loginPart  ||
+        (e.login || '').toLowerCase() === emailLogin
+      );
+      if (emp) {
+        solEl.value = emp.nome || CURRENT_USER.nome || '';
+        // Pré-preenche email do requerente
+        const emailEl = document.getElementById('ch-sol-email');
+        if (emailEl) emailEl.value = emp.email || CURRENT_USER.email || '';
+        // Pré-preenche matrícula e setor se houver campos
+        const matEl   = document.getElementById('ch-mat-requerente');
+        const setorEl = document.getElementById('ch-setor-requerente');
+        if (matEl)   matEl.value   = emp.mat   || '';
+        if (setorEl) setorEl.value = emp.setor || '';
+        // Pré-preenche área baseado no setor do empregado
+        const areaEl = document.getElementById('ch-area');
+        if (areaEl && emp.setor && !areaEl.value) areaEl.value = emp.setor;
+        console.log(`[Chamado] Requerente identificado: ${emp.nome} (${emp.mat}) — ${emp.setor}`);
+      } else {
+        solEl.value = CURRENT_USER.nome || CURRENT_USER.email || '';
+        const emailEl = document.getElementById('ch-sol-email');
+        if (emailEl) emailEl.value = CURRENT_USER.email || '';
+      }
       atualizarIniciais();
     }
     const sel = document.getElementById('ch-tecnico');
@@ -15078,28 +15274,38 @@ function renderRelatorioCapacidade() {
 // Substitui a geração de ID local por chamada ao backend
 // O backend garante sequência única e imutável
 async function gerarIdChamado() {
-  if (!FB_READY) {
-    // Offline: gera ID temporário, será substituído no sync
-    const tempId = 'CH-OFFLINE-' + Date.now();
-    console.warn('[ID] Offline — ID temporário:', tempId);
+  // Sem Firebase Auth válido (ex: ad-blocker bloqueando), gera ID local sequencial
+  const temAuth = !!(auth?.currentUser || SESSION_USER);
+  if (!FB_READY || !temAuth) {
+    // Tenta usar o último número conhecido + 1 para manter sequência legível
+    const ultimo = parseInt(localStorage.getItem('_ultimo_ch_num') || '99');
+    const proximo = ultimo + 1;
+    localStorage.setItem('_ultimo_ch_num', proximo);
+    const tempId = 'CH-' + String(proximo).padStart(4, '0');
+    console.warn('[ID] Sem auth Firebase — ID local:', tempId);
     return tempId;
   }
   try {
-    // Usa um documento de contador no Firestore com transaction
-    const { getFirestore, doc, runTransaction, increment } = {}; // replaced by compat below
-    const db2     = db; // usa a instância global já inicializada
-    const contRef = db2.collection('config').doc('contadores');
-    const novoNum = await db2.runTransaction(async tx => {
-      const snap   = await tx.get(contRef);
-      const atual  = snap.exists ? (snap.data().chamados || 99) : 99;
-      const prox   = atual + 1;
-      tx.set(contRef, { chamados: prox }, { merge: true });
-      return prox;
-    });
+    const contRef = db.collection('config').doc('contadores');
+    // Timeout de 5s para não travar o formulário
+    const novoNum = await Promise.race([
+      db.runTransaction(async tx => {
+        const snap  = await tx.get(contRef);
+        const atual = snap.exists ? (snap.data().chamados || 99) : 99;
+        const prox  = atual + 1;
+        tx.set(contRef, { chamados: prox }, { merge: true });
+        localStorage.setItem('_ultimo_ch_num', prox);
+        return prox;
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+    ]);
     return 'CH-' + String(novoNum).padStart(4, '0');
   } catch (err) {
     console.warn('[ID] Transação falhou, usando local:', err.message);
-    return 'CH-' + Date.now().toString(36).toUpperCase();
+    const ultimo = parseInt(localStorage.getItem('_ultimo_ch_num') || '99');
+    const proximo = ultimo + 1;
+    localStorage.setItem('_ultimo_ch_num', proximo);
+    return 'CH-' + String(proximo).padStart(4, '0');
   }
 }
 

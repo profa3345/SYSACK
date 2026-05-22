@@ -3768,10 +3768,12 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div style="border:1px solid var(--g200);border-radius:10px;background:#fff;padding:14px 16px">
           <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:10px">🖥️ Itens Associados</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <input class="form-control" id="ch-patrimonio" style="width:220px;margin:0" placeholder="Patrimônio (PAT-0000) ou nome da máquina...">
+            <input class="form-control" id="ch-patrimonio" style="width:200px;margin:0" placeholder="Patrimônio (PAT-0000) ou nome da máquina...">
             <button class="btn btn-secondary btn-sm" onclick="vincularAtivoAoChamado()">+ Vincular Ativo</button>
-            <input class="form-control" id="ch-smartphone-busca" style="width:220px;margin:0" placeholder="Login, matrícula ou IMEI do smartphone...">
+            <button class="btn btn-ghost btn-sm" onclick="sugerirAtivosPorHistorico()" title="Busca computadores onde você logou nos últimos 5 dias">🕐 Meus Computadores</button>
+            <input class="form-control" id="ch-smartphone-busca" style="width:200px;margin:0" placeholder="Nome, login, matrícula ou IMEI do smartphone...">
             <button class="btn btn-ghost btn-sm" onclick="vincularSmartphone()">📱 Vincular Smartphone</button>
+            <button class="btn btn-ghost btn-sm" onclick="sugerirSmartphonesPorEmpregado()" title="Busca smartphones vinculados ao seu nome">🕐 Meus Smartphones</button>
           </div>
           <div id="ch-itens-vinculados" style="display:flex;flex-wrap:wrap;gap:8px"></div>
         </div>
