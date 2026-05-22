@@ -682,7 +682,8 @@ async function fsAdd(col, data, localArr, _fromSync = false) {
     return null;
   }
 
-  if (FB_READY && db && window._fs) {
+  const temFirebaseAuth = !!(auth?.currentUser);
+  if (FB_READY && db && window._fs && temFirebaseAuth) {
     try {
       const { collection, addDoc, serverTimestamp } = window._fs;
       // Timeout de 8s para não travar quando Firebase Auth está bloqueado
@@ -843,7 +844,13 @@ function startFirestoreListeners() {
 
 function startProtectedListeners(snap2arr, norm) {
   if (window._protectedListenersAtivos) return;
+  // Só inicia se Firebase Auth tiver token válido
+  if (!auth?.currentUser) {
+    console.warn('[Listeners] startProtectedListeners chamado sem Firebase Auth — aguardando background auth');
+    return;
+  }
   window._protectedListenersAtivos = true;
+  console.log('[Banco] Iniciando listeners protegidos (auth válido) ✓');
 
   if (!snap2arr) {
     snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1923,6 +1930,42 @@ function checkSavedSession() {
 }
 
 // ─── Login principal ─────────────────────────────────────────
+// ── Tenta autenticar no Firebase em background após login local ──────────────
+// Fica retentando a cada 30s até conseguir — quando conseguir, ativa os
+// listeners protegidos (chamados, aprovacoes, etc.) que precisam de token Firebase
+function _tentarFirebaseAuthBackground(email, senha, tentativa = 1) {
+  if (!auth || !email || !senha) return;
+  if (auth.currentUser) {
+    // Já autenticado — garante que listeners protegidos estão ativos
+    if (!window._protectedListenersAtivos) {
+      console.log('[Auth] Firebase Auth já ativo — iniciando listeners protegidos');
+      startProtectedListeners();
+    }
+    return;
+  }
+
+  auth.signInWithEmailAndPassword(email, senha)
+    .then(cred => {
+      console.log('[Auth] Firebase Auth obtido em background ✓ — ativando listeners protegidos');
+      if (!window._protectedListenersAtivos) {
+        startProtectedListeners();
+      }
+      // Recarrega dados que podem estar desatualizados
+      setTimeout(() => {
+        if (typeof renderChamados === 'function' && isPageActive('chamados')) renderChamados();
+        if (typeof renderDashboard === 'function') renderDashboard();
+      }, 1000);
+    })
+    .catch(err => {
+      const maxTentativas = 20; // ~10 minutos
+      if (tentativa < maxTentativas) {
+        const delay = Math.min(30000, tentativa * 5000); // 5s, 10s, 15s... max 30s
+        console.log(`[Auth] Firebase Auth bloqueado (tentativa ${tentativa}) — retry em ${delay/1000}s`);
+        setTimeout(() => _tentarFirebaseAuthBackground(email, senha, tentativa + 1), delay);
+      }
+    });
+}
+
 async function fazerLogin() {
   // emailRaw = o que o usuário digitou (ex: 'admin')
   // emailNorm = normalizado com @ (ex: 'admin@adsi.com.br')
@@ -2015,6 +2058,10 @@ async function fazerLogin() {
       permissions: local.permissions || permissionsForRole(local.role),
     };
     loginSuccess(user, true);
+
+    // Tenta autenticar no Firebase em background (pode estar bloqueado pelo ad-blocker)
+    // Quando conseguir, os listeners protegidos serão ativados automaticamente
+    _tentarFirebaseAuthBackground(emailNorm, senha);
     return;
   }
 
@@ -3168,7 +3215,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 // ============================================================
 // TOAST
 // ============================================================
-function showToast(msg, type='success') {
+function showToast(msg, type='success', duration=2500) {
   const container = document.getElementById('toast');
   const t = document.createElement('div');
   const c = {success:['#0F172A','#10B981','#fff'], danger:['#FEF2F2','#DC2626','#991B1B'], warning:['#FFFBEB','#D97706','#92400E'], info:['#EFF6FF','#2563EB','#1E40AF']};
@@ -3177,7 +3224,7 @@ function showToast(msg, type='success') {
   t.style.cssText=`background:${bg};color:${text};padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 20px 48px rgba(0,0,0,.14);display:flex;gap:8px;align-items:center;pointer-events:all;border:1px solid ${accent}33;animation:fadeUp .25s ease;font-family:'Inter',sans-serif;max-width:380px`;
   t.innerHTML=`<span style="color:${accent};font-size:16px">${icon}</span><span>${msg}</span>`;
   container.appendChild(t);
-  setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateY(8px)'; t.style.transition='all .3s ease'; setTimeout(()=>t.remove(),300); }, 4000);
+  setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateY(-8px)'; t.style.transition='all .3s ease'; setTimeout(()=>t.remove(),300); }, duration);
 }
 
 // ============================================================
@@ -15287,9 +15334,10 @@ function renderRelatorioCapacidade() {
 // Substitui a geração de ID local por chamada ao backend
 // O backend garante sequência única e imutável
 async function gerarIdChamado() {
-  // Sem Firebase Auth válido (ex: ad-blocker bloqueando), gera ID local sequencial
-  const temAuth = !!(auth?.currentUser || SESSION_USER);
-  if (!FB_READY || !temAuth) {
+  // Só tenta Firestore se Firebase Auth tiver token válido
+  // SESSION_USER é apenas sessão local — não garante token Firebase
+  const temFirebaseAuth = !!(auth?.currentUser);
+  if (!FB_READY || !temFirebaseAuth) {
     // Tenta usar o último número conhecido + 1 para manter sequência legível
     const ultimo = parseInt(localStorage.getItem('_ultimo_ch_num') || '99');
     const proximo = ultimo + 1;
