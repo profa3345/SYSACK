@@ -1018,7 +1018,7 @@ window.auditLog = function(action, module, resourceId, resourceType, details = {
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
   if (FB_READY && db && window._fs) {
     const { collection, addDoc, serverTimestamp } = window._fs;
-    addDoc(collection('audit_logs'), {
+    addDoc(col('audit_logs'), {
       userId: CURRENT_USER.uid, userName: CURRENT_USER.nome,
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
@@ -2027,13 +2027,32 @@ async function _salvarChamadoInterno() {
   exibirConfirmacaoChamado(novo);
   // Envia e-mail de confirmação via Cloud Function
   if (FB_READY && novo.id && !novo.id.startsWith('offline_')) {
-    callFunction('enviarConfirmacaoChamado', {
-      chamadoId:  novo.id,
-      titulo:     novo.desc?.split('\n')[0] || novo.id,
+    const emailPayload = {
+      chamadoId:   novo.id,
+      titulo:      novo.titulo || novo.desc?.split('\n')[0] || novo.id,
       solicitante: novo.solicitante,
       prioridade:  novo.prioridade,
       email:       CURRENT_USER?.email || '',
-    }).catch(err => console.warn('[Email] Falha ao enviar confirmação:', err.message));
+    };
+    // Tenta via SDK (requer Firebase Auth)
+    callFunction('enviarConfirmacaoChamado', emailPayload)
+      .then(() => console.log('[Email] Confirmação enviada via SDK'))
+      .catch(async err => {
+        console.warn('[Email] SDK falhou, tentando fetch direto:', err.message);
+        // Fallback: fetch direto para URL pública da Cloud Function
+        try {
+          const url = 'https://us-central1-sysack-829e2.cloudfunctions.net/enviarConfirmacaoChamadoHttp';
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: emailPayload }),
+          });
+          if (res.ok) console.log('[Email] Confirmação enviada via fetch direto');
+          else console.warn('[Email] Fetch falhou:', res.status, await res.text());
+        } catch (e2) {
+          console.warn('[Email] Fetch também falhou:', e2.message);
+        }
+      });
   }
 }
 
