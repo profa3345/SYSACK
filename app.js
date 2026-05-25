@@ -6020,27 +6020,23 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // 3. Alerta o técnico sobre o modo de conexão
 
   async function rvDetectarEConectar() {
-    rvSb('Detectando melhor rota de conexão...');
-    rvSetStatus('detectando', 'Detectando rota...');
+    rvSb('Conectando via rede interna...');
+    rvSetStatus('detectando', 'Conectando...');
 
     const localOk = await rvTestarConexaoLocal();
 
     if (localOk) {
       _modoConexao = 'local';
-      rvSetStatus('local', 'Rede interna');
+      rvSetStatus('local', 'Rede interna ⚡');
       rvMostrarBannerConexao('local');
       rvConnect(_wsLocal);
     } else {
-      _modoConexao = 'firebase';
-      rvSetStatus('firebase', 'Via internet (Banco)');
-      rvMostrarBannerConexao('firebase');
-      // Alerta ao técnico
-      showToast(
-        '📡 PC não encontrado na rede local — usando relay via internet. ' +
-        'Latência pode ser maior.',
-        'warning', 6000
-      );
-      rvConnectBanco();
+      rvSetStatus('offline', 'Inacessível');
+      rvSb('❌ Computador não encontrado na rede interna.');
+      rvShellLog('[SYSACK] Não foi possível conectar ao computador ' + hostname + ' (' + wsIp + ').', '#EF4444');
+      rvShellLog('[SYSACK] Verifique se o computador está ligado e na mesma rede.', '#64748B');
+      rvShellLog('[SYSACK] O acesso remoto funciona apenas na rede interna da CESAN.', '#64748B');
+      showToast('❌ ' + hostname + ' não acessível na rede interna.', 'danger', 6000);
     }
   }
 
@@ -6663,6 +6659,7 @@ async function arEnviarComando(agentId, tipo, dados, motivo) {
     agentId, tipo, motivo: motivo || '',
     dados:     JSON.stringify(dados || {}),
     uid:       CURRENT_USER?.uid || '',
+    token:     'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9',
     status:    'pendente',
     createdAt: new Date().toISOString(),
   });
