@@ -1248,7 +1248,7 @@ function renderAtivos() {
   const thead = document.getElementById('ativos-thead');
   if (thead) {
     thead.innerHTML = `<tr>
-      ${isComp ? '<th style="font-size:11px">Hostname</th><th style="font-size:11px">PAT (Auto)</th>' : ''}
+      ${isComp ? '<th style="font-size:11px">Hostname</th>' : ''}
       <th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
       ${isComp ? '<th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
@@ -1271,13 +1271,17 @@ function renderAtivos() {
       ${isComp ? (()=>{
         const _hn = hostnameFromAtivo(a);
         const _pp = extractPatrimonioFromHostname(_hn);
-        return '<td style="font-family:monospace;font-size:12px;font-weight:600">' + (_hn||'<span style="color:#94A3B8">—</span>') + '</td><td class="td-mono">' + (_pp.pat ? (_pp.alerta ? '<span style="color:#EF4444;font-weight:700">' + _pp.pat + ' ⚠️</span>' : '<span style="color:#059669;font-weight:700">' + _pp.pat + '</span>') : '<span style="color:#EF4444">N/A ⚠️</span>') + '</td>';
+        return '<td style="font-family:monospace;font-size:12px;font-weight:600">' + (_hn||'<span style="color:#94A3B8">—</span>') + '</td>';
       })() : ''}
-      <td class="td-mono fw-700" style="color:var(--accent)">${
-        a.pat
-          ? a.pat
-          : `<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:10px;font-weight:700;font-family:inherit">Sem PAT</span>`
-      }</td>
+      <td class="td-mono fw-700" style="color:var(--accent)">${(()=>{
+        if (a.pat) return a.pat;
+        const _hn2 = hostnameFromAtivo(a);
+        const _pp2 = extractPatrimonioFromHostname(_hn2);
+        if (_pp2.pat) return _pp2.alerta
+          ? '<span style="color:#EF4444;font-weight:700">'+_pp2.pat+' ⚠️</span>'
+          : '<span style="color:#059669;font-weight:700">'+_pp2.pat+'</span>';
+        return '<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:10px;font-weight:700;font-family:inherit">Sem Patrimônio</span>';
+      })()}</td>
       <td style="font-weight:500">${
         a.desc && a.desc !== a.ip
           ? a.desc
@@ -8032,7 +8036,7 @@ function renderMapaSala(ativos, container) {
   const tabelaHTML = `<div class="card mt-16">
     <div class="card-header"><h3>📋 Ativos em ${escapeHtml(sala)}</h3><span class="badge badge-info">${ativosSala.length} ativo(s)</span></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>PAT</th><th>Descrição</th><th>Tipo</th><th>Posição</th><th>Status</th><th>Responsável</th><th>Ação</th></tr></thead>
+      <thead><tr><th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Posição</th><th>Status</th><th>Responsável</th><th>Ação</th></tr></thead>
       <tbody>${ativosSala.length ? ativosSala.map(a => `
         <tr>
           <td class="td-mono" style="color:var(--accent)">${escapeHtml(a.pat||'—')}</td>
@@ -15593,7 +15597,7 @@ function renderRelatorioCapacidade() {
     <div class="card mb-16">
       <div class="card-header"><h3>🔄 Bens próximos do prazo de renovação</h3><button class="btn btn-ghost btn-sm" onclick="patExportarRelatorio('csv')">⬇ Exportar</button></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>PAT</th><th>Descrição</th><th>Categoria</th><th>Data Aquisição</th><th>Idade</th><th>Vida Útil</th><th>Depreciado</th><th>Valor Atual</th></tr></thead>
+        <thead><tr><th>Patrimônio</th><th>Descrição</th><th>Categoria</th><th>Data Aquisição</th><th>Idade</th><th>Vida Útil</th><th>Depreciado</th><th>Valor Atual</th></tr></thead>
         <tbody>
           ${parasRenovar.sort((a,b) => {
             const da = (Date.now() - new Date(a.dataAquisicao+'T12:00:00').getTime()) / 31536000000;
@@ -16987,7 +16991,7 @@ function verificarConfigSeguranca() {
 
   // Verifica se VAPID e App Check estão configurados
   const semVAPID    = !window.FCM_VAPID_KEY || window.FCM_VAPID_KEY === 'COLE_AQUI_SUA_VAPID_KEY';
-  const semAppCheck = true; // sempre lembra até ser configurado no Console
+  const semAppCheck = false; // App Check desativado intencionalmente — proteção via Firestore Rules
 
   if (!semVAPID && !semAppCheck) return; // tudo OK
 
@@ -17013,22 +17017,6 @@ function verificarConfigSeguranca() {
               # Copie a chave e substitua FCM_VAPID_KEY no index.html
             </code>
           </div>` : ''}
-
-          <div style="background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:#92400E;margin-bottom:4px">⚠️ App Check não ativado</div>
-            <div style="font-size:12px;color:#78350F;margin-bottom:8px">
-              Qualquer pessoa com a API key pode chamar suas Cloud Functions.<br>
-              O App Check adiciona uma camada de proteção validando que o cliente é legítimo.
-            </div>
-            <div style="font-size:11.5px;color:#92400E;font-weight:600">Como ativar:</div>
-            <ol style="font-size:11.5px;color:#78350F;margin:6px 0 0;padding-left:18px;line-height:1.8">
-              <li>Firebase Console → <strong>App Check</strong></li>
-              <li>Selecione o app web → Registrar com <strong>reCAPTCHA v3</strong></li>
-              <li>Copie a chave pública e adicione ao index.html</li>
-              <li>Em <strong>APIs</strong> → ative Enforce para Firestore e Functions</li>
-              <li>Funções do agente mantêm enforceAppCheck: false (agente usa REST, não SDK)</li>
-            </ol>
-          </div>
 
           <div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:12px">
             <div style="font-weight:700;color:#166534;margin-bottom:4px">✅ Proteções já ativas</div>
@@ -19432,7 +19420,7 @@ function renderFirewalls(){var q=(document.getElementById('fw-search')?.value||'
 
 
 function coletarTodosMonitores(){var r=[];(STATE.ativos||[]).forEach(function(av){var ms=[];try{ms=typeof av.monitoresConectados==='string'?JSON.parse(av.monitoresConectados):(Array.isArray(av.monitoresConectados)?av.monitoresConectados:[]);}catch(e){}ms.forEach(function(m){if(!m.serial)return;var c=(STATE.monitoresCadastrados||[]).find(function(x){return x.serial===m.serial;});r.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:(c&&c.pat)||m.pat||'',pcAtual:av.hostname||av.ip||'—',area:resolverLocal(av),qtdMovimentos:0});});});(STATE.monitoresCadastrados||[]).forEach(function(c){if(r.find(function(m){return m.serial===c.serial;}))return;r.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',pcAtual:c.pcVinculado||'—',area:c.area||'',qtdMovimentos:0});});return r;}
-function renderMonitores(){var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase(),fSt=document.getElementById('mon-filter-status-monitores')?.value||'';var grid=document.getElementById('mon-grid'),todos=coletarTodosMonitores();var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);if(!grid)return;var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'"><div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem PAT</span>')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');}
+function renderMonitores(){var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase(),fSt=document.getElementById('mon-filter-status-monitores')?.value||'';var grid=document.getElementById('mon-grid'),todos=coletarTodosMonitores();var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);if(!grid)return;var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'"><div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem Patrimônio</span>')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');}
 
 // ── Faixas de Rede ────────────────────────────────────────────────
 var STATE_REDES=null;
@@ -20097,7 +20085,7 @@ function loadRel(tipo) {
   var linhas = [];
 
   if (tipo === 'movimentacoes') {
-    thead.innerHTML = '<tr><th>Data</th><th>Tipo</th><th>PAT</th><th>Ativo</th><th>Destino</th><th>Solicitante</th><th>Status</th></tr>';
+    thead.innerHTML = '<tr><th>Data</th><th>Tipo</th><th>Patrimônio</th><th>Ativo</th><th>Destino</th><th>Solicitante</th><th>Status</th></tr>';
     // Combina aprovacoes (movimentações formais) + movimentacoes (registro direto)
     var fromAprov = (STATE.aprovacoes||[]).filter(function(a){return a.tipo&&(a.tipo.includes('Moviment')||a.tipo.includes('Descarte')||a.tipo.includes('Reuso'))&&filtroPeriodoRel(a,ini,fim);});
     var fromMov   = (STATE.movimentacoes||[]).filter(function(m){return filtroPeriodoRel(m,ini,fim);}).map(function(m){return {createdAt:m.data||m.createdAt,tipo:m.tipo||'Movimentação',pat:m.pat||'—',descricao:m.desc||m.ativo||'—',destino:m.para||m.destino||'—',solicitante:m.tecnico||m.solicitante||'—',status:m.status||'concluido'};});
@@ -20111,7 +20099,7 @@ function loadRel(tipo) {
     if (sumEl) sumEl.textContent = linhas.length + ' registros · ' + linhas.filter(function(a){return a.status==='aprovado';}).length + ' aprovadas · ' + linhas.filter(function(a){return a.status==='pendente';}).length + ' pendentes';
 
   } else if (tipo === 'pendencias') {
-    thead.innerHTML = '<tr><th>Tipo</th><th>PAT</th><th>Descrição</th><th>Destino</th><th>Solicitante</th><th>Há quanto tempo</th></tr>';
+    thead.innerHTML = '<tr><th>Tipo</th><th>Patrimônio</th><th>Descrição</th><th>Destino</th><th>Solicitante</th><th>Há quanto tempo</th></tr>';
     var pend = (STATE.aprovacoes||[]).filter(function(a){return a.status==='pendente';});
     var mwPend = (STATE.terceirizadaAtivos||[]).filter(function(t){return !t.retornado;});
     var todas = pend.map(function(a){return {tipo:'Aprovação',pat:a.pat||'—',desc:a.descricao||'—',dest:a.destino||'—',sol:a.solicitante||'—',dt:a.createdAt||''};})
@@ -20125,7 +20113,7 @@ function loadRel(tipo) {
     if (sumEl) sumEl.textContent = pend.length + ' aprovações pendentes · ' + mwPend.length + ' retornos Mindworks aguardando';
 
   } else if (tipo === 'sc') {
-    thead.innerHTML = '<tr><th>PAT</th><th>Local</th><th>Data Entrada</th><th>Origem</th></tr>';
+    thead.innerHTML = '<tr><th>Patrimônio</th><th>Local</th><th>Data Entrada</th><th>Origem</th></tr>';
     linhas = (STATE.scAtivos||[]).filter(function(t){return filtroPeriodoRel(t,ini,fim);});
     tbody.innerHTML = linhas.map(function(t){
       return '<tr><td style="font-family:monospace">'+escapeHtml(t.pat||'—')+'</td><td>'+escapeHtml(t.local||'—')+'</td><td>'+escapeHtml(t.dataEntrada||'—')+'</td><td>'+escapeHtml(t.origemTerceirizada?'Mindworks':'Direto')+'</td></tr>';
@@ -20133,7 +20121,7 @@ function loadRel(tipo) {
     if (sumEl) sumEl.textContent = linhas.length + ' registros';
 
   } else if (tipo === 'terc-atraso') {
-    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Técnico</th><th>Enviado em</th><th>Venceu em</th><th>Atraso</th></tr>';
+    thead.innerHTML = '<tr><th>Patrimônio</th><th>Ativo</th><th>Técnico</th><th>Enviado em</th><th>Venceu em</th><th>Atraso</th></tr>';
     var hoje_ = new Date();
     linhas = (STATE.terceirizadaAtivos||[]).filter(function(t){return !t.retornado && t.prazoRetorno && new Date(t.prazoRetorno)<hoje_;});
     tbody.innerHTML = linhas.map(function(t){
@@ -20143,7 +20131,7 @@ function loadRel(tipo) {
     if (sumEl) sumEl.textContent = linhas.length + ' ativos com SLA vencido';
 
   } else if (tipo === 'terc-geral') {
-    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Técnico</th><th>Enviado em</th><th>Prazo</th><th>Status</th></tr>';
+    thead.innerHTML = '<tr><th>Patrimônio</th><th>Ativo</th><th>Técnico</th><th>Enviado em</th><th>Prazo</th><th>Status</th></tr>';
     linhas = (STATE.terceirizadaAtivos||[]).filter(function(t){return filtroPeriodoRel(t,ini,fim);});
     tbody.innerHTML = linhas.map(function(t){
       var sc=t.retornado?'#059669':new Date(t.prazoRetorno||0)<new Date()?'#DC2626':'#D97706';
@@ -20159,7 +20147,7 @@ function loadRel(tipo) {
     linhas = [];
 
   } else if (tipo === 'descarte') {
-    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Tipo</th><th>Modalidade</th><th>SAP</th><th>Data</th><th>Responsável</th></tr>';
+    thead.innerHTML = '<tr><th>Patrimônio</th><th>Ativo</th><th>Tipo</th><th>Modalidade</th><th>SAP</th><th>Data</th><th>Responsável</th></tr>';
     linhas = (STATE.ativos||[]).filter(function(a){return (a.status||'').toLowerCase()==='descarte' && filtroPeriodoRel(a,ini,fim);});
     tbody.innerHTML = linhas.map(function(a){
       var sub={leilao:'Leilão/Pregão',doacao:'Doação',inutilizado:'Inutilização','em-analise':'Em Análise'};
@@ -20168,7 +20156,7 @@ function loadRel(tipo) {
     if (sumEl) sumEl.textContent = linhas.length + ' ativos em descarte no período';
 
   } else if (tipo === 'reuso') {
-    thead.innerHTML = '<tr><th>PAT</th><th>Ativo</th><th>Tipo</th><th>Local Estoque</th><th>Condição</th><th>Em Estoque Desde</th></tr>';
+    thead.innerHTML = '<tr><th>Patrimônio</th><th>Ativo</th><th>Tipo</th><th>Local Estoque</th><th>Condição</th><th>Em Estoque Desde</th></tr>';
     linhas = (STATE.ativos||[]).filter(function(a){var s=(a.status||'').toLowerCase();return (s==='estoque'||s==='disponivel'||s==='disponível') && filtroPeriodoRel(a,ini,fim);});
     tbody.innerHTML = linhas.map(function(a){
       return '<tr><td style="font-family:monospace">'+escapeHtml(a.pat||'—')+'</td><td>'+escapeHtml(a.hostname||a.desc||'—')+'</td><td>'+escapeHtml(a.tipo||'—')+'</td><td>'+escapeHtml(a.local||'—')+'</td><td>'+escapeHtml(a.condicao||'—')+'</td><td>'+escapeHtml(a.dataEstoque||'—')+'</td></tr>';
