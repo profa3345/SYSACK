@@ -12157,9 +12157,9 @@ function verificarSLAs() {
     if (!sla) return;
     // Notifica no console/banner quando sobe de nível
     const chaveNivel = 'sla_nivel_' + ch.id;
-    const nivelAnterior = parseInt(sessionStorage.getItem(chaveNivel)||'0');
+    const nivelAnterior = parseInt(localStorage.getItem(chaveNivel)||'0');
     if (sla.nivel > nivelAnterior) {
-      sessionStorage.setItem(chaveNivel, sla.nivel.toString());
+      localStorage.setItem(chaveNivel, sla.nivel.toString());
       if (sla.nivel >= 2) {
         showToast(`🚨 SLA ${SLA_LABELS[sla.prioridade]}: Chamado ${ch.id} escalado para ${sla.escalonamento}`, 'danger', 8000);
         alertas++;
