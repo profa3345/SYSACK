@@ -381,6 +381,11 @@ async function reportar() {
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
     log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user}`);
+    // Atualiza ativo correspondente com hostname (roda apenas uma vez por sessão)
+    if (!global._ativoAtualizado) {
+      global._ativoAtualizado = true;
+      atualizarAtivoComHostname(dados);
+    }
   } catch(e) {
     log(`[ERRO] ${e.message}`);
   }
@@ -527,6 +532,222 @@ function handleRemoteCommand(msg, socket) {
 }
 
 iniciarServidorRemoto();
+
+
+// ── Relay Firestore — escuta comandos do técnico ──────────────────
+async function firestoreQuery(collectionPath, filters) {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
+  const body = JSON.stringify({
+    structuredQuery: {
+      from: [{ collectionId: collectionPath }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: filters.map(([field, op, value]) => ({
+            fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: value } }
+          }))
+        }
+      },
+      limit: 10
+    }
+  });
+  const urlObj = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => resolve(JSON.parse(raw)));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function firestorePatch(docPath, data) {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${docPath}`;
+  const fields = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (typeof v === 'string') fields[k] = { stringValue: v };
+    else if (typeof v === 'number') fields[k] = { doubleValue: v };
+    else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
+  }
+  const body = JSON.stringify({ fields });
+  const urlObj = new URL(url + '?' + Object.keys(data).map(k => 'updateMask.fieldPaths=' + k).join('&'));
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'PATCH',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => resolve(raw));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function executarComando(doc) {
+  const fields = doc.document?.fields || {};
+  const getId = f => f?.stringValue || '';
+  const id       = doc.document?.name?.split('/').pop();
+  const tipo     = getId(fields.tipo);
+  const dados    = (() => { try { return JSON.parse(getId(fields.dados) || '{}'); } catch { return {}; } })();
+  const agentId  = getId(fields.agentId);
+
+  if (agentId !== AGENT_ID) return;
+
+  // Verifica token de segurança
+  const tokenRecebido = getId(fields.token);
+  if (tokenRecebido !== 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9') {
+    log('[Relay] SEGURANÇA: comando rejeitado — token inválido');
+    await firestorePatch('agent_commands/' + id, { status: 'rejeitado' }).catch(() => {});
+    return;
+  }
+
+  log('[Relay] Comando recebido: ' + tipo);
+
+  // Marca como processando
+  await firestorePatch('agent_commands/' + id, { status: 'executando' }).catch(() => {});
+
+  let resultado = '';
+  try {
+    if (tipo === 'iniciar_acesso_remoto' || tipo === 'usar_firebase_relay') {
+      resultado = JSON.stringify({ ok: true, porta: 9000, hostname: AGENT_ID });
+
+    } else if (tipo === 'powershell') {
+      const cmd = dados.cmd || '';
+      const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + cmd.replace(/"/g, '\\"') + '"',
+        { timeout: 15000, windowsHide: true }).toString();
+      resultado = out;
+
+    } else if (tipo === 'screenshot') {
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms,System.Drawing',
+        '$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds',
+        '$b=New-Object System.Drawing.Bitmap($s.Width,$s.Height)',
+        '$g=[System.Drawing.Graphics]::FromImage($b)',
+        '$g.CopyFromScreen($s.Location,[System.Drawing.Point]::Empty,$s.Size)',
+        '$ms=New-Object System.IO.MemoryStream',
+        '$b.Save($ms,[System.Drawing.Imaging.ImageFormat]::Jpeg)',
+        '[Convert]::ToBase64String($ms.ToArray())',
+      ].join(';');
+      const psFile = path.join(__dirname, '_sc.ps1');
+      fs.writeFileSync(psFile, ps);
+      resultado = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
+        { timeout: 20000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).toString().trim();
+      try { fs.unlinkSync(psFile); } catch(e) {}
+
+    } else if (tipo === 'encerrar_acesso_remoto') {
+      resultado = 'ok';
+    } else {
+      resultado = 'tipo desconhecido: ' + tipo;
+    }
+  } catch(e) {
+    resultado = '[ERRO] ' + e.message;
+  }
+
+  // Grava resultado de volta
+  const sessaoId = dados.sessaoId || '';
+  if (sessaoId) {
+    await firestorePatch('sessoes_remotas/' + sessaoId + '/relay/resposta', {
+      resultado, tipo, ts: new Date().toISOString(), agentId: AGENT_ID
+    }).catch(() => {});
+  }
+  await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: resultado.slice(0, 500) }).catch(() => {});
+}
+
+// Poll de comandos a cada 3 segundos
+async function pollComandos() {
+  try {
+    const docs = await firestoreQuery('agent_commands', [
+      ['agentId', 'EQUAL', AGENT_ID],
+      ['status', 'EQUAL', 'pendente']
+    ]);
+    if (Array.isArray(docs)) {
+      for (const doc of docs) {
+        if (doc.document) await executarComando(doc);
+      }
+    }
+  } catch(e) {}
+}
+
+setInterval(pollComandos, 3000);
+
+
+// ── Atualiza ativo correspondente com hostname ────────────────────
+async function atualizarAtivoComHostname(dados) {
+  try {
+    const ip = dados.ip;
+    if (!ip) return;
+
+    // Busca ativo pelo IP no Firestore
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
+    const body = JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'ativos' }],
+        where: {
+          compositeFilter: {
+            op: 'AND',
+            filters: [
+              { fieldFilter: { field: { fieldPath: 'ip' }, op: 'EQUAL', value: { stringValue: ip } } }
+            ]
+          }
+        },
+        limit: 1
+      }
+    });
+
+    const urlObj = new URL(url);
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path: urlObj.pathname,
+        method: 'POST',
+        rejectUnauthorized: false,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+      }, res => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => resolve(JSON.parse(raw)));
+      });
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+
+    if (!Array.isArray(result) || !result[0]?.document) return;
+
+    const doc = result[0].document;
+    const docId = doc.name.split('/').pop();
+    const ativoHostname = doc.fields?.hostname?.stringValue || '';
+
+    // Só atualiza se o hostname estiver vazio ou diferente
+    if (ativoHostname === AGENT_ID) return;
+
+    await firestorePatch(`ativos/${docId}`, {
+      hostname:     AGENT_ID,
+      ip:           ip,
+      status:       'em-uso',
+      ultimoAgente: new Date().toISOString(),
+    });
+
+    log(`[OK] Ativo ${docId} atualizado com hostname: ${AGENT_ID}`);
+  } catch(e) {
+    // Silencioso — não crítico
+  }
+}
 
 reportar(); // Primeira execução imediata
 setInterval(reportar, INTERVAL);
