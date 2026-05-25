@@ -18216,18 +18216,29 @@ function patMetricasHtml(ativo) {
     return b+'B';
   }
 
-  return `<td style="padding:4px 8px;min-width:160px">
+  const uptime   = ag?.uptimeH != null ? Math.round(ag.uptimeH) + 'h' : null;
+  const usuario  = ag?.usuarioLogado || null;
+  const osNome   = ag?.osNome ? (ag.osNome).replace('Microsoft Windows ','Win ') : null;
+  const monitor  = Array.isArray(ag?.monitores) && ag.monitores.length
+    ? ag.monitores.map(m => (m.nome||m.caption||'Monitor') + (m.serial?' #'+m.serial:'')).join(', ')
+    : null;
+  const lastSeen = ag?.lastSeen ? fmtRelative(new Date(ag.lastSeen?.seconds ? ag.lastSeen.seconds*1000 : ag.lastSeen)) : null;
+
+  return `<td style="padding:4px 8px;min-width:200px">
     <div style="background:${online?'#F0FDF4':'var(--g50,#f8fafc)'};border:1px solid ${online?'#BBF7D0':'var(--g200,#e2e8f0)'};border-radius:8px;padding:6px 8px;font-size:10.5px">
       <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:10px">
         <span style="font-weight:700;color:${online?'#059669':'var(--g400,#94a3b8)'}">${online?'🟢 Online':'⚫ Offline'}</span>
-        ${tipo?`<span style="color:var(--g400,#94a3b8)">${escapeHtml(tipo)}</span>`:''}
+        ${lastSeen?`<span style="color:var(--g400,#94a3b8)">${escapeHtml(lastSeen)}</span>`:''}
       </div>
       <div style="display:grid;grid-template-columns:30px 1fr;gap:2px 6px;align-items:center">
         <span style="color:var(--g400,#94a3b8)">CPU</span>${bar(cpuPct,'#3B82F6')}
         <span style="color:var(--g400,#94a3b8)">MEM</span>${bar(memPct,'#8B5CF6')}
         <span style="color:var(--g400,#94a3b8)">DSK</span>${bar(diskPct,'#10B981')}
       </div>
-      ${ag?.usuarioLogado ? `<div style="margin-top:4px;font-size:9.5px;color:var(--g500,#64748b)">👤 ${escapeHtml(ag.usuarioLogado)}</div>` : ''}
+      ${usuario  ? `<div style="margin-top:3px;font-size:9.5px;color:var(--g600)">👤 ${escapeHtml(usuario)}</div>` : ''}
+      ${uptime   ? `<div style="font-size:9.5px;color:var(--g400)">⏱ Uptime: ${uptime}</div>` : ''}
+      ${osNome   ? `<div style="font-size:9.5px;color:var(--g400)">💻 ${escapeHtml(osNome)}</div>` : ''}
+      ${monitor  ? `<div style="font-size:9.5px;color:var(--g400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(monitor)}">🖥️ ${escapeHtml(monitor)}</div>` : ''}
     </div>
   </td>`;
 }
