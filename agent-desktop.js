@@ -118,12 +118,18 @@ function firestoreSet(docPath, data) {
     function toFirestore(val) {
       if (val === null || val === undefined) return { nullValue: null };
       if (typeof val === 'boolean')  return { booleanValue: val };
-      if (typeof val === 'number')   return { doubleValue: val };
+      if (typeof val === 'number' && isFinite(val)) return { doubleValue: val };
+      if (typeof val === 'number')   return { doubleValue: 0 }; // NaN/Infinity
       if (typeof val === 'string')   return { stringValue: val };
-      if (Array.isArray(val))        return { arrayValue: { values: val.map(toFirestore) } };
+      if (Array.isArray(val)) {
+        const values = val.map(toFirestore).filter(v => v !== null);
+        return { arrayValue: values.length ? { values } : {} };
+      }
       if (typeof val === 'object') {
         const fields = {};
-        for (const [k, v] of Object.entries(val)) fields[k] = toFirestore(v);
+        for (const [k, v] of Object.entries(val)) {
+          if (v !== undefined) fields[k] = toFirestore(v);
+        }
         return { mapValue: { fields } };
       }
       return { stringValue: String(val) };
@@ -139,6 +145,7 @@ function firestoreSet(docPath, data) {
       hostname: urlObj.hostname,
       path:     urlObj.pathname + urlObj.search,
       method:   'PATCH',
+      rejectUnauthorized: false, // aceita proxy CESAN com certificado autoassinado
       headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
     }, res => {
       let raw = '';
