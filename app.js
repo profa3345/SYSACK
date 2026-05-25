@@ -5610,6 +5610,7 @@ function startAgentsListener() {
           if (data.memPct  != null) data.memPct  = Number(data.memPct);
           return { id: d.id, ...data };
         });
+        verificarTrocaMonitores(STATE_AGENTS.list);
         if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
         nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
       }, err => {
@@ -5632,6 +5633,41 @@ async function arPollAgentes() {
     if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
     nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
   } catch(e) { console.warn('[Agentes] poll erro:', e.message); }
+}
+
+
+// ── Detecção de troca de monitor ─────────────────────────────────
+function verificarTrocaMonitores(agentes) {
+  if (!agentes || !agentes.length) return;
+  const CHAVE = 'monitor_maquina_'; // localStorage: monitor_maquina_{serial} = hostname
+
+  agentes.forEach(ag => {
+    const monitores = ag.monitores;
+    if (!Array.isArray(monitores) || !monitores.length) return;
+
+    monitores.forEach(mon => {
+      const id = mon.serial || mon.nome || mon.caption;
+      if (!id || id.length < 3) return; // ignora sem identificador
+      const chave = CHAVE + id.replace(/[^a-zA-Z0-9]/g,'_');
+      const maquinaAnterior = localStorage.getItem(chave);
+
+      if (maquinaAnterior && maquinaAnterior !== ag.hostname) {
+        // Monitor mudou de máquina!
+        const nomeMonitor = mon.nome || mon.caption || id;
+        showToast(
+          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${ag.hostname}`,
+          'warning', 10000
+        );
+        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${ag.hostname}`);
+        // Registra no audit log
+        auditLog('monitor_movido', 'assistencia-remota', id, 'monitor', {
+          monitor: nomeMonitor, de: maquinaAnterior, para: ag.hostname
+        });
+      }
+      // Atualiza registro
+      localStorage.setItem(chave, ag.hostname);
+    });
+  });
 }
 
 function renderAssistenciaRemota() {

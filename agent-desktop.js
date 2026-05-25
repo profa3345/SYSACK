@@ -87,27 +87,25 @@ function getDiskInfo() {
 function getLoggedUser() {
   try {
     if (process.platform === 'win32') {
-      // query session mostra usuários com sessão interativa ativa
-      const out = execSync('query session', { timeout: 5000 }).toString();
-      const lines = out.split('\n');
-      for (const line of lines) {
-        // Linha com "console" ou "rdp" e "Active" = usuário logado na tela
-        if ((line.toLowerCase().includes('console') || line.toLowerCase().includes('rdp')) 
-            && line.toLowerCase().includes('active')) {
-          // formato: " >nome_usuario  console  1  Active  ..."
-          const parts = line.trim().replace(/^>/, '').trim().split(/\s+/);
-          const user = parts[0];
-          if (user && user !== 'services' && user !== 'sistema') return user;
+      // WMIC é mais confiável rodando como SYSTEM
+      try {
+        const out = execSync('wmic computersystem get username /format:value', { timeout: 5000, windowsHide: true }).toString();
+        const match = out.match(/UserName=(.+)/i);
+        if (match && match[1].trim()) {
+          const full = match[1].trim();
+          return full.includes('\\') ? full.split('\\').pop() : full;
         }
-      }
-      // fallback: qualquer linha Active
-      for (const line of lines) {
-        if (line.toLowerCase().includes('active')) {
-          const parts = line.trim().replace(/^>/, '').trim().split(/\s+/);
-          const user = parts[0];
-          if (user && !['services','sistema','system'].includes(user.toLowerCase())) return user;
+      } catch(e2) {}
+      // fallback: query session
+      try {
+        const out = execSync('query session', { timeout: 5000, windowsHide: true }).toString();
+        for (const line of out.split('\n')) {
+          if (line.toLowerCase().includes('active')) {
+            const user = line.trim().replace(/^>/, '').trim().split(/\s+/)[0];
+            if (user && !['services','sistema','system','services#'].includes(user.toLowerCase())) return user;
+          }
         }
-      }
+      } catch(e3) {}
       return '';
     }
     return os.userInfo().username;
@@ -127,6 +125,61 @@ function getOsInfo() {
 function getUptime() {
   return Math.round(os.uptime()); // segundos numérico — uptimeH calculado no payload
 }
+
+// ── Monitores conectados ──────────────────────────────────────────
+function getMonitores() {
+  try {
+    if (process.platform !== 'win32') return [];
+    // WMI: captura monitores plug-and-play com número de série
+    const out = execSync(
+      'wmic path Win32_DesktopMonitor get Caption,MonitorManufacturer,MonitorType,ScreenHeight,ScreenWidth /format:csv',
+      { timeout: 8000, windowsHide: true }
+    ).toString();
+    const monitores = [];
+    const lines = out.split('\n').filter(l => l.trim() && !l.startsWith('Node'));
+    for (const line of lines) {
+      const parts = line.split(',');
+      if (parts.length < 5) continue;
+      const caption = (parts[1]||'').trim();
+      const fab     = (parts[2]||'').trim();
+      const tipo    = (parts[3]||'').trim();
+      const h       = parseInt(parts[4]||'0');
+      const w       = parseInt(parts[5]||'0');
+      if (!caption && !fab) continue;
+      monitores.push({ caption, fabricante: fab, tipo, resolucao: w && h ? `${w}x${h}` : '' });
+    }
+
+    // Tenta pegar número de série via WMI (requer permissão)
+    try {
+      const out2 = execSync(
+        'wmic path WmiMonitorID get SerialNumberID,UserFriendlyName,ManufacturerName /format:csv',
+        { timeout: 8000, windowsHide: true }
+      ).toString();
+      const lines2 = out2.split('\n').filter(l => l.trim() && !l.startsWith('Node'));
+      lines2.forEach((line, i) => {
+        const parts = line.split(',');
+        if (parts.length < 4) return;
+        // SerialNumberID e UserFriendlyName vêm como arrays de bytes decimais
+        const toStr = arr => arr.split(';').map(n=>parseInt(n)).filter(n=>n>0).map(n=>String.fromCharCode(n)).join('').trim();
+        const serial = toStr(parts[1]||'');
+        const nome   = toStr(parts[2]||'');
+        const fab2   = toStr(parts[3]||'');
+        if (monitores[i]) {
+          if (serial) monitores[i].serial = serial;
+          if (nome)   monitores[i].nome   = nome;
+          if (fab2)   monitores[i].fabricante = fab2;
+        } else {
+          monitores.push({ serial, nome, fabricante: fab2 });
+        }
+      });
+    } catch(e2) {}
+
+    return monitores.filter(m => m.caption || m.nome || m.serial);
+  } catch(e) {
+    return [];
+  }
+}
+
 
 // ── Firebase REST API ─────────────────────────────────────────────
 function firestoreSet(docPath, data) {
@@ -212,6 +265,7 @@ async function reportar() {
       usuarioLogado:     user,
       uptime:            uptimeSec,
       uptimeH:           Math.floor(uptimeSec / 3600),
+      monitores:         getMonitores(),
       versaoAgente:      '2.0.0',
       ultimaAtualizacao: now,
       lastSeen:          now,
