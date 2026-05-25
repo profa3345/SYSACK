@@ -5600,9 +5600,16 @@ function startAgentsListener() {
   try {
     // Usa SDK compat (igual ao resto do app)
     STATE_AGENTS.listener = db.collection('agents')
-      .orderBy('lastSeen', 'desc')
       .onSnapshot(snap => {
-        STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        STATE_AGENTS.list = snap.docs.map(d => {
+          const data = d.data();
+          // Garante que campos numéricos não virem string
+          if (data.uptimeH != null) data.uptimeH = Number(data.uptimeH);
+          if (data.cpuPct  != null) data.cpuPct  = Number(data.cpuPct);
+          if (data.ramPct  != null) data.ramPct  = Number(data.ramPct);
+          if (data.memPct  != null) data.memPct  = Number(data.memPct);
+          return { id: d.id, ...data };
+        });
         if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
         nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
       }, err => {

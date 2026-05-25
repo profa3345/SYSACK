@@ -11,6 +11,10 @@ const fs      = require('fs');
 const path    = require('path');
 const https   = require('https');
 const { execSync, exec } = require('child_process');
+// Força encoding UTF-8 no Windows
+if (process.platform === 'win32') {
+  try { execSync('chcp 65001', { stdio: 'ignore' }); } catch(e) {}
+}
 
 // ── Configuração ──────────────────────────────────────────────────
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -28,7 +32,7 @@ function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
   try {
-    fs.appendFileSync(LOG_FILE, line + '\n');
+    fs.appendFileSync(LOG_FILE, line + '\n', 'utf8');
     // Mantém log com máximo 1MB
     const stat = fs.statSync(LOG_FILE);
     if (stat.size > 1_000_000) {
@@ -83,17 +87,31 @@ function getDiskInfo() {
 function getLoggedUser() {
   try {
     if (process.platform === 'win32') {
-      // whoami é mais confiável que query session
-      const whoami = execSync('whoami', { timeout: 3000 }).toString().trim();
-      // retorna só o usuário sem o domínio (DOMINIO\usuario -> usuario)
-      return whoami.includes('\\') ? whoami.split('\\').pop() : whoami;
+      // query session mostra usuários com sessão interativa ativa
+      const out = execSync('query session', { timeout: 5000 }).toString();
+      const lines = out.split('\n');
+      for (const line of lines) {
+        // Linha com "console" ou "rdp" e "Active" = usuário logado na tela
+        if ((line.toLowerCase().includes('console') || line.toLowerCase().includes('rdp')) 
+            && line.toLowerCase().includes('active')) {
+          // formato: " >nome_usuario  console  1  Active  ..."
+          const parts = line.trim().replace(/^>/, '').trim().split(/\s+/);
+          const user = parts[0];
+          if (user && user !== 'services' && user !== 'sistema') return user;
+        }
+      }
+      // fallback: qualquer linha Active
+      for (const line of lines) {
+        if (line.toLowerCase().includes('active')) {
+          const parts = line.trim().replace(/^>/, '').trim().split(/\s+/);
+          const user = parts[0];
+          if (user && !['services','sistema','system'].includes(user.toLowerCase())) return user;
+        }
+      }
+      return '';
     }
     return os.userInfo().username;
-  } catch(e) {
-    try {
-      return process.env.USERNAME || process.env.USER || '';
-    } catch { return ''; }
-  }
+  } catch(e) { return ''; }
 }
 
 function getOsInfo() {
@@ -202,14 +220,14 @@ async function reportar() {
     };
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
-    log(`[OK] Dados enviados — CPU: ${cpu}% | RAM: ${mem.pct}% | Usuário: ${user}`);
+    log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user}`);
   } catch(e) {
     log(`[ERRO] ${e.message}`);
   }
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop] Iniciando — hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
