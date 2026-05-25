@@ -195,6 +195,68 @@ function getMonitores() {
 }
 
 
+
+// ── Informações de hardware ───────────────────────────────────────
+function getHardwareInfo() {
+  const info = { fabricante: '', modelo: '', serial: '', cpu: '', nucleos: 0, build: '' };
+  if (process.platform !== 'win32') return info;
+  try {
+    const psScript = [
+      '$cs  = Get-WmiObject Win32_ComputerSystem',
+      '$bios = Get-WmiObject Win32_BIOS',
+      '$cpu  = Get-WmiObject Win32_Processor | Select-Object -First 1',
+      '$os   = Get-WmiObject Win32_OperatingSystem',
+      'Write-Output ("FAB="   + $cs.Manufacturer)',
+      'Write-Output ("MOD="   + $cs.Model)',
+      'Write-Output ("SER="   + $bios.SerialNumber)',
+      'Write-Output ("CPU="   + $cpu.Name)',
+      'Write-Output ("NUC="   + $cpu.NumberOfLogicalProcessors)',
+      'Write-Output ("BUILD=" + $os.BuildNumber)',
+    ].join('\n');
+    const psFile = path.join(__dirname, '_hw.ps1');
+    fs.writeFileSync(psFile, psScript, 'utf8');
+    const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
+      { timeout: 10000, windowsHide: true }).toString();
+    try { fs.unlinkSync(psFile); } catch(e) {}
+    const get = key => (out.match(new RegExp(key + '=([^\r\n]*)')) || [])[1]?.trim() || '';
+    info.fabricante = get('FAB');
+    info.modelo     = get('MOD');
+    info.serial     = get('SER');
+    info.cpu        = get('CPU');
+    info.nucleos    = parseInt(get('NUC')) || 0;
+    info.build      = get('BUILD');
+  } catch(e) {}
+  return info;
+}
+
+function getSegurancaInfo() {
+  const info = { antivirus: '', bitlocker: '', firewall: '', patches: 0 };
+  if (process.platform !== 'win32') return info;
+  try {
+    const psScript = [
+      // Antivirus
+      'try { $av = Get-WmiObject -Namespace root\\SecurityCenter2 -Class AntiVirusProduct -EA SilentlyContinue | Select-Object -First 1; Write-Output ("AV=" + $av.displayName) } catch { Write-Output "AV=" }',
+      // BitLocker
+      'try { $bl = Get-BitLockerVolume -MountPoint C: -EA SilentlyContinue; Write-Output ("BL=" + $bl.ProtectionStatus) } catch { Write-Output "BL=" }',
+      // Firewall
+      'try { $fw = Get-NetFirewallProfile -EA SilentlyContinue | Where-Object {$_.Enabled -eq $true} | Select-Object -First 1; Write-Output ("FW=" + $fw.Name) } catch { Write-Output "FW=" }',
+      // Patches (últimos 30 dias)
+      'try { $p = (Get-HotFix -EA SilentlyContinue | Where-Object {$_.InstalledOn -gt (Get-Date).AddDays(-30)}).Count; Write-Output ("PATCHES=" + $p) } catch { Write-Output "PATCHES=0" }',
+    ].join('\n');
+    const psFile = path.join(__dirname, '_sec.ps1');
+    fs.writeFileSync(psFile, psScript, 'utf8');
+    const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
+      { timeout: 15000, windowsHide: true }).toString();
+    try { fs.unlinkSync(psFile); } catch(e) {}
+    const get = key => (out.match(new RegExp(key + '=([^\r\n]*)')) || [])[1]?.trim() || '';
+    info.antivirus = get('AV');
+    info.bitlocker = get('BL') === '1' ? 'Ativo' : get('BL') === '0' ? 'Inativo' : '';
+    info.firewall  = get('FW') ? 'Ativo (' + get('FW') + ')' : '';
+    info.patches   = parseInt(get('PATCHES')) || 0;
+  } catch(e) {}
+  return info;
+}
+
 // ── Firebase REST API ─────────────────────────────────────────────
 function firestoreSet(docPath, data) {
   return new Promise((resolve, reject) => {
@@ -259,8 +321,21 @@ async function reportar() {
     const discoC = discos.find(d => d.drive === 'C:') || null;
     const uptimeSec = getUptime();
 
+    const hw  = getHardwareInfo();
+    const sec = getSegurancaInfo();
+
     const dados = {
       hostname:          AGENT_ID,
+      fabricante:        hw.fabricante,
+      modelo:            hw.modelo,
+      serial:            hw.serial,
+      cpuModelo:         hw.cpu,
+      nucleos:           hw.nucleos,
+      build:             hw.build,
+      antivirus:         sec.antivirus,
+      bitlocker:         sec.bitlocker,
+      firewall:          sec.firewall,
+      patches:           sec.patches,
       ip:                Object.values(os.networkInterfaces())
                            .flat().find(n => n.family === 'IPv4' && !n.internal)?.address || '',
       so:                getOsInfo(),

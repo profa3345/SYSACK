@@ -5713,7 +5713,7 @@ function renderAssistenciaRemota() {
   lista.sort((a,b) => (ORDER[a.status]??4) - (ORDER[b.status]??4));
 
   if (!lista.length) {
-    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--g400)">
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--g400)">
       <div style="font-size:32px;margin-bottom:12px">🖥️</div>
       <div style="font-weight:600;margin-bottom:6px">${agentes.length ? 'Nenhum agente com esses filtros' : 'Nenhum agente instalado'}</div>
       ${!agentes.length ? '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="arInstalarAgente()">⬇️ Baixar Instalador</button>' : ''}
@@ -5769,17 +5769,16 @@ function renderAssistenciaRemota() {
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
-      <td style="font-size:11.5px;color:var(--g500)">${Array.isArray(a.outrosDiscos) && a.outrosDiscos.length ? a.outrosDiscos.map(d=>escapeHtml(d.drive||'')+(d.freeGB!=null?' '+Math.round(d.freeGB)+'GB livre':'')).join('<br>') : '—'}</td>
-      <td style="font-size:11px">${Array.isArray(a.monitores) && a.monitores.length ?
+
+      <td class="monitor-cell">${Array.isArray(a.monitores) && a.monitores.length ?
         a.monitores.map(m => {
           const nome   = escapeHtml(m.nome || m.caption || 'Monitor');
-          const serial = m.serial ? '<br><span style="font-family:monospace;color:var(--g400);font-size:10px">#'+escapeHtml(m.serial)+'</span>' : '<br><span style="color:var(--g300);font-size:10px">sem serial</span>';
-          const res    = m.resolucao ? ' <span style="color:var(--g400)">'+escapeHtml(m.resolucao)+'</span>' : '';
-          return '<div style="margin-bottom:2px">'+nome+res+serial+'</div>';
+          const serial = m.serial ? '<span style="font-family:monospace;color:var(--g400);font-size:10px;display:block">#'+escapeHtml(m.serial)+'</span>' : '';
+          return '<div style="font-size:11px;line-height:1.4">'+nome+serial+'</div>';
         }).join('') : '<span style="color:var(--g300)">—</span>'
       }</td>
       <td style="font-size:12px;color:var(--g500)">${a.uptimeH != null ? Math.round(a.uptimeH) + 'h' : '—'}</td>
-      <td style="font-size:11.5px;color:var(--g400)">${escapeHtml(a.versaoAgente||a.version||'—')}</td>
+
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
@@ -11559,7 +11558,7 @@ function renderPatrimonio() {
         </div>
       </td>
     </tr>`;
-  }).join('') : '<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--g400)">Nenhum patrimônio cadastrado. Importe uma Nota Fiscal ou cadastre manualmente.</td></tr>';
+  }).join('') : '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--g400)">Nenhum patrimônio cadastrado. Importe uma Nota Fiscal ou cadastre manualmente.</td></tr>';
 }
 
 function patTab(tab) {
@@ -14361,7 +14360,7 @@ function renderPatrimonio() {
   if (!tbody) return;
 
   if (!lista.length) {
-    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--g400)">
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--g400)">
       <div style="font-size:24px;margin-bottom:8px">🔍</div>
       <div style="font-weight:600">Nenhum item encontrado</div>
       <div style="font-size:12px;margin-top:4px">Ajuste os filtros ou <button onclick="patLimparFiltros()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600">limpe a busca</button></div>
