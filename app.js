@@ -2328,6 +2328,7 @@ function loginSuccess(user, showWelcome = true) {
     verificarConfigSeguranca?.();
     iniciarWatcherIP?.();
     iniciarWatcherAlertasIA?.();
+    startAgentsListener();
     document.dispatchEvent(new Event('sysack-login'));
   }
 
