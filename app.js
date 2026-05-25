@@ -1285,7 +1285,15 @@ function renderAtivos() {
       }</td>
       <td><span class="tag">${a.tipo||'—'}</span></td>
       <td>${a.area||'—'}</td>
-      <td>${a.resp||'—'}</td>
+      <td>${(()=>{
+        if (a.resp) return a.resp;
+        // Tenta pegar usuário logado do agente
+        const ag = (STATE_AGENTS?.list||[]).find(x =>
+          (a.ip && x.ip === a.ip) ||
+          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
+        );
+        return ag?.usuarioLogado ? '<span style="color:var(--g500);font-size:11px">'+escapeHtml(ag.usuarioLogado)+'</span>' : '—';
+      })()}</td>
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.sala||a.loc||a.area||''}">
         ${a.sala ? `<div style="font-size:12px;font-weight:600;color:var(--g800)">${a.sala}</div><div style="font-size:11px;color:var(--g400)">${a.loc||''}</div>` : a.loc||'—'}
@@ -5781,11 +5789,11 @@ function renderAssistenciaRemota() {
 
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
-        <div style="display:flex;gap:4px;align-items:center">
-          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:3px 8px;font-size:11px">🖥️</button>
-          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:3px 8px;font-size:11px">📋</button>
-          <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:3px 8px;font-size:11px">📦</button>
-          <button class="btn btn-secondary btn-xs" onclick="arInstalarPatches('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Patches" style="padding:3px 8px;font-size:11px">🔒</button>
+        <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
+          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
+          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:2px 7px;font-size:12px">📋</button>
+          <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
+          <button class="btn btn-secondary btn-xs" onclick="arInstalarPatches('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Patches" style="padding:2px 7px;font-size:12px">🔒</button>
         </div>
       </td>
     </tr>`;
@@ -18176,14 +18184,11 @@ function patMetricasHtml(ativo) {
   }
 
   const src = ag || ativo;
-  const diskTotal = src.disk_total || 0;
-  const diskUsed  = src.disk_used  || 0;
-  const diskPct   = diskTotal > 0 ? Math.round(diskUsed/diskTotal*100) : null;
-  const memTotal  = src.mem_total  || 0;
-  const memUsed   = src.mem_used   || 0;
-  const memPct    = memTotal  > 0 ? Math.round(memUsed/memTotal*100)   : null;
-  const cpuPct    = src.cpu_pct ?? src.cpuPct ?? null;
-  const tipo      = src.tipo_hw   || src.tipo || ativo.tipo || '';
+  // Campos do agente novo (agent-desktop.js)
+  const diskPct   = src.discoC_usadoPct ?? src.discoC?.pct ?? null;
+  const memPct    = src.ramPct ?? src.memPct ?? null;
+  const cpuPct    = src.cpuPct ?? src.cpu_pct ?? null;
+  const tipo      = src.tipo_hw || src.tipo || ativo.tipo || '';
   const online    = ag?.status === 'online';
 
   function bar(pct, color) {
