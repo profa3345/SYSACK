@@ -156,22 +156,25 @@ function getMonitores() {
       monitores.push({ caption, fabricante: fab, tipo, resolucao: w && h ? `${w}x${h}` : '' });
     }
 
-    // Tenta pegar número de série via PowerShell (mais confiável que WMIC para WmiMonitorID)
+    // Pega serial via arquivo .ps1 temporário (evita problemas de escape)
     try {
-      const ps = `
-        $monitors = Get-WmiObject -Namespace root\\wmi -Class WmiMonitorID -ErrorAction SilentlyContinue
-        foreach ($m in $monitors) {
-          $serial = ($m.SerialNumberID | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ''
-          $name   = ($m.UserFriendlyName | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ''
-          $mfr    = ($m.ManufacturerName | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ''
-          Write-Output "SERIAL=$serial|NAME=$name|MFR=$mfr"
-        }
-      `.trim();
-      const out2 = execSync('powershell -NoProfile -Command "' + ps.replace(/\n/g,' ') + '"',
+      const psScript = [
+        '$monitors = Get-WmiObject -Namespace root\\wmi -Class WmiMonitorID -ErrorAction SilentlyContinue',
+        'foreach ($m in $monitors) {',
+        '  $serial = ($m.SerialNumberID | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ""',
+        '  $name   = ($m.UserFriendlyName | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ""',
+        '  $mfr    = ($m.ManufacturerName | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ""',
+        '  Write-Output ("SERIAL=" + $serial + "|NAME=" + $name + "|MFR=" + $mfr)',
+        '}'
+      ].join('\n');
+      const psFile = path.join(__dirname, '_mon.ps1');
+      fs.writeFileSync(psFile, psScript, 'utf8');
+      const out2 = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
         { timeout: 10000, windowsHide: true }).toString();
+      try { fs.unlinkSync(psFile); } catch(e3) {}
       const lines2 = out2.split('\n').filter(l => l.includes('SERIAL='));
       lines2.forEach((line, i) => {
-        const get = key => (line.match(new RegExp(key+'=([^|\\r\\n]*)')) || [])[1]?.trim() || '';
+        const get = key => (line.match(new RegExp(key + '=([^|\r\n]*)')) || [])[1]?.trim() || '';
         const serial = get('SERIAL');
         const nome   = get('NAME');
         const fab2   = get('MFR');
