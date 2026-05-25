@@ -163,25 +163,34 @@ async function reportar() {
     const user   = getLoggedUser();
     const now    = new Date().toISOString();
 
+    const discoC = discos.find(d => d.drive === 'C:') || null;
+    const uptimeSec = getUptime();
+
     const dados = {
-      hostname:       AGENT_ID,
-      ip:             Object.values(os.networkInterfaces())
-                        .flat().find(n => n.family === 'IPv4' && !n.internal)?.address || '',
-      so:             getOsInfo(),
-      cpu:            cpu,
-      ramPct:         mem.pct,
-      ramUsadoGB:     mem.usedGB,
-      ramTotalGB:     mem.totalGB,
-      discoC:         discos.find(d => d.drive === 'C:') || null,
-      outrosDiscos:   discos.filter(d => d.drive !== 'C:'),
-      usuarioLogado:  user,
-      uptime:         getUptime(),
-      versaoAgente:   '2.0.0',
+      hostname:          AGENT_ID,
+      ip:                Object.values(os.networkInterfaces())
+                           .flat().find(n => n.family === 'IPv4' && !n.internal)?.address || '',
+      so:                getOsInfo(),
+      osNome:            getOsInfo(),
+      // campos esperados pelo renderAssistenciaRemota
+      cpuPct:            cpu,
+      ramPct:            mem.pct,
+      memPct:            mem.pct,
+      ramUsadoGB:        mem.usedGB,
+      ramTotalGB:        mem.totalGB,
+      discoC_usadoPct:   discoC ? discoC.pct : null,
+      discoC_livreGB:    discoC ? discoC.freeGB : null,
+      discoC_totalGB:    discoC ? discoC.totalGB : null,
+      discoC:            discoC,
+      outrosDiscos:      discos.filter(d => d.drive !== 'C:'),
+      usuarioLogado:     user,
+      uptime:            uptimeSec,
+      uptimeH:           Math.floor(uptimeSec / 3600),
+      versaoAgente:      '2.0.0',
       ultimaAtualizacao: now,
-      lastSeen:       now,
-      osNome:         getOsInfo(),
-      status:         'online',
-      plataforma:     process.platform,
+      lastSeen:          now,
+      status:            'online',
+      plataforma:        process.platform,
     };
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
