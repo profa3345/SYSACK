@@ -5728,9 +5728,9 @@ function renderAssistenciaRemota() {
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
-      <td style="font-size:11.5px;color:var(--g500)">${a.outrosDiscos && a.outrosDiscos.length ? a.outrosDiscos.map(d=>escapeHtml(d.drive||'')+(d.freeGB!=null?' '+d.freeGB+'GB livre':'')).join('<br>') : '—'}</td>
+      <td style="font-size:11.5px;color:var(--g500)">${Array.isArray(a.outrosDiscos) && a.outrosDiscos.length ? a.outrosDiscos.map(d=>escapeHtml(d.drive||'')+(d.freeGB!=null?' '+Math.round(d.freeGB)+'GB livre':'')).join('<br>') : '—'}</td>
       <td style="font-size:12px;color:var(--g500)">${a.uptimeH != null ? Math.round(a.uptimeH) + 'h' : '—'}</td>
-      <td style="font-size:11.5px;color:var(--g400)">${escapeHtml(a.version||'—')}</td>
+      <td style="font-size:11.5px;color:var(--g400)">${escapeHtml(a.versaoAgente||a.version||'—')}</td>
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
