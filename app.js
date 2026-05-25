@@ -5597,33 +5597,33 @@ const STATE_AGENTS = { list: [], listener: null };
 function startAgentsListener() {
   if (!FB_READY || STATE_AGENTS.listener) return;
   try {
-    const { getFirestore, collection, onSnapshot, query, orderBy } =
-      window._fsModule || {};
-    // Fallback: usa polling se módulo não disponível
-    if (!onSnapshot) {
-      arPollAgentes();
-      setInterval(arPollAgentes, 30000);
-      return;
-    }
-    STATE_AGENTS.listener = onSnapshot(
-      query(collection(getFirestore(window._app || getApps()[0]), 'agents'), orderBy('lastSeen', 'desc')),
-      snap => {
+    // Usa SDK compat (igual ao resto do app)
+    STATE_AGENTS.listener = db.collection('agents')
+      .orderBy('lastSeen', 'desc')
+      .onSnapshot(snap => {
         STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
         nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
-      }
-    );
-  } catch { arPollAgentes(); setInterval(arPollAgentes, 30000); }
+      }, err => {
+        console.warn('[Agentes] listener erro:', err.message);
+        arPollAgentes();
+        setInterval(arPollAgentes, 30000);
+      });
+  } catch(e) {
+    console.warn('[Agentes] startAgentsListener erro:', e.message);
+    arPollAgentes();
+    setInterval(arPollAgentes, 30000);
+  }
 }
 
 async function arPollAgentes() {
-  if (!FB_READY) return;
+  if (!FB_READY || !db) return;
   try {
-    const snap = await fsQuery('agents', []);
-    STATE_AGENTS.list = snap || [];
+    const snap = await db.collection('agents').orderBy('lastSeen', 'desc').get();
+    STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
     nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
-  } catch {}
+  } catch(e) { console.warn('[Agentes] poll erro:', e.message); }
 }
 
 function renderAssistenciaRemota() {
