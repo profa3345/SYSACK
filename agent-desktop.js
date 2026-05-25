@@ -83,13 +83,17 @@ function getDiskInfo() {
 function getLoggedUser() {
   try {
     if (process.platform === 'win32') {
-      return execSync('query session', { timeout: 3000 })
-        .toString().split('\n')
-        .find(l => l.includes('Active'))
-        ?.trim().split(/\s+/)[1] || '';
+      // whoami é mais confiável que query session
+      const whoami = execSync('whoami', { timeout: 3000 }).toString().trim();
+      // retorna só o usuário sem o domínio (DOMINIO\usuario -> usuario)
+      return whoami.includes('\\') ? whoami.split('\\').pop() : whoami;
     }
     return os.userInfo().username;
-  } catch(e) { return ''; }
+  } catch(e) {
+    try {
+      return process.env.USERNAME || process.env.USER || '';
+    } catch { return ''; }
+  }
 }
 
 function getOsInfo() {
@@ -103,10 +107,7 @@ function getOsInfo() {
 }
 
 function getUptime() {
-  const secs = os.uptime();
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  return `${h}h ${m}m`;
+  return Math.round(os.uptime()); // segundos numérico — uptimeH calculado no payload
 }
 
 // ── Firebase REST API ─────────────────────────────────────────────
