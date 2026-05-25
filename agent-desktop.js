@@ -391,6 +391,143 @@ log(`[SYSACK Agent Desktop] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
+
+// ── Servidor WebSocket para sessão remota ─────────────────────────
+const http = require('http');
+const WS_PORT = 9000;
+
+function iniciarServidorRemoto() {
+  try {
+    // Usa ws nativo sem dependência externa via upgrade do http
+    const server = http.createServer();
+    const clients = new Set();
+
+    server.on('upgrade', (req, socket, head) => {
+      // Handshake WebSocket manual
+      const key = req.headers['sec-websocket-key'];
+      if (!key) { socket.destroy(); return; }
+      const crypto = require('crypto');
+      const accept = crypto.createHash('sha1')
+        .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+        .digest('base64');
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n'
+      );
+
+      clients.add(socket);
+      log('[WS] Cliente conectado — total: ' + clients.size);
+
+      socket.on('data', buf => {
+        try {
+          // Decodifica frame WebSocket
+          const fin = (buf[0] & 0x80) !== 0;
+          const opcode = buf[0] & 0x0f;
+          const masked = (buf[1] & 0x80) !== 0;
+          let len = buf[1] & 0x7f;
+          let offset = 2;
+          if (len === 126) { len = buf.readUInt16BE(2); offset = 4; }
+          const mask = masked ? buf.slice(offset, offset + 4) : null;
+          offset += masked ? 4 : 0;
+          const payload = buf.slice(offset, offset + len);
+          if (masked) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+          
+          if (opcode === 8) { socket.destroy(); return; } // close
+          if (opcode !== 1) return; // só texto
+
+          const msg = JSON.parse(payload.toString());
+          handleRemoteCommand(msg, socket);
+        } catch(e) {}
+      });
+
+      socket.on('close', () => { clients.delete(socket); });
+      socket.on('error', () => { clients.delete(socket); });
+    });
+
+    server.listen(WS_PORT, '0.0.0.0', () => {
+      log('[WS] Servidor remoto ativo na porta ' + WS_PORT);
+    });
+
+    server.on('error', e => log('[WS] Erro servidor: ' + e.message));
+  } catch(e) {
+    log('[WS] Falha ao iniciar servidor: ' + e.message);
+  }
+}
+
+function wsSend(socket, data) {
+  try {
+    const str = JSON.stringify(data);
+    const buf = Buffer.from(str);
+    const frame = Buffer.allocUnsafe(2 + buf.length);
+    frame[0] = 0x81; // FIN + text opcode
+    frame[1] = buf.length;
+    buf.copy(frame, 2);
+    socket.write(frame);
+  } catch(e) {}
+}
+
+function handleRemoteCommand(msg, socket) {
+  const { type, cmd } = msg;
+  
+  if (type === 'ping') {
+    wsSend(socket, { type: 'pong', ts: Date.now() });
+    return;
+  }
+  
+  if (type === 'info') {
+    wsSend(socket, {
+      type: 'info',
+      hostname: AGENT_ID,
+      ip: Object.values(os.networkInterfaces()).flat().find(n => n.family === 'IPv4' && !n.internal)?.address || '',
+      cpu: getCpuUsage(),
+      ram: getMemoryInfo().pct,
+      uptime: getUptime(),
+      user: getLoggedUser(),
+    });
+    return;
+  }
+
+  if (type === 'powershell' && cmd) {
+    try {
+      const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + cmd.replace(/"/g, '\\"') + '"',
+        { timeout: 15000, windowsHide: true }).toString();
+      wsSend(socket, { type: 'output', data: out });
+    } catch(e) {
+      wsSend(socket, { type: 'output', data: '[ERRO] ' + e.message });
+    }
+    return;
+  }
+
+  if (type === 'screenshot') {
+    try {
+      // Captura tela via PowerShell
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds',
+        '$b = New-Object System.Drawing.Bitmap($s.Width, $s.Height)',
+        '$g = [System.Drawing.Graphics]::FromImage($b)',
+        '$g.CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size)',
+        '$ms = New-Object System.IO.MemoryStream',
+        '$b.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)',
+        '[Convert]::ToBase64String($ms.ToArray())',
+      ].join(';');
+      const psFile = require('path').join(__dirname, '_sc.ps1');
+      require('fs').writeFileSync(psFile, ps);
+      const b64 = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
+        { timeout: 20000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).toString().trim();
+      try { require('fs').unlinkSync(psFile); } catch(e) {}
+      wsSend(socket, { type: 'screenshot', data: b64 });
+    } catch(e) {
+      wsSend(socket, { type: 'error', msg: e.message });
+    }
+    return;
+  }
+}
+
+iniciarServidorRemoto();
+
 reportar(); // Primeira execução imediata
 setInterval(reportar, INTERVAL);
 
