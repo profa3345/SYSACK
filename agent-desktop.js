@@ -115,10 +115,17 @@ function getLoggedUser() {
 function getOsInfo() {
   try {
     if (process.platform === 'win32') {
-      const ver = execSync('ver', { timeout: 3000 }).toString().trim();
-      return ver;
+      // wmic retorna ASCII puro sem problemas de encoding
+      try {
+        const out = execSync('wmic os get Caption,Version /format:value', { timeout: 5000, windowsHide: true }).toString();
+        const caption = (out.match(/Caption=(.+)/i)||[])[1]?.trim() || '';
+        const version = (out.match(/Version=(.+)/i)||[])[1]?.trim() || '';
+        if (caption) return caption + (version ? ' [' + version + ']' : '');
+      } catch(e2) {}
+      // fallback: usa dados do Node.js
+      return 'Windows ' + os.release();
     }
-    return `${os.type()} ${os.release()}`;
+    return os.type() + ' ' + os.release();
   } catch(e) { return os.type(); }
 }
 

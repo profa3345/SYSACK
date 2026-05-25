@@ -5757,6 +5757,7 @@ function renderAssistenciaRemota() {
         <div style="font-weight:700;font-size:13px">${escapeHtml(a.hostname||a.id)}</div>
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
+        ${Array.isArray(a.monitores) && a.monitores.length ? '<div style="font-size:10px;color:var(--g400);margin-top:2px">🖥️ ' + a.monitores.map(m=>escapeHtml(m.nome||m.caption||'Monitor')).join(', ') + '</div>' : ''}
       </td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
