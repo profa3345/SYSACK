@@ -234,8 +234,25 @@ function getSegurancaInfo() {
   if (process.platform !== 'win32') return info;
   try {
     const psScript = [
-      // Antivirus
-      'try { $av = Get-WmiObject -Namespace root\\SecurityCenter2 -Class AntiVirusProduct -EA SilentlyContinue | Select-Object -First 1; Write-Output ("AV=" + $av.displayName) } catch { Write-Output "AV=" }',
+      '# Antivirus detection',
+      '$avName = ""',
+      '$av = Get-WmiObject -Namespace root\\SecurityCenter2 -Class AntiVirusProduct -EA SilentlyContinue | Select-Object -First 1',
+      'if ($av) { $avName = $av.displayName }',
+      '$knownAV = @(',
+      '  [pscustomobject]@{Name="Trend Micro";Svcs="TMBMSRV,ntrtscan,TmPfw"},',
+      '  [pscustomobject]@{Name="Symantec";Svcs="SepMasterService,SAVRT"},',
+      '  [pscustomobject]@{Name="McAfee";Svcs="McShield,McAfeeFramework"},',
+      '  [pscustomobject]@{Name="Kaspersky";Svcs="AVP,klnagent"},',
+      '  [pscustomobject]@{Name="Sophos";Svcs="SAVService,SophosHealth"}',
+      ')',
+      'foreach ($corp in $knownAV) {',
+      '  foreach ($svc in $corp.Svcs.Split(",")) {',
+      '    $s = Get-Service -Name $svc.Trim() -EA SilentlyContinue',
+      '    if ($s -and $s.Status -eq "Running") { $avName = $corp.Name; break }',
+      '  }',
+      '  if ($avName -eq $corp.Name) { break }',
+      '}',
+      'Write-Output ("AV=" + $avName)',
       // BitLocker
       'try { $bl = Get-BitLockerVolume -MountPoint C: -EA SilentlyContinue; Write-Output ("BL=" + $bl.ProtectionStatus) } catch { Write-Output "BL=" }',
       // Firewall
