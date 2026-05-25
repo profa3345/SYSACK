@@ -794,7 +794,7 @@ function startFirestoreListeners() {
     STATE._assetsDisc = snap2arr(snap).map(norm);
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     nbUpdate('nb-ativos', STATE.ativos.length);
-    _debounce('ativos-render', function(){ if(isPageActive('dashboard')||isPageActive('exec-dashboard')) requestAnimationFrame(renderDashboard); }, 800);
+    _debounce('ativos-render', function(){ requestAnimationFrame(renderDashboard); }, 800);
     console.log('[Banco] ativos:', STATE._assetsDisc.length);
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
@@ -820,7 +820,7 @@ function startFirestoreListeners() {
     STATE.switches  = STATE._assetsSw;
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     nbUpdate('nb-ativos', STATE.ativos.length);
-    _debounce('switches-render', function(){ if(isPageActive('dashboard')||isPageActive('exec-dashboard')) renderDashboard(); }, 600);
+    _debounce('switches-render', function(){ renderDashboard(); }, 600);
     console.log('[Banco] switches:', STATE._assetsSw.length);
   }, function(e){ console.error('[Banco] switches erro:', e.message); });
 
@@ -5761,7 +5761,14 @@ function renderAssistenciaRemota() {
         <div style="font-weight:700;font-size:13px">${escapeHtml(a.hostname||a.id)}</div>
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
-        ${Array.isArray(a.monitores) && a.monitores.length ? '<div style="font-size:10px;color:var(--g400);margin-top:2px">🖥️ ' + a.monitores.map(m=>escapeHtml(m.nome||m.caption||'Monitor')).join(', ') + '</div>' : ''}
+        ${Array.isArray(a.monitores) && a.monitores.length ? 
+          a.monitores.map(m => {
+            const nome   = escapeHtml(m.nome || m.caption || 'Monitor');
+            const serial = m.serial ? ' <span style="color:var(--g300);font-family:monospace">#'+escapeHtml(m.serial)+'</span>' : '';
+            const res    = m.resolucao ? ' <span style="color:var(--g300)">'+escapeHtml(m.resolucao)+'</span>' : '';
+            return '<div style="font-size:10px;color:var(--g500);margin-top:3px;padding:2px 5px;background:var(--g100);border-radius:4px;display:inline-block">🖥️ '+nome+serial+res+'</div>';
+          }).join(' ')
+          : ''}
       </td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
