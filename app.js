@@ -18169,16 +18169,22 @@ function patAbrirAlertas() {
 
 function patMetricasHtml(ativo) {
   const agentes = STATE_AGENTS?.list || [];
-  // Casa pelo IP ou hostname
-  const ag = agentes.find(a =>
-    (ativo.ip && a.ip === ativo.ip) ||
-    (ativo.hostname && (a.hostname||'').toLowerCase() === (ativo.hostname||'').toLowerCase()) ||
-    (a.hostname && hostnameFromAtivo(ativo) &&
-     a.hostname.toLowerCase() === hostnameFromAtivo(ativo).toLowerCase())
-  );
+  const ativoHn = (ativo.hostname || hostnameFromAtivo(ativo) || '').toLowerCase();
+  const ativoIp = ativo.ip || ativo.ipAddress || ativo.ipPrincipal || '';
+
+  // Casa pelo IP, hostname, ou PAT extraído do hostname do agente
+  const ag = agentes.find(a => {
+    const agHn = (a.hostname || '').toLowerCase();
+    if (ativoIp && a.ip === ativoIp) return true;
+    if (ativoHn && agHn === ativoHn) return true;
+    // Fallback: PAT numérico no hostname
+    const ativoPat = (ativo.pat || '').replace(/\D/g, '');
+    const agPat    = agHn.replace(/\D/g, '');
+    if (ativoPat && agPat && ativoPat === agPat) return true;
+    return false;
+  });
 
   if (!ag) {
-    // Verifica se tem dados direto no ativo (enviado por cliente SYSACK)
     const hasMeta = ativo.disk_total || ativo.mem_total || ativo.cpu_pct != null;
     if (!hasMeta) return '<td style="font-size:11px;color:var(--g300,#CBD5E1);text-align:center">—</td>';
   }
@@ -18221,7 +18227,7 @@ function patMetricasHtml(ativo) {
         <span style="color:var(--g400,#94a3b8)">MEM</span>${bar(memPct,'#8B5CF6')}
         <span style="color:var(--g400,#94a3b8)">DSK</span>${bar(diskPct,'#10B981')}
       </div>
-      ${diskTotal?`<div style="margin-top:4px;font-size:9.5px;color:var(--g400,#94a3b8)">${fmtBytes(diskUsed)} / ${fmtBytes(diskTotal)}</div>`:''}
+      ${ag?.usuarioLogado ? `<div style="margin-top:4px;font-size:9.5px;color:var(--g500,#64748b)">👤 ${escapeHtml(ag.usuarioLogado)}</div>` : ''}
     </div>
   </td>`;
 }
