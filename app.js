@@ -12155,15 +12155,18 @@ function verificarSLAs() {
   abertos.forEach(ch => {
     const sla = calcularSLA(ch);
     if (!sla) return;
-    // Notifica no console/banner quando sobe de nível
     const chaveNivel = 'sla_nivel_' + ch.id;
-    const nivelAnterior = parseInt(localStorage.getItem(chaveNivel)||'0');
+    const nivelSalvo  = localStorage.getItem(chaveNivel);
+    const nivelAnterior = nivelSalvo !== null ? parseInt(nivelSalvo) : sla.nivel; // primeira vez: assume nível atual
     if (sla.nivel > nivelAnterior) {
       localStorage.setItem(chaveNivel, sla.nivel.toString());
       if (sla.nivel >= 2) {
         showToast(`🚨 SLA ${SLA_LABELS[sla.prioridade]}: Chamado ${ch.id} escalado para ${sla.escalonamento}`, 'danger', 8000);
         alertas++;
       }
+    } else if (nivelSalvo === null) {
+      // Primeira vez — só registra, sem alertar
+      localStorage.setItem(chaveNivel, sla.nivel.toString());
     }
   });
   if (alertas) nbUpdate('nb-chamados', abertos.length);
