@@ -5781,11 +5781,11 @@ function renderAssistenciaRemota() {
 
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" ${a.status!=='online'?'disabled title="Agente offline"':''}>🖥️ Acessar</button>
-          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')">📋 Info</button>
-          <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')">📦</button>
-          <button class="btn btn-secondary btn-xs" onclick="arInstalarPatches('${a.id}','${escapeHtml(a.hostname||a.id)}')">🔒</button>
+        <div style="display:flex;gap:4px;align-items:center">
+          <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:3px 8px;font-size:11px">🖥️</button>
+          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:3px 8px;font-size:11px">📋</button>
+          <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:3px 8px;font-size:11px">📦</button>
+          <button class="btn btn-secondary btn-xs" onclick="arInstalarPatches('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Patches" style="padding:3px 8px;font-size:11px">🔒</button>
         </div>
       </td>
     </tr>`;
@@ -6678,35 +6678,68 @@ function arAbrirInventario(agentId) {
   openModal('modal-ar-inventario');
   document.getElementById('ar-inv-title').textContent = a.hostname || agentId;
 
+  const v = (field, fallback='—') => {
+    const val = a[field] ?? inv[field];
+    if (val === null || val === undefined || val === '') return fallback;
+    return val;
+  };
+
+  // Monitores formatados
+  const monitoresStr = Array.isArray(a.monitores) && a.monitores.length
+    ? a.monitores.map(m => (m.nome||m.caption||'Monitor') + (m.serial ? ' #'+m.serial : '') + (m.resolucao ? ' '+m.resolucao : '')).join(' | ')
+    : '—';
+
+  // Disco C formatado
+  const discoC = a.discoC || inv.discoC || {};
+  const discoCStr = discoC.totalGB
+    ? `${discoC.freeGB||'?'} GB livres de ${discoC.totalGB} GB (${discoC.pct||'?'}% usado)`
+    : (a.discoC_livreGB ? a.discoC_livreGB + ' GB livres' : '—');
+
+  // Outros discos
+  const outrosDiscos = Array.isArray(a.outrosDiscos) && a.outrosDiscos.length
+    ? a.outrosDiscos.map(d => d.drive + ': ' + (d.freeGB||'?') + ' GB livres').join(' | ')
+    : '—';
+
   const rows = [
-    ['Hostname',     inv.hostname || a.id],
-    ['IP',           inv.ip || a.ip || '—'],
-    ['Fabricante',   inv.fabricante || '—'],
-    ['Modelo',       inv.modelo || '—'],
-    ['Serial',       inv.serial || '—'],
-    ['Sistema',      inv.osNome  || a.osNome || '—'],
-    ['Build',        inv.osBuild || '—'],
-    ['CPU',          inv.cpuNome || '—'],
-    ['Núcleos',      inv.cpuNucleos ? inv.cpuNucleos + ' núcleos' : '—'],
-    ['RAM Total',    inv.ramTotalGB ? inv.ramTotalGB + ' GB' : '—'],
-    ['Disco C livre',inv.discoC_livreGB ? inv.discoC_livreGB + ' GB' : '—'],
-    ['Software',     inv.softwareCount ? inv.softwareCount + ' programas' : '—'],
-    ['Patches',      inv.patchesPendentes != null ? inv.patchesPendentes + ' pendentes (' + (inv.patchesCriticos||0) + ' críticos)' : '—'],
-    ['Antivírus',    inv.antivirusNome ? inv.antivirusNome + (inv.antivirusAtivo === false ? ' (INATIVO!)' : '') : '—'],
-    ['BitLocker',    inv.bitlocker != null ? (inv.bitlocker ? 'Ativo' : 'Inativo') : '—'],
-    ['Firewall',     inv.firewallAtivo != null ? (inv.firewallAtivo ? 'Ativo' : 'Inativo') : '—'],
-    ['Usuário',      inv.usuarioLogado || a.usuarioLogado || '—'],
-    ['Uptime',       inv.uptimeH ? inv.uptimeH + 'h' : a.uptimeH ? a.uptimeH + 'h' : '—'],
-    ['Versão Agente', a.version || '—'],
+    ['— IDENTIFICAÇÃO —', ''],
+    ['Hostname',      v('hostname') || a.id],
+    ['IP',            v('ip')],
+    ['Fabricante',    v('fabricante')],
+    ['Modelo',        v('modelo')],
+    ['Serial',        v('serial')],
+    ['Plataforma',    v('plataforma')],
+    ['— SISTEMA —', ''],
+    ['Sistema',       v('osNome') || v('so')],
+    ['Build',         v('build')],
+    ['CPU',           v('cpuModelo')],
+    ['Núcleos',       v('nucleos') ? v('nucleos') + ' núcleos lógicos' : '—'],
+    ['— MEMÓRIA E DISCO —', ''],
+    ['RAM Total',     v('ramTotalGB') ? v('ramTotalGB') + ' GB' : '—'],
+    ['RAM Usada',     v('ramUsadoGB') ? v('ramUsadoGB') + ' GB (' + v('ramPct') + '%)' : '—'],
+    ['Disco C:',      discoCStr],
+    ['Outros Discos', outrosDiscos],
+    ['— SEGURANÇA —', ''],
+    ['Antivírus',     v('antivirus')],
+    ['BitLocker',     v('bitlocker') || '—'],
+    ['Firewall',      v('firewall')],
+    ['Patches (30d)', v('patches') !== '—' ? v('patches') + ' instalados' : '—'],
+    ['— MONITOR —', ''],
+    ['Monitor(es)',   monitoresStr],
+    ['— SESSÃO —', ''],
+    ['Usuário',       v('usuarioLogado')],
+    ['Uptime',        v('uptimeH') ? Math.round(v('uptimeH')) + 'h (' + Math.round(v('uptime')/3600*10)/10 + 'h)' : '—'],
+    ['Versão Agente', v('versaoAgente') || v('version')],
     ['Último contato', a.lastSeen ? new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleString('pt-BR') : '—'],
   ];
 
   document.getElementById('ar-inv-body').innerHTML =
     '<table style="width:100%;border-collapse:collapse">' +
-    rows.map(([k,v]) =>
-      `<tr><td style="padding:7px 0;color:var(--g500);font-size:12px;width:140px">${escapeHtml(k)}</td>` +
-      `<td style="padding:7px 0;font-size:13px;font-weight:500;color:${(v||'').includes('INATIVO') ? 'var(--danger)' : 'inherit'}">${escapeHtml(String(v))}</td></tr>`
-    ).join('') + '</table>';
+    rows.map(([k,val]) => {
+      if (k.startsWith('—')) return `<tr><td colspan="2" style="padding:10px 0 4px;font-size:10px;font-weight:700;color:var(--g400);letter-spacing:.8px;text-transform:uppercase;border-top:1px solid var(--g100)">${k.replace(/—/g,'').trim()}</td></tr>`;
+      const danger = String(val).includes('INATIVO') || String(val).includes('Inativo');
+      return `<tr><td style="padding:5px 0;color:var(--g500);font-size:12px;width:130px;vertical-align:top">${escapeHtml(k)}</td>` +
+        `<td style="padding:5px 0;font-size:12.5px;font-weight:500;color:${danger?'var(--danger)':'inherit'};word-break:break-word">${escapeHtml(String(val))}</td></tr>`;
+    }).join('') + '</table>';
 }
 
 // ── AÇÕES RÁPIDAS ─────────────────────────────────────────────
