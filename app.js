@@ -5713,7 +5713,7 @@ function renderAssistenciaRemota() {
   lista.sort((a,b) => (ORDER[a.status]??4) - (ORDER[b.status]??4));
 
   if (!lista.length) {
-    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--g400)">
+    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--g400)">
       <div style="font-size:32px;margin-bottom:12px">🖥️</div>
       <div style="font-weight:600;margin-bottom:6px">${agentes.length ? 'Nenhum agente com esses filtros' : 'Nenhum agente instalado'}</div>
       ${!agentes.length ? '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="arInstalarAgente()">⬇️ Baixar Instalador</button>' : ''}
@@ -5761,14 +5761,7 @@ function renderAssistenciaRemota() {
         <div style="font-weight:700;font-size:13px">${escapeHtml(a.hostname||a.id)}</div>
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
-        ${Array.isArray(a.monitores) && a.monitores.length ? 
-          a.monitores.map(m => {
-            const nome   = escapeHtml(m.nome || m.caption || 'Monitor');
-            const serial = m.serial ? ' <span style="color:var(--g300);font-family:monospace">#'+escapeHtml(m.serial)+'</span>' : '';
-            const res    = m.resolucao ? ' <span style="color:var(--g300)">'+escapeHtml(m.resolucao)+'</span>' : '';
-            return '<div style="font-size:10px;color:var(--g500);margin-top:3px;padding:2px 5px;background:var(--g100);border-radius:4px;display:inline-block">🖥️ '+nome+serial+res+'</div>';
-          }).join(' ')
-          : ''}
+
       </td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
@@ -5777,6 +5770,14 @@ function renderAssistenciaRemota() {
       <td>${ramBar}</td>
       <td>${diskBar}</td>
       <td style="font-size:11.5px;color:var(--g500)">${Array.isArray(a.outrosDiscos) && a.outrosDiscos.length ? a.outrosDiscos.map(d=>escapeHtml(d.drive||'')+(d.freeGB!=null?' '+Math.round(d.freeGB)+'GB livre':'')).join('<br>') : '—'}</td>
+      <td style="font-size:11px">${Array.isArray(a.monitores) && a.monitores.length ?
+        a.monitores.map(m => {
+          const nome   = escapeHtml(m.nome || m.caption || 'Monitor');
+          const serial = m.serial ? '<br><span style="font-family:monospace;color:var(--g400);font-size:10px">#'+escapeHtml(m.serial)+'</span>' : '<br><span style="color:var(--g300);font-size:10px">sem serial</span>';
+          const res    = m.resolucao ? ' <span style="color:var(--g400)">'+escapeHtml(m.resolucao)+'</span>' : '';
+          return '<div style="margin-bottom:2px">'+nome+res+serial+'</div>';
+        }).join('') : '<span style="color:var(--g300)">—</span>'
+      }</td>
       <td style="font-size:12px;color:var(--g500)">${a.uptimeH != null ? Math.round(a.uptimeH) + 'h' : '—'}</td>
       <td style="font-size:11.5px;color:var(--g400)">${escapeHtml(a.versaoAgente||a.version||'—')}</td>
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>

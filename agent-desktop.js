@@ -156,26 +156,30 @@ function getMonitores() {
       monitores.push({ caption, fabricante: fab, tipo, resolucao: w && h ? `${w}x${h}` : '' });
     }
 
-    // Tenta pegar número de série via WMI (requer permissão)
+    // Tenta pegar número de série via PowerShell (mais confiável que WMIC para WmiMonitorID)
     try {
-      const out2 = execSync(
-        'wmic path WmiMonitorID get SerialNumberID,UserFriendlyName,ManufacturerName /format:csv',
-        { timeout: 8000, windowsHide: true }
-      ).toString();
-      const lines2 = out2.split('\n').filter(l => l.trim() && !l.startsWith('Node'));
+      const ps = `
+        $monitors = Get-WmiObject -Namespace root\\wmi -Class WmiMonitorID -ErrorAction SilentlyContinue
+        foreach ($m in $monitors) {
+          $serial = ($m.SerialNumberID | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ''
+          $name   = ($m.UserFriendlyName | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ''
+          $mfr    = ($m.ManufacturerName | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_}) -join ''
+          Write-Output "SERIAL=$serial|NAME=$name|MFR=$mfr"
+        }
+      `.trim();
+      const out2 = execSync('powershell -NoProfile -Command "' + ps.replace(/\n/g,' ') + '"',
+        { timeout: 10000, windowsHide: true }).toString();
+      const lines2 = out2.split('\n').filter(l => l.includes('SERIAL='));
       lines2.forEach((line, i) => {
-        const parts = line.split(',');
-        if (parts.length < 4) return;
-        // SerialNumberID e UserFriendlyName vêm como arrays de bytes decimais
-        const toStr = arr => arr.split(';').map(n=>parseInt(n)).filter(n=>n>0).map(n=>String.fromCharCode(n)).join('').trim();
-        const serial = toStr(parts[1]||'');
-        const nome   = toStr(parts[2]||'');
-        const fab2   = toStr(parts[3]||'');
+        const get = key => (line.match(new RegExp(key+'=([^|\\r\\n]*)')) || [])[1]?.trim() || '';
+        const serial = get('SERIAL');
+        const nome   = get('NAME');
+        const fab2   = get('MFR');
         if (monitores[i]) {
           if (serial) monitores[i].serial = serial;
           if (nome)   monitores[i].nome   = nome;
           if (fab2)   monitores[i].fabricante = fab2;
-        } else {
+        } else if (serial || nome) {
           monitores.push({ serial, nome, fabricante: fab2 });
         }
       });
