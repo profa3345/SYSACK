@@ -5596,7 +5596,11 @@ const STATE_AGENTS = { list: [], listener: null };
 
 // Inicia listener Banco para agentes em tempo real
 function startAgentsListener() {
-  if (!FB_READY || STATE_AGENTS.listener) return;
+  if (!FB_READY) return;
+  if (STATE_AGENTS.listener) {
+    try { STATE_AGENTS.listener(); } catch(e) {} // unsubscribe anterior
+    STATE_AGENTS.listener = null;
+  }
   try {
     // Usa SDK compat (igual ao resto do app)
     STATE_AGENTS.listener = db.collection('agents')
