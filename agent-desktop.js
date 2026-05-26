@@ -300,8 +300,24 @@ function firestoreSet(docPath, data) {
       return { stringValue: String(val) };
     }
 
+    // Remove undefined/NaN antes de serializar
+    function sanitize(obj) {
+      if (obj === null || obj === undefined) return null;
+      if (typeof obj === 'number' && !isFinite(obj)) return 0;
+      if (Array.isArray(obj)) return obj.map(sanitize).filter(v => v !== undefined);
+      if (typeof obj === 'object') {
+        const r = {};
+        for (const [k, v] of Object.entries(obj)) {
+          if (v !== undefined) r[k] = sanitize(v);
+        }
+        return r;
+      }
+      return obj;
+    }
+
     const fields = {};
-    for (const [k, v] of Object.entries(data)) fields[k] = toFirestore(v);
+    const cleanData = sanitize(data);
+    for (const [k, v] of Object.entries(cleanData)) fields[k] = toFirestore(v);
 
     const body = JSON.stringify({ fields });
     const urlObj = new URL(url);
@@ -1169,7 +1185,7 @@ async function coletarImpressorasLocais() {
     // Grava também na coleção impressoras para cada uma
     for (const imp of impressoras) {
       const impId = AGENT_ID + '_' + imp.nome.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-      const online = imp.status === 'pronta' || imp.status === 'imprimindo';
+      const online = ['pronta','imprimindo','outro'].includes(imp.status);
       await firestoreSet(`impressoras/${impId}`, {
         nome:         imp.nome,
         hostname:     AGENT_ID,

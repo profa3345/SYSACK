@@ -5781,7 +5781,10 @@ function renderAssistenciaRemota() {
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
-
+      <td style="font-size:10.5px;color:var(--g500)">${(()=>{
+        if (!Array.isArray(a.outrosDiscos) || !a.outrosDiscos.length) return '—';
+        return a.outrosDiscos.map(d => '<div>'+escapeHtml(d.drive||'?')+': '+escapeHtml(String(d.freeGB||'?'))+' GB</div>').join('');
+      })()}</td>
       <td class="monitor-cell">${Array.isArray(a.monitores) && a.monitores.length ?
         a.monitores.map(m => {
           const nome   = escapeHtml(m.nome || m.caption || 'Monitor');
@@ -5790,7 +5793,7 @@ function renderAssistenciaRemota() {
         }).join('') : '<span style="color:var(--g300)">—</span>'
       }</td>
       <td style="font-size:12px;color:var(--g500)">${a.uptimeH != null ? Math.round(a.uptimeH) + 'h' : '—'}</td>
-
+      <td style="font-size:10.5px;color:var(--g400);font-family:monospace">${escapeHtml(a.versaoAgente || a.version || '—')}</td>
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
@@ -20984,15 +20987,13 @@ function _mapaAtualizarBotoesModo() {
 // Layout: switches no centro, ativos ao redor por subnet
 // ─────────────────────────────────────────────────────────────────
 function _renderMapaGrafico(todosAll, container) {
-  // Filter: se há área selecionada, mostra só essa área
   var todos = _mapaAreaSel
-    ? todosAll.filter(function(d){return resolverLocal(d)===_mapaAreaSel;})
+    ? todosAll.filter(function(d){ return resolverLocal(d) === _mapaAreaSel; })
     : todosAll;
 
-  // Apply status/tipo filters
   if (_mapaFiltros.status) {
     todos = todos.filter(function(d){
-      var ok = d.reachable||(d.status||'').match(/^(ok|ativo|online)$/i);
+      var ok = d.reachable || (d.status||'').match(/^(ok|ativo|online)$/i);
       if (_mapaFiltros.status==='ok')      return ok;
       if (_mapaFiltros.status==='offline') return !ok;
       if (_mapaFiltros.status==='alerta')  return (d.status||'').toLowerCase()==='alerta';
@@ -21000,53 +21001,16 @@ function _renderMapaGrafico(todosAll, container) {
     });
   }
   if (_mapaFiltros.tipo) {
-    todos = todos.filter(function(d){return (d.tipo||'').toLowerCase()===_mapaFiltros.tipo;});
+    todos = todos.filter(function(d){ return (d.tipo||'').toLowerCase() === _mapaFiltros.tipo; });
   }
 
-  var switches  = todos.filter(function(d){return ['switch','switch-core','switch-distribuicao','switch-acesso','router','firewall','ap'].includes((d.tipo||'').toLowerCase());});
-  var hosts     = todos.filter(function(d){return !['switch','switch-core','switch-distribuicao','switch-acesso','router','firewall','ap'].includes((d.tipo||'').toLowerCase());});
+  var SW_TIPOS = ['switch','switch-core','switch-distribuicao','switch-acesso','router','firewall','ap'];
+  var switches = todos.filter(function(d){ return SW_TIPOS.includes((d.tipo||'').toLowerCase()); });
+  var hosts    = todos.filter(function(d){ return !SW_TIPOS.includes((d.tipo||'').toLowerCase()); });
 
-  // ── Layout ──────────────────────────────────────────────────
-  // Switches: row of colored circles on top
-  // Hosts: grouped by subnet, each subnet = column below its switch
+  function getSubnet(ip) { var p=(ip||'').split('.'); return p.length>=3?p.slice(0,3).join('.'):''; }
 
-  function getSubnet(ip) { var p=(ip||'').split('.'); return p.length>=3?p.slice(0,3).join('.'):'sem-subnet'; }
-
-  // Group hosts by subnet
-  var subnets = {};
-  hosts.forEach(function(h){
-    var sn = getSubnet(h.ip);
-    if (!subnets[sn]) subnets[sn]={sn:sn, hosts:[], sw:null};
-    subnets[sn].hosts.push(h);
-  });
-
-  // Try to match subnet to switch by IP prefix
-  switches.forEach(function(sw){
-    var sn = getSubnet(sw.ip);
-    if (subnets[sn]) subnets[sn].sw = sw;
-  });
-
-  // Unmatched subnets (no switch found)
-  var snList = Object.values(subnets).sort(function(a,b){return a.sn.localeCompare(b.sn);});
-
-  // Also: switches with no hosts
-  var orphanSw = switches.filter(function(sw){
-    return !snList.find(function(s){return s.sw && s.sw.id===sw.id;});
-  });
-
-  // ── Render ──────────────────────────────────────────────────
-  var CARD_W   = 130;
-  var CARD_GAP = 10;
-  var SW_H     = 44;
-  var HOST_H   = 22;
-  var HOST_PAD = 4;
-  var HEADER_H = 60;
-
-  // Estimate total width
-  var cols  = snList.length + orphanSw.length;
-  var totalW = Math.max(cols * (CARD_W + CARD_GAP), 600);
-
-  var tipoClr = {switch:'#1E40AF','switch-core':'#0F172A','switch-distribuicao':'#1D4ED8','switch-acesso':'#2563EB',router:'#EA580C',firewall:'#7C3AED',ap:'#0891B2'};
+  var tipoClr = {'switch':'#1E40AF','switch-core':'#0F172A','switch-distribuicao':'#1D4ED8','switch-acesso':'#2563EB','router':'#EA580C','firewall':'#7C3AED','ap':'#0891B2'};
   var statusClr = function(d){
     var s=(d.status||'').toLowerCase();
     if(d.reachable||s==='ok'||s==='ativo'||s==='online') return '#10B981';
@@ -21055,9 +21019,39 @@ function _renderMapaGrafico(todosAll, container) {
     return '#94A3B8';
   };
 
+  // ── Agrupa hosts por switch (match por subnet) ──────────────────
+  var groups = []; // [{sw, hosts}]
+  var usedHosts = new Set();
+
+  switches.forEach(function(sw) {
+    var snSw = getSubnet(sw.ip);
+    var swHosts = hosts.filter(function(h){
+      return getSubnet(h.ip) === snSw && snSw !== '';
+    });
+    swHosts.forEach(function(h){ usedHosts.add(h.id); });
+    groups.push({ sw: sw, hosts: swHosts });
+  });
+
+  // Hosts sem switch
+  var orphanHosts = hosts.filter(function(h){ return !usedHosts.has(h.id); });
+  if (orphanHosts.length) groups.push({ sw: null, hosts: orphanHosts });
+
+  // ── Dimensões ──────────────────────────────────────────────────
+  var COL_W    = 150;
+  var COL_GAP  = 30;
+  var SW_H     = 50;
+  var HOST_H   = 24;
+  var HOST_GAP = 4;
+  var TOP_PAD  = 20;
+  var SW_PAD   = 20; // espaço entre switch e hosts
+
+  var maxHosts = Math.max.apply(null, groups.map(function(g){ return g.hosts.length; })) || 0;
+  var totalH   = TOP_PAD + SW_H + SW_PAD + maxHosts * (HOST_H + HOST_GAP) + 40;
+  var totalW   = Math.max(groups.length * (COL_W + COL_GAP), 600);
+
   var html = '';
 
-  // Breadcrumb se em área específica
+  // Breadcrumb
   if (_mapaAreaSel) {
     html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#EFF6FF;border-bottom:1px solid #BFDBFE;font-size:12px;flex-shrink:0">'
       +'<button onclick="_mapaAreaSel=null;renderMapaRede()" style="border:none;background:#2563EB;color:#fff;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">← Voltar</button>'
@@ -21068,102 +21062,94 @@ function _renderMapaGrafico(todosAll, container) {
 
   // Filter bar
   html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 12px;background:var(--g50);border-bottom:0.5px solid var(--g100)">'
-    + _mapaFiltBtn('status','ok',    '🟢 Online',   '#059669')
-    + _mapaFiltBtn('status','offline','🔴 Offline', '#DC2626')
-    + _mapaFiltBtn('status','alerta', '🟡 Alerta',  '#D97706')
+    + _mapaFiltBtn('status','ok',     '🟢 Online',   '#059669')
+    + _mapaFiltBtn('status','offline','🔴 Offline',   '#DC2626')
+    + _mapaFiltBtn('status','alerta', '🟡 Alerta',   '#D97706')
     + '<div style="width:1px;height:16px;background:var(--g200)"></div>'
     + _mapaFiltBtn('tipo','switch',   '⇌ Switches',  '#2563EB')
     + _mapaFiltBtn('tipo','router',   '🌐 Routers',   '#EA580C')
     + _mapaFiltBtn('tipo','firewall', '🔥 Firewalls', '#7C3AED')
     + _mapaFiltBtn('tipo','ap',       '📡 APs',       '#0891B2')
-    + '<span style="font-size:11px;color:var(--g400);margin-left:auto">'+todos.length+' dispositivos · '+snList.length+' subnets</span>'
+    + '<span style="font-size:11px;color:var(--g400);margin-left:auto">'+todos.length+' dispositivos · '+switches.length+' switches</span>'
     + ((_mapaFiltros.status||_mapaFiltros.tipo)
         ? '<button onclick="_mapaFiltros={status:\'\',tipo:\'\',local:\'\'};renderMapaRede()" style="border:none;background:var(--g200);color:var(--g600);padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px">✕ Limpar</button>'
         : '')
   +'</div>';
 
-  // SVG canvas
-  html += '<div style="overflow:auto;position:relative"><svg xmlns="http://www.w3.org/2000/svg" width="'+(totalW+40)+'" style="display:block;padding:16px 12px">';
+  // SVG hierárquico
+  html += '<div style="overflow:auto;position:relative"><svg xmlns="http://www.w3.org/2000/svg" width="'+(totalW+40)+'" height="'+totalH+'" style="display:block;padding:12px">';
 
-  var x = 12;
+  groups.forEach(function(g, gi) {
+    var x   = gi * (COL_W + COL_GAP) + 12;
+    var sw  = g.sw;
+    var swY = TOP_PAD;
 
-  // Render each subnet column
-  snList.forEach(function(s) {
-    var sw     = s.sw;
-    var hList  = s.hosts;
-    var colH   = HEADER_H + (sw ? SW_H + 8 : 0) + hList.length * (HOST_H + HOST_PAD) + 20;
-
-    // Column background
-    html += '<rect x="'+x+'" y="4" width="'+CARD_W+'" height="'+colH+'" rx="8" fill="#fff" stroke="#E2E8F0" stroke-width="1"/>';
-
-    // Subnet label
-    html += '<text x="'+(x+6)+'" y="18" font-size="9" fill="#94A3B8" font-family="monospace">'+escapeHtml(s.sn+'.0/24')+'</text>';
-
-    var yy = 28;
-
-    // Switch node
+    // ── Switch node ──────────────────────────────────────────
     if (sw) {
       var swC = tipoClr[(sw.tipo||'').toLowerCase()] || '#2563EB';
-      html += '<rect x="'+(x+4)+'" y="'+yy+'" width="'+(CARD_W-8)+'" height="'+SW_H+'" rx="6" fill="'+swC+'" opacity="0.95"/>';
-      html += '<text x="'+(x+CARD_W/2)+'" y="'+(yy+14)+'" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml((sw.hostname||sw.sysName||sw.ip||'—').slice(0,17))+'</text>';
-      html += '<text x="'+(x+CARD_W/2)+'" y="'+(yy+25)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.7)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
-      // Status dot
-      html += '<circle cx="'+(x+CARD_W-10)+'" cy="'+(yy+8)+'" r="4" fill="'+statusClr(sw)+'"/>';
-      // Latency
-      if (sw.latencyMs!=null) html += '<text x="'+(x+6)+'" y="'+(yy+SW_H-4)+'" font-size="8" fill="rgba(255,255,255,.6)">'+sw.latencyMs.toFixed(0)+'ms</text>';
+      var swLabel  = (sw.hostname || sw.sysName || sw.ip || '?').slice(0,18);
+      var swStatus = statusClr(sw);
 
-      // Line from switch to hosts
-      if (hList.length) {
-        html += '<line x1="'+(x+CARD_W/2)+'" y1="'+(yy+SW_H)+'" x2="'+(x+CARD_W/2)+'" y2="'+(yy+SW_H+6)+'" stroke="#CBD5E1" stroke-width="1.5"/>';
+      // Fundo
+      html += '<rect x="'+x+'" y="'+swY+'" width="'+COL_W+'" height="'+SW_H+'" rx="8" fill="'+swC+'"/>';
+      // Status dot
+      html += '<circle cx="'+(x+COL_W-10)+'" cy="'+(swY+10)+'" r="5" fill="'+swStatus+'"/>';
+      // Hostname
+      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+18)+'" text-anchor="middle" font-size="10" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml(swLabel)+'</text>';
+      // IP
+      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+30)+'" text-anchor="middle" font-size="8.5" fill="rgba(255,255,255,.75)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
+      // Tipo
+      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+42)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.6)">'+escapeHtml((sw.tipo||'switch').toUpperCase())+'</text>';
+      // Latency
+      if (sw.latencyMs != null) html += '<text x="'+(x+8)+'" y="'+(swY+42)+'" font-size="8" fill="rgba(255,255,255,.5)">'+sw.latencyMs+'ms</text>';
+
+      // Linha vertical do switch para os hosts
+      if (g.hosts.length) {
+        html += '<line x1="'+(x+COL_W/2)+'" y1="'+(swY+SW_H)+'" x2="'+(x+COL_W/2)+'" y2="'+(swY+SW_H+SW_PAD)+'" stroke="#CBD5E1" stroke-width="1.5" stroke-dasharray="3,2"/>';
       }
-      yy += SW_H + 8;
     }
 
-    // Host rows
-    hList.forEach(function(h, hi) {
-      var sc = statusClr(h);
-      var hn = (h.hostname||h.desc||h.ip||'—').slice(0,17);
-      var bg = hi%2===0 ? '#F8FAFC' : '#fff';
-      html += '<rect x="'+(x+4)+'" y="'+yy+'" width="'+(CARD_W-8)+'" height="'+HOST_H+'" rx="3" fill="'+bg+'"/>';
-      html += '<circle cx="'+(x+10)+'" cy="'+(yy+HOST_H/2)+'" r="4" fill="'+sc+'"/>';
-      html += '<text x="'+(x+18)+'" y="'+(yy+HOST_H/2+4)+'" font-size="9" fill="#374151" font-family="monospace">'+escapeHtml(hn)+'</text>';
-      if (h.latencyMs!=null) html += '<text x="'+(x+CARD_W-6)+'" y="'+(yy+HOST_H/2+4)+'" text-anchor="end" font-size="8" fill="#9CA3AF">'+h.latencyMs.toFixed(0)+'ms</text>';
-      // Tooltip title
-      html += '<title>'+escapeHtml((h.hostname||h.ip||'—')+' · '+h.ip+' · '+(h.status||'—'))+'</title>';
-      yy += HOST_H + HOST_PAD;
+    // ── Hosts ────────────────────────────────────────────────
+    var hostStartY = TOP_PAD + SW_H + SW_PAD;
+    g.hosts.forEach(function(h, hi) {
+      var hy      = hostStartY + hi * (HOST_H + HOST_GAP);
+      var hStatus = statusClr(h);
+      var hLabel  = (h.hostname || h.sysName || h.ip || '?').slice(0,20);
+      var hTipo   = (h.tipo||'').toLowerCase();
+      var hIcon   = hTipo==='impressora'||hTipo==='printer' ? '🖨' : hTipo==='ap' ? '📡' : '💻';
+
+      // Host bg
+      html += '<rect x="'+x+'" y="'+hy+'" width="'+COL_W+'" height="'+HOST_H+'" rx="4" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>';
+      // Status dot
+      html += '<circle cx="'+(x+8)+'" cy="'+(hy+HOST_H/2)+'" r="4" fill="'+hStatus+'"/>';
+      // Label
+      html += '<text x="'+(x+18)+'" y="'+(hy+HOST_H/2+4)+'" font-size="9" fill="#334155" font-family="monospace">'+escapeHtml(hLabel)+'</text>';
+
+      // Linha do switch para o host (horizontal)
+      if (sw && hi === 0) {
+        // Linha horizontal da base do switch até o primeiro host
+      }
+      // Linha vertical entre hosts
+      if (sw) {
+        var lineX = x + COL_W/2;
+        if (hi === 0) {
+          // já desenhada acima
+        } else {
+          html += '<line x1="'+lineX+'" y1="'+(hy-HOST_GAP)+'" x2="'+lineX+'" y2="'+hy+'" stroke="#E2E8F0" stroke-width="1"/>';
+        }
+      }
     });
 
-    x += CARD_W + CARD_GAP;
+    // Label "sem switch" se grupo sem switch
+    if (!sw && g.hosts.length) {
+      html += '<text x="'+(x+COL_W/2)+'" y="'+(TOP_PAD+14)+'" text-anchor="middle" font-size="9" fill="#94A3B8">Sem switch</text>';
+    }
   });
-
-  // Orphan switches (no hosts)
-  orphanSw.forEach(function(sw) {
-    var swC = tipoClr[(sw.tipo||'').toLowerCase()] || '#2563EB';
-    var colH = HEADER_H + SW_H + 16;
-    html += '<rect x="'+x+'" y="4" width="'+CARD_W+'" height="'+colH+'" rx="8" fill="#fff" stroke="#E2E8F0" stroke-width="1"/>';
-    html += '<text x="'+(x+6)+'" y="18" font-size="9" fill="#94A3B8" font-family="monospace">'+(sw.tipo||'device')+'</text>';
-    html += '<rect x="'+(x+4)+'" y="28" width="'+(CARD_W-8)+'" height="'+SW_H+'" rx="6" fill="'+swC+'" opacity="0.9"/>';
-    html += '<text x="'+(x+CARD_W/2)+'" y="48" text-anchor="middle" font-size="9" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml((sw.hostname||sw.sysName||sw.ip||'—').slice(0,17))+'</text>';
-    html += '<text x="'+(x+CARD_W/2)+'" y="60" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.7)">'+escapeHtml(sw.ip||'')+'</text>';
-    html += '<circle cx="'+(x+CARD_W-10)+'" cy="36" r="4" fill="'+statusClr(sw)+'"/>';
-    x += CARD_W + CARD_GAP;
-  });
-
-  if (!snList.length && !orphanSw.length) {
-    html += '<text x="300" y="80" text-anchor="middle" fill="#94A3B8" font-size="13" font-family="Arial">Nenhum dispositivo encontrado com esses filtros</text>';
-  }
 
   html += '</svg></div>';
   container.innerHTML = html;
 }
 
-function _mapaFiltBtn(campo, valor, label, cor) {
-  var ativo = _mapaFiltros[campo] === valor;
-  return '<button onclick="_mapaFiltros.'+campo+'=_mapaFiltros.'+campo+'===\''+valor+'\'?\'\':\''+valor+'\';renderMapaRede()" '
-    +'style="padding:3px 9px;border:1px solid '+(ativo?cor:'var(--g200)')+';border-radius:7px;'
-    +'background:'+(ativo?cor+'15':'transparent')+';color:'+(ativo?cor:'var(--g600)')+';'
-    +'font-size:11px;font-weight:'+(ativo?'700':'400')+';cursor:pointer;white-space:nowrap">'+label+'</button>';
-}
 
 // ─────────────────────────────────────────────────────────────────
 // MODO 2 — CARDS POR LOCALIDADE
