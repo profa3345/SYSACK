@@ -749,6 +749,80 @@ async function atualizarAtivoComHostname(dados) {
   }
 }
 
+
+// ── Cloudflare Tunnel — acesso remoto seguro ─────────────────────
+const { spawn } = require('child_process');
+const CLOUDFLARED_PATH = path.join(__dirname, 'cloudflared.exe');
+const CLOUDFLARED_URL  = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe';
+
+async function baixarCloudflared() {
+  if (fs.existsSync(CLOUDFLARED_PATH)) return true;
+  log('[Tunnel] Baixando cloudflared...');
+  return new Promise((resolve) => {
+    const file = fs.createWriteStream(CLOUDFLARED_PATH);
+    const download = (url, redirects = 0) => {
+      if (redirects > 5) { resolve(false); return; }
+      const urlObj = new URL(url);
+      const mod = urlObj.protocol === 'https:' ? require('https') : require('http');
+      mod.get(url, { rejectUnauthorized: false }, res => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          download(res.headers.location, redirects + 1);
+          return;
+        }
+        res.pipe(file);
+        file.on('finish', () => { file.close(); resolve(true); });
+        file.on('error', () => resolve(false));
+      }).on('error', () => resolve(false));
+    };
+    download(CLOUDFLARED_URL);
+  });
+}
+
+async function iniciarTunnel() {
+  try {
+    const ok = await baixarCloudflared();
+    if (!ok) { log('[Tunnel] Falha ao baixar cloudflared'); return; }
+
+    log('[Tunnel] Iniciando tunnel Cloudflare...');
+
+    const proc = spawn(CLOUDFLARED_PATH, [
+      'tunnel', '--url', 'ws://localhost:9000',
+      '--no-autoupdate'
+    ], { windowsHide: true });
+
+    let tunnelUrl = null;
+
+    proc.stderr.on('data', async data => {
+      const txt = data.toString();
+      // Cloudflared imprime a URL no stderr
+      const match = txt.match(/https:\/\/[a-z0-9\-]+\.trycloudflare\.com/);
+      if (match && !tunnelUrl) {
+        tunnelUrl = match[0].replace('https://', 'wss://');
+        log('[Tunnel] URL gerada: ' + tunnelUrl);
+
+        // Grava no Firestore para o app ler
+        await firestoreSet('agents/' + AGENT_ID, { tunnelUrl, tunnelAtivo: true });
+        log('[Tunnel] URL gravada no Firestore');
+      }
+    });
+
+    proc.on('close', async code => {
+      log('[Tunnel] Processo encerrado — código: ' + code);
+      tunnelUrl = null;
+      await firestoreSet('agents/' + AGENT_ID, { tunnelUrl: '', tunnelAtivo: false });
+      // Reinicia após 30s
+      setTimeout(iniciarTunnel, 30000);
+    });
+
+    proc.on('error', e => log('[Tunnel] Erro: ' + e.message));
+
+  } catch(e) {
+    log('[Tunnel] Falha: ' + e.message);
+  }
+}
+
+iniciarTunnel();
+
 reportar(); // Primeira execução imediata
 setInterval(reportar, INTERVAL);
 
