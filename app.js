@@ -13711,8 +13711,11 @@ function impRenderCards() {
 
   grid.innerHTML = imps.map(imp => {
     const toners    = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
-    const statusCor = imp.status === 'critico' ? '#EF4444' : imp.status === 'alerta' ? '#F59E0B' : '#10B981';
-    const statusBg  = imp.status === 'critico' ? '#FEF2F2' : imp.status === 'alerta' ? '#FFFBEB' : '#F0FDF4';
+    // Sem dados SNMP/WMI = não marcar como crítico
+    const temDados = imp.snmpOnline || imp.ultimoSnmp || imp.fonte === 'agente-wmi' || imp.ultimoCheck;
+    const _st = temDados ? (imp.status||'ok') : 'sem-dados';
+    const statusCor = _st==='critico' ? '#EF4444' : _st==='alerta' ? '#F59E0B' : _st==='sem-dados' ? '#94A3B8' : '#10B981';
+    const statusBg  = _st==='critico' ? '#FEF2F2' : _st==='alerta' ? '#FFFBEB' : _st==='sem-dados' ? '#F8FAFC' : '#F0FDF4';
 
     const tonerHtml = toners.length ? toners.map(t => {
       const cor   = { K:'#1E293B', C:'#0EA5E9', M:'#EC4899', Y:'#EAB308' }[t.cor] || '#64748B';
@@ -13738,7 +13741,7 @@ function impRenderCards() {
             <div class="td-mono" style="font-size:11px;color:var(--g400)">${escapeHtml(imp.ip)} · ${escapeHtml(imp.local || imp.area || '—')}</div>
           </div>
           <div style="text-align:right">
-            <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;background:${statusBg};color:${statusCor}">${imp.status === 'ok' ? '✓ Online' : imp.status === 'critico' ? '⚠ Crítico' : imp.status === 'alerta' ? '⚡ Alerta' : '● Offline'}</span>
+            <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;background:${statusBg};color:${statusCor}">${_st==='ok'?'✓ Online':_st==='critico'?'⚠ Crítico':_st==='alerta'?'⚡ Alerta':_st==='sem-dados'?'○ Sem dados':'● Offline'}</span>
             ${imp.atolamento ? '<div style="font-size:10px;color:#EF4444;font-weight:700;margin-top:3px">🚫 Atolamento!</div>' : ''}
             ${imp.semPapel   ? '<div style="font-size:10px;color:#F59E0B;font-weight:700;margin-top:3px">📋 Sem papel</div>' : ''}
           </div>
@@ -13817,7 +13820,9 @@ function impRenderToner() {
     const min    = imp.tonerMin || 100;
     const minCor = min < 10 ? '#EF4444' : min < 20 ? '#F59E0B' : '#10B981';
     const dias   = imp.tonerDiasRestantes;
-    const statusCor = imp.status === 'critico' ? '#EF4444' : imp.status === 'alerta' ? '#F59E0B' : '#10B981';
+    const temDados2 = imp.snmpOnline || imp.ultimoSnmp || imp.fonte === 'agente-wmi' || imp.ultimoCheck;
+    const _st2 = temDados2 ? (imp.status||'ok') : 'sem-dados';
+    const statusCor = _st2==='critico' ? '#EF4444' : _st2==='alerta' ? '#F59E0B' : _st2==='sem-dados' ? '#94A3B8' : '#10B981';
 
     return `<tr>
       <td style="font-size:13px;font-weight:600">${escapeHtml(imp.nome||imp.hostname||imp.ip)}</td>
@@ -19491,7 +19496,13 @@ function renderFirewalls(){var q=(document.getElementById('fw-search')?.value||'
 
 
 
-function coletarTodosMonitores(){var r=[];(STATE.ativos||[]).forEach(function(av){var ms=[];try{ms=typeof av.monitoresConectados==='string'?JSON.parse(av.monitoresConectados):(Array.isArray(av.monitoresConectados)?av.monitoresConectados:[]);}catch(e){}ms.forEach(function(m){if(!m.serial)return;var c=(STATE.monitoresCadastrados||[]).find(function(x){return x.serial===m.serial;});r.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:(c&&c.pat)||m.pat||'',pcAtual:av.hostname||av.ip||'—',area:resolverLocal(av),qtdMovimentos:0});});});(STATE.monitoresCadastrados||[]).forEach(function(c){if(r.find(function(m){return m.serial===c.serial;}))return;r.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',pcAtual:c.pcVinculado||'—',area:c.area||'',qtdMovimentos:0});});return r;}
+function coletarTodosMonitores(){var r=[];(STATE.ativos||[]).forEach(function(av){var ms=[];try{
+  // Tenta monitores (campo do agente) e monitoresConectados (campo legado)
+  var raw = av.monitores || av.monitoresConectados;
+  ms = typeof raw==='string' ? JSON.parse(raw) : (Array.isArray(raw) ? raw : []);
+  }catch(e){}
+  // Também busca nos agentes desktop
+  if(!ms.length){var ag=(STATE_AGENTS?.list||[]).find(function(a){return a.ip===av.ip||(a.hostname&&a.hostname===av.hostname);});if(ag&&Array.isArray(ag.monitores))ms=ag.monitores;}ms.forEach(function(m){if(!m.serial)return;var c=(STATE.monitoresCadastrados||[]).find(function(x){return x.serial===m.serial;});r.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:(c&&c.pat)||m.pat||'',pcAtual:av.hostname||av.ip||'—',area:resolverLocal(av),qtdMovimentos:0});});});(STATE.monitoresCadastrados||[]).forEach(function(c){if(r.find(function(m){return m.serial===c.serial;}))return;r.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',pcAtual:c.pcVinculado||'—',area:c.area||'',qtdMovimentos:0});});return r;}
 function renderMonitores(){var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase(),fSt=document.getElementById('mon-filter-status-monitores')?.value||'';var grid=document.getElementById('mon-grid'),todos=coletarTodosMonitores();var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);if(!grid)return;var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'"><div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem Patrimônio</span>')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');}
 
 // ── Faixas de Rede ────────────────────────────────────────────────
@@ -21070,17 +21081,17 @@ function _renderMapaGrafico(todosAll, container) {
   if (orphanHosts.length) groups.push({ sw: null, hosts: orphanHosts });
 
   // ── Dimensões ──────────────────────────────────────────────────
-  var COL_W    = 150;
-  var COL_GAP  = 30;
-  var SW_H     = 50;
-  var HOST_H   = 24;
-  var HOST_GAP = 4;
-  var TOP_PAD  = 20;
-  var SW_PAD   = 20; // espaço entre switch e hosts
+  var COL_W    = 180;
+  var COL_GAP  = 24;
+  var SW_H     = 54;
+  var HOST_H   = 26;
+  var HOST_GAP = 5;
+  var TOP_PAD  = 30;
+  var SW_PAD   = 24; // espaço entre switch e hosts
 
   var maxHosts = Math.max.apply(null, groups.map(function(g){ return g.hosts.length; })) || 0;
-  var totalH   = TOP_PAD + SW_H + SW_PAD + maxHosts * (HOST_H + HOST_GAP) + 40;
-  var totalW   = Math.max(groups.length * (COL_W + COL_GAP), 600);
+  var totalH   = TOP_PAD + SW_H + SW_PAD + maxHosts * (HOST_H + HOST_GAP) + 60;
+  var totalW   = Math.max(groups.length * (COL_W + COL_GAP) + 24, 800);
 
   var html = '';
 
@@ -21138,7 +21149,16 @@ function _renderMapaGrafico(todosAll, container) {
 
       // Linha vertical do switch para os hosts
       if (g.hosts.length) {
-        html += '<line x1="'+(x+COL_W/2)+'" y1="'+(swY+SW_H)+'" x2="'+(x+COL_W/2)+'" y2="'+(swY+SW_H+SW_PAD)+'" stroke="#CBD5E1" stroke-width="1.5" stroke-dasharray="3,2"/>';
+        var lineX = x + COL_W/2;
+        var lineY1 = swY + SW_H;
+        var lineY2 = TOP_PAD + SW_H + SW_PAD + (g.hosts.length-1)*(HOST_H+HOST_GAP) + HOST_H/2;
+        // Linha vertical principal
+        html += '<line x1="'+lineX+'" y1="'+lineY1+'" x2="'+lineX+'" y2="'+lineY2+'" stroke="#CBD5E1" stroke-width="1.5"/>';
+        // Linhas horizontais para cada host
+        g.hosts.forEach(function(h,hi){
+          var hy2 = TOP_PAD + SW_H + SW_PAD + hi*(HOST_H+HOST_GAP) + HOST_H/2;
+          html += '<line x1="'+lineX+'" y1="'+hy2+'" x2="'+(x+8)+'" y2="'+hy2+'" stroke="#CBD5E1" stroke-width="1"/>';
+        });
       }
     }
 
@@ -21157,26 +21177,22 @@ function _renderMapaGrafico(todosAll, container) {
       // Status dot
       html += '<circle cx="'+(x+8)+'" cy="'+(hy+HOST_H/2)+'" r="3.5" fill="'+hStatus+'"/>';
       // Tipo icon
-      var tipoIcon = hTipo==='impressora'||hTipo==='printer'?'🖨':hTipo==='ap'?'📡':hTipo==='servidor'||hTipo==='server'?'🖥':hTipo==='notebook'?'💻':'🖥';
+      var tipoIcon = hTipo==='impressora'||hTipo==='printer'?'🖨'
+        :hTipo==='ap'?'📡'
+        :hTipo==='servidor'||hTipo==='server'?'🖳'
+        :hTipo==='notebook'||hTipo==='laptop'?'💻'
+        :hTipo==='workstation'||hTipo==='computador'||hTipo==='desktop'?'🖥'
+        :hTipo==='firewall'?'🔥'
+        :hTipo==='router'||hTipo==='roteador'?'🌐'
+        :hTipo==='telefone'||hTipo==='voip'?'📞'
+        :'📦';
       html += '<text x="'+(x+17)+'" y="'+(hy+HOST_H/2+4)+'" font-size="9">'+tipoIcon+'</text>';
       // Label
       html += '<text x="'+(x+28)+'" y="'+(hy+HOST_H/2+4)+'" font-size="8.5" fill="#334155" font-family="monospace">'+escapeHtml(hLabel)+'</text>';
       // IP pequeno
       if (h.ip) html += '<text x="'+(x+COL_W-4)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="#94A3B8" text-anchor="end">'+escapeHtml(h.ip)+'</text>';
 
-      // Linha do switch para o host (horizontal)
-      if (sw && hi === 0) {
-        // Linha horizontal da base do switch até o primeiro host
-      }
-      // Linha vertical entre hosts
-      if (sw) {
-        var lineX = x + COL_W/2;
-        if (hi === 0) {
-          // já desenhada acima
-        } else {
-          html += '<line x1="'+lineX+'" y1="'+(hy-HOST_GAP)+'" x2="'+lineX+'" y2="'+hy+'" stroke="#E2E8F0" stroke-width="1"/>';
-        }
-      }
+      // Linhas já desenhadas no bloco do switch
     });
 
     // Label "sem switch" se grupo sem switch
