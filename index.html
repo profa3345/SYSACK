@@ -5929,5 +5929,34 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
   </div>
 </div>
 
+
+<!-- Modal Atribuir PAT Monitor -->
+<div class="modal-overlay" id="modal-atribuir-pat-monitor">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header" style="background:linear-gradient(135deg,#1E40AF,#2563EB);color:#fff">
+      <h3 style="color:#fff;margin:0">🖥️ Atribuir Patrimônio ao Monitor</h3>
+      <button onclick="closeModal('modal-atribuir-pat-monitor')" class="modal-close" style="color:#fff">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="mon-pat-serial">
+      <div style="background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px">
+        <div id="mon-pat-info" style="color:#0369A1;font-weight:600"></div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="form-label">Número de Patrimônio <span style="color:var(--danger)">*</span></label>
+        <input class="form-control" id="mon-pat-numero" placeholder="Ex: 70678" type="text">
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="form-label">Observação</label>
+        <input class="form-control" id="mon-pat-obs" placeholder="Ex: Monitor substituído em 05/2026">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('modal-atribuir-pat-monitor')" class="btn btn-secondary">Cancelar</button>
+      <button onclick="confirmarPatMonitor()" class="btn btn-primary">✅ Salvar Patrimônio</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

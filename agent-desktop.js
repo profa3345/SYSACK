@@ -1239,15 +1239,38 @@ async function coletarVLANs() {
       if (!ip) continue;
       const docId = doc.name.split('/').pop();
 
-      // OIDs de VLAN (IEEE 802.1Q)
-      const VLAN_NAME_OID = '1.3.6.1.2.1.17.7.1.4.3.1.1'; // dot1qVlanStaticName
-      const VLAN_PORT_OID = '1.3.6.1.2.1.17.7.1.4.3.1.2'; // dot1qVlanStaticEgressPorts
+      // OIDs de VLAN — tenta padrão 802.1Q e HP ProCurve proprietário
+      const VLAN_OIDS_STD = [
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.1',   // dot1qVlanStaticName VLAN 1
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.2',
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.10',
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.20',
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.30',
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.100',
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.200',
+        '1.3.6.1.2.1.17.7.1.4.3.1.1.999',
+      ];
+      // HP ProCurve OIDs
+      const VLAN_OIDS_HP = [
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.1',  // hpSwitchVlanName VLAN 1
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.2',
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.10',
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.20',
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.30',
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.100',
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.200',
+        '1.3.6.1.4.1.11.2.14.11.5.1.7.1.3.1.1.999',
+      ];
 
-      const resp = await snmpGet(ip, [
-        VLAN_NAME_OID + '.1', VLAN_NAME_OID + '.2', VLAN_NAME_OID + '.10',
-        VLAN_NAME_OID + '.20', VLAN_NAME_OID + '.30', VLAN_NAME_OID + '.100',
-        VLAN_NAME_OID + '.200', VLAN_NAME_OID + '.999',
-      ], community, 4000);
+      // Detecta se é HP pelo sysOid
+      const sysOid = f.sysOid?.stringValue || '';
+      const isHP = sysOid.startsWith('1.3.6.1.4.1.11');
+      const oidList = isHP ? VLAN_OIDS_HP : VLAN_OIDS_STD;
+
+      let resp = await snmpGet(ip, oidList, community, 4000);
+      // Se não retornou nada, tenta o outro padrão
+      const hasData = resp && Object.values(resp).some(v => v && v !== 'NULL');
+      if (!hasData) resp = await snmpGet(ip, isHP ? VLAN_OIDS_STD : VLAN_OIDS_HP, community, 4000);
 
       if (!resp) continue;
 
@@ -1255,7 +1278,7 @@ async function coletarVLANs() {
       for (const [oid, val] of Object.entries(resp)) {
         if (!val || val === 'NULL') continue;
         const id = parseInt(oid.split('.').pop());
-        if (isNaN(id)) continue;
+        if (isNaN(id) || id === 0) continue;
         vlans.push({ id, nome: String(val).trim() });
       }
 
@@ -1275,6 +1298,80 @@ async function coletarVLANs() {
 // Roda 4 minutos após iniciar e depois a cada 30 minutos
 setTimeout(coletarVLANs, 4 * 60 * 1000);
 setInterval(coletarVLANs, 30 * 60 * 1000);
+
+// ── Coleta mapa de portas dos switches via SNMP ───────────────────
+async function coletarPortasSwitches() {
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/switches?pageSize=100`;
+    const urlObj = new URL(url);
+    const docs = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path: urlObj.pathname + urlObj.search,
+        method: 'GET', rejectUnauthorized: false,
+      }, res => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => { try { resolve(JSON.parse(raw).documents || []); } catch(e) { resolve([]); } });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+
+    for (const doc of docs) {
+      const f = doc.fields || {};
+      const ip        = f.ip?.stringValue;
+      const community = f.snmpCommunity?.stringValue || 'public';
+      if (!ip) continue;
+      const docId = doc.name.split('/').pop();
+
+      // OIDs de interface
+      const IF_OIDS = [];
+      for (let i = 1; i <= 48; i++) {
+        IF_OIDS.push('1.3.6.1.2.1.2.2.1.8.'  + i); // ifOperStatus (1=up, 2=down)
+        IF_OIDS.push('1.3.6.1.2.1.2.2.1.2.'  + i); // ifDescr (nome da porta)
+        IF_OIDS.push('1.3.6.1.2.1.31.1.1.1.18.' + i); // ifAlias (descrição)
+      }
+
+      const resp = await snmpGet(ip, IF_OIDS, community, 5000);
+      if (!resp) continue;
+
+      const portas = [];
+      for (let i = 1; i <= 48; i++) {
+        const status = resp['1.3.6.1.2.1.2.2.1.8.'  + i];
+        const nome   = resp['1.3.6.1.2.1.2.2.1.2.'  + i];
+        const alias  = resp['1.3.6.1.2.1.31.1.1.1.18.' + i];
+        if (status == null) continue;
+        portas.push({
+          porta: i,
+          status: status === 1 ? 'up' : 'down',
+          nome:  String(nome||'').trim(),
+          alias: String(alias||'').trim(),
+        });
+      }
+
+      if (portas.length) {
+        const portasUp   = portas.filter(p => p.status === 'up').length;
+        const portasDown = portas.filter(p => p.status === 'down').length;
+        await firestoreSet(`switches/${docId}`, {
+          portasMap:       JSON.stringify(portas),
+          portasUso:       portasUp,
+          portasLivres:    portasDown,
+          totalPortas:     portas.length,
+          portasAtualizadoEm: new Date().toISOString(),
+        });
+        log(`[SNMP] Switch ${ip}: ${portasUp}/${portas.length} portas ativas`);
+      }
+    }
+  } catch(e) {
+    log('[SNMP] Portas erro: ' + e.message);
+  }
+}
+
+// Roda 5 minutos após iniciar e depois a cada 15 minutos
+setTimeout(coletarPortasSwitches, 5 * 60 * 1000);
+setInterval(coletarPortasSwitches, 15 * 60 * 1000);
+
 
 reportar(); // Primeira execução imediata
 setInterval(reportar, INTERVAL);

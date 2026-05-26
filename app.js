@@ -10812,11 +10812,52 @@ function abrirGerenciarSwitch(id){
   document.getElementById('ger-sw-portas-live').textContent=`${sw.portasUso}/${sw.totalPortas}`;
   document.getElementById('ger-sw-fw-live').textContent=sw.firmware||'—';
   const pm=document.getElementById('ger-sw-port-map');
-  if(pm) pm.innerHTML=Array.from({length:Math.min(sw.totalPortas||24,48)},(_,i)=>{
-    const sfp=i>=(sw.totalPortas-(sw.portasSfp||0)),used=i<(sw.portasUso||0),poe=sw.poe&&used&&i<4;
-    const cls=sfp?'sfp':poe?'poe':used?'ativo':'livre';
-    return `<div class='sw-port ${cls}' data-tip='${sfp?'SFP':'Porta '+(i+1)+': '+(used?'Em uso':'Livre')}' style='width:22px;height:22px;font-size:8px'>${sfp?'S':i+1}</div>`;
-  }).join('');
+  if(pm) {
+    // Usa dados reais do agente SNMP se disponíveis
+    const portasReal = (() => {
+      try { return sw.portasMap ? JSON.parse(sw.portasMap) : null; }
+      catch(e) { return null; }
+    })();
+
+    if (portasReal && portasReal.length) {
+      // Mapa real com status por porta
+      const rows = [];
+      const perRow = 12;
+      for (let r = 0; r < Math.ceil(portasReal.length / perRow); r++) {
+        const row = portasReal.slice(r * perRow, (r+1) * perRow);
+        rows.push(`<div style="display:flex;gap:4px;margin-bottom:4px">`
+          + row.map(p => {
+            const cor  = p.status==='up' ? '#10B981' : '#E2E8F0';
+            const text = p.status==='up' ? '#fff' : '#94A3B8';
+            const tip  = `Porta ${p.porta}: ${p.status==='up'?'Em uso':'Livre'}${p.alias?' — '+p.alias:''}`;
+            return `<div title="${escapeHtml(tip)}" style="width:28px;height:28px;background:${cor};color:${text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;cursor:default">${p.porta}</div>`;
+          }).join('')
+          + `</div>`
+        );
+      }
+      const upCount   = portasReal.filter(p=>p.status==='up').length;
+      const downCount = portasReal.filter(p=>p.status==='down').length;
+      pm.innerHTML = `
+        <div style="display:flex;gap:16px;margin-bottom:10px;font-size:11px">
+          <span>🟢 <strong>${upCount}</strong> em uso</span>
+          <span style="color:var(--g400)">⚪ <strong>${downCount}</strong> livres</span>
+          <span style="color:var(--g400);margin-left:auto;font-size:10px">Atualizado: ${sw.portasAtualizadoEm ? new Date(sw.portasAtualizadoEm).toLocaleString('pt-BR') : '—'}</span>
+        </div>
+        <div style="background:#F8FAFC;border-radius:8px;padding:10px">${rows.join('')}</div>
+        <div style="display:flex;gap:12px;margin-top:8px;font-size:10px;color:var(--g400)">
+          <span><span style="display:inline-block;width:12px;height:12px;background:#10B981;border-radius:2px;vertical-align:middle"></span> Em uso</span>
+          <span><span style="display:inline-block;width:12px;height:12px;background:#E2E8F0;border-radius:2px;vertical-align:middle"></span> Livre</span>
+        </div>`;
+    } else {
+      // Fallback estimado se SNMP ainda não rodou
+      pm.innerHTML = Array.from({length:Math.min(sw.totalPortas||24,48)},(_,i)=>{
+        const used = i < (sw.portasUso||0);
+        const cor  = used ? '#10B981' : '#E2E8F0';
+        const text = used ? '#fff' : '#94A3B8';
+        return `<div title="Porta ${i+1}: ${used?'Em uso (estimado)':'Livre (estimado)'}" style="display:inline-flex;width:28px;height:28px;background:${cor};color:${text};border-radius:4px;align-items:center;justify-content:center;font-size:9px;font-weight:700;margin:2px;cursor:default">${i+1}</div>`;
+      }).join('') + '<div style="margin-top:8px;font-size:10px;color:var(--g400)">⏳ Aguardando dados SNMP do agente...</div>';
+    }
+  }
   const vb=document.getElementById('ger-sw-vlans-body');
   if(vb) {
     const vlansArr = (() => {
@@ -19503,7 +19544,7 @@ function coletarTodosMonitores(){var r=[];(STATE.ativos||[]).forEach(function(av
   }catch(e){}
   // Também busca nos agentes desktop
   if(!ms.length){var ag=(STATE_AGENTS?.list||[]).find(function(a){return a.ip===av.ip||(a.hostname&&a.hostname===av.hostname);});if(ag&&Array.isArray(ag.monitores))ms=ag.monitores;}ms.forEach(function(m){if(!m.serial)return;var c=(STATE.monitoresCadastrados||[]).find(function(x){return x.serial===m.serial;});r.push({serial:m.serial,fabricante:m.fabricante||'',modelo:m.modelo||'',pat:(c&&c.pat)||m.pat||'',pcAtual:av.hostname||av.ip||'—',area:resolverLocal(av),qtdMovimentos:0});});});(STATE.monitoresCadastrados||[]).forEach(function(c){if(r.find(function(m){return m.serial===c.serial;}))return;r.push({serial:c.serial||'',fabricante:c.fabricante||'',modelo:c.modelo||'',pat:c.pat||'',pcAtual:c.pcVinculado||'—',area:c.area||'',qtdMovimentos:0});});return r;}
-function renderMonitores(){var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase(),fSt=document.getElementById('mon-filter-status-monitores')?.value||'';var grid=document.getElementById('mon-grid'),todos=coletarTodosMonitores();var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);if(!grid)return;var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'"><div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem Patrimônio</span>')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="openModal(\'modal-atribuir-pat-monitor\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');}
+function renderMonitores(){var q=(document.getElementById('mon-search-monitores')?.value||'').toLowerCase(),fSt=document.getElementById('mon-filter-status-monitores')?.value||'';var grid=document.getElementById('mon-grid'),todos=coletarTodosMonitores();var sv=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};sv('mon-kpi-total',todos.length);sv('mon-kpi-sem-pat',todos.filter(function(m){return!m.pat;}).length);sv('mon-kpi-com-pat',todos.filter(function(m){return!!m.pat;}).length);sv('mon-kpi-movidos',todos.filter(function(m){return m.qtdMovimentos>1;}).length);if(!grid)return;var lista=todos;if(q)lista=lista.filter(function(m){return(m.serial+m.pat+m.modelo+m.fabricante+m.pcAtual).toLowerCase().includes(q);});if(fSt==='sem-pat')lista=lista.filter(function(m){return!m.pat;});if(fSt==='com-pat')lista=lista.filter(function(m){return!!m.pat;});if(!lista.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:40px">🖥️</div><div style="font-weight:600;margin-top:8px">Nenhum monitor encontrado</div></div>';return;}grid.innerHTML=lista.map(function(m){var tp=!!m.pat;return'<div style="background:var(--panel,#fff);border:0.5px solid var(--line,#e2e8f0);border-radius:12px;overflow:hidden;border-top:3px solid '+(tp?'var(--success)':'#F59E0B')+'"><div style="padding:14px 16px 10px"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><div style="font-size:28px">🖥️</div><div><div style="font-size:14px;font-weight:700">'+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'</div><div style="font-size:11px;font-family:monospace;color:var(--g500)">S/N: '+escapeHtml(m.serial||'—')+'</div></div></div>'+(tp?'<span style="background:#eaf3de;color:#3b6d11;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">PAT: '+escapeHtml(m.pat)+'</span>':'<span style="background:#FEF3C7;color:#92400E;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">Sem Patrimônio</span>')+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px"><div><span style="color:var(--g400)">PC:</span> <span style="font-weight:600">'+escapeHtml(m.pcAtual)+'</span></div><div><span style="color:var(--g400)">Local:</span> <span>'+escapeHtml(m.area||'—')+'</span></div></div></div><div style="display:flex;border-top:0.5px solid var(--g100)"><button onclick="abrirAtribuirPatMonitor(\''+escapeHtml(m.serial||'')+'\',' +'\''+escapeHtml((m.fabricante||'')+' '+(m.modelo||'Monitor'))+'\',' +'\''+escapeHtml(m.pat||'')+'\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:'+(tp?'var(--g500)':'var(--accent)')+';cursor:pointer;border-right:0.5px solid var(--g100)">'+(tp?'Alterar PAT':'Atribuir PAT')+'</button><button onclick="openModal(\'modal-novo-chamado\')" style="flex:1;border:none;background:none;padding:10px;font-size:12px;font-weight:600;color:var(--g500);cursor:pointer">Chamado</button></div></div>';}).join('');}
 
 // ── Faixas de Rede ────────────────────────────────────────────────
 var STATE_REDES=null;
@@ -19971,6 +20012,54 @@ window.abrirBuscaReuso = function() {
   if (typeof _origAbrirBuscaReuso === 'function') _origAbrirBuscaReuso();
   else abrirBuscaReuso_orig?.();
 };
+
+
+function abrirAtribuirPatMonitor(serial, modelo, patAtual) {
+  document.getElementById('mon-pat-serial').value  = serial || '';
+  document.getElementById('mon-pat-numero').value  = patAtual || '';
+  document.getElementById('mon-pat-obs').value     = '';
+  document.getElementById('mon-pat-info').textContent =
+    modelo + (serial ? ' · S/N: ' + serial : '');
+  openModal('modal-atribuir-pat-monitor');
+}
+
+async function confirmarPatMonitor() {
+  const serial = document.getElementById('mon-pat-serial').value;
+  const pat    = document.getElementById('mon-pat-numero').value.trim();
+  const obs    = document.getElementById('mon-pat-obs').value.trim();
+  if (!pat) return showToast('Informe o número de patrimônio', 'warning');
+
+  try {
+    // Salva na coleção monitoresCadastrados
+    const id = 'mon_' + serial.replace(/[^a-zA-Z0-9]/g,'_');
+    await db?.collection('monitoresCadastrados').doc(id).set({
+      serial, pat, obs,
+      atualizadoEm: new Date().toISOString(),
+      por: CURRENT_USER?.nome || '—',
+    }, { merge: true });
+
+    // Atualiza o ativo vinculado se existir
+    const ag = (STATE_AGENTS?.list||[]).find(a =>
+      (a.monitores||[]).some(m => m.serial === serial)
+    );
+    if (ag?.id) {
+      const ativo = (STATE.ativos||[]).find(a =>
+        a.ip === ag.ip || a.hostname === ag.hostname
+      );
+      if (ativo?.id) {
+        await db?.collection('ativos').doc(ativo.id).update({
+          [`monitor_pat_${serial}`]: pat,
+        }).catch(() => {});
+      }
+    }
+
+    closeModal('modal-atribuir-pat-monitor');
+    showToast('✅ Patrimônio ' + pat + ' atribuído ao monitor!', 'success');
+    renderMonitores();
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
+}
 
 async function confirmarMoverReuso() {
   var ativoId = document.getElementById('reuso-busca-ativo-id').value;
