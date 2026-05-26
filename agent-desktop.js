@@ -822,8 +822,8 @@ async function iniciarTunnel() {
         tunnelUrl = match[0].replace('https://', 'wss://');
         log('[Tunnel] URL gerada: ' + tunnelUrl);
 
-        // Grava no Firestore para o app ler
-        await firestoreSet('agents/' + AGENT_ID, { tunnelUrl, tunnelAtivo: true });
+        // Grava no Firestore para o app ler (merge — não apaga outros campos)
+        await firestorePatch('agents/' + AGENT_ID, { tunnelUrl, tunnelAtivo: true });
         log('[Tunnel] URL gravada no Firestore');
       }
     });
@@ -831,7 +831,7 @@ async function iniciarTunnel() {
     proc.on('close', async code => {
       log('[Tunnel] Processo encerrado — código: ' + code + (code===1?' (provável bloqueio de rede/proxy)':''));
       tunnelUrl = null;
-      try { await firestoreSet('agents/' + AGENT_ID, { tunnelUrl: '', tunnelAtivo: false }); } catch(e) {}
+      try { await firestorePatch('agents/' + AGENT_ID, { tunnelUrl: '', tunnelAtivo: false }); } catch(e) {}
       // Reinicia após 60s se encerrou com erro
       const delay = code === 0 ? 5000 : 60000;
       setTimeout(iniciarTunnel, delay);
