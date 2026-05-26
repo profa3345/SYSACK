@@ -608,11 +608,14 @@ async function executarComando(doc) {
 
   if (agentId !== AGENT_ID) return;
 
+  // Marca como processando IMEDIATAMENTE para não processar duas vezes
+  await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
+
   // Verifica token de segurança
   const tokenRecebido = getId(fields.token);
-  if (tokenRecebido !== 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9') {
-    log('[Relay] SEGURANÇA: comando rejeitado — token inválido');
-    await firestorePatch('agent_commands/' + id, { status: 'rejeitado' }).catch(() => {});
+  if (!tokenRecebido || tokenRecebido !== 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9') {
+    // Token inválido ou ausente (comando antigo) — descarta silenciosamente
+    await firestorePatch('agent_commands/' + id, { status: 'descartado' }).catch(() => {});
     return;
   }
 
@@ -760,11 +763,20 @@ async function baixarCloudflared() {
   log('[Tunnel] Baixando cloudflared...');
   return new Promise((resolve) => {
     const file = fs.createWriteStream(CLOUDFLARED_PATH);
+    const PROXY_HOST = 'proxy.sistemas.cesan.com.br';
+    const PROXY_PORT = 8080;
     const download = (url, redirects = 0) => {
       if (redirects > 5) { resolve(false); return; }
       const urlObj = new URL(url);
-      const mod = urlObj.protocol === 'https:' ? require('https') : require('http');
-      mod.get(url, { rejectUnauthorized: false }, res => {
+      // Download via proxy CESAN
+      const req = require('http').request({
+        host: PROXY_HOST, port: PROXY_PORT, method: 'GET',
+        path: url, rejectUnauthorized: false,
+        headers: { Host: urlObj.hostname }
+      }, res => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          download(res.headers.location, redirects + 1); return;
+        }
         if (res.statusCode === 301 || res.statusCode === 302) {
           download(res.headers.location, redirects + 1);
           return;
@@ -787,8 +799,18 @@ async function iniciarTunnel() {
 
     const proc = spawn(CLOUDFLARED_PATH, [
       'tunnel', '--url', 'ws://localhost:9000',
-      '--no-autoupdate'
-    ], { windowsHide: true });
+      '--no-autoupdate',
+      '--logfile', path.join(__dirname, 'cloudflared.log'),
+    ], {
+      windowsHide: true,
+      detached: false,
+      env: {
+        ...process.env,
+        HTTPS_PROXY: 'http://proxy.sistemas.cesan.com.br:8080',
+        HTTP_PROXY:  'http://proxy.sistemas.cesan.com.br:8080',
+        NO_PROXY:    'localhost,127.0.0.1,172.23.*,10.*,192.168.*',
+      }
+    });
 
     let tunnelUrl = null;
 
@@ -807,11 +829,12 @@ async function iniciarTunnel() {
     });
 
     proc.on('close', async code => {
-      log('[Tunnel] Processo encerrado — código: ' + code);
+      log('[Tunnel] Processo encerrado — código: ' + code + (code===1?' (provável bloqueio de rede/proxy)':''));
       tunnelUrl = null;
-      await firestoreSet('agents/' + AGENT_ID, { tunnelUrl: '', tunnelAtivo: false });
-      // Reinicia após 30s
-      setTimeout(iniciarTunnel, 30000);
+      try { await firestoreSet('agents/' + AGENT_ID, { tunnelUrl: '', tunnelAtivo: false }); } catch(e) {}
+      // Reinicia após 60s se encerrou com erro
+      const delay = code === 0 ? 5000 : 60000;
+      setTimeout(iniciarTunnel, delay);
     });
 
     proc.on('error', e => log('[Tunnel] Erro: ' + e.message));
@@ -1096,6 +1119,146 @@ async function monitorarImpressoras() {
 // Roda 2 minutos após iniciar e depois a cada 5 minutos
 setTimeout(monitorarImpressoras, 2 * 60 * 1000);
 setInterval(monitorarImpressoras, 5 * 60 * 1000);
+
+
+// ── Impressoras locais via WMI ────────────────────────────────────
+async function coletarImpressorasLocais() {
+  try {
+    if (process.platform !== 'win32') return;
+
+    const ps = [
+      '$printers = Get-WmiObject -Class Win32_Printer -EA SilentlyContinue',
+      'foreach ($p in $printers) {',
+      '  $jobs = (Get-WmiObject -Class Win32_PrintJob -EA SilentlyContinue | Where-Object {$_.Name -like ($p.Name + "*")}).Count',
+      '  $status = switch ($p.PrinterStatus) {',
+      '    1 {"outro"} 2 {"desconhecida"} 3 {"pronta"} 4 {"impresssando"}',
+      '    5 {"aquecendo"} 6 {"parada"} 7 {"offline"} default {"desconhecida"}',
+      '  }',
+      '  Write-Output ("NOME=" + $p.Name + "|STATUS=" + $status + "|REDE=" + $p.Network + "|DEFAULT=" + $p.Default + "|JOBS=" + $jobs + "|PORT=" + $p.PortName)',
+      '}',
+    ].join("\n");
+
+    const psFile = path.join(__dirname, '_printers.ps1');
+    fs.writeFileSync(psFile, ps, 'utf8');
+    const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`,
+      { timeout: 15000, windowsHide: true }).toString();
+    try { fs.unlinkSync(psFile); } catch(e) {}
+
+    const impressoras = [];
+    for (const line of out.split('\n')) {
+      if (!line.includes('NOME=')) continue;
+      const get = key => (line.match(new RegExp(key + '=([^|\r\n]*)')) || [])[1]?.trim() || '';
+      const nome   = get('NOME');
+      const status = get('STATUS');
+      const rede   = get('REDE') === 'True';
+      const def    = get('DEFAULT') === 'True';
+      const jobs   = parseInt(get('JOBS')) || 0;
+      const porta  = get('PORT');
+      if (!nome || nome.includes('Microsoft') || nome.includes('PDF') || nome.includes('XPS') || nome.includes('OneNote') || nome.includes('Fax')) continue;
+      impressoras.push({ nome, status, rede, default: def, jobsNaFila: jobs, porta });
+    }
+
+    if (!impressoras.length) return;
+
+    // Grava no documento do agente
+    await firestoreSet(`agents/${AGENT_ID}`, {
+      impressorasLocais: JSON.stringify(impressoras),
+      impressorasCount: impressoras.length,
+    });
+
+    // Grava também na coleção impressoras para cada uma
+    for (const imp of impressoras) {
+      const impId = AGENT_ID + '_' + imp.nome.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+      const online = imp.status === 'pronta' || imp.status === 'imprimindo';
+      await firestoreSet(`impressoras/${impId}`, {
+        nome:         imp.nome,
+        hostname:     AGENT_ID,
+        tipo:         imp.rede ? 'rede' : 'usb',
+        status:       online ? 'ok' : imp.status === 'offline' ? 'critico' : 'alerta',
+        statusLegivel: imp.status,
+        jobsNaFila:   imp.jobsNaFila,
+        isDefault:    imp.default,
+        porta:        imp.porta,
+        ultimoCheck:  new Date().toISOString(),
+        fonte:        'agente-wmi',
+      });
+    }
+
+    log(`[WMI] ${impressoras.length} impressoras locais coletadas`);
+  } catch(e) {
+    log('[WMI] Impressoras erro: ' + e.message);
+  }
+}
+
+// Roda 3 minutos após iniciar e depois a cada 10 minutos
+setTimeout(coletarImpressorasLocais, 3 * 60 * 1000);
+setInterval(coletarImpressorasLocais, 10 * 60 * 1000);
+
+
+// ── Coleta VLANs dos switches via SNMP ───────────────────────────
+async function coletarVLANs() {
+  try {
+    // Busca switches do Firestore
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/switches?pageSize=100`;
+    const urlObj = new URL(url);
+    const docs = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path: urlObj.pathname + urlObj.search,
+        method: 'GET',
+        rejectUnauthorized: false,
+      }, res => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => { try { resolve(JSON.parse(raw).documents || []); } catch(e) { resolve([]); } });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+
+    for (const doc of docs) {
+      const f = doc.fields || {};
+      const ip        = f.ip?.stringValue;
+      const community = f.snmpCommunity?.stringValue || 'public';
+      if (!ip) continue;
+      const docId = doc.name.split('/').pop();
+
+      // OIDs de VLAN (IEEE 802.1Q)
+      const VLAN_NAME_OID = '1.3.6.1.2.1.17.7.1.4.3.1.1'; // dot1qVlanStaticName
+      const VLAN_PORT_OID = '1.3.6.1.2.1.17.7.1.4.3.1.2'; // dot1qVlanStaticEgressPorts
+
+      const resp = await snmpGet(ip, [
+        VLAN_NAME_OID + '.1', VLAN_NAME_OID + '.2', VLAN_NAME_OID + '.10',
+        VLAN_NAME_OID + '.20', VLAN_NAME_OID + '.30', VLAN_NAME_OID + '.100',
+        VLAN_NAME_OID + '.200', VLAN_NAME_OID + '.999',
+      ], community, 4000);
+
+      if (!resp) continue;
+
+      const vlans = [];
+      for (const [oid, val] of Object.entries(resp)) {
+        if (!val || val === 'NULL') continue;
+        const id = parseInt(oid.split('.').pop());
+        if (isNaN(id)) continue;
+        vlans.push({ id, nome: String(val).trim() });
+      }
+
+      if (vlans.length) {
+        await firestoreSet(`switches/${docId}`, {
+          vlans: JSON.stringify(vlans),
+          vlansAtualizadoEm: new Date().toISOString(),
+        });
+      }
+    }
+    log(`[SNMP] VLANs coletadas de ${docs.length} switches`);
+  } catch(e) {
+    log('[SNMP] VLANs erro: ' + e.message);
+  }
+}
+
+// Roda 4 minutos após iniciar e depois a cada 30 minutos
+setTimeout(coletarVLANs, 4 * 60 * 1000);
+setInterval(coletarVLANs, 30 * 60 * 1000);
 
 reportar(); // Primeira execução imediata
 setInterval(reportar, INTERVAL);
