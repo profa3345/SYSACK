@@ -50,7 +50,7 @@ self.addEventListener('notificationclick', event => {
 // ─────────────────────────────────────────────────────────────────
 // Cache config
 // ─────────────────────────────────────────────────────────────────
-const CACHE_NAME = 'sysack-v8';
+const CACHE_NAME = 'sysack-v10';
 
 const BYPASS = [
   /firestore\.googleapis\.com/,
