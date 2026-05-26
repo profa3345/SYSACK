@@ -10727,18 +10727,25 @@ function renderSwitches(){
   const fs=document.getElementById('sw-filter-status')?.value||'';
   const ft=document.getElementById('sw-filter-tipo')?.value||'';
   const filtered=sws.filter(s=>(!q||(s.hostname||s.sysName||s.name||'').toLowerCase().includes(q)||(s.ip||'').includes(q)||(s.modelo||'').toLowerCase().includes(q)||(s.local||s.sysLocation||'').toLowerCase().includes(q)||(s.marca||'').toLowerCase().includes(q))&&(!fs||s.status===fs)&&(!ft||s.tipo===ft));
-  sv('sw-s-total',sws.length);sv('sw-s-online',sws.filter(s=>s.status==='online').length);
-  sv('sw-s-offline',sws.filter(s=>s.status==='offline').length);sv('sw-s-alerta',sws.filter(s=>s.status==='alerta').length);
+  const swOnline  = s => s.status==='online'  || s.status==='ativo'   || s.reachable===true;
+  const swOffline = s => s.status==='offline' || s.status==='inativo' || s.reachable===false;
+  const swAlerta  = s => s.status==='alerta'  || s.status==='warning';
+  sv('sw-s-total',sws.length);sv('sw-s-online',sws.filter(swOnline).length);
+  sv('sw-s-offline',sws.filter(swOffline).length);sv('sw-s-alerta',sws.filter(swAlerta).length);
   sv('sw-s-portas',sws.reduce((a,s)=>a+(s.totalPortas||0),0));
   sv('sw-s-uso-portas',sws.reduce((a,s)=>a+(s.portasUso||0),0));
-  nbUpdate('nb-switches',sws.filter(s=>s.status==='offline'||s.status==='alerta').length);
-  const alertas=sws.filter(s=>s.status==='offline'||s.status==='alerta');
+  nbUpdate('nb-switches',sws.filter(s=>swOffline(s)||swAlerta(s)).length);
+  const alertas=sws.filter(s=>swOffline(s)||swAlerta(s));
   const alertDiv=document.getElementById('sw-network-alerts');
   if(alertDiv) alertDiv.innerHTML=alertas.map(s=>{const _h=s.hostname||s.sysName||s.name||s.ip||'—';const _l=s.local&&s.local!=='undefined'?s.local:s.sysLocation&&s.sysLocation!=='undefined'?s.sysLocation:'sem local';const _m=[s.marca,s.modelo].filter(v=>v&&v!=='undefined').join(' ')||'';return `<div class='alert ${s.status==='offline'?'alert-danger':'alert-warning'}' style='margin-bottom:8px'><span>${s.status==='offline'?'🔴':'🟡'}</span><div><strong>${_h}</strong> — ${s.status==='offline'?'OFFLINE':'Em Alerta'}<br><span style='font-size:11.5px'>${s.ip} · ${_l}${_m?' · '+_m:''}</span></div><button class='btn btn-danger btn-sm' style='margin-left:auto;flex-shrink:0' onclick="abrirGerenciarSwitch('${s.id}')">Investigar</button></div>`}).join('');
   if(currentSwView==='cards'){
     const grid=document.getElementById('sw-cards-grid');
     if(!grid) return;
     grid.innerHTML=filtered.map(s=>{
+      // Normaliza status
+      if (s.status==='ativo' || s.reachable===true)  s._statusNorm = 'online';
+      else if (s.status==='inativo' || s.reachable===false) s._statusNorm = 'offline';
+      else s._statusNorm = s.status || 'online';
       const pct=Math.round(((s.portasUso||0)/(s.totalPortas||1))*100)||0;
       const ico={'switch-acesso':'🔀','switch-core':'🔀','switch-distribuicao':'🔀','roteador':'📡','ap':'📶','firewall':'🛡️'}[s.tipo]||'🔌';
       const bg={'firewall':'#7C3AED','roteador':'#EA580C','ap':'#2563EB'}[s.tipo]||'#1E293B';
@@ -10808,7 +10815,20 @@ function abrirGerenciarSwitch(id){
     return `<div class='sw-port ${cls}' data-tip='${sfp?'SFP':'Porta '+(i+1)+': '+(used?'Em uso':'Livre')}' style='width:22px;height:22px;font-size:8px'>${sfp?'S':i+1}</div>`;
   }).join('');
   const vb=document.getElementById('ger-sw-vlans-body');
-  if(vb) vb.innerHTML=(sw.vlans||[]).map(v=>`<tr><td class='td-mono' style='color:var(--accent)'>${v.id}</td><td>${v.nome}</td><td><span class='tag'>${v.tipo}</span></td><td class='td-mono' style='font-size:10.5px'>${v.rede||'—'}</td></tr>`).join('')||'<tr><td colspan=4 style=text-align:center;padding:10px;color:var(--g400)>Sem VLANs</td></tr>';
+  if(vb) {
+    const vlansArr = (() => {
+      try { return typeof sw.vlans === 'string' ? JSON.parse(sw.vlans) : (sw.vlans||[]); }
+      catch(e) { return []; }
+    })();
+    vb.innerHTML = vlansArr.length
+      ? vlansArr.map(v=>`<tr>
+          <td class='td-mono' style='color:var(--accent);font-weight:700'>${v.id}</td>
+          <td>${escapeHtml(v.nome||'—')}</td>
+          <td><span class='tag'>${v.tipo||'802.1Q'}</span></td>
+          <td class='td-mono' style='font-size:10.5px'>${v.rede||'—'}</td>
+        </tr>`).join('')
+      : '<tr><td colspan=4 style="text-align:center;padding:20px;color:var(--g400)">⏳ Aguardando coleta SNMP pelo agente...</td></tr>';
+  }
   const mb=document.getElementById('ger-sw-mac-body');
   if(mb) mb.innerHTML=[{porta:'Gi1',mac:'00:1A:2B:3C:4D:5E',vlan:'20',tipo:'Dinâmico'},{porta:'Gi2',mac:'00:1A:2B:3C:4D:6F',vlan:'20',tipo:'Dinâmico'},{porta:'Gi24',mac:'00:AA:BB:CC:DD:EE',vlan:'99',tipo:'Estático'}].map(m=>`<tr><td class='td-mono' style='font-size:10.5px'>${m.porta}</td><td class='td-mono' style='font-size:10px'>${m.mac}</td><td class='td-mono'>${m.vlan}</td><td>${m.tipo}</td></tr>`).join('');
   const lg=document.getElementById('ger-sw-log');
