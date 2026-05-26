@@ -6032,24 +6032,38 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // 3. Alerta o técnico sobre o modo de conexão
 
   async function rvDetectarEConectar() {
-    rvSb('Conectando via rede interna...');
+    rvSb('Detectando melhor rota de conexão...');
     rvSetStatus('detectando', 'Conectando...');
 
+    // 1. Tenta WebSocket local (rede interna)
     const localOk = await rvTestarConexaoLocal();
-
     if (localOk) {
       _modoConexao = 'local';
       rvSetStatus('local', 'Rede interna ⚡');
       rvMostrarBannerConexao('local');
       rvConnect(_wsLocal);
-    } else {
-      rvSetStatus('offline', 'Inacessível');
-      rvSb('❌ Computador não encontrado na rede interna.');
-      rvShellLog('[SYSACK] Não foi possível conectar ao computador ' + hostname + ' (' + wsIp + ').', '#EF4444');
-      rvShellLog('[SYSACK] Verifique se o computador está ligado e na mesma rede.', '#64748B');
-      rvShellLog('[SYSACK] O acesso remoto funciona apenas na rede interna da CESAN.', '#64748B');
-      showToast('❌ ' + hostname + ' não acessível na rede interna.', 'danger', 6000);
+      return;
     }
+
+    // 2. Tenta tunnel Cloudflare (qualquer rede)
+    const agente = STATE_AGENTS?.list?.find(a => a.id === agentId);
+    const tunnelUrl = agente?.tunnelUrl;
+    if (tunnelUrl && agente?.tunnelAtivo) {
+      _modoConexao = 'tunnel';
+      rvSetStatus('tunnel', 'Via Cloudflare Tunnel 🌐');
+      rvMostrarBannerConexao('tunnel');
+      rvSb('Conectando via Cloudflare Tunnel...');
+      rvConnect(tunnelUrl);
+      return;
+    }
+
+    // 3. Sem rota disponível
+    rvSetStatus('offline', 'Inacessível');
+    rvSb('❌ Computador não acessível.');
+    rvShellLog('[SYSACK] Tentativa 1: WebSocket local (' + wsIp + ':9000) — falhou', '#EF4444');
+    rvShellLog('[SYSACK] Tentativa 2: Cloudflare Tunnel — ' + (tunnelUrl ? 'tunnel inativo' : 'tunnel não iniciado'), '#EF4444');
+    rvShellLog('[SYSACK] Verifique se o computador está ligado e o agente SYSACK está rodando.', '#64748B');
+    showToast('❌ ' + hostname + ' não acessível em nenhuma rota.', 'danger', 6000);
   }
 
   function rvTestarConexaoLocal() {
@@ -6222,7 +6236,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
 
   function rvEnviarViaBanco(msg) {
     // Envia comando para o agente via Banco (relay)
-    return fsPatch('sessoes_remotas', sessaoId, {
+    return db?.collection('sessoes_remotas').doc(sessaoId).update({
       relay_cmd: JSON.stringify(msg),
       relay_seq: Date.now(),
     }).catch(() => {});
@@ -6643,17 +6657,18 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── Encerrar ─────────────────────────────────────────────────
   window.rvEncerrar = async sid => {
     if (!confirm('Encerrar sessão remota?')) return;
+    // Fecha a UI imediatamente — não depende de operações assíncronas
     clearInterval(_autoTimer);
     document.removeEventListener('keydown', rvKeyHandler);
     _ws?.close();
+    document.getElementById('remote-viewer-overlay')?.remove();
+    // Operações secundárias em background
     if (sid) {
-      await fsPatch('sessoes_remotas', sid, {
+      db?.collection('sessoes_remotas').doc(sid).update({
         status: 'encerrado', encerradoEm: new Date().toISOString(),
       }).catch(() => {});
     }
-    // Manda comando para o agente encerrar o tunnel
-    await arEnviarComando(agentId, 'encerrar_acesso_remoto', {}, 'Sessão encerrada pelo técnico').catch(() => {});
-    document.getElementById('remote-viewer-overlay')?.remove();
+    arEnviarComando(agentId, 'encerrar_acesso_remoto', {}, 'Sessão encerrada pelo técnico').catch(() => {});
   };
 
   window.rvToggleAuto = enabled => {
@@ -8251,7 +8266,7 @@ async function executarAutoCheckin(smId) {
       console.log('[Checkin] ✓ Dados enviados para smartphone', sm.pat);
     } else {
       // Sem smartphone vinculado — envia para checkins genéricos
-      await fsPatch('checkins', uid, checkin);
+      await db?.collection('checkins').doc(uid).set(checkin, {merge:true}).catch(()=>{});
     }
 
     // Atualiza badge na tela MDM se estiver aberta
@@ -11518,6 +11533,42 @@ async function verificarTodosIPs() {
 setTimeout(verificarTodosIPs, 30000);
 setInterval(verificarTodosIPs, 3600000);
 
+// ── Monitoramento de impressoras — ping via fetch ─────────────────
+async function verificarStatusImpressoras() {
+  const imps = getImpressoras().filter(i => i.ip);
+  if (!imps.length) return;
+
+  for (const imp of imps) {
+    try {
+      // Tenta acessar a página web da impressora (timeout 3s)
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 3000);
+      const resp = await fetch(`http://${imp.ip}`, {
+        signal: ctrl.signal, mode: 'no-cors', cache: 'no-store'
+      }).catch(() => null);
+      clearTimeout(tid);
+
+      const online = resp !== null; // no-cors sempre resolve se alcançável
+      const novoStatus = online ? 'ok' : 'critico';
+
+      if (imp.status !== novoStatus) {
+        // Atualiza no Firestore
+        db?.collection('impressoras').doc(imp.id).update({
+          status: novoStatus,
+          ultimoCheck: new Date().toISOString(),
+        }).catch(() => {});
+      }
+    } catch(e) {}
+
+    await new Promise(r => setTimeout(r, 500));
+  }
+}
+
+// Roda 1 minuto após login e depois a cada 5 minutos
+setTimeout(verificarStatusImpressoras, 60000);
+setInterval(verificarStatusImpressoras, 5 * 60 * 1000);
+
+
 
 
 // ════════════════════════════════════════════════════════════
@@ -13716,7 +13767,38 @@ function impRenderCards() {
         <div><div style="color:var(--g400)">Custo/mês est.</div><div style="font-weight:700;color:var(--accent)">R$ ${custoPag}</div></div>
       </div>
       <!-- Status impressão -->
-      ${imp.statusLegivel ? `<div style="padding:6px 16px;font-size:11px;color:var(--g400);border-top:1px solid var(--g100)">Estado: ${escapeHtml(imp.statusLegivel)}</div>` : ''}
+      ${(()=>{
+        const sups = (() => { try { return JSON.parse(imp.suprimentos||'[]'); } catch { return []; } })();
+        const bans = (() => { try { return JSON.parse(imp.bandejas||'[]'); } catch { return []; } })();
+        if (!sups.length && !bans.length && !imp.statusLegivel) return '';
+        const bar = (pct, cor) => {
+          const c = pct < 10 ? '#EF4444' : pct < 25 ? '#F59E0B' : cor;
+          return `<div style="background:#F1F5F9;border-radius:4px;height:6px;flex:1">
+            <div style="background:${c};width:${Math.min(100,pct)}%;height:100%;border-radius:4px"></div></div>`;
+        };
+        let html = '<div style="padding:8px 16px;border-top:1px solid var(--g100);font-size:10.5px">';
+        if (sups.length) {
+          html += '<div style="font-weight:600;color:var(--g500);margin-bottom:4px">Toner</div>';
+          sups.forEach(s => {
+            html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+              <span style="color:var(--g400);width:60px;white-space:nowrap">${escapeHtml(s.nome)}</span>
+              ${bar(s.pct,'#6366F1')}
+              <span style="color:var(--g500);width:30px;text-align:right">${s.pct}%</span></div>`;
+          });
+        }
+        if (bans.length) {
+          html += '<div style="font-weight:600;color:var(--g500);margin:6px 0 4px">Papel</div>';
+          bans.forEach(b => {
+            html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+              <span style="color:var(--g400);width:60px">Bandeja ${b.bandeja}</span>
+              ${bar(b.pct,'#10B981')}
+              <span style="color:var(--g500);width:30px;text-align:right">${b.pct}%</span></div>`;
+          });
+        }
+        if (imp.paginasTotal) html += `<div style="margin-top:4px;color:var(--g400)">Total: ${(imp.paginasTotal||0).toLocaleString('pt-BR')} páginas</div>`;
+        html += '</div>';
+        return html;
+      })()}
       <!-- Ações -->
       <div style="padding:10px 16px;display:flex;gap:6px">
         <button class="btn btn-ghost btn-xs" onclick="impVerDetalhes('${imp.id}')">📋 Detalhes</button>

@@ -823,6 +823,280 @@ async function iniciarTunnel() {
 
 iniciarTunnel();
 
+
+// ── Monitor SNMP de Impressoras ───────────────────────────────────
+const dgram = require('dgram');
+
+// OIDs padrão para impressoras (RFC 3805 / Printer MIB)
+const PRINTER_OIDS = {
+  nome:           '1.3.6.1.2.1.1.5.0',           // sysName
+  descricao:      '1.3.6.1.2.1.1.1.0',           // sysDescr
+  uptime:         '1.3.6.1.2.1.1.3.0',           // sysUpTime
+  status:         '1.3.6.1.2.1.25.3.2.1.5.1',   // hrDeviceStatus (2=ok,3=warning,4=error)
+  paginasTotal:   '1.3.6.1.2.1.43.10.2.1.4.1.1', // prtMarkerLifeCount
+  // Suprimentos (toner/papel) — índices variam por modelo
+  suprimento0pct: '1.3.6.1.2.1.43.11.1.1.9.1.1', // prtMarkerSuppliesLevel[1]
+  suprimento1pct: '1.3.6.1.2.1.43.11.1.1.9.1.2', // prtMarkerSuppliesLevel[2]
+  suprimento2pct: '1.3.6.1.2.1.43.11.1.1.9.1.3', // prtMarkerSuppliesLevel[3]
+  suprimento3pct: '1.3.6.1.2.1.43.11.1.1.9.1.4', // prtMarkerSuppliesLevel[4]
+  suprimento0max: '1.3.6.1.2.1.43.11.1.1.8.1.1', // prtMarkerSuppliesMaxCapacity[1]
+  suprimento1max: '1.3.6.1.2.1.43.11.1.1.8.1.2',
+  suprimento2max: '1.3.6.1.2.1.43.11.1.1.8.1.3',
+  suprimento3max: '1.3.6.1.2.1.43.11.1.1.8.1.4',
+  suprimento0nome:'1.3.6.1.2.1.43.12.1.1.4.1.1', // prtMarkerColorantValue[1]
+  suprimento1nome:'1.3.6.1.2.1.43.12.1.1.4.1.2',
+  suprimento2nome:'1.3.6.1.2.1.43.12.1.1.4.1.3',
+  suprimento3nome:'1.3.6.1.2.1.43.12.1.1.4.1.4',
+  // Bandejas de papel
+  bandeja0status: '1.3.6.1.2.1.43.8.2.1.10.1.1', // prtInputCurrentLevel[1]
+  bandeja0max:    '1.3.6.1.2.1.43.8.2.1.9.1.1',  // prtInputMaxCapacity[1]
+  bandeja1status: '1.3.6.1.2.1.43.8.2.1.10.1.2',
+  bandeja1max:    '1.3.6.1.2.1.43.8.2.1.9.1.2',
+  erros:          '1.3.6.1.2.1.43.18.1.1.8.1.1', // prtAlertDescription
+};
+
+function encodeOID(oid) {
+  const parts = oid.split('.').map(Number);
+  const encoded = [parts[0] * 40 + parts[1]];
+  for (let i = 2; i < parts.length; i++) {
+    const v = parts[i];
+    if (v < 128) { encoded.push(v); }
+    else {
+      const bytes = [];
+      let n = v;
+      while (n > 0) { bytes.unshift(n & 0x7f); n >>= 7; }
+      for (let j = 0; j < bytes.length - 1; j++) bytes[j] |= 0x80;
+      encoded.push(...bytes);
+    }
+  }
+  return Buffer.from([0x06, encoded.length, ...encoded]);
+}
+
+function buildSNMPGet(oids, community = 'public', reqId = 1) {
+  const oidBuffers = oids.map(oid => {
+    const enc = encodeOID(oid);
+    return Buffer.from([0x30, enc.length + 4, 0x06, ...enc.slice(1), 0x05, 0x00]);
+  });
+
+  // Cada VarBind: SEQUENCE { OID, NULL }
+  const varBinds = oids.map(oid => {
+    const oidEnc = encodeOID(oid);
+    const nullVal = Buffer.from([0x05, 0x00]);
+    const inner = Buffer.concat([oidEnc, nullVal]);
+    return Buffer.concat([Buffer.from([0x30, inner.length]), inner]);
+  });
+
+  const varBindList = Buffer.concat(varBinds);
+  const varBindListSeq = Buffer.concat([Buffer.from([0x30, varBindList.length]), varBindList]);
+
+  const comm = Buffer.from(community);
+  const commTlv = Buffer.concat([Buffer.from([0x04, comm.length]), comm]);
+
+  const version = Buffer.from([0x02, 0x01, 0x00]); // v1
+  const reqIdBuf = Buffer.from([0x02, 0x04,
+    (reqId >> 24) & 0xff, (reqId >> 16) & 0xff, (reqId >> 8) & 0xff, reqId & 0xff]);
+  const errStatus = Buffer.from([0x02, 0x01, 0x00]);
+  const errIndex  = Buffer.from([0x02, 0x01, 0x00]);
+
+  const pdu = Buffer.concat([reqIdBuf, errStatus, errIndex, varBindListSeq]);
+  const pduSeq = Buffer.concat([Buffer.from([0xa0, pdu.length]), pdu]); // GetRequest
+
+  const msg = Buffer.concat([version, commTlv, pduSeq]);
+  return Buffer.concat([Buffer.from([0x30, msg.length]), msg]);
+}
+
+function parseSNMPResponse(buf) {
+  const results = {};
+  try {
+    // Navega até o VarBindList
+    let pos = 0;
+    if (buf[pos++] !== 0x30) return results; // SEQUENCE
+    pos += buf[pos] < 128 ? 1 : (buf[pos] & 0x7f) + 1;
+
+    // version
+    pos += 2 + buf[pos + 1];
+    // community
+    pos += 2 + buf[pos + 1];
+    // GetResponse PDU (0xa2)
+    if (buf[pos++] !== 0xa2) return results;
+    pos += buf[pos] < 128 ? 1 : (buf[pos] & 0x7f) + 1;
+    // reqId, errStatus, errIndex
+    pos += 2 + buf[pos + 1]; // reqId
+    pos += 2 + buf[pos + 1]; // errStatus
+    pos += 2 + buf[pos + 1]; // errIndex
+    // VarBindList SEQUENCE
+    if (buf[pos++] !== 0x30) return results;
+    pos += buf[pos] < 128 ? 1 : (buf[pos] & 0x7f) + 1;
+
+    while (pos < buf.length) {
+      if (buf[pos++] !== 0x30) break;
+      pos += buf[pos] < 128 ? 1 : (buf[pos] & 0x7f) + 1;
+      // OID
+      if (buf[pos++] !== 0x06) break;
+      const oidLen = buf[pos++];
+      const oidBytes = buf.slice(pos, pos + oidLen);
+      pos += oidLen;
+      // Decodifica OID
+      const oidParts = [Math.floor(oidBytes[0] / 40), oidBytes[0] % 40];
+      for (let i = 1; i < oidBytes.length; i++) {
+        if (oidBytes[i] & 0x80) {
+          let val = 0;
+          while (oidBytes[i] & 0x80) val = (val << 7) | (oidBytes[i++] & 0x7f);
+          val = (val << 7) | oidBytes[i];
+          oidParts.push(val);
+        } else {
+          oidParts.push(oidBytes[i]);
+        }
+      }
+      const oidStr = oidParts.join('.');
+
+      // Valor
+      const valType = buf[pos++];
+      const valLen  = buf[pos++];
+      const valBytes = buf.slice(pos, pos + valLen);
+      pos += valLen;
+
+      let value = null;
+      if (valType === 0x02 || valType === 0x41 || valType === 0x42 || valType === 0x43) {
+        // Integer, Counter32, Gauge32, TimeTicks
+        value = valBytes.reduce((a, b) => (a << 8) | b, 0);
+      } else if (valType === 0x04) {
+        // OctetString
+        value = valBytes.toString('utf8').replace(/\x00/g, '').trim();
+      } else if (valType === 0x05) {
+        value = null; // NULL
+      } else {
+        value = valBytes.toString('hex');
+      }
+      results[oidStr] = value;
+    }
+  } catch(e) {}
+  return results;
+}
+
+function snmpGet(ip, oids, community = 'public', timeout = 3000) {
+  return new Promise(resolve => {
+    const sock = dgram.createSocket('udp4');
+    const reqId = Math.floor(Math.random() * 0xFFFF);
+    const pkt = buildSNMPGet(oids, community, reqId);
+    let done = false;
+
+    const tid = setTimeout(() => {
+      if (!done) { done = true; sock.close(); resolve(null); }
+    }, timeout);
+
+    sock.on('message', buf => {
+      if (!done) {
+        done = true;
+        clearTimeout(tid);
+        sock.close();
+        resolve(parseSNMPResponse(buf));
+      }
+    });
+
+    sock.on('error', () => { if (!done) { done = true; resolve(null); } });
+    sock.send(pkt, 0, pkt.length, 161, ip, err => {
+      if (err && !done) { done = true; resolve(null); }
+    });
+  });
+}
+
+async function monitorarImpressoras() {
+  try {
+    // Busca lista de impressoras do Firestore
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/impressoras?pageSize=200`;
+    const urlObj = new URL(url);
+    const docs = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path: urlObj.pathname + urlObj.search,
+        method: 'GET',
+        rejectUnauthorized: false,
+      }, res => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => {
+          try { resolve(JSON.parse(raw).documents || []); }
+          catch(e) { resolve([]); }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+
+    for (const doc of docs) {
+      const f = doc.fields || {};
+      const ip = f.ip?.stringValue || f.ipAddress?.stringValue;
+      if (!ip) continue;
+      const docId = doc.name.split('/').pop();
+
+      // Coleta via SNMP
+      const oidList = Object.values(PRINTER_OIDS);
+      const resp = await snmpGet(ip, oidList);
+      if (!resp) continue; // impressora não respondeu
+
+      // Mapeia OIDs para campos legíveis
+      const get = key => resp[PRINTER_OIDS[key]];
+
+      const statusCode = get('status');
+      const status = statusCode === 2 ? 'ok' : statusCode === 3 ? 'alerta' : statusCode === 4 ? 'critico' : 'ok';
+
+      // Calcula % de suprimentos
+      const calcPct = (nivel, max) => {
+        if (nivel == null || max == null || max <= 0) return null;
+        if (nivel === -3) return 100; // sem restrição
+        return Math.max(0, Math.round((nivel / max) * 100));
+      };
+
+      const suprimentos = [];
+      for (let i = 0; i < 4; i++) {
+        const nivel = get(`suprimento${i}pct`);
+        const max   = get(`suprimento${i}max`);
+        const nome  = get(`suprimento${i}nome`) || `Suprimento ${i+1}`;
+        const pct   = calcPct(nivel, max);
+        if (pct !== null) suprimentos.push({ nome, pct });
+      }
+
+      const bandejas = [];
+      for (let i = 0; i < 2; i++) {
+        const nivel = get(`bandeja${i}status`);
+        const max   = get(`bandeja${i}max`);
+        const pct   = calcPct(nivel, max);
+        if (pct !== null) bandejas.push({ bandeja: i + 1, pct });
+      }
+
+      const tonerMin = suprimentos.length > 0
+        ? Math.min(...suprimentos.map(s => s.pct))
+        : null;
+
+      const papelMin = bandejas.length > 0
+        ? Math.min(...bandejas.map(b => b.pct))
+        : null;
+
+      const dados = {
+        status,
+        statusLegivel:  status === 'ok' ? 'Online' : status === 'alerta' ? 'Atenção' : 'Erro',
+        paginasTotal:   get('paginasTotal') || 0,
+        suprimentos:    JSON.stringify(suprimentos),
+        bandejas:       JSON.stringify(bandejas),
+        tonerMin:       tonerMin,
+        papelMin:       papelMin,
+        ultimoSnmp:     new Date().toISOString(),
+        snmpOnline:     true,
+      };
+
+      await firestoreSet(`impressoras/${docId}`, dados);
+    }
+    log(`[SNMP] ${docs.length} impressoras verificadas`);
+  } catch(e) {
+    log('[SNMP] Erro: ' + e.message);
+  }
+}
+
+// Roda 2 minutos após iniciar e depois a cada 5 minutos
+setTimeout(monitorarImpressoras, 2 * 60 * 1000);
+setInterval(monitorarImpressoras, 5 * 60 * 1000);
+
 reportar(); // Primeira execução imediata
 setInterval(reportar, INTERVAL);
 
