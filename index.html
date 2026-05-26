@@ -5866,6 +5866,15 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
         <label class="form-label">Motivo da devolução ao estoque <span style="color:var(--danger)">*</span></label>
         <textarea class="form-control" id="reuso-motivo" rows="2" placeholder="Ex: Área reduziu equipe, equipamento sobrou após troca, etc..." style="margin:0"></textarea>
       </div>
+      <div style="margin-bottom:12px">
+        <label class="form-label">📷 Fotos do ativo <span style="font-size:11px;color:var(--g400)">(opcional — frente, verso, etiqueta)</span></label>
+        <div id="reuso-fotos-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+        <label style="display:flex;align-items:center;gap:8px;padding:10px 14px;border:2px dashed var(--g200);border-radius:8px;cursor:pointer;color:var(--g400);font-size:12px;background:var(--g50)">
+          <span style="font-size:20px">📷</span>
+          <span>Clique para adicionar fotos ou arraste aqui</span>
+          <input type="file" id="reuso-fotos-input" accept="image/*" multiple style="display:none" onchange="reusoAdicionarFotos(this)">
+        </label>
+      </div>
     </div>
     <div class="modal-footer" style="flex-shrink:0">
       <button onclick="closeModal('modal-busca-reuso')" class="btn btn-secondary">Cancelar</button>

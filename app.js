@@ -11556,40 +11556,7 @@ async function verificarTodosIPs() {
 setTimeout(verificarTodosIPs, 30000);
 setInterval(verificarTodosIPs, 3600000);
 
-// ── Monitoramento de impressoras — ping via fetch ─────────────────
-async function verificarStatusImpressoras() {
-  const imps = getImpressoras().filter(i => i.ip);
-  if (!imps.length) return;
-
-  for (const imp of imps) {
-    try {
-      // Tenta acessar a página web da impressora (timeout 3s)
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 3000);
-      const resp = await fetch(`http://${imp.ip}`, {
-        signal: ctrl.signal, mode: 'no-cors', cache: 'no-store'
-      }).catch(() => null);
-      clearTimeout(tid);
-
-      const online = resp !== null; // no-cors sempre resolve se alcançável
-      const novoStatus = online ? 'ok' : 'critico';
-
-      if (imp.status !== novoStatus) {
-        // Atualiza no Firestore
-        db?.collection('impressoras').doc(imp.id).update({
-          status: novoStatus,
-          ultimoCheck: new Date().toISOString(),
-        }).catch(() => {});
-      }
-    } catch(e) {}
-
-    await new Promise(r => setTimeout(r, 500));
-  }
-}
-
-// Roda 1 minuto após login e depois a cada 5 minutos
-setTimeout(verificarStatusImpressoras, 60000);
-setInterval(verificarStatusImpressoras, 5 * 60 * 1000);
+// Monitoramento de impressoras feito pelo agente via SNMP (não pelo browser)
 
 
 
@@ -19949,6 +19916,51 @@ function selecionarAtivoReuso(ativoId) {
   if (fw) fw.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+
+// ── Fotos no modal de Reuso ────────────────────────────────────────
+window._reusoFotos = []; // base64 das fotos
+
+function reusoAdicionarFotos(input) {
+  const files = Array.from(input.files);
+  const preview = document.getElementById('reuso-fotos-preview');
+  if (!preview) return;
+
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const base64 = e.target.result;
+      window._reusoFotos.push(base64);
+
+      // Miniatura
+      const idx = window._reusoFotos.length - 1;
+      const div = document.createElement('div');
+      div.style.cssText = 'position:relative;width:80px;height:80px';
+      div.innerHTML = `
+        <img src="${base64}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--g200)">
+        <button onclick="reusoRemoverFoto(${idx},this.parentNode)" style="position:absolute;top:-6px;right:-6px;background:#EF4444;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">✕</button>
+      `;
+      preview.appendChild(div);
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value = '';
+}
+
+function reusoRemoverFoto(idx, el) {
+  window._reusoFotos[idx] = null;
+  el?.remove();
+}
+
+// Limpa fotos ao abrir modal
+const _origAbrirBuscaReuso = window.abrirBuscaReuso;
+window.abrirBuscaReuso = function() {
+  window._reusoFotos = [];
+  const preview = document.getElementById('reuso-fotos-preview');
+  if (preview) preview.innerHTML = '';
+  if (typeof _origAbrirBuscaReuso === 'function') _origAbrirBuscaReuso();
+  else abrirBuscaReuso_orig?.();
+};
+
 async function confirmarMoverReuso() {
   var ativoId = document.getElementById('reuso-busca-ativo-id').value;
   var local   = document.getElementById('reuso-local-estoque').value.trim();
@@ -19981,12 +19993,26 @@ async function confirmarMoverReuso() {
     await fsUpdate(colecao, ativoId, updates);
     Object.assign(a, updates);
 
+    // Salva fotos no Firestore se houver
+    const fotos = (window._reusoFotos||[]).filter(Boolean);
+    if (fotos.length) {
+      await db?.collection('ativos_fotos').doc(ativoId).set({
+        fotos,
+        atualizadoEm: new Date().toISOString(),
+        por: CURRENT_USER?.nome || '—',
+      }, { merge: true }).catch(() => {});
+      updates.temFotos = true;
+      updates.fotosCount = fotos.length;
+      await fsUpdate(colecao, ativoId, { temFotos: true, fotosCount: fotos.length }).catch(() => {});
+    }
+
     // Histórico imutável
     await registrarHistoricoAtivo(ativoId, 'movimentado', {
       para:        'Estoque (Reuso)',
       local,
       condicao,
       motivo,
+      fotos:       fotos.length ? fotos.length + ' foto(s) anexada(s)' : '—',
       por:         CURRENT_USER?.nome || '—',
     });
 
@@ -21083,8 +21109,8 @@ function _renderMapaGrafico(todosAll, container) {
         : '')
   +'</div>';
 
-  // SVG hierárquico
-  html += '<div style="overflow:auto;position:relative"><svg xmlns="http://www.w3.org/2000/svg" width="'+(totalW+40)+'" height="'+totalH+'" style="display:block;padding:12px">';
+  // SVG hierárquico — scroll horizontal, não corta
+  html += '<div style="overflow-x:auto;overflow-y:auto;position:relative;max-height:70vh"><svg xmlns="http://www.w3.org/2000/svg" width="'+(totalW+40)+'" height="'+totalH+'" style="display:block;padding:12px;min-width:'+(totalW+40)+'px">';
 
   groups.forEach(function(g, gi) {
     var x   = gi * (COL_W + COL_GAP) + 12;
@@ -21126,11 +21152,17 @@ function _renderMapaGrafico(todosAll, container) {
       var hIcon   = hTipo==='impressora'||hTipo==='printer' ? '🖨' : hTipo==='ap' ? '📡' : '💻';
 
       // Host bg
-      html += '<rect x="'+x+'" y="'+hy+'" width="'+COL_W+'" height="'+HOST_H+'" rx="4" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>';
+      var hBg = hStatus==='#10B981'?'#F0FDF4':hStatus==='#EF4444'?'#FEF2F2':'#FFFBEB';
+      html += '<rect x="'+x+'" y="'+hy+'" width="'+COL_W+'" height="'+HOST_H+'" rx="4" fill="'+hBg+'" stroke="'+hStatus+'" stroke-width="0.8" stroke-opacity="0.4"/>';
       // Status dot
-      html += '<circle cx="'+(x+8)+'" cy="'+(hy+HOST_H/2)+'" r="4" fill="'+hStatus+'"/>';
+      html += '<circle cx="'+(x+8)+'" cy="'+(hy+HOST_H/2)+'" r="3.5" fill="'+hStatus+'"/>';
+      // Tipo icon
+      var tipoIcon = hTipo==='impressora'||hTipo==='printer'?'🖨':hTipo==='ap'?'📡':hTipo==='servidor'||hTipo==='server'?'🖥':hTipo==='notebook'?'💻':'🖥';
+      html += '<text x="'+(x+17)+'" y="'+(hy+HOST_H/2+4)+'" font-size="9">'+tipoIcon+'</text>';
       // Label
-      html += '<text x="'+(x+18)+'" y="'+(hy+HOST_H/2+4)+'" font-size="9" fill="#334155" font-family="monospace">'+escapeHtml(hLabel)+'</text>';
+      html += '<text x="'+(x+28)+'" y="'+(hy+HOST_H/2+4)+'" font-size="8.5" fill="#334155" font-family="monospace">'+escapeHtml(hLabel)+'</text>';
+      // IP pequeno
+      if (h.ip) html += '<text x="'+(x+COL_W-4)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="#94A3B8" text-anchor="end">'+escapeHtml(h.ip)+'</text>';
 
       // Linha do switch para o host (horizontal)
       if (sw && hi === 0) {
