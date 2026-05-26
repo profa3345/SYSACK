@@ -20986,6 +20986,13 @@ function _mapaAtualizarBotoesModo() {
 // MODO 1 — GRÁFICO SVG (Visão Geral ou Área Específica)
 // Layout: switches no centro, ativos ao redor por subnet
 // ─────────────────────────────────────────────────────────────────
+function _mapaFiltBtn(campo, valor, label, cor) {
+  var ativo = (_mapaFiltros||{})[campo] === valor;
+  return '<button onclick="_mapaFiltros=_mapaFiltros||{};_mapaFiltros.'+campo+'=(_mapaFiltros.'+campo+'===\''+valor+'\'?\'\':\''+valor+'\');renderMapaRede()" '
+    +'style="border:1px solid '+(ativo?cor:'var(--g200)')+';background:'+(ativo?cor+'22':'transparent')+';color:'+(ativo?cor:'var(--g500)')+';padding:3px 10px;border-radius:16px;cursor:pointer;'
+    +'font-size:11px;font-weight:'+(ativo?'700':'400')+';cursor:pointer;white-space:nowrap">'+label+'</button>';
+}
+
 function _renderMapaGrafico(todosAll, container) {
   var todos = _mapaAreaSel
     ? todosAll.filter(function(d){ return resolverLocal(d) === _mapaAreaSel; })
