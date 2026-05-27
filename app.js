@@ -295,7 +295,7 @@ window.callFunction = callFunction; // expõe globalmente
 // As functions estão em functions/src/index.js com Gemini via GOOGLE_GENAI_API_KEY.
 async function callGenkitFlow(flowName, data) {
   const MAP = {
-    'analisarChamado':       'analisarChamado',   // triagem automática
+    'analisarChamado':       'triageChamado',     // triagem automática (nome real no Firebase)
     'chatbotADSI':           'chatbotADSI',        // assistente IA
     'gerarInsightsExecutivos': 'getInsightsIA',    // dashboard executivo
     'analisarAtivo':         'analisarAtivo',      // análise de ativo
@@ -5562,11 +5562,15 @@ function _triagemLocal(titulo, desc) {
     /usuário|cadastro|conta|perfil|permissão/.test(txt)                   ? 'cadastro-usuario'   :
     '';
 
-  // Tipo
-  const tipo =
-    /preciso|solicito|gostaria|quero|necessito|pedido|instalar|criar/.test(txt) ? 'requisicao' :
-    /não funciona|parou|caiu|quebrou|erro|falha|problema|travou/.test(txt)      ? 'incidente'  :
-    'incidente';
+  // Tipo — analisa contexto completo antes de decidir
+  // Palavras de REQUISIÇÃO têm prioridade sobre o fallback
+  const _ehRequisicao = /preciso|solicito|gostaria|quero|necessito|pedido|instalar|criar|favor|por favor|solicita(ção|cao)|requisi|agendamento|agendar|providenciar/.test(txt);
+  const _ehIncidente  = /não funciona|nao funciona|parou|caiu|quebrou|erro|falha|problema|travou|travada|tela azul|não abre|nao abre|não liga|nao liga|corrompido|perdeu/.test(txt);
+  // "backup por segurança", "backup preventivo", "solicito backup" → requisição
+  const _backupReq    = /backup/.test(txt) && /seguran|preventiv|solicito|preciso|quero|agendar|periodic/.test(txt);
+  const tipo = (_ehRequisicao || _backupReq) && !_ehIncidente ? 'requisicao'
+             : _ehIncidente ? 'incidente'
+             : 'requisicao'; // fallback padrão agora é requisição (mais seguro)
 
   // Prioridade
   const prio =
@@ -14238,8 +14242,10 @@ function impRenderCards() {
   }
 
   grid.innerHTML = imps.map(imp => {
-    const toners    = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
-    // Sem dados SNMP/WMI recentes = não marcar como crítico
+    // Toner: monitor grava imp.toner (array de {descricao, pct, tipo})
+    // Fallback para imp.tonerLevels (formato antigo)
+    const tonerRaw = Array.isArray(imp.toner) && imp.toner.length ? imp.toner
+                   : Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
     const agora = Date.now();
     const _agora = Date.now();
     const ultimoCheck = imp.ultimoSnmp || imp.ultimoCheck || imp.coletadoEm;
@@ -14259,15 +14265,25 @@ function impRenderCards() {
                     : _stOffline ? '#F1F5F9'
                     : '#F0FDF4';
 
-    const tonerHtml = toners.length ? toners.map(t => {
-      const cor   = { K:'#1E293B', C:'#0EA5E9', M:'#EC4899', Y:'#EAB308' }[t.cor] || '#64748B';
-      const bg    = { K:'#F8FAFC', C:'#F0F9FF', M:'#FDF2F8', Y:'#FEFCE8' }[t.cor] || '#F8FAFC';
-      return `<div style="flex:1;min-width:55px">
-        <div style="font-size:9px;font-weight:700;color:${cor};text-transform:uppercase;margin-bottom:3px;text-align:center">${t.cor} ${t.nome?.split(' ')[0]||''}</div>
+    // Normaliza toner para exibição (suporta formato monitor e formato antigo)
+    const tonerNorm = tonerRaw.filter(t => t.tipo !== 'opc' && t.tipoNum !== 9).map(t => {
+      // Novo formato (monitor): {descricao:'Black (K)', pct:89, tipo:'toner'}
+      // Antigo formato: {cor:'K', nome:'Black', pct:89}
+      const desc = t.descricao || t.nome || '';
+      const corKey = t.cor || (desc.includes('Black')||desc.includes('(K)')?'K':desc.includes('Cyan')||desc.includes('(C)')?'C':desc.includes('Magenta')||desc.includes('(M)')?'M':desc.includes('Yellow')||desc.includes('(Y)')?'Y':'K');
+      return { ...t, corKey, desc };
+    });
+    const tonerHtml = tonerNorm.length ? tonerNorm.map(t => {
+      const cor  = { K:'#1E293B', C:'#0EA5E9', M:'#EC4899', Y:'#EAB308' }[t.corKey] || '#64748B';
+      const bg   = { K:'#F8FAFC', C:'#F0F9FF', M:'#FDF2F8', Y:'#FEFCE8' }[t.corKey] || '#F8FAFC';
+      const pct  = t.pct ?? 0;
+      const label = t.corKey || t.desc?.match(/\(([KCMY])\)/)?.[1] || t.desc?.slice(0,1) || '?';
+      return `<div style="flex:1;min-width:50px">
+        <div style="font-size:9px;font-weight:700;color:${cor};text-transform:uppercase;margin-bottom:3px;text-align:center">${label}</div>
         <div style="height:60px;background:${bg};border-radius:5px;display:flex;align-items:flex-end;overflow:hidden;border:1px solid ${cor}30">
-          <div style="width:100%;height:${t.pct}%;background:${cor};border-radius:3px;transition:height .5s;min-height:${t.pct<5?'4px':'0'}"></div>
+          <div style="width:100%;height:${pct}%;background:${cor};border-radius:3px;transition:height .5s;min-height:${pct<5?'4px':'0'}"></div>
         </div>
-        <div style="text-align:center;font-size:10px;font-weight:700;color:${t.pct<20?'#EF4444':cor};margin-top:2px">${t.pct}%</div>
+        <div style="text-align:center;font-size:10px;font-weight:700;color:${pct<20?'#EF4444':cor};margin-top:2px">${pct}%</div>
       </div>`;
     }).join('') : '<div style="color:var(--g400);font-size:12px;padding:10px 0">Sem dados de toner</div>';
 
@@ -14284,8 +14300,9 @@ function impRenderCards() {
           </div>
           <div style="text-align:right">
             <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;background:${statusBg};color:${statusCor}">${_st==='online'||_st==='ok'?'✓ Online':_st==='atolamento'?'🚨 Atolamento':_st==='sem-toner'?'⚠ Sem toner':_st==='critico'?'⚠ Crítico':_st==='alerta'?'⚡ Alerta':_st==='sem-dados'?'○ Sem dados':'● Offline'}</span>
-            ${imp.atolamento ? '<div style="font-size:10px;color:#EF4444;font-weight:700;margin-top:3px">🚫 Atolamento!</div>' : ''}
-            ${imp.semPapel   ? '<div style="font-size:10px;color:#F59E0B;font-weight:700;margin-top:3px">📋 Sem papel</div>' : ''}
+            ${imp.temAtolamento||imp.atolamento ? '<div style="font-size:10px;color:#EF4444;font-weight:700;margin-top:3px">🚫 Atolamento!</div>' : ''}
+            ${(imp.alertas||[]).some(a=>a.tipo==='papel-vazio') ? '<div style="font-size:10px;color:#F59E0B;font-weight:700;margin-top:3px">📋 Sem papel</div>' : ''}
+            ${imp.temTampaAberta ? '<div style="font-size:10px;color:#F59E0B;font-weight:700;margin-top:3px">📭 Tampa aberta</div>' : ''}
           </div>
         </div>
       </div>
@@ -14304,7 +14321,7 @@ function impRenderCards() {
       <!-- Status impressão -->
       ${(()=>{
         const sups = (() => { try { return JSON.parse(imp.suprimentos||'[]'); } catch { return []; } })();
-        const bans = (() => { try { return JSON.parse(imp.bandejas||'[]'); } catch { return []; } })();
+        const bans = Array.isArray(imp.bandejas) ? imp.bandejas : (() => { try { return JSON.parse(imp.bandejas||'[]'); } catch { return []; } })();
         if (!sups.length && !bans.length && !imp.statusLegivel) return '';
         const bar = (pct, cor) => {
           const c = pct < 10 ? '#EF4444' : pct < 25 ? '#F59E0B' : cor;
