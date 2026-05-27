@@ -14240,10 +14240,10 @@ function impRenderCards() {
     const toners    = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
     // Sem dados SNMP/WMI recentes = não marcar como crítico
     const agora = Date.now();
-    const ultimoCheck = imp.ultimoSnmp || imp.ultimoCheck;
-    const checkRecente = ultimoCheck && (agora - new Date(ultimoCheck).getTime()) < 30 * 60 * 1000; // 30min
-    const temDados = checkRecente || imp.fonte === 'agente-wmi';
-    const _st = temDados ? (imp.status||'ok') : 'sem-dados';
+    const ultimoCheck = imp.ultimoSnmp || imp.ultimoCheck || imp.coletadoEm;
+    const checkRecente = ultimoCheck && (agora - new Date(ultimoCheck).getTime()) < 60 * 60 * 1000; // 1h
+    const temDados = checkRecente || imp.reachable === true || imp.fonte === 'agente-wmi';
+    const _st = temDados ? (imp.status || (imp.reachable ? 'online' : 'offline')) : 'sem-dados';
     const statusCor = _st==='critico' ? '#EF4444' : _st==='alerta' ? '#F59E0B' : _st==='sem-dados' ? '#94A3B8' : '#10B981';
     const statusBg  = _st==='critico' ? '#FEF2F2' : _st==='alerta' ? '#FFFBEB' : _st==='sem-dados' ? '#F8FAFC' : '#F0FDF4';
 
@@ -14271,7 +14271,7 @@ function impRenderCards() {
             <div class="td-mono" style="font-size:11px;color:var(--g400)">${escapeHtml(imp.ip)} · ${escapeHtml(imp.local || imp.area || '—')}</div>
           </div>
           <div style="text-align:right">
-            <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;background:${statusBg};color:${statusCor}">${_st==='ok'?'✓ Online':_st==='critico'?'⚠ Crítico':_st==='alerta'?'⚡ Alerta':_st==='sem-dados'?'○ Sem dados':'● Offline'}</span>
+            <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;background:${statusBg};color:${statusCor}">${_st==='online'||_st==='ok'?'✓ Online':_st==='atolamento'?'🚨 Atolamento':_st==='sem-toner'?'⚠ Sem toner':_st==='critico'?'⚠ Crítico':_st==='alerta'?'⚡ Alerta':_st==='sem-dados'?'○ Sem dados':'● Offline'}</span>
             ${imp.atolamento ? '<div style="font-size:10px;color:#EF4444;font-weight:700;margin-top:3px">🚫 Atolamento!</div>' : ''}
             ${imp.semPapel   ? '<div style="font-size:10px;color:#F59E0B;font-weight:700;margin-top:3px">📋 Sem papel</div>' : ''}
           </div>
@@ -14351,8 +14351,10 @@ function impRenderToner() {
     const min    = imp.tonerMin || 100;
     const minCor = min < 10 ? '#EF4444' : min < 20 ? '#F59E0B' : '#10B981';
     const dias   = imp.tonerDiasRestantes;
-    const temDados2 = imp.snmpOnline || imp.ultimoSnmp || imp.fonte === 'agente-wmi' || imp.ultimoCheck;
-    const _st2 = temDados2 ? (imp.status||'ok') : 'sem-dados';
+    const ultimoCheck2 = imp.ultimoSnmp || imp.ultimoCheck || imp.coletadoEm;
+    const checkRecente2 = ultimoCheck2 && (agora - new Date(ultimoCheck2).getTime()) < 60 * 60 * 1000;
+    const temDados2 = checkRecente2 || imp.reachable === true || imp.fonte === 'agente-wmi';
+    const _st2 = temDados2 ? (imp.status || (imp.reachable ? 'online' : 'offline')) : 'sem-dados';
     const statusCor = _st2==='critico' ? '#EF4444' : _st2==='alerta' ? '#F59E0B' : _st2==='sem-dados' ? '#94A3B8' : '#10B981';
 
     return `<tr>
@@ -14682,9 +14684,165 @@ async function impSalvarPedido(btn) {
 function impVerDetalhes(impId) {
   const imp = getImpressoras().find(i => i.id === impId);
   if (!imp) return;
-  goPage('monitor-rede');
-  // Abre modal de detalhe do dispositivo no monitor
-  setTimeout(() => abrirDetalheMonitor?.(impId), 300);
+
+  // Remove modal anterior se existir
+  document.getElementById('modal-imp-detalhe')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-imp-detalhe';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto';
+
+  const statusCor = imp.status==='offline'?'#94A3B8':imp.status==='atolamento'||imp.status==='sem-toner'?'#EF4444':imp.status==='alerta'?'#F59E0B':'#10B981';
+  const toners = Array.isArray(imp.toner) ? imp.toner : [];
+  const tonerHtml = toners.map(t => {
+    const c = t.pct<=5?'#EF4444':t.pct<=15?'#F59E0B':'#10B981';
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <span style="width:90px;font-size:12px;color:var(--g600)">${t.descricao||'Toner'}</span>
+      <div style="flex:1;height:8px;background:var(--g200);border-radius:4px;overflow:hidden">
+        <div style="width:${t.pct}%;height:8px;background:${c};border-radius:4px"></div>
+      </div>
+      <span style="width:36px;text-align:right;font-size:12px;font-weight:700;color:${c}">${t.pct}%</span>
+    </div>`;
+  }).join('');
+
+  const alertasHtml = (imp.alertas||[]).map(a => {
+    const c = a.nivel==='error'?'#EF4444':a.nivel==='warning'?'#F59E0B':'#3B82F6';
+    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--g100)">
+      <span style="width:8px;height:8px;border-radius:50%;background:${c};flex-shrink:0"></span>
+      <span style="font-size:12px">${escapeHtml(a.msg)}</span>
+    </div>`;
+  }).join('') || '<span style="color:var(--g400);font-size:12px">Nenhum alerta</span>';
+
+  overlay.innerHTML = `
+    <div style="background:var(--surface);border-radius:14px;max-width:620px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <!-- Header -->
+      <div style="padding:18px 20px;border-bottom:1px solid var(--g200);display:flex;align-items:center;gap:12px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${statusCor};flex-shrink:0"></div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px">${escapeHtml(imp.nome||imp.fila||imp.ip)}</div>
+          <div style="font-size:12px;color:var(--g500)">${escapeHtml(imp.ip)} · ${escapeHtml(imp.local||'—')} · ${escapeHtml(imp.fabricante||'HP')}</div>
+        </div>
+        <button onclick="document.getElementById('modal-imp-detalhe').remove()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--g400)">✕</button>
+      </div>
+      <!-- Tabs -->
+      <div style="display:flex;border-bottom:1px solid var(--g200)">
+        <button id="imp-tab-info" onclick="impDetalheTroca('info')" style="flex:1;padding:10px;border:none;background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer;border-radius:0">📊 Status</button>
+        <button id="imp-tab-hist" onclick="impDetalheTroca('hist')" style="flex:1;padding:10px;border:none;background:none;color:var(--g600);font-size:13px;cursor:pointer">📋 Histórico</button>
+      </div>
+      <!-- Aba Status -->
+      <div id="imp-tab-info-body" style="padding:18px 20px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--g500);margin-bottom:8px">SUPRIMENTOS</div>
+            ${tonerHtml || '<span style="color:var(--g400);font-size:12px">Sem dados de toner</span>'}
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--g500);margin-bottom:8px">INFORMAÇÕES</div>
+            <div style="font-size:12px;line-height:1.8">
+              <div><span style="color:var(--g400)">Status:</span> <b style="color:${statusCor}">${imp.status||'—'}</b></div>
+              <div><span style="color:var(--g400)">Páginas:</span> ${(imp.paginasTotal||0).toLocaleString('pt-BR')}</div>
+              <div><span style="color:var(--g400)">Fila:</span> ${escapeHtml(imp.fila||'—')}</div>
+              <div><span style="color:var(--g400)">Firmware:</span> ${escapeHtml(imp.firmware||'—')}</div>
+              <div><span style="color:var(--g400)">Uptime:</span> ${escapeHtml(imp.uptimeH ? imp.uptimeH+'h' : '—')}</div>
+              <div><span style="color:var(--g400)">Coletado:</span> ${imp.coletadoEm ? new Date(imp.coletadoEm).toLocaleString('pt-BR') : '—'}</div>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:11px;font-weight:700;color:var(--g500);margin-bottom:8px">ALERTAS ATIVOS</div>
+        ${alertasHtml}
+        <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+          <button class="btn btn-secondary btn-sm" onclick="impAbrirChamadoToner('${imp.id}');document.getElementById('modal-imp-detalhe').remove()">🛒 Pedir toner</button>
+          <button class="btn btn-ghost btn-sm" onclick="impAbrirChamadoProblema('${imp.id}');document.getElementById('modal-imp-detalhe').remove()">🎫 Abrir chamado</button>
+        </div>
+      </div>
+      <!-- Aba Histórico -->
+      <div id="imp-tab-hist-body" style="padding:18px 20px;display:none">
+        <div id="imp-hist-loading" style="text-align:center;padding:24px;color:var(--g400)">
+          <div style="font-size:24px;margin-bottom:8px">⏳</div>
+          Carregando histórico...
+        </div>
+        <div id="imp-hist-lista" style="display:none"></div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+  // Armazena o ID da impressora para o histórico
+  overlay._impId = impId;
+  overlay._impDocId = imp.id;
+}
+
+function impDetalheTroca(aba) {
+  const infoBtn  = document.getElementById('imp-tab-info');
+  const histBtn  = document.getElementById('imp-tab-hist');
+  const infoBody = document.getElementById('imp-tab-info-body');
+  const histBody = document.getElementById('imp-tab-hist-body');
+  if (!infoBtn) return;
+
+  if (aba === 'info') {
+    infoBtn.style.cssText = 'flex:1;padding:10px;border:none;background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer';
+    histBtn.style.cssText = 'flex:1;padding:10px;border:none;background:none;color:var(--g600);font-size:13px;cursor:pointer';
+    infoBody.style.display = 'block';
+    histBody.style.display = 'none';
+  } else {
+    histBtn.style.cssText = 'flex:1;padding:10px;border:none;background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer';
+    infoBtn.style.cssText = 'flex:1;padding:10px;border:none;background:none;color:var(--g600);font-size:13px;cursor:pointer';
+    infoBody.style.display = 'none';
+    histBody.style.display = 'block';
+    impCarregarHistorico();
+  }
+}
+
+async function impCarregarHistorico() {
+  const overlay = document.getElementById('modal-imp-detalhe');
+  if (!overlay) return;
+  const docId = overlay._impDocId;
+  const loading = document.getElementById('imp-hist-loading');
+  const lista   = document.getElementById('imp-hist-lista');
+  if (!docId) return;
+
+  loading.style.display = 'block';
+  lista.style.display   = 'none';
+
+  try {
+    // Busca subcoleção histórico ordenada por ts desc, limite 50
+    const snap = await db.collection('impressoras').doc(docId)
+      .collection('historico').orderBy('ts','desc').limit(50).get();
+
+    const ICONE = {
+      'online':'🟢','offline':'🔴','status':'🔄','toner':'🖨️',
+      'atolamento':'🚨','atolamento-resolvido':'✅','tampa-aberta':'📭',
+      'tampa-fechada':'📫','papel-vazio':'📄','papel-vazio-resolvido':'✅',
+      'paginas':'📊','toner-baixo':'⚠️','toner-critico':'🆘',
+    };
+
+    if (snap.empty) {
+      lista.innerHTML = '<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum evento registrado ainda.<br><small>O histórico é gerado automaticamente a cada coleta SNMP.</small></div>';
+    } else {
+      lista.innerHTML = snap.docs.map(doc => {
+        const ev = doc.data();
+        const icone = ICONE[ev.tipo] || '📌';
+        const data  = ev.ts ? new Date(ev.ts).toLocaleString('pt-BR') : '—';
+        const corTipo = ev.tipo?.includes('offline')||ev.tipo?.includes('critico')||ev.tipo?.includes('atolamento')&&!ev.tipo.includes('resolvido') ? '#EF4444'
+                      : ev.tipo?.includes('resolvido')||ev.tipo==='online'||ev.tipo==='tampa-fechada' ? '#10B981'
+                      : ev.tipo?.includes('toner')||ev.tipo?.includes('papel')||ev.tipo?.includes('tampa') ? '#F59E0B'
+                      : 'var(--g500)';
+        return `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--g100)">
+          <span style="font-size:16px;flex-shrink:0">${icone}</span>
+          <div style="flex:1">
+            <div style="font-size:13px;color:${corTipo}">${escapeHtml(ev.msg||ev.tipo)}</div>
+            <div style="font-size:11px;color:var(--g400)">${data}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    loading.style.display = 'none';
+    lista.style.display   = 'block';
+  } catch(e) {
+    loading.innerHTML = '<div style="color:#EF4444;text-align:center;padding:16px">Erro ao carregar histórico.<br><small>' + escapeHtml(e.message) + '</small></div>';
+  }
 }
 
 function impSalvarConfig() {
