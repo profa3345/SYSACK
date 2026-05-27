@@ -1272,7 +1272,7 @@ function renderAtivos() {
   if (thead) {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
-      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
+      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Responsável</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
       ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
@@ -1322,9 +1322,17 @@ function renderAtivos() {
         return ag?.usuarioLogado ? '<span style="color:var(--g500);font-size:11px">'+escapeHtml(ag.usuarioLogado)+'</span>' : '—';
       })()}</td>
       <td>${statusAtivoHtml(a.status)}</td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.sala||a.loc||a.area||''}">
-        ${a.sala ? `<div style="font-size:12px;font-weight:600;color:var(--g800)">${a.sala}</div><div style="font-size:11px;color:var(--g400)">${a.loc||''}</div>` : a.loc||'—'}
-      </td>
+      <td style="text-align:center">${(()=>{
+        const _ag = (STATE_AGENTS?.list||[]).find(x =>
+          (a.ip && x.ip === a.ip) ||
+          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
+        );
+        const _up = _ag?.uptimeH ?? a.uptimeH ?? null;
+        if (_up == null) return '<span style="color:var(--g300)">—</span>';
+        if (_up >= 24*30) return '<span style="font-size:11px;font-weight:700;color:#059669">' + Math.floor(_up/24/30) + 'm ' + Math.floor(_up/24%30) + 'd</span>';
+        if (_up >= 24)   return '<span style="font-size:11px;font-weight:700;color:#2563EB">' + Math.floor(_up/24) + 'd ' + Math.round(_up%24) + 'h</span>';
+        return '<span style="font-size:11px;color:var(--g600)">' + Math.round(_up) + 'h</span>';
+      })()}</td>
       ${isComp ? (()=>{
         // Monitor(es) vinculado(s) ao ativo
         const ag = (STATE_AGENTS?.list||[]).find(x =>
@@ -2019,6 +2027,7 @@ async function _salvarChamadoInterno() {
   const novo = {
     id, tipo: document.getElementById('ch-tipo')?.value||'incidente',
     area: document.getElementById('ch-area')?.value||'TI',
+    localizacaoDetalhe: document.getElementById('ch-localizacao-detalhe')?.value?.trim()||'',
     solicitante: sol, tecnico: document.getElementById('ch-tecnico')?.value||'',
     pat: document.getElementById('ch-pat-antigo')?.value?.trim()
       || (ativosVinculados[0]?.pat)
@@ -3495,11 +3504,14 @@ function openModal(id) {
         const setorEl = document.getElementById('ch-setor-requerente');
         if (matEl)   matEl.value   = emp.mat   || '';
         if (setorEl) setorEl.value = emp.setor || '';
-        // Pré-preenche área baseado no setor/lotação do empregado
+        // Pré-preenche área baseado na sigla organizacional do empregado
         const areaEl = document.getElementById('ch-area');
-        if (areaEl && emp.setor) {
-          _popularSelectArea(areaEl, emp.setor);
+        const _siglaEmp = _siglaDoEmpregado(emp);
+        if (areaEl && _siglaEmp) {
+          _popularSelectArea(areaEl, _siglaEmp);
         }
+        // Pré-preenche localização com a área/setor do empregado
+        _preencherLocalizacao(emp);
         console.log(`[Chamado] Requerente identificado: ${emp.nome} (${emp.mat}) — ${emp.setor || emp.lotacao}`);
       } else {
         solEl.value = CURRENT_USER.nome || CURRENT_USER.email || '';
@@ -3516,6 +3528,95 @@ function openModal(id) {
   }
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/**
+ * Retorna a sigla organizacional (ex: A-DSI) de um empregado.
+ *
+ * O AD da CESAN guarda em `department` (→ emp.setor) o local físico
+ * (ex: "Rui Barbosa"), e a sigla da gerência fica na OU do DN do LDAP.
+ * O agente salva essa sigla em `emp.lotacao` quando `department` está vazio,
+ * e também em `orgUnidades` como coleção separada.
+ *
+ * Estratégia:
+ * 1. Se emp.lotacao parece uma sigla (contém hífen ou é maiúscula curta), usa ela
+ * 2. Busca em orgUnidades pela matrícula do empregado
+ * 3. Fallback: emp.setor
+ */
+function _siglaDoEmpregado(emp) {
+  if (!emp) return '';
+
+  // 1. emp.lotacao pode já ser a sigla (A-DSI, E-DCA, etc.) quando vem do DN
+  const lotacao = emp.lotacao || '';
+  const isSigla = /^[A-Z][-][A-Z]/.test(lotacao) || // A-DSI, E-DCA...
+                  (/^[A-Z]{1,2}-/.test(lotacao) && lotacao.length <= 10);
+  if (isSigla) return lotacao;
+
+  // 2. Busca em orgUnidades pela matrícula
+  if (emp.mat) {
+    const unidade = (STATE.orgUnidades || []).find(u =>
+      (u.empregados || []).some(e =>
+        e.mat === emp.mat || e.login === emp.login
+      )
+    );
+    if (unidade?.sigla) return unidade.sigla;
+  }
+
+  // 3. Fallback: setor (pode ser o local físico, mas é o que temos)
+  return emp.setor || emp.lotacao || '';
+}
+
+/**
+ * Preenche o select de localização com a área/setor do empregado.
+ * Popula dinamicamente a partir do STATE.orgUnidades e empregados,
+ * e seleciona a unidade correspondente ao empregado.
+ */
+function _preencherLocalizacao(emp) {
+  const locEl = document.getElementById('ch-localizacao');
+  if (!locEl) return;
+
+  // Coleta localizações únicas: prefer orgUnidades (tem nome completo)
+  const locais = new Map(); // sigla → nome completo
+
+  (STATE.orgUnidades || []).forEach(u => {
+    if (u.sigla) locais.set(u.sigla, u.nome || u.sigla);
+  });
+
+  // Complementa com setores dos empregados se orgUnidades vazio
+  if (locais.size === 0) {
+    (STATE.empregados || []).forEach(e => {
+      const s = e.setor || e.lotacao || e.area;
+      if (s) locais.set(s, s);
+    });
+  }
+
+  // Determina a localização do empregado
+  const setorEmp = _siglaDoEmpregado(emp);
+
+  // Reconstrói opções
+  locEl.innerHTML = '<option value="">— Selecione —</option>';
+  [...locais.entries()].sort((a,b) => a[0].localeCompare(b[0])).forEach(([sigla, nome]) => {
+    const opt = document.createElement('option');
+    opt.value = sigla;
+    opt.textContent = nome !== sigla ? `${sigla} — ${nome}` : sigla;
+    if (sigla === setorEmp) opt.selected = true;
+    locEl.appendChild(opt);
+  });
+
+  // Se o setor do empregado não estava na lista, adiciona
+  if (setorEmp && !locais.has(setorEmp)) {
+    const opt = document.createElement('option');
+    opt.value = setorEmp;
+    opt.textContent = setorEmp;
+    opt.selected = true;
+    locEl.appendChild(opt);
+  }
+
+  locEl.value = setorEmp || '';
+
+  // Limpa o campo de detalhamento
+  const detalheEl = document.getElementById('ch-localizacao-detalhe');
+  if (detalheEl) detalheEl.value = '';
+}
 
 /**
  * Popula o select de área com os setores únicos dos empregados e
@@ -18791,7 +18892,6 @@ function patMetricasHtml(ativo) {
         <span style="color:var(--g400,#94a3b8)">MEM</span>${bar(memPct,'#8B5CF6')}
         <span style="color:var(--g400,#94a3b8)">DSK</span>${bar(diskPct,'#10B981')}
       </div>
-      ${uptime   ? `<div style="font-size:9.5px;color:var(--g400)">⏱ Uptime: ${uptime}</div>` : ''}
     </div>
   </td>`;
 }
