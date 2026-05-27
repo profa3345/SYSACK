@@ -5905,17 +5905,22 @@ async function _executarTriagem(titulo, desc) {
 }
 
 async function _triagemIA(titulo, desc) {
-  // Tenta via Firebase Function (Gemini). Se falhar (function não deployada),
-  // usa classificação local por palavras-chave como fallback.
+  // Tenta via Firebase Function (Gemini) com timeout de 4s.
+  // Se falhar (bloqueado, sem deploy ou sem conexão), usa classificação local.
   try {
-    const r = await callGenkitFlow('analisarChamado', {
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 4000)
+    );
+    const call = callGenkitFlow('analisarChamado', {
       titulo:    titulo,
       descricao: desc || '',
     });
+    const r = await Promise.race([call, timeout]);
     if (r && (r.categoria || r.prioridade)) return r;
   } catch (e) {
     console.info('[Triagem] Function indisponível, usando classificação local:', e.message);
   }
+  // Fallback: classificação por palavras-chave (funciona offline e sem deploy)
   return _triagemLocal(titulo, desc);
 }
 
