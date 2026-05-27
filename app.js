@@ -290,6 +290,26 @@ async function callFunction(name, data) {
 }
 window.callFunction = callFunction; // expõe globalmente
 
+// ─── callGenkitFlow — mapeia flows para Firebase Functions (Gemini) ──
+// Substitui a implementação anterior que chamava api.anthropic.com diretamente.
+// As functions estão em functions/src/index.js com Gemini via GOOGLE_GENAI_API_KEY.
+async function callGenkitFlow(flowName, data) {
+  const MAP = {
+    'analisarChamado':       'analisarChamado',   // triagem automática
+    'chatbotADSI':           'chatbotADSI',        // assistente IA
+    'gerarInsightsExecutivos': 'getInsightsIA',    // dashboard executivo
+    'analisarAtivo':         'analisarAtivo',      // análise de ativo
+  };
+  const fnName = MAP[flowName] || flowName;
+  try {
+    return await callFunction(fnName, data);
+  } catch (e) {
+    console.warn(`[callGenkitFlow] ${flowName} falhou:`, e.message);
+    throw e;
+  }
+}
+window.callGenkitFlow = callGenkitFlow;
+
 window.initFCM = async function() {
       if (!('Notification' in window)) return;
       try {
@@ -5342,60 +5362,11 @@ async function _executarTriagem(titulo, desc) {
 }
 
 async function _triagemIA(titulo, desc) {
-  // Lista de categorias válidas no formulário
-  const categoriasValidas = [
-    'active-directory','antivirus','backup-restore','banco-dados','cadastro-usuario',
-    'certificado-digital','computador','email','equipamento-problema','firewall-webfilter',
-    'impressao','internet','link-dados','rede-dados','rede-logica','rede-wan','cabeamento',
-    'servidor','servidor-aplicacao','servidor-arquivos','sistemas-corporativos','software',
-    'smartphone-mdm','na'
-  ];
-
-  const prompt = `Você é um analista de TI da CESAN (saneamento). Analise o chamado abaixo e retorne SOMENTE JSON, sem nenhum texto fora do JSON.
-
-Título: "${titulo}"
-Descrição: "${desc || '(sem descrição)'}"
-
-Responda com este JSON exato:
-{
-  "categoria": "<um dos valores: ${categoriasValidas.join('|')}>",
-  "tipo": "<incidente|requisicao|problema|mudanca>",
-  "prioridade": "<baixa|media|alta|urgente>",
-  "tempoEstimado": "<ex: 1 hora|2 horas|1 dia>",
-  "resumo": "<uma frase curta explicando a classificação, máx 80 chars>",
-  "confianca": <número 60-99>
-}
-
-Regras:
-- impressora/toner/papel/jam → categoria "impressao"
-- senha/acesso/AD/login → categoria "active-directory"
-- internet/lentidão/wifi/rede sem fio → categoria "internet"
-- cabo/switch/porta → categoria "cabeamento" ou "rede-dados"
-- computador/notebook/tela azul/não liga → categoria "computador"
-- e-mail/outlook/zimbra → categoria "email"
-- sistema/SAP/GIS/GLPI → categoria "sistemas-corporativos"
-- vírus/malware/ransomware → categoria "antivirus", tipo "incidente", prioridade "urgente"
-- servidor/RAID/datacenter → categoria "servidor"
-- firewall/bloqueio/webfilter → categoria "firewall-webfilter"
-- smartphone/celular → categoria "smartphone-mdm"
-- urgente/parado/crítico no título → prioridade "urgente"
-- "não funciona" genérico → tipo "incidente"
-- "preciso de" / "solicito" → tipo "requisicao"`;
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',  // modelo mais rápido e barato para triagem
-      max_tokens: 300,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+  // Chama Firebase Function analisarChamado (Gemini via GOOGLE_GENAI_API_KEY)
+  return await callGenkitFlow('analisarChamado', {
+    titulo:    titulo,
+    descricao: desc || '',
   });
-
-  if (!response.ok) throw new Error('API ' + response.status);
-  const data = await response.json();
-  const text = (data.content || []).find(b => b.type === 'text')?.text || '{}';
-  return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
 function _aplicarTriagemSilenciosa(r) {
@@ -11390,7 +11361,7 @@ async function mobOCREtiqueta(base64DataUrl) {
   // ⚠️ SEGURANÇA: Esta chamada requer um proxy backend com a chave Anthropic.
   // Em produção, substitua esta URL por seu endpoint proxy (ex: /api/ocr)
   // para não expor a chave de API no frontend.
-  const ANTHROPIC_PROXY = window.ANTHROPIC_PROXY_URL || 'https://api.anthropic.com/v1/messages';
+  const ANTHROPIC_PROXY = '/api/claude'; // mantido como fallback
   const response = await fetch(ANTHROPIC_PROXY, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -11569,7 +11540,7 @@ function mobVerDetalhes(id) {
 async function patOCR(base64DataUrl) {
   const base64    = base64DataUrl.split(',')[1];
   const mediaType = base64DataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
-  const response  = await fetch('https://api.anthropic.com/v1/messages', {
+  const response  = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
