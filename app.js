@@ -1251,9 +1251,9 @@ function renderAtivos() {
   const thead = document.getElementById('ativos-thead');
   if (thead) {
     thead.innerHTML = `<tr>
-      ${isComp ? '<th style="font-size:11px">Hostname</th>' : ''}
-      <th>Patrimônio</th><th>Descrição</th><th>Tipo</th><th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
-      ${isComp ? '<th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
+      ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
+      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
+      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">Sistema OP</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
   }
@@ -1268,7 +1268,7 @@ function renderAtivos() {
     return true;
   });
 
-  const colspan = isComp ? '11' : '8';
+  const colspan = isComp ? '14' : '8';
   document.getElementById('ativos-body').innerHTML = lista.map(a => `
     <tr>
       ${isComp ? (()=>{
@@ -1285,12 +1285,12 @@ function renderAtivos() {
           : '<span style="color:#059669;font-weight:700">'+_pp2.pat+'</span>';
         return '<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:10px;font-weight:700;font-family:inherit">Sem Patrimônio</span>';
       })()}</td>
-      <td style="font-weight:500">${
+      ${isComp ? '' : `<td style="font-weight:500">${
         a.desc && a.desc !== a.ip
           ? a.desc
-          : (a.hostname && a.hostname !== a.ip ? a.hostname : (a.ip ? `<span style="font-family:monospace;font-size:11px;color:var(--g500)">${a.ip}</span>` : '—'))
+          : (a.hostname && a.hostname !== a.ip ? a.hostname : (a.ip ? '<span style="font-family:monospace;font-size:11px;color:var(--g500)">'+a.ip+'</span>' : '—'))
       }</td>
-      <td><span class="tag">${a.tipo||'—'}</span></td>
+      <td><span class="tag">${a.tipo||'—'}</span></td>`}
       <td>${a.area||'—'}</td>
       <td>${(()=>{
         if (a.resp) return a.resp;
@@ -1305,6 +1305,21 @@ function renderAtivos() {
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.sala||a.loc||a.area||''}">
         ${a.sala ? `<div style="font-size:12px;font-weight:600;color:var(--g800)">${a.sala}</div><div style="font-size:11px;color:var(--g400)">${a.loc||''}</div>` : a.loc||'—'}
       </td>
+      ${isComp ? (()=>{
+        // Monitor(es) vinculado(s) ao ativo
+        const ag = (STATE_AGENTS?.list||[]).find(x =>
+          (a.ip && x.ip === a.ip) ||
+          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
+        );
+        const monitores = ag?.monitores?.length
+          ? ag.monitores.map(m => escapeHtml(m.nome||m.caption||'Monitor')).join(', ')
+          : (a.monitores?.length ? a.monitores.map(m => escapeHtml(m.nome||m.caption||'Monitor')).join(', ') : '—');
+        const so = escapeHtml(ag?.os || ag?.sistemaOp || a.os || a.sistemaOp || a.osName || '—');
+        const ip = a.ip ? `<span style="font-family:monospace;font-size:11px">${escapeHtml(a.ip)}</span>` : '—';
+        return `<td style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${monitores}">${monitores}</td>
+        <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${so}">${so}</td>
+        <td>${ip}</td>`;
+      })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
       <td><div class="flex gap-6">
         <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')">📜</button>
