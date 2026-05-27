@@ -244,7 +244,8 @@ async function initBanco() {
     const orderBy         = (f, d)         => ({ _orderBy: [f, d] });
     const limit           = (n)            => ({ _limit: n });
 
-    const FCM_VAPID_KEY = window.FCM_VAPID_KEY || 'BK-q97NzBrt0PeUBA7uB2VFe_ijxe3pDdI7P1OSyPVGJKhDLYfMGplwZrfE6vlNicTP7TOd0QWB7Q09sO6FGTJA';
+    const FCM_VAPID_KEY = 'BK-q97NzBrt0PeUBA7uB2VFe_ijxe3pDdI7P1OSyPVGJKhDLYfMGplwZrfE6vlNicTP7TOd0QWB7Q09sO6FGTJA';
+    window.FCM_VAPID_KEY = FCM_VAPID_KEY; // expõe globalmente para verificarConfigSeguranca
 
     // Singleton de Banco Functions — instanciado 1x após login
 let _fbFunctions = null;
@@ -1850,12 +1851,16 @@ function toggleTrocaMaquina(val) {
 }
 
 // ── Busca nova máquina no sistema ─────────────────────────────────
+let _atBuscaTimer = null;
 function atBuscarNovaMaquina(q) {
   const res = document.getElementById('at-nova-maq-resultados');
   if (!q || q.length < 2) { res.style.display = 'none'; return; }
-
+  clearTimeout(_atBuscaTimer);
+  _atBuscaTimer = setTimeout(() => _atBuscarNovaMaquinaExec(q, res), 180);
+}
+function _atBuscarNovaMaquinaExec(q, res) {
   const qLow = q.toLowerCase();
-  const fontes = [...(STATE.ativos||[]), ...(STATE.switches||[])];
+  const fontes = STATE.ativos || [];
   const encontrados = fontes.filter(a =>
     (a.pat||'').toLowerCase().includes(qLow) ||
     (a.desc||'').toLowerCase().includes(qLow) ||
@@ -1930,15 +1935,33 @@ async function atRegistrarNovaMaquina() {
 }
 
 function toggleMudouLugar(val) {
-  document.getElementById('sub-mudou-lugar').style.display = val==='sim'?'':'none';
-  document.getElementById('ro-nao').classList.toggle('checked', val==='nao');
-  document.getElementById('ro-sim').classList.toggle('checked', val==='sim');
+  const sub = document.getElementById('sub-mudou-lugar');
+  if (sub) {
+    sub.style.display = val === 'sim' ? '' : 'none';
+    // reset troca when hiding
+    if (val === 'nao') {
+      document.querySelectorAll('input[name="troca-maquina"]').forEach(r => r.checked = r.value === 'nao');
+      toggleTrocaMaquina('nao');
+      const dest = document.getElementById('at-destino-antigo');
+      if (dest) { dest.value = ''; toggleDestinoAntigo(); }
+    }
+  }
+  document.getElementById('ro-nao')?.classList.toggle('checked', val === 'nao');
+  document.getElementById('ro-sim')?.classList.toggle('checked', val === 'sim');
 }
 function toggleDestinoAntigo() {
-  const val = document.getElementById('at-destino-antigo').value;
-  document.getElementById('sub-dest-terceirizada').style.display = val==='terceirizada'?'':'none';
-  document.getElementById('sub-dest-sc').style.display = val==='sc'?'':'none';
-  document.getElementById('sub-dest-reutilizada').style.display = val==='reutilizada'?'':'none';
+  const val = document.getElementById('at-destino-antigo')?.value || '';
+  // Hide all first in one batch, then show target — avoids multiple reflows
+  ['sub-dest-terceirizada','sub-dest-sc','sub-dest-leilao','sub-dest-reutilizada','sub-dest-descarte'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  const map = { terceirizada:'sub-dest-terceirizada', sc:'sub-dest-sc', leilao:'sub-dest-leilao', reutilizada:'sub-dest-reutilizada', descarte:'sub-dest-descarte' };
+  const target = map[val];
+  if (target) {
+    const el = document.getElementById(target);
+    if (el) el.style.display = '';
+  }
 }
 function toggleUsoTipo(tipo) {
   document.getElementById('sub-uso-usuario').style.display = tipo==='usuario'?'':'none';
@@ -3331,10 +3354,19 @@ function _confirmarSeletorVinculo() {
   window._seletorVinculoCallback?.(selecionados);
 }
 
+let _vinculoTimer = null;
 function vincularAtivoAoChamado() {
+  clearTimeout(_vinculoTimer);
+  _vinculoTimer = setTimeout(_vincularAtivoAoChamadoExec, 200);
+}
+function _vincularAtivoAoChamadoExec() {
   const input = document.getElementById('ch-patrimonio');
   const q     = (input?.value || '').trim();
-  if (q.length < 2) return showToast('Digite pelo menos 2 caracteres', 'warning');
+  if (q.length < 2) { 
+    const res = document.getElementById('ch-patrimonio-resultados');
+    if (res) res.style.display = 'none';
+    return; 
+  }
 
   const fontes = [
     ...(STATE.ativos       || []),
@@ -3561,10 +3593,19 @@ async function salvarAtendimento() {
 }
 
 // ── Vincular ativo durante atendimento (técnico) ─────────────────
+let _atVincTimer = null;
 function atVincularAtivo() {
+  clearTimeout(_atVincTimer);
+  _atVincTimer = setTimeout(_atVincularAtivoExec, 200);
+}
+function _atVincularAtivoExec() {
   const input = document.getElementById('at-vincular-busca');
   const q     = (input?.value || '').trim();
-  if (q.length < 2) return showToast('Digite pelo menos 2 caracteres', 'warning');
+  if (q.length < 2) {
+    const res = document.getElementById('at-vincular-resultados');
+    if (res) res.style.display = 'none';
+    return;
+  }
 
   const qLow = q.toLowerCase();
   const fontes = [...(STATE.ativos||[]), ...(STATE.switches||[]), ...(STATE.impressorasDisc||[])];
@@ -3661,8 +3702,12 @@ function populateSelects() {
 // ============================================================
 // MODAL
 // ============================================================
+// Cache de populateSelects — evita reprocessar a cada openModal
+let _populateSelectsDone = false;
+function _resetPopulateCache() { _populateSelectsDone = false; }
+
 function openModal(id) {
-  populateSelects();
+  if (!_populateSelectsDone) { populateSelects(); _populateSelectsDone = true; }
   const el = document.getElementById(id);
   if (el) el.classList.add('open');
   if (id === 'modal-novo-chamado') {
@@ -18297,8 +18342,10 @@ async function iniciarAutoDiscovery(subnet) {
 function verificarConfigSeguranca() {
   if (CURRENT_USER?.role !== 'admin') return;
   const chave = 'sysack_sec_check_v1';
-  if (sessionStorage.getItem(chave)) return;
-  sessionStorage.setItem(chave, '1');
+  // Mostra no máximo 1x por dia
+  const ultima = localStorage.getItem(chave);
+  if (ultima && (Date.now() - Number(ultima)) < 86400000) return;
+  localStorage.setItem(chave, String(Date.now()));
 
   // Verifica se VAPID e App Check estão configurados
   const semVAPID    = !window.FCM_VAPID_KEY || window.FCM_VAPID_KEY === 'COLE_AQUI_SUA_VAPID_KEY';

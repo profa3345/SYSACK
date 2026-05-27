@@ -4287,7 +4287,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         </div>
 
         <!-- Campos da nova máquina — visível só se troca=sim -->
-        <div id="sub-troca-maquina" style="display:none;border-left:3px solid var(--accent);padding-left:14px;margin-bottom:14px">
+        <div id="sub-troca-maquina" style="display:none;contain:layout style;border-left:3px solid var(--accent);padding-left:14px;margin-bottom:14px">
           <p style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px">🖥️ Nova Máquina Entregue ao Usuário</p>
           <div class="form-group" style="margin-bottom:10px">
             <label class="form-label req">Buscar máquina existente no sistema</label>
@@ -4332,7 +4332,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           </div>
         </div>
         <!-- DESTINO: TERCEIRIZADA -->
-        <div id="sub-dest-terceirizada" style="display:none;border-left:3px solid var(--orange);padding-left:14px;margin-bottom:14px">
+        <div id="sub-dest-terceirizada" style="display:none;contain:layout style;border-left:3px solid var(--orange);padding-left:14px;margin-bottom:14px">
           <p style="font-size:12px;font-weight:700;color:var(--orange);margin-bottom:10px">📤 Configuração de Envio para Terceirizada</p>
           <div class="form-row c2">
             <div class="form-group">
@@ -4347,7 +4347,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <div class="alert alert-orange"><span>🕐</span><span>Alertas automáticos: técnico recebe aviso quando faltam <strong>5 dias úteis</strong> para o prazo de 10 dias. Gestor é alertado se o prazo for excedido.</span></div>
         </div>
         <!-- DESTINO: SANTA CLARA -->
-        <div id="sub-dest-sc" style="display:none;border-left:3px solid var(--violet);padding-left:14px;margin-bottom:14px">
+        <div id="sub-dest-sc" style="display:none;contain:layout style;border-left:3px solid var(--violet);padding-left:14px;margin-bottom:14px">
           <p style="font-size:12px;font-weight:700;color:var(--violet);margin-bottom:10px">📍 Registro em Santa Clara</p>
           <div class="form-row c2">
             <div class="form-group">
@@ -4366,7 +4366,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           </div>
         </div>
         <!-- DESTINO: LEILÃO / PREGÃO -->
-        <div id="sub-dest-leilao" style="display:none;border-left:3px solid #7C3AED;padding-left:14px;margin-bottom:14px">
+        <div id="sub-dest-leilao" style="display:none;contain:layout style;border-left:3px solid #7C3AED;padding-left:14px;margin-bottom:14px">
           <p style="font-size:12px;font-weight:700;color:#7C3AED;margin-bottom:10px">🏛️ Encaminhamento para Leilão / Pregão</p>
           <div class="form-row c2">
             <div class="form-group">
@@ -4399,7 +4399,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         </div>
 
         <!-- DESTINO: REUTILIZADA -->
-        <div id="sub-dest-reutilizada" style="display:none;border-left:3px solid var(--success);padding-left:14px;margin-bottom:14px">
+        <div id="sub-dest-reutilizada" style="display:none;contain:layout style;border-left:3px solid var(--success);padding-left:14px;margin-bottom:14px">
           <p style="font-size:12px;font-weight:700;color:var(--success);margin-bottom:10px">🔄 Reutilização Interna</p>
           <div class="form-row c2">
             <div class="form-group">
@@ -4436,7 +4436,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         </div>
       </div>
         <!-- DESTINO: DESCARTE -->
-        <div id="sub-dest-descarte" style="display:none;border-left:3px solid #EF4444;padding-left:14px;margin-bottom:14px">
+        <div id="sub-dest-descarte" style="display:none;contain:layout style;border-left:3px solid #EF4444;padding-left:14px;margin-bottom:14px">
           <p style="font-size:12px;font-weight:700;color:#EF4444;margin-bottom:10px">♻️ Descarte de Equipamento</p>
           <div class="form-row c2">
             <div class="form-group">
@@ -5904,6 +5904,10 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
   </div>
 </div>
 
+<script>
+  // VAPID Key para FCM push notifications
+  window.FCM_VAPID_KEY = 'BK-q97NzBrt0PeUBA7uB2VFe_ijxe3pDdI7P1OSyPVGJKhDLYfMGplwZrfE6vlNicTP7TOd0QWB7Q09sO6FGTJA';
+</script>
 <script src="app.js"></script>
 
 <!-- Modal: Menu do Usuário -->
