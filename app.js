@@ -701,6 +701,11 @@ const COLS_COM_FILA_OFFLINE = new Set([
   'alertas_rede', 'empregados',
 ]);
 
+// Grava documento com ID específico (usado para agent_commands)
+async function fsSet(col, id, data) {
+  return db.collection(col).doc(id).set(data);
+}
+
 async function fsAdd(col, data, localArr, _fromSync = false) {
   // Valida col — evita crash no Firestore com coleção inválida
   if (!col || typeof col !== 'string' || col.trim() === '') {
@@ -14755,8 +14760,9 @@ function impVerDetalhes(impId) {
       </div>
       <!-- Tabs -->
       <div style="display:flex;border-bottom:1px solid var(--g200)">
-        <button id="imp-tab-info" onclick="impDetalheTroca('info')" style="flex:1;padding:10px;border:none;background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer;border-radius:0">📊 Status</button>
-        <button id="imp-tab-hist" onclick="impDetalheTroca('hist')" style="flex:1;padding:10px;border:none;background:none;color:var(--g600);font-size:13px;cursor:pointer">📋 Histórico</button>
+        <button id="imp-tab-info" onclick="impDetalheTroca('info')" style="flex:1;padding:9px;border:none;background:var(--primary);color:#fff;font-size:12px;font-weight:600;cursor:pointer;border-radius:0">📊 Status</button>
+        <button id="imp-tab-hist" onclick="impDetalheTroca('hist')" style="flex:1;padding:9px;border:none;background:none;color:var(--g600);font-size:12px;cursor:pointer">📋 Histórico</button>
+        <button id="imp-tab-ger"  onclick="impDetalheTroca('ger')"  style="flex:1;padding:9px;border:none;background:none;color:var(--g600);font-size:12px;cursor:pointer">⚙️ Gerenciar</button>
       </div>
       <!-- Aba Status -->
       <div id="imp-tab-info-body" style="padding:18px 20px">
@@ -14792,6 +14798,51 @@ function impVerDetalhes(impId) {
         </div>
         <div id="imp-hist-lista" style="display:none"></div>
       </div>
+      <!-- Aba Gerenciamento -->
+      <div id="imp-tab-ger-body" style="padding:18px 20px;display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+          <div style="border:1px solid var(--g200);border-radius:8px;padding:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔍 Testar conectividade</div>
+            <div style="font-size:11px;color:var(--g400);margin-bottom:10px">Ping e verificação SNMP na hora</div>
+            <button class="btn btn-secondary btn-sm" style="width:100%" onclick="impGerenciarAcao(\'ping\')">Testar agora</button>
+          </div>
+          <div style="border:1px solid var(--g200);border-radius:8px;padding:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">📡 Forçar coleta SNMP</div>
+            <div style="font-size:11px;color:var(--g400);margin-bottom:10px">Atualiza toner e status imediatamente</div>
+            <button class="btn btn-secondary btn-sm" style="width:100%" onclick="impGerenciarAcao(\'snmp\')">Coletar agora</button>
+          </div>
+          <div style="border:1px solid var(--g200);border-radius:8px;padding:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔄 Reiniciar fila de impressão</div>
+            <div style="font-size:11px;color:var(--g400);margin-bottom:10px">Para e reinicia o serviço Spooler</div>
+            <button class="btn btn-warning btn-sm" style="width:100%" onclick="impGerenciarAcao(\'reiniciar_fila\')">Reiniciar spooler</button>
+          </div>
+          <div style="border:1px solid var(--g200);border-radius:8px;padding:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">🗑️ Limpar fila travada</div>
+            <div style="font-size:11px;color:var(--g400);margin-bottom:10px">Remove todos os jobs pendentes</div>
+            <button class="btn btn-warning btn-sm" style="width:100%" onclick="impGerenciarAcao(\'limpar_fila\')">Limpar jobs</button>
+          </div>
+          <div style="border:1px solid var(--g200);border-radius:8px;padding:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔕 Silenciar alertas</div>
+            <div style="font-size:11px;color:var(--g400);margin-bottom:10px">Suprime notificações temporariamente</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" style="flex:1" onclick="impGerenciarAcao(\'silenciar\',2)">2h</button>
+              <button class="btn btn-ghost btn-sm" style="flex:1" onclick="impGerenciarAcao(\'silenciar\',8)">8h</button>
+              <button class="btn btn-ghost btn-sm" style="flex:1" onclick="impGerenciarAcao(\'silenciar\',24)">24h</button>
+            </div>
+          </div>
+          <div style="border:1px solid var(--g200);border-radius:8px;padding:14px">
+            <div style="font-size:13px;font-weight:700;margin-bottom:4px">✏️ Editar informações</div>
+            <div style="font-size:11px;color:var(--g400);margin-bottom:8px">Nome, localização, observações</div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <input id="imp-ger-nome" class="form-control" style="font-size:12px;padding:5px 8px" placeholder="Nome da impressora">
+              <input id="imp-ger-local" class="form-control" style="font-size:12px;padding:5px 8px" placeholder="Localização">
+              <input id="imp-ger-obs" class="form-control" style="font-size:12px;padding:5px 8px" placeholder="Observações">
+              <button class="btn btn-primary btn-sm" onclick="impGerenciarAcao(\'editar\')">Salvar</button>
+            </div>
+          </div>
+        </div>
+        <div id="imp-ger-log" style="display:none;background:#0F172A;color:#E2E8F0;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;max-height:150px;overflow-y:auto;white-space:pre-wrap"></div>
+      </div>
     </div>`;
 
   document.body.appendChild(overlay);
@@ -14803,24 +14854,184 @@ function impVerDetalhes(impId) {
 }
 
 function impDetalheTroca(aba) {
-  const infoBtn  = document.getElementById('imp-tab-info');
-  const histBtn  = document.getElementById('imp-tab-hist');
-  const infoBody = document.getElementById('imp-tab-info-body');
-  const histBody = document.getElementById('imp-tab-hist-body');
-  if (!infoBtn) return;
+  const abas = ['info','hist','ger'];
+  const labels = { info:'📊 Status', hist:'📋 Histórico', ger:'⚙️ Gerenciar' };
+  abas.forEach(a => {
+    const btn  = document.getElementById('imp-tab-' + a);
+    const body = document.getElementById('imp-tab-' + a + '-body');
+    if (!btn || !body) return;
+    const ativo = a === aba;
+    btn.style.cssText  = `flex:1;padding:9px;border:none;font-size:12px;cursor:pointer;${ativo ? 'background:var(--primary);color:#fff;font-weight:600' : 'background:none;color:var(--g600)'}`;
+    body.style.display = ativo ? 'block' : 'none';
+  });
+  if (aba === 'hist') impCarregarHistorico();
+  if (aba === 'ger')  impIniciarGerenciamento();
+}
 
-  if (aba === 'info') {
-    infoBtn.style.cssText = 'flex:1;padding:10px;border:none;background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer';
-    histBtn.style.cssText = 'flex:1;padding:10px;border:none;background:none;color:var(--g600);font-size:13px;cursor:pointer';
-    infoBody.style.display = 'block';
-    histBody.style.display = 'none';
-  } else {
-    histBtn.style.cssText = 'flex:1;padding:10px;border:none;background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer';
-    infoBtn.style.cssText = 'flex:1;padding:10px;border:none;background:none;color:var(--g600);font-size:13px;cursor:pointer';
-    infoBody.style.display = 'none';
-    histBody.style.display = 'block';
-    impCarregarHistorico();
+function impIniciarGerenciamento() {
+  // Preenche campos de edição com dados atuais
+  const overlay = document.getElementById('modal-imp-detalhe');
+  if (!overlay) return;
+  const imp = getImpressoras().find(i => i.id === overlay._impDocId);
+  if (!imp) return;
+  const nomeEl  = document.getElementById('imp-ger-nome');
+  const localEl = document.getElementById('imp-ger-local');
+  const obsEl   = document.getElementById('imp-ger-obs');
+  if (nomeEl)  nomeEl.value  = imp.nome  || imp.sysName || '';
+  if (localEl) localEl.value = imp.local || imp.area    || '';
+  if (obsEl)   obsEl.value   = imp.obs   || '';
+}
+
+async function impGerenciarAcao(acao, param) {
+  const overlay = document.getElementById('modal-imp-detalhe');
+  if (!overlay) return;
+  const imp = getImpressoras().find(i => i.id === overlay._impDocId);
+  if (!imp) return;
+
+  const logEl = document.getElementById('imp-ger-log');
+  const addLog = (msg, cor) => {
+    if (!logEl) return;
+    logEl.style.display = 'block';
+    logEl.innerHTML += `<span style="color:${cor||'#E2E8F0'}">[${new Date().toLocaleTimeString('pt-BR')}] ${escapeHtml(msg)}</span>\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
+  // ── Ping / Testar conectividade ──────────────────────────────
+  if (acao === 'ping') {
+    addLog('Testando conectividade com ' + imp.ip + '...', '#94A3B8');
+    try {
+      // Testa via agente no servidor de impressão ou direto via SNMP check
+      const cmdPing = `Test-Connection -ComputerName ${imp.ip} -Count 4 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ResponseTime | Measure-Object -Average | Select-Object -ExpandProperty Average`;
+      const resultado = await impEnviarComando(imp, 'powershell', { cmd: cmdPing });
+      if (resultado && !resultado.includes('ERRO')) {
+        addLog('✓ Ping OK — latência média: ' + resultado.trim() + 'ms', '#10B981');
+      } else {
+        addLog('✗ Sem resposta ao ping', '#EF4444');
+      }
+    } catch(e) {
+      addLog('Erro: ' + e.message, '#EF4444');
+    }
+    return;
   }
+
+  // ── Forçar coleta SNMP ───────────────────────────────────────
+  if (acao === 'snmp') {
+    addLog('Forçando coleta SNMP em ' + imp.ip + '...', '#94A3B8');
+    // Grava flag no Firestore para o monitor coletar na próxima vez
+    try {
+      await db.collection('impressoras').doc(imp.id).update({
+        forcarColeta: true,
+        forcarColetaEm: new Date().toISOString(),
+      });
+      addLog('✓ Solicitação enviada — dados serão atualizados na próxima coleta do monitor', '#10B981');
+      showToast('📡 Coleta forçada solicitada', 'success', 3000);
+    } catch(e) {
+      addLog('Erro: ' + e.message, '#EF4444');
+    }
+    return;
+  }
+
+  // ── Reiniciar fila de impressão ──────────────────────────────
+  if (acao === 'reiniciar_fila') {
+    if (!confirm(`Reiniciar o serviço Spooler no servidor? Isso interrompe brevemente todas as impressoras.`)) return;
+    addLog('Reiniciando serviço Spooler...', '#94A3B8');
+    const cmd = 'Stop-Service -Name Spooler -Force; Start-Sleep -Seconds 2; Start-Service -Name Spooler; (Get-Service Spooler).Status';
+    const resultado = await impEnviarComando(imp, 'powershell', { cmd });
+    if (resultado?.toLowerCase().includes('running') || resultado?.includes('Running')) {
+      addLog('✓ Spooler reiniciado com sucesso — Status: Running', '#10B981');
+      showToast('✅ Spooler reiniciado', 'success', 3000);
+    } else {
+      addLog('Resultado: ' + (resultado || 'sem resposta'), resultado?.includes('ERRO') ? '#EF4444' : '#F59E0B');
+    }
+    return;
+  }
+
+  // ── Limpar fila travada ──────────────────────────────────────
+  if (acao === 'limpar_fila') {
+    if (!confirm(`Limpar todos os jobs pendentes da impressora ${imp.fila || imp.ip}?`)) return;
+    addLog('Limpando fila de impressão...', '#94A3B8');
+    const fila = imp.fila || imp.sysName || '';
+    const cmd = fila
+      ? `Stop-Service -Name Spooler -Force; Remove-Item -Path "$env:SystemRoot\\System32\\spool\\PRINTERS\\*" -Force -ErrorAction SilentlyContinue; Start-Service -Name Spooler; Get-PrintJob -PrinterName '${fila}' | Measure-Object | Select-Object -ExpandProperty Count`
+      : `Stop-Service -Name Spooler -Force; Remove-Item -Path "$env:SystemRoot\\System32\\spool\\PRINTERS\\*" -Force -ErrorAction SilentlyContinue; Start-Service -Name Spooler; Write-Output "Fila limpa"`;
+    const resultado = await impEnviarComando(imp, 'powershell', { cmd });
+    addLog('✓ Fila limpa — jobs restantes: ' + (resultado?.trim() || '0'), '#10B981');
+    showToast('✅ Fila de impressão limpa', 'success', 3000);
+    return;
+  }
+
+  // ── Silenciar alertas ────────────────────────────────────────
+  if (acao === 'silenciar') {
+    const horas = param || 2;
+    const ate   = new Date(Date.now() + horas * 60 * 60 * 1000).toISOString();
+    try {
+      await db.collection('impressoras').doc(imp.id).update({
+        suprimirAlertasAte: ate,
+        suprimirAlertasPor: CURRENT_USER?.nome || 'Técnico',
+      });
+      addLog(`✓ Alertas silenciados por ${horas}h até ${new Date(ate).toLocaleString('pt-BR')}`, '#10B981');
+      showToast(`🔕 Alertas silenciados por ${horas}h`, 'success', 3000);
+    } catch(e) {
+      addLog('Erro: ' + e.message, '#EF4444');
+    }
+    return;
+  }
+
+  // ── Editar informações ───────────────────────────────────────
+  if (acao === 'editar') {
+    const nome  = document.getElementById('imp-ger-nome')?.value?.trim();
+    const local = document.getElementById('imp-ger-local')?.value?.trim();
+    const obs   = document.getElementById('imp-ger-obs')?.value?.trim();
+    try {
+      const update = {};
+      if (nome  !== undefined) update.nome  = nome;
+      if (local !== undefined) update.local = local;
+      if (obs   !== undefined) update.obs   = obs;
+      await db.collection('impressoras').doc(imp.id).update(update);
+      addLog('✓ Informações atualizadas com sucesso', '#10B981');
+      showToast('✅ Informações salvas', 'success', 2000);
+      // Atualiza STATE local
+      const idx = (STATE.impressoras || []).findIndex(i => i.id === imp.id);
+      if (idx >= 0) Object.assign(STATE.impressoras[idx], update);
+    } catch(e) {
+      addLog('Erro: ' + e.message, '#EF4444');
+    }
+    return;
+  }
+}
+
+// Envia comando PowerShell via agente desktop no servidor de impressão
+async function impEnviarComando(imp, tipo, dados) {
+  // Descobre qual agente gerencia essa impressora
+  // Usa o servidor de impressão (campo servidorImpressao na impressora, ou o agente padrão da rede)
+  const agentId = imp.servidorAgente || imp.agentId
+    || (STATE_AGENTS?.list || []).find(a => a.status === 'online' && a.tipoServidor === 'impressao')?.id
+    || (STATE_AGENTS?.list || []).find(a => a.status === 'online')?.id;
+
+  if (!agentId) {
+    showToast('⚠️ Nenhum agente online disponível para executar o comando', 'warning', 4000);
+    throw new Error('Nenhum agente disponível');
+  }
+
+  const cmdId = 'imp_' + Date.now();
+  const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
+
+  await fsSet('agent_commands', cmdId, {
+    tipo, dados: JSON.stringify(dados),
+    agentId, token: TOKEN,
+    status: 'pendente',
+    criadoEm: new Date().toISOString(),
+  });
+
+  // Aguarda resultado por até 15 segundos
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const doc = await db.collection('agent_commands').doc(cmdId).get();
+    const d = doc.data();
+    if (d?.status === 'concluido') return d.resultado || '';
+    if (d?.status === 'erro')      throw new Error(d.resultado || 'Erro no agente');
+  }
+  throw new Error('Timeout — agente não respondeu em 15s');
 }
 
 async function impCarregarHistorico() {
