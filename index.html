@@ -4264,7 +4264,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <input class="form-control" id="at-vincular-busca" placeholder="Buscar por patrimônio ou nome da máquina..."
                  style="flex:1" oninput="atVincularAtivo()"
                  onkeydown="if(event.key==='Enter'){event.preventDefault();atVincularAtivo();}">
-          <button class="btn btn-secondary btn-sm" type="button" onclick="atVincularAtivo()">Buscar</button>
+          <button class="btn btn-secondary btn-sm" type="button" onclick="atVincularAtivo(true)">Buscar</button>
         </div>
         <div id="at-vincular-resultados" style="display:none;border:1px solid var(--g200);border-radius:8px;max-height:160px;overflow-y:auto;background:#fff;margin-bottom:8px"></div>
         <div id="at-itens-vinculados" style="display:flex;flex-wrap:wrap;gap:6px;min-height:24px"></div>

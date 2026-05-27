@@ -1721,17 +1721,34 @@ function abrirAtendimento(chamadoId) {
   if (existentes) existentes.innerHTML = '';
   if (vinculados)  vinculados.innerHTML  = '';
   if (resultados)  resultados.style.display = 'none';
-  if (buscaEl)     buscaEl.value = '';
+  // Pré-preenche busca com o patrimônio do chamado para facilitar
+  if (buscaEl)     buscaEl.value = ch.pat || '';
   if (document.getElementById('at-desc-atendimento'))
     document.getElementById('at-desc-atendimento').value = ch.descAtendimento || '';
 
-  // Mostra ativos já vinculados pelo solicitante
-  const avs = ch.ativosVinculados || [];
+  // Monta lista de ativos vinculados:
+  // 1) ativosVinculados (array com objetos {pat, id})
+  // 2) Fallback: campo pat do chamado (chamados criados antes da funcionalidade)
+  let avs = ch.ativosVinculados || [];
+  if (!avs.length && ch.pat) {
+    // Tenta achar o ativo completo pelo pat
+    const ativoEncontrado = (STATE.ativos||[]).find(a =>
+      (a.pat||'').toLowerCase() === ch.pat.toLowerCase() ||
+      (a.hostname||'').toLowerCase() === ch.pat.toLowerCase() ||
+      (a.id||'').toLowerCase() === ch.pat.toLowerCase()
+    ) || (STATE.impressorasDisc||[]).find(a =>
+      (a.id||'').toLowerCase() === ch.pat.toLowerCase() ||
+      (a.ip||'').replace(/\./g,'_') === ch.pat.toLowerCase()
+    );
+    avs = [{ pat: ch.pat, id: ativoEncontrado?.id || ch.pat, desc: ativoEncontrado?.desc || ativoEncontrado?.hostname || '' }];
+  }
+
   if (existentes && avs.length) {
     existentes.innerHTML = avs.map(av => `
       <div style="display:inline-flex;align-items:center;gap:5px;background:#F0FDF4;border:1px solid #86EFAC;
                   border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:#166534">
         🖥️ ${escapeHtml(av.pat || av.id || '?')}
+        ${av.desc ? `<span style="font-size:10px;font-weight:400;color:#15803D"> — ${escapeHtml(av.desc)}</span>` : ''}
         <span style="font-size:10px;font-weight:400;color:#15803D;margin-left:2px">(vinculado pelo solicitante)</span>
       </div>`).join('');
   } else if (existentes) {
@@ -2297,17 +2314,28 @@ async function _salvarChamadoInterno() {
       criadoPor: CURRENT_USER?.nome || CURRENT_USER?.email || '',
     };
     for (const av of novo.ativosVinculados) {
-      if (!av.docId) continue;
+      const docId = av.docId || av.id;
+      if (!docId) continue;
       try {
-        // Tenta nas coleções possíveis
-        for (const col of ['ativos','switches','impressoras','firewalls']) {
-          const ref = db.collection(col).doc(av.docId);
-          const snap = await ref.get();
-          if (snap.exists) {
-            await ref.collection('historico').add(hist);
-            console.log(`[Chamado] Vinculado ao ativo ${av.pat} (${col})`);
-            break;
-          }
+        // Tenta nas coleções possíveis (sem GET extra — escreve direto na mais provável)
+        // O Firestore aceita add em subcoleção mesmo se o doc pai não existir no índice
+        let escrito = false;
+        for (const col of ['ativos','impressoras','switches','firewalls']) {
+          try {
+            const ref = db.collection(col).doc(docId);
+            const snap = await ref.get();
+            if (snap.exists) {
+              await ref.collection('historico').add(hist);
+              console.log(`[Chamado] ✓ Histórico escrito: ${av.pat} em ${col}`);
+              escrito = true;
+              break;
+            }
+          } catch(_) {}
+        }
+        // Se não achou em nenhuma coleção, escreve em 'ativos' mesmo assim
+        if (!escrito) {
+          await db.collection('ativos').doc(docId).collection('historico').add(hist);
+          console.log(`[Chamado] ✓ Histórico escrito (fallback ativos): ${av.pat || docId}`);
         }
       } catch (e) {
         console.warn('[Chamado] Falha ao vincular ao ativo:', e.message);
@@ -3665,17 +3693,39 @@ async function salvarAtendimento() {
   // Registra pat do primeiro ativo se não havia
   if (!ch.pat && ativosFinais.length) update.pat = ativosFinais[0].pat || '';
 
-  // Registra log de vínculo para cada ativo novo adicionado pelo técnico
-  if (ativosVinculadosTec.length && FB_READY && db) {
-    for (const av of ativosVinculadosTec) {
+  // Registra histórico em TODOS os ativos vinculados (existentes + adicionados pelo técnico)
+  if (FB_READY && db && ativosFinais.length) {
+    const histEntry = {
+      evento:      'chamado-atendido',
+      chamadoId,
+      titulo:      ch.desc?.split('\n')[0] || chamadoId,
+      diagnostico: diagnostico,
+      tecnico:     CURRENT_USER?.nome || CURRENT_USER?.uid || 'Técnico',
+      data:        agora,
+      obs:         descAtendimento || `Atendimento do chamado ${chamadoId}`,
+    };
+    for (const av of ativosFinais) {
+      const docId = av.docId || av.id;
+      if (!docId) continue;
       try {
-        await db.collection('ativos').doc(av.docId || av.id).collection('historico').add({
-          evento:  'chamado-vinculado',
-          chamadoId,
-          tecnico: CURRENT_USER?.nome || CURRENT_USER?.uid || 'Técnico',
-          data:    agora,
-          obs:     `Vinculado ao chamado ${chamadoId} durante atendimento`,
-        });
+        let escrito = false;
+        for (const col of ['ativos','impressoras','switches','firewalls']) {
+          try {
+            const snap = await db.collection(col).doc(docId).get();
+            if (snap.exists) {
+              const entrada = { ...histEntry,
+                evento: ativosVinculadosTec.some(a=>(a.docId||a.id)===docId)
+                  ? 'chamado-vinculado-tecnico' : 'chamado-atendido'
+              };
+              await db.collection(col).doc(docId).collection('historico').add(entrada);
+              console.log(`[Atendimento] ✓ Histórico escrito: ${av.pat||docId} em ${col}`);
+              escrito = true; break;
+            }
+          } catch(_) {}
+        }
+        if (!escrito) {
+          await db.collection('ativos').doc(docId).collection('historico').add(histEntry);
+        }
       } catch(e) { console.warn('[atendimento] histórico ativo:', e.message); }
     }
   }
@@ -3717,18 +3767,60 @@ async function salvarAtendimento() {
 
 // ── Vincular ativo durante atendimento (técnico) ─────────────────
 let _atVincTimer = null;
-function atVincularAtivo() {
+function atVincularAtivo(immediate) {
+  if (immediate) { _atVincularAtivoExec(); return; }
   clearTimeout(_atVincTimer);
-  _atVincTimer = setTimeout(_atVincularAtivoExec, 200);
+  _atVincTimer = setTimeout(_atVincularAtivoExec, 220);
 }
 function _atVincularAtivoExec() {
   const input = document.getElementById('at-vincular-busca');
   const q     = (input?.value || '').trim();
+  const res   = document.getElementById('at-vincular-resultados');
+  if (!res) return;
+
+  const fontes = [...(STATE.ativos||[]), ...(STATE.switches||[]), ...(STATE.impressorasDisc||[])];
+
+  // Campo vazio → mostra primeiros 12 ativos para o técnico escolher
+  let encontrados;
   if (q.length < 2) {
-    const res = document.getElementById('at-vincular-resultados');
-    if (res) res.style.display = 'none';
+    encontrados = fontes.slice(0, 12);
+  } else {
+    const qLow = q.toLowerCase();
+    encontrados = fontes.filter(a =>
+      (a.pat||'').toLowerCase().includes(qLow) ||
+      (a.desc||'').toLowerCase().includes(qLow) ||
+      (a.hostname||'').toLowerCase().includes(qLow) ||
+      (a.nome||'').toLowerCase().includes(qLow)
+    ).slice(0, 12);
+  }
+
+  if (!encontrados.length) {
+    res.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum ativo encontrado.</div>';
+    res.style.display = '';
     return;
   }
+
+  const header = q.length < 2
+    ? '<div style="padding:6px 14px;font-size:11px;color:var(--g500);border-bottom:1px solid var(--g100);font-style:italic">Mostrando primeiros ativos — digite para filtrar</div>'
+    : '';
+
+  res.innerHTML = header + encontrados.map(a => {
+    const pat  = escapeHtml(a.pat||a.hostname||'—');
+    const desc = escapeHtml(a.desc||a.hostname||'');
+    const area = escapeHtml(a.area||'');
+    const id   = escapeHtml(a.id);
+    const patRaw = escapeHtml(a.pat||a.hostname||'');
+    const descRaw= escapeHtml(a.desc||a.hostname||'');
+    return `<div onclick="atConfirmarVincularAtivo('${id}','${patRaw}','${descRaw}','${id}')"
+         style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);font-size:12.5px;display:flex;gap:10px;align-items:center"
+         onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <span style="font-weight:700;color:var(--accent);min-width:90px">${pat}</span>
+      <span style="color:var(--g700);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</span>
+      <span style="color:var(--g400);font-size:11px;flex-shrink:0">${area}</span>
+    </div>`;
+  }).join('');
+  res.style.display = '';
+}
 
   const qLow = q.toLowerCase();
   const fontes = [...(STATE.ativos||[]), ...(STATE.switches||[]), ...(STATE.impressorasDisc||[])];
