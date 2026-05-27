@@ -14323,9 +14323,10 @@ function impRenderCards() {
         return html;
       })()}
       <!-- Ações -->
-      <div style="padding:10px 16px;display:flex;gap:6px">
+      <div style="padding:10px 16px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-xs" onclick="impVerDetalhes('${imp.id}')">📋 Detalhes</button>
-        <button class="btn btn-secondary btn-xs" onclick="impPedirToner('${imp.id}')">🛒 Pedir toner</button>
+        <button class="btn btn-secondary btn-xs" onclick="impAbrirChamadoToner('${imp.id}')">🛒 Pedir toner</button>
+        <button class="btn btn-ghost btn-xs" onclick="impAbrirChamadoProblema('${imp.id}')">🎫 Outro problema</button>
         ${(imp.tonerMin||100) < (_impConfig.pedidoToner||15) ? `<span style="font-size:10px;color:#EF4444;font-weight:700;align-self:center">⚠️ Toner baixo!</span>` : ''}
       </div>
     </div>`;
@@ -14361,7 +14362,7 @@ function impRenderToner() {
       <td style="text-align:center;font-weight:700;color:${minCor}">${min}%</td>
       <td style="text-align:center;font-size:12px;color:${dias && dias < 14 ? '#EF4444' : 'inherit'}">${dias ? dias + 'd' : '—'}</td>
       <td><span class="badge" style="font-size:10px;background:${statusCor}22;color:${statusCor}">${escapeHtml(imp.status||'—')}</span></td>
-      <td><button class="btn btn-secondary btn-xs" onclick="impPedirToner('${imp.id}')">🛒 Pedir</button></td>
+      <td><button class="btn btn-secondary btn-xs" onclick="impAbrirChamadoToner('${imp.id}')">🛒 Pedir</button></td>
     </tr>`;
   }).join('') || '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--g400)">Nenhuma impressora</td></tr>';
 }
@@ -14488,6 +14489,109 @@ function impRenderPedidos() {
 }
 
 function impNovoPedido() { impPedirToner(null); }
+
+function impAbrirChamadoToner(impId) {
+  const imp = impId ? getImpressoras().find(i => i.id === impId) : null;
+  if (!imp) return;
+
+  // Monta texto automático com as informações da impressora
+  const nomeImp  = escapeHtml(imp.nome || imp.fila || imp.ip || 'Impressora');
+  const ip       = imp.ip || '—';
+  const toners   = Array.isArray(imp.toner) ? imp.toner : [];
+  const tonerTxt = toners.length
+    ? toners.map(t => `  - ${t.descricao||t.tipo}: ${t.pct != null ? t.pct + '%' : '—'}`).join('\n')
+    : '  - Nível não disponível via SNMP';
+  const paginas  = imp.paginasTotal ? `\nContador de páginas: ${imp.paginasTotal.toLocaleString('pt-BR')}` : '';
+
+  const titulo = `Troca de toner — ${nomeImp}`;
+  const desc   =
+`Solicitação de troca/reposição de toner para a impressora abaixo.
+
+Impressora: ${nomeImp}
+IP: ${ip}
+Fila: ${imp.fila || '—'}${paginas}
+
+Níveis atuais de toner:
+${tonerTxt}
+
+Favor providenciar a reposição do suprimento conforme necessidade indicada acima.`;
+
+  // Abre o modal de chamado já preenchido
+  openModal('modal-novo-chamado');
+
+  setTimeout(() => {
+    // Título e descrição
+    const tituloEl = document.getElementById('ch-titulo');
+    const descEl   = document.getElementById('ch-descricao');
+    if (tituloEl) { tituloEl.value = titulo; atualizarIniciais?.(); }
+    if (descEl)   descEl.value = desc;
+
+    // Categoria: Impressão
+    const catEl = document.getElementById('ch-categoria');
+    if (catEl) { catEl.value = 'impressao'; atualizarSubcategoria?.(); }
+
+    // Tipo: Requisição (pedido de suprimento)
+    const tipoEl = document.getElementById('ch-tipo');
+    if (tipoEl) tipoEl.value = 'requisicao';
+
+    // Grupo: Nível 2 – Terceiro Impressão
+    const grupoEl = document.getElementById('ch-grupo');
+    if (grupoEl) grupoEl.value = 'n2-impressao';
+
+    // Prioridade baseada no nível de toner
+    const prioEl = document.getElementById('ch-prioridade');
+    if (prioEl) {
+      const minToner = imp.tonerMinPct ?? imp.tonerMin ?? 100;
+      prioEl.value = minToner <= 5 ? 'urgente' : minToner <= 10 ? 'alta' : 'media';
+      atualizarPrioridadeColor?.(prioEl);
+    }
+
+    showToast('📋 Chamado de toner pré-preenchido', 'success', 2000);
+  }, 300);
+}
+
+function impAbrirChamadoProblema(impId) {
+  const imp = impId ? getImpressoras().find(i => i.id === impId) : null;
+
+  openModal('modal-novo-chamado');
+
+  if (!imp) return;
+
+  setTimeout(() => {
+    const nomeImp = imp.nome || imp.fila || imp.ip || 'Impressora';
+    const alertas = (imp.alertas || []).map(a => `  - ${a.msg}`).join('\n') || '  - Nenhum alerta detectado via SNMP';
+
+    const tituloEl = document.getElementById('ch-titulo');
+    const descEl   = document.getElementById('ch-descricao');
+
+    if (tituloEl) { tituloEl.value = `Problema — ${nomeImp}`; atualizarIniciais?.(); }
+    if (descEl) {
+      descEl.value =
+`Problema reportado na impressora abaixo.
+
+Impressora: ${nomeImp}
+IP: ${imp.ip || '—'}
+Fila: ${imp.fila || '—'}
+Status atual: ${imp.status || '—'}
+
+Alertas detectados:
+${alertas}
+
+Descreva o problema observado:
+`;
+      // Posiciona cursor no final para o usuário completar
+      setTimeout(() => { descEl.focus(); descEl.setSelectionRange(descEl.value.length, descEl.value.length); }, 100);
+    }
+
+    const catEl = document.getElementById('ch-categoria');
+    if (catEl) { catEl.value = 'impressao'; atualizarSubcategoria?.(); }
+
+    const tipoEl = document.getElementById('ch-tipo');
+    if (tipoEl) tipoEl.value = 'incidente';
+
+    showToast('📋 Chamado pré-preenchido — descreva o problema', 'info', 3000);
+  }, 300);
+}
 
 function impPedirToner(impId) {
   const imp = impId ? getImpressoras().find(i => i.id === impId) : null;
