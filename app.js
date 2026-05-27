@@ -18100,10 +18100,10 @@ async function patLerFoto(input) {
     const ocr = await patOCR(base64DataUrl);
     const pat = (ocr.patrimonio || '').replace(/[^0-9]/g, '');
     if (pat && pat.length >= 4) {
-      if (resultDiv) resultDiv.innerHTML = \`<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:10px;font-size:13px;color:#166534">
-        ✅ Patrimônio detectado: <strong>\${pat}</strong>\${ocr.tipo ? ' · ' + ocr.tipo : ''}\${ocr.responsavel ? ' · ' + ocr.responsavel : ''}
-        <button onclick="patProcessarCodigoLido('\${pat}','pat-foto-result')" class="btn btn-primary btn-sm" style="margin-top:8px;width:100%">Usar \${pat}</button>
-      </div>\`;
+      if (resultDiv) resultDiv.innerHTML = `<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:10px;font-size:13px;color:#166534">
+        ✅ Patrimônio detectado: <strong>${pat}</strong>${ocr.tipo ? ' · ' + ocr.tipo : ''}${ocr.responsavel ? ' · ' + ocr.responsavel : ''}
+        <button onclick="patProcessarCodigoLido('${pat}','pat-foto-result')" class="btn btn-primary btn-sm" style="margin-top:8px;width:100%">Usar ${pat}</button>
+      </div>`;
       return;
     }
     // OCR não encontrou número — exibe formulário manual com dica do que foi lido
