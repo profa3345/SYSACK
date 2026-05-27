@@ -3711,9 +3711,11 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div style="padding:14px 20px 0;border-bottom:1px solid var(--g100);background:#fff">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
         <div style="width:32px;height:32px;background:var(--g700);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:11px;flex-shrink:0" id="ch-avatar-iniciais">??</div>
-        <input id="ch-titulo" onblur="if(this.value.length>10)mostrarSugestaoAIchamado(this.value,document.getElementById('ch-desc')?.value||'')" class="form-control" style="font-size:15px;font-weight:700;border:none;border-bottom:2px solid var(--g200);border-radius:0;padding:4px 0;flex:1;background:transparent" placeholder="Título do chamado..." oninput="atualizarIniciais()">
+        <input id="ch-titulo" onblur="triagemAutoChamado()" class="form-control" style="font-size:15px;font-weight:700;border:none;border-bottom:2px solid var(--g200);border-radius:0;padding:4px 0;flex:1;background:transparent" placeholder="Título do chamado..." oninput="atualizarIniciais()">
         <span style="font-size:12px;color:var(--g400);white-space:nowrap" id="ch-numero-display">#NOVO</span>
       </div>
+      <!-- BANNER DE TRIAGEM AUTOMÁTICA POR IA -->
+      <div id="ai-triage-suggestion" style="display:none;margin:0 0 10px"></div>
       <!-- ABAS estilo GLPI -->
       <div style="display:flex;gap:0;overflow-x:auto">
         <div class="ch-tab active" data-chtab="chamado" onclick="switchChTab(this,'chamado')" style="padding:8px 16px;font-size:12.5px;font-weight:600;cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent);white-space:nowrap;display:flex;align-items:center;gap:5px">
@@ -3752,7 +3754,7 @@ window.dispatchEvent(new Event('firebase-ready'));
             <div style="font-size:14px;font-weight:700;color:var(--g900);margin-bottom:10px" id="ch-bolha-titulo-preview">Preencha o título acima</div>
             <div class="form-group" style="margin-bottom:0">
               <label class="form-label req">Descrição completa</label>
-              <textarea class="form-control" id="ch-descricao" rows="5" placeholder="Descreva o problema ou solicitação com o máximo de detalhes possível..." style="background:#fff" oninput=""></textarea>
+              <textarea class="form-control" id="ch-descricao" rows="5" placeholder="Descreva o problema ou solicitação com o máximo de detalhes possível..." style="background:#fff" oninput="" onblur="triagemAutoChamado()"></textarea>
             </div>
           </div>
         </div>

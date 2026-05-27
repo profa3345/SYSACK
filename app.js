@@ -5300,35 +5300,159 @@ function renderAIDashboard() {
 }
 
 // ─── AI triage badge no modal de chamado ──────────────────────
-function mostrarSugestaoAIchamado(titulo, desc) {
+// ─── Triagem automática de chamados por IA ──────────────────────
+// Dispara quando o usuário sai do campo título ou descrição.
+// Analisa o texto, preenche categoria/tipo/prioridade automaticamente
+// e exibe um banner informando o que foi classificado.
+
+let _triagemTimer = null;
+
+function triagemAutoChamado() {
+  const titulo = (document.getElementById('ch-titulo')?.value || '').trim();
+  const desc   = (document.getElementById('ch-descricao')?.value || '').trim();
+  if (titulo.length < 8 && desc.length < 10) return;   // texto ainda muito curto
+
+  // Debounce — evita múltiplas chamadas se o usuário sair e voltar rápido
+  clearTimeout(_triagemTimer);
+  _triagemTimer = setTimeout(() => _executarTriagem(titulo, desc), 400);
+}
+
+async function _executarTriagem(titulo, desc) {
   const container = document.getElementById('ai-triage-suggestion');
   if (!container) return;
+
+  // Não re-analisa se o usuário já aplicou manualmente
+  if (container.dataset.aplicado === '1') return;
+
+  // Mostra loading
   container.style.display = '';
-  container.innerHTML = '<div class="ai-triage-badge"><div class="ai-typing" style="margin:0"><span></span><span></span><span></span></div> Analisando com IA...</div>';
-  callGenkitFlow('analisarChamado', { titulo, desc }).then(result => {
-    container.innerHTML = `
-      <div class="ai-triage-badge" style="flex-direction:column;align-items:start;gap:6px;padding:10px;border-radius:8px;background:linear-gradient(135deg,rgba(37,99,235,.05),rgba(124,58,237,.05))">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--accent)">✨ Sugestão da IA (Gemini)</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <span style="font-size:11.5px">📊 Prioridade: <strong>${result.prioridade}</strong></span>
-          <span style="font-size:11.5px">🏷️ ${esc(result.categoriaAI)}</span>
-          <span style="font-size:11.5px">⏱ ${result.tempoEstimado}</span>
-          <span style="font-size:11.5px;color:var(--g500)">${result.confianca}% confiança</span>
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:linear-gradient(135deg,#EFF6FF,#F5F3FF);border:1px solid #BFDBFE;border-radius:8px;font-size:12px;color:#1E40AF">
+      <div class="ai-typing" style="margin:0"><span></span><span></span><span></span></div>
+      <span>IA classificando o chamado...</span>
+    </div>`;
+
+  try {
+    const r = await _triagemIA(titulo, desc);
+    _aplicarTriagemSilenciosa(r);
+    _mostrarBannerTriagem(container, r);
+  } catch (e) {
+    container.style.display = 'none';
+  }
+}
+
+async function _triagemIA(titulo, desc) {
+  // Lista de categorias válidas no formulário
+  const categoriasValidas = [
+    'active-directory','antivirus','backup-restore','banco-dados','cadastro-usuario',
+    'certificado-digital','computador','email','equipamento-problema','firewall-webfilter',
+    'impressao','internet','link-dados','rede-dados','rede-logica','rede-wan','cabeamento',
+    'servidor','servidor-aplicacao','servidor-arquivos','sistemas-corporativos','software',
+    'smartphone-mdm','na'
+  ];
+
+  const prompt = `Você é um analista de TI da CESAN (saneamento). Analise o chamado abaixo e retorne SOMENTE JSON, sem nenhum texto fora do JSON.
+
+Título: "${titulo}"
+Descrição: "${desc || '(sem descrição)'}"
+
+Responda com este JSON exato:
+{
+  "categoria": "<um dos valores: ${categoriasValidas.join('|')}>",
+  "tipo": "<incidente|requisicao|problema|mudanca>",
+  "prioridade": "<baixa|media|alta|urgente>",
+  "tempoEstimado": "<ex: 1 hora|2 horas|1 dia>",
+  "resumo": "<uma frase curta explicando a classificação, máx 80 chars>",
+  "confianca": <número 60-99>
+}
+
+Regras:
+- impressora/toner/papel/jam → categoria "impressao"
+- senha/acesso/AD/login → categoria "active-directory"
+- internet/lentidão/wifi/rede sem fio → categoria "internet"
+- cabo/switch/porta → categoria "cabeamento" ou "rede-dados"
+- computador/notebook/tela azul/não liga → categoria "computador"
+- e-mail/outlook/zimbra → categoria "email"
+- sistema/SAP/GIS/GLPI → categoria "sistemas-corporativos"
+- vírus/malware/ransomware → categoria "antivirus", tipo "incidente", prioridade "urgente"
+- servidor/RAID/datacenter → categoria "servidor"
+- firewall/bloqueio/webfilter → categoria "firewall-webfilter"
+- smartphone/celular → categoria "smartphone-mdm"
+- urgente/parado/crítico no título → prioridade "urgente"
+- "não funciona" genérico → tipo "incidente"
+- "preciso de" / "solicito" → tipo "requisicao"`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',  // modelo mais rápido e barato para triagem
+      max_tokens: 300,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!response.ok) throw new Error('API ' + response.status);
+  const data = await response.json();
+  const text = (data.content || []).find(b => b.type === 'text')?.text || '{}';
+  return JSON.parse(text.replace(/```json|```/g, '').trim());
+}
+
+function _aplicarTriagemSilenciosa(r) {
+  // Preenche os campos automaticamente, sem precisar do usuário confirmar
+  const catEl  = document.getElementById('ch-categoria');
+  const tipoEl = document.getElementById('ch-tipo');
+  const prioEl = document.getElementById('ch-prioridade');
+
+  if (catEl  && r.categoria  && catEl.querySelector(`option[value="${r.categoria}"]`))  {
+    catEl.value = r.categoria;
+    atualizarSubcategoria?.();
+  }
+  if (tipoEl && r.tipo && tipoEl.querySelector(`option[value="${r.tipo}"]`)) {
+    tipoEl.value = r.tipo;
+  }
+  if (prioEl && r.prioridade && prioEl.querySelector(`option[value="${r.prioridade}"]`)) {
+    prioEl.value = r.prioridade;
+    atualizarPrioridadeColor?.(prioEl);
+  }
+}
+
+function _mostrarBannerTriagem(container, r) {
+  const corPrio = { urgente:'#DC2626', alta:'#D97706', media:'#2563EB', baixa:'#059669' }[r.prioridade] || '#64748B';
+  const bgPrio  = { urgente:'#FEF2F2', alta:'#FFF7ED', media:'#EFF6FF', baixa:'#F0FDF4' }[r.prioridade] || '#F8FAFC';
+  const catLabel = document.getElementById('ch-categoria')?.selectedOptions?.[0]?.text?.replace(/^»\s*/, '') || r.categoria;
+  const tipoLabel = { incidente:'Incidente', requisicao:'Requisição', problema:'Problema', mudanca:'Mudança' }[r.tipo] || r.tipo;
+
+  container.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:linear-gradient(135deg,#EFF6FF,#F5F3FF);border:1px solid #BFDBFE;border-radius:8px;font-size:12px">
+      <span style="font-size:16px;flex-shrink:0;margin-top:1px">✨</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;color:#1E40AF;margin-bottom:4px">Classificado automaticamente pela IA</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+          <span style="background:${bgPrio};color:${corPrio};border:1px solid ${corPrio}33;font-size:11px;font-weight:700;padding:1px 8px;border-radius:10px">● ${(r.prioridade||'').charAt(0).toUpperCase()+(r.prioridade||'').slice(1)}</span>
+          <span style="background:#F1F5F9;color:#334155;font-size:11px;padding:1px 8px;border-radius:10px">🏷️ ${escapeHtml(catLabel)}</span>
+          <span style="background:#F1F5F9;color:#334155;font-size:11px;padding:1px 8px;border-radius:10px">${escapeHtml(tipoLabel)}</span>
+          <span style="background:#F1F5F9;color:#334155;font-size:11px;padding:1px 8px;border-radius:10px">⏱ ${escapeHtml(r.tempoEstimado||'—')}</span>
+          <span style="color:#94A3B8;font-size:10.5px;align-self:center">${r.confianca||'—'}% confiança</span>
         </div>
-        <div style="font-size:12px;color:var(--g600)">${result.resumo}</div>
-        <button class="btn btn-secondary btn-xs" onclick="aplicarSugestaoAI(${JSON.stringify(JSON.stringify(result))})">✓ Aplicar sugestão</button>
-      </div>`;
-  }).catch(() => { container.style.display='none'; });
+        <div style="color:#475569;font-size:11.5px">${escapeHtml(r.resumo||'')}</div>
+      </div>
+      <button onclick="this.closest('#ai-triage-suggestion').dataset.aplicado='0';triagemAutoChamado()" title="Re-analisar" style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:14px;padding:0;flex-shrink:0">↺</button>
+      <button onclick="this.closest('#ai-triage-suggestion').style.display='none'" title="Fechar" style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:16px;padding:0;line-height:1;flex-shrink:0">×</button>
+    </div>`;
+  container.dataset.aplicado = '1';
+}
+
+// Mantém compatibilidade com código legado que chamava mostrarSugestaoAIchamado
+function mostrarSugestaoAIchamado(titulo, desc) {
+  triagemAutoChamado();
 }
 
 function aplicarSugestaoAI(resultStr) {
   try {
     const r = JSON.parse(resultStr);
-    const prioEl = document.getElementById('ch-prioridade');
-    const catEl  = document.getElementById('ch-categoria');
-    if (prioEl) { prioEl.value = r.prioridade; atualizarPrioridadeColor?.(); }
-    if (catEl)  { catEl.value  = r.categoriaAI || catEl.value; atualizarSubcategoria?.(); }
-    showToast('✓ Sugestão da IA aplicada ao chamado');
+    _aplicarTriagemSilenciosa(r);
+    showToast('✓ Classificação da IA aplicada ao chamado');
   } catch {}
 }
 
