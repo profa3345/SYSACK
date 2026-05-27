@@ -244,7 +244,7 @@ async function initBanco() {
     const orderBy         = (f, d)         => ({ _orderBy: [f, d] });
     const limit           = (n)            => ({ _limit: n });
 
-    const FCM_VAPID_KEY = window.FCM_VAPID_KEY || 'BCp-PLACEHOLDER-GERE-NO-FIREBASE-CONSOLE';
+    const FCM_VAPID_KEY = window.FCM_VAPID_KEY || 'BK-q97NzBrt0PeUBA7uB2VFe_ijxe3pDdI7P1OSyPVGJKhDLYfMGplwZrfE6vlNicTP7TOd0QWB7Q09sO6FGTJA';
 
     // Singleton de Banco Functions — instanciado 1x após login
 let _fbFunctions = null;
@@ -820,7 +820,10 @@ function startFirestoreListeners() {
     STATE.switches  = STATE._assetsSw;
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     nbUpdate('nb-ativos', STATE.ativos.length);
-    _debounce('switches-render', function(){ renderDashboard(); }, 600);
+    _debounce('switches-render', function(){
+      renderDashboard();
+      if (isPageActive('monitor-rede')) renderSwitches();
+    }, 600);
     console.log('[Banco] switches:', STATE._assetsSw.length);
   }, function(e){ console.error('[Banco] switches erro:', e.message); });
 
@@ -10850,12 +10853,18 @@ function abrirGerenciarSwitch(id){
         </div>`;
     } else {
       // Fallback estimado se SNMP ainda não rodou
-      pm.innerHTML = Array.from({length:Math.min(sw.totalPortas||24,48)},(_,i)=>{
+      // Estimativa baseada em portasUso
+      const estimated = Array.from({length:Math.min(sw.totalPortas||24,48)},(_,i)=>{
         const used = i < (sw.portasUso||0);
         const cor  = used ? '#10B981' : '#E2E8F0';
         const text = used ? '#fff' : '#94A3B8';
         return `<div title="Porta ${i+1}: ${used?'Em uso (estimado)':'Livre (estimado)'}" style="display:inline-flex;width:28px;height:28px;background:${cor};color:${text};border-radius:4px;align-items:center;justify-content:center;font-size:9px;font-weight:700;margin:2px;cursor:default">${i+1}</div>`;
-      }).join('') + '<div style="margin-top:8px;font-size:10px;color:var(--g400)">⏳ Aguardando dados SNMP do agente...</div>';
+      }).join('');
+      pm.innerHTML = estimated
+        + `<div style="margin-top:10px;padding:8px 12px;background:#FEF9C3;border-radius:6px;font-size:11px;color:#92400E">
+            ⏳ Dados estimados — o agente SYSACK vai coletar dados reais via SNMP em até 5 minutos após iniciar.
+            <br>Portas em uso: <strong>${sw.portasUso||0}</strong> / <strong>${sw.totalPortas||0}</strong> total.
+           </div>`;
     }
   }
   const vb=document.getElementById('ger-sw-vlans-body');
@@ -10876,7 +10885,55 @@ function abrirGerenciarSwitch(id){
   const mb=document.getElementById('ger-sw-mac-body');
   if(mb) mb.innerHTML=[{porta:'Gi1',mac:'00:1A:2B:3C:4D:5E',vlan:'20',tipo:'Dinâmico'},{porta:'Gi2',mac:'00:1A:2B:3C:4D:6F',vlan:'20',tipo:'Dinâmico'},{porta:'Gi24',mac:'00:AA:BB:CC:DD:EE',vlan:'99',tipo:'Estático'}].map(m=>`<tr><td class='td-mono' style='font-size:10.5px'>${m.porta}</td><td class='td-mono' style='font-size:10px'>${m.mac}</td><td class='td-mono'>${m.vlan}</td><td>${m.tipo}</td></tr>`).join('');
   const lg=document.getElementById('ger-sw-log');
-  if(lg) lg.innerHTML=(sw.historico||[]).slice(-3).reverse().map(h=>`<div class='audit-row'><div class='ar-time'>${h.data}</div><div class='ar-action' style='flex:1'>${h.titulo}</div></div>`).join('')||'<p class=text-sm>Sem logs.</p>';
+  if(lg) {
+    // Carrega logs do syslog server do Firestore
+    const swIpKey = (sw.ip||'').replace(/\./g,'_');
+    lg.innerHTML = '<div style="text-align:center;padding:20px;color:var(--g400);font-size:12px">⏳ Carregando logs...</div>';
+    db?.collection('switch_logs').doc(swIpKey).collection('entries')
+      .orderBy('timestamp', 'desc').limit(50)
+      .get().then(snap => {
+        if (!snap || snap.empty) {
+          // Fallback para logs do SYSACK
+          const hist = (sw.historico||[]).slice(-20).reverse();
+          if (hist.length) {
+            lg.innerHTML = hist.map(h =>
+              `<div class='audit-row'>
+                <div class='ar-time' style="font-size:10px;color:var(--g400);width:130px;flex-shrink:0">${h.data||''}</div>
+                <div class='ar-action' style='flex:1;font-size:12px'>${escapeHtml(h.titulo||'')}</div>
+              </div>`
+            ).join('');
+          } else {
+            lg.innerHTML = `<div style="text-align:center;padding:32px;color:var(--g400)">
+              <div style="font-size:28px;margin-bottom:8px">📋</div>
+              <div style="font-weight:600;margin-bottom:4px">Sem logs syslog</div>
+              <div style="font-size:11px">Configure o switch para enviar logs para o syslog-server.js</div>
+              <div style="font-size:10px;margin-top:8px;font-family:monospace;background:var(--g50);padding:8px;border-radius:6px;text-align:left">
+                HP ProCurve:<br>logging ${escapeHtml(sw.ip)} severity warning<br>logging facility local0
+              </div>
+            </div>`;
+          }
+          return;
+        }
+        const sevIcon = { emergency:'🔴',alert:'🔴',critical:'🔴',error:'🟠',warning:'🟡',notice:'🔵',info:'⚪',debug:'⚫' };
+        const sevCor  = { emergency:'#DC2626',alert:'#DC2626',critical:'#DC2626',error:'#EA580C',warning:'#D97706',notice:'#2563EB',info:'#64748B',debug:'#94A3B8' };
+        lg.innerHTML = snap.docs.map(d => {
+          const e   = d.data();
+          const ts  = e.timestamp ? new Date(e.timestamp).toLocaleString('pt-BR') : '';
+          const sev = e.severidade || 'info';
+          const ic  = sevIcon[sev] || '⚪';
+          const cor = sevCor[sev]  || '#64748B';
+          const bg  = e.isAlerta ? '#FEF2F2' : 'transparent';
+          return `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-bottom:0.5px solid var(--g100);background:${bg};font-size:11.5px">
+            <span title="${escapeHtml(sev)}">${ic}</span>
+            <span style="color:var(--g400);white-space:nowrap;font-size:10px;width:120px;flex-shrink:0">${escapeHtml(ts)}</span>
+            <span style="color:${cor};font-weight:600;width:60px;flex-shrink:0;font-size:10px">${escapeHtml(sev)}</span>
+            <span style="flex:1;color:var(--g700)">${escapeHtml(e.mensagem||e.message||'')}</span>
+          </div>`;
+        }).join('');
+      }).catch(() => {
+        lg.innerHTML = '<p style="padding:16px;color:var(--g400);font-size:12px">Sem logs disponíveis.</p>';
+      });
+  }
   const tl=document.getElementById('ger-sw-timeline');
   if(tl) tl.innerHTML=(sw.historico||[]).map(h=>`<div class='tl-item'><div class='tl-dot ${h.dot}'></div><div class='tl-title'>${h.titulo}</div><div class='tl-desc'>${h.desc}</div><div class='tl-time'>${h.data}</div></div>`).join('');
   openModal('modal-gerenciar-switch');
@@ -11598,6 +11655,27 @@ setTimeout(verificarTodosIPs, 30000);
 setInterval(verificarTodosIPs, 3600000);
 
 // Monitoramento de impressoras feito pelo agente via SNMP (não pelo browser)
+
+// Reseta status 'critico' de impressoras sem dados SNMP recentes
+async function resetarStatusImpressorasSemDados() {
+  try {
+    const agora = Date.now();
+    const imps = getImpressoras().filter(i => {
+      const ultimoCheck = i.ultimoSnmp || i.ultimoCheck;
+      const checkRecente = ultimoCheck && (agora - new Date(ultimoCheck).getTime()) < 30 * 60 * 1000;
+      return !checkRecente && (i.status === 'critico' || i.status === 'alerta');
+    });
+    for (const imp of imps) {
+      await db?.collection('impressoras').doc(imp.id).update({
+        status: 'sem-dados',
+        statusLegivel: 'Sem dados',
+      }).catch(() => {});
+    }
+    if (imps.length) console.log(`[Impressoras] ${imps.length} resetadas para sem-dados`);
+  } catch(e) {}
+}
+setTimeout(resetarStatusImpressorasSemDados, 10000);
+
 
 
 
@@ -13752,8 +13830,11 @@ function impRenderCards() {
 
   grid.innerHTML = imps.map(imp => {
     const toners    = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
-    // Sem dados SNMP/WMI = não marcar como crítico
-    const temDados = imp.snmpOnline || imp.ultimoSnmp || imp.fonte === 'agente-wmi' || imp.ultimoCheck;
+    // Sem dados SNMP/WMI recentes = não marcar como crítico
+    const agora = Date.now();
+    const ultimoCheck = imp.ultimoSnmp || imp.ultimoCheck;
+    const checkRecente = ultimoCheck && (agora - new Date(ultimoCheck).getTime()) < 30 * 60 * 1000; // 30min
+    const temDados = checkRecente || imp.fonte === 'agente-wmi';
     const _st = temDados ? (imp.status||'ok') : 'sem-dados';
     const statusCor = _st==='critico' ? '#EF4444' : _st==='alerta' ? '#F59E0B' : _st==='sem-dados' ? '#94A3B8' : '#10B981';
     const statusBg  = _st==='critico' ? '#FEF2F2' : _st==='alerta' ? '#FFFBEB' : _st==='sem-dados' ? '#F8FAFC' : '#F0FDF4';
@@ -17115,6 +17196,7 @@ function verificarConfigSeguranca() {
 
   setTimeout(() => {
     const overlay = document.createElement('div');
+    overlay.id = 'sysack-security-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:20px';
     const modal = document.createElement('div');
     modal.style.cssText = 'background:#fff;border-radius:14px;max-width:560px;width:100%;padding:0;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.5)';
@@ -17149,7 +17231,7 @@ function verificarConfigSeguranca() {
         </div>
 
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
-          <button onclick="this.closest('[style*=z-index:99999]').remove()" class="btn btn-ghost btn-sm">Fechar</button>
+          <button onclick="document.getElementById('sysack-security-overlay')?.remove()" class="btn btn-ghost btn-sm">Fechar</button>
           <a href="https://console.firebase.google.com/project/sysack-829e2/appcheck" target="_blank" class="btn btn-primary btn-sm">Abrir App Check →</a>
         </div>
       </div>`;
