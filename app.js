@@ -1204,9 +1204,9 @@ function renderDashboard() {
   }
 
   document.getElementById('dash-chamados-body').innerHTML = STATE.chamados.slice(0,5).map(c => `
-    <tr>
-      <td class="td-mono" style="color:var(--accent)">${c.id}</td>
-      <td>${c.desc.slice(0,40)}${c.desc.length>40?'...':''}</td>
+    <tr onclick="abrirDetalheChamado('${c.id}')" style="cursor:pointer" onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <td class="td-mono fw-700" style="color:var(--accent)">${c.id}</td>
+      <td>${c.desc.slice(0,45)}${c.desc.length>45?'...':''}</td>
       <td class="td-mono">${c.pat||'—'}</td>
       <td>${statusBadge(c.status)}</td>
     </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--g400)">Nenhum chamado</td></tr>';
@@ -1712,6 +1712,31 @@ function abrirAtendimento(chamadoId) {
   if (descEl) descEl.textContent = ch.desc || '';
   if (obsEl)  obsEl.textContent  = ch.obs  ? '📝 Informações adicionais: ' + ch.obs : '';
 
+  // Limpa seções de vínculo
+  const existentes = document.getElementById('at-itens-existentes');
+  const vinculados = document.getElementById('at-itens-vinculados');
+  const resultados = document.getElementById('at-vincular-resultados');
+  const buscaEl    = document.getElementById('at-vincular-busca');
+  if (existentes) existentes.innerHTML = '';
+  if (vinculados)  vinculados.innerHTML  = '';
+  if (resultados)  resultados.style.display = 'none';
+  if (buscaEl)     buscaEl.value = '';
+  if (document.getElementById('at-desc-atendimento'))
+    document.getElementById('at-desc-atendimento').value = ch.descAtendimento || '';
+
+  // Mostra ativos já vinculados pelo solicitante
+  const avs = ch.ativosVinculados || [];
+  if (existentes && avs.length) {
+    existentes.innerHTML = avs.map(av => `
+      <div style="display:inline-flex;align-items:center;gap:5px;background:#F0FDF4;border:1px solid #86EFAC;
+                  border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:#166534">
+        🖥️ ${escapeHtml(av.pat || av.id || '?')}
+        <span style="font-size:10px;font-weight:400;color:#15803D;margin-left:2px">(vinculado pelo solicitante)</span>
+      </div>`).join('');
+  } else if (existentes) {
+    existentes.innerHTML = '<span style="font-size:11.5px;color:var(--g400);font-style:italic">Nenhuma máquina vinculada pelo solicitante</span>';
+  }
+
   openModal('modal-atender-chamado');
 }
 
@@ -1719,6 +1744,17 @@ function abrirAtendimento(chamadoId) {
 // ── Toggle troca de máquina ───────────────────────────────────────
 
 // ── Menu do usuário / Perfil ──────────────────────────────────────
+function abrirDetalheChamado(chamadoId) {
+  // Se já estiver na página de chamados, abre o detalhe diretamente
+  const chamados_page = document.getElementById('page-chamados');
+  if (!chamados_page || chamados_page.style.display === 'none') {
+    goPage('chamados');
+    setTimeout(() => abrirAtendimento(chamadoId), 400);
+  } else {
+    abrirAtendimento(chamadoId);
+  }
+}
+
 function abrirMenuUsuario() {
   const u = SESSION_USER || CURRENT_USER;
   if (!u) return;
@@ -3297,51 +3333,67 @@ function _confirmarSeletorVinculo() {
 
 function vincularAtivoAoChamado() {
   const input = document.getElementById('ch-patrimonio');
-  const pat   = input?.value?.trim();
-  if (!pat) return showToast('Informe o patrimônio', 'danger');
+  const q     = (input?.value || '').trim();
+  if (q.length < 2) return showToast('Digite pelo menos 2 caracteres', 'warning');
 
-  // Busca em todas as fontes: ativos, switches, impressoras
   const fontes = [
     ...(STATE.ativos       || []),
     ...(STATE.switches     || []),
     ...(STATE.impressorasDisc || []),
     ...(STATE.firewallsDisc   || []),
   ];
-  const q = pat.toLowerCase();
-  // Busca exata primeiro (pat ou hostname), depois parcial (desc/nome)
-  const ativo = fontes.find(a =>
-    (a.pat      || '').toLowerCase() === q ||
-    (a.hostname || '').toLowerCase() === q
-  ) || fontes.find(a =>
-    (a.desc  || '').toLowerCase().includes(q) ||
-    (a.nome  || '').toLowerCase().includes(q) ||
-    (a.hostname || '').toLowerCase().includes(q)
-  );
+  const qLow = q.toLowerCase();
+  const encontrados = fontes.filter(a =>
+    (a.pat||'').toLowerCase().includes(qLow) ||
+    (a.desc||'').toLowerCase().includes(qLow) ||
+    (a.hostname||'').toLowerCase().includes(qLow) ||
+    (a.nome||'').toLowerCase().includes(qLow)
+  ).slice(0, 10);
 
-  if (!ativo) {
-    showToast(`"${pat}" não encontrado — tente o patrimônio (PAT-0000) ou nome da máquina`, 'danger');
+  // Garante que o dropdown existe
+  let res = document.getElementById('ch-patrimonio-resultados');
+  if (!res) {
+    res = document.createElement('div');
+    res.id = 'ch-patrimonio-resultados';
+    res.style.cssText = 'border:1px solid var(--g200);border-radius:8px;max-height:180px;overflow-y:auto;background:#fff;margin-top:4px;box-shadow:0 4px 12px rgba(0,0,0,.1)';
+    input.parentElement.insertAdjacentElement('afterend', res);
+  }
+
+  if (!encontrados.length) {
+    res.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum ativo encontrado.</div>';
+    res.style.display = '';
     return;
   }
 
+  res.innerHTML = encontrados.map(a => `
+    <div onclick="chSelecionarAtivo('${escapeHtml(a.id)}','${escapeHtml(a.pat||a.hostname||'')}','${escapeHtml(a.desc||a.hostname||'')}','${escapeHtml(a.id)}')"
+         style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);font-size:12.5px;display:flex;gap:10px;align-items:center"
+         onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <span style="font-weight:700;color:var(--accent);min-width:90px">${escapeHtml(a.pat||a.hostname||'—')}</span>
+      <span style="color:var(--g700)">${escapeHtml(a.desc||a.hostname||'')}</span>
+      <span style="color:var(--g400);font-size:11px;margin-left:auto">${escapeHtml(a.area||'')}</span>
+    </div>`).join('');
+  res.style.display = '';
+}
+
+function chSelecionarAtivo(id, pat, desc, docId) {
   const container = document.getElementById('ch-itens-vinculados');
   if (!container) return;
-
-  // Evita duplicata
-  if (container.querySelector(`[data-ativo-id="${ativo.id}"]`)) {
-    showToast('Ativo já vinculado', 'warning');
-    return;
+  if (container.querySelector(`[data-ativo-id="${id}"]`)) {
+    showToast('Ativo já vinculado', 'warning'); return;
   }
-
-  const label = `${ativo.pat || ativo.hostname} — ${ativo.desc || ativo.nome || ''}`.trim();
+  const label = `${pat}${desc ? ' — ' + desc : ''}`;
   container.insertAdjacentHTML('beforeend', `
-    <div data-ativo-id="${ativo.id}" data-ativo-pat="${ativo.pat||''}" data-ativo-doc-id="${ativo.id}"
+    <div data-ativo-id="${escapeHtml(id)}" data-ativo-pat="${escapeHtml(pat)}" data-ativo-doc-id="${escapeHtml(docId)}"
          style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
       🖥️ ${escapeHtml(label)}
       <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
     </div>`);
-
-  input.value = '';
-  showToast(`✓ Ativo ${ativo.pat || ativo.hostname} vinculado!`);
+  const res = document.getElementById('ch-patrimonio-resultados');
+  if (res) res.style.display = 'none';
+  const input = document.getElementById('ch-patrimonio');
+  if (input) input.value = '';
+  showToast(`✓ ${pat} vinculado!`);
 }
 
 function vincularSmartphone() {
@@ -3415,18 +3467,150 @@ function salvarAtivo() {
   showToast(`✓ Ativo ${pat} cadastrado!`);
 }
 
-function salvarAtendimento() {
-  closeModal('modal-atender-chamado');
-  const destino = document.getElementById('at-destino-antigo').value;
-  if (destino==='terceirizada') {
-    const aprov = { id:'ap'+Date.now(), tipo:'Envio para Terceirizada', pat:document.getElementById('at-patrimonio').value||'—', ativo:'—', solicitante:'Técnico SYSACK', data:new Date(), status:'pendente', obs:'' };
-    STATE.aprovacoes.unshift(aprov);
-    // TODO Banco + SMTP: enviar email gestor
-    showToast('⏳ Enviado para aprovação do gestor', 'warning');
-  } else {
-    showToast('✓ Atendimento registrado!');
+async function salvarAtendimento() {
+  const chamadoId = document.getElementById('atender-ch-id').textContent.trim();
+  const ch = (STATE.chamados || []).find(c => c.id === chamadoId);
+  if (!ch) return showToast('Chamado não encontrado', 'danger');
+
+  const diagnostico = document.getElementById('at-diagnostico')?.value || '';
+  if (!diagnostico) return showToast('Selecione o diagnóstico', 'danger');
+
+  // Coleta descrição do atendimento
+  const descAtendimento = document.querySelector('#modal-atender-chamado textarea')?.value?.trim() || '';
+
+  // Coleta ativos vinculados (seção técnico)
+  const ativosVinculadosTec = Array.from(
+    document.querySelectorAll('#at-itens-vinculados [data-ativo-id]')
+  ).map(el => ({
+    id:    el.dataset.ativoId    || '',
+    pat:   el.dataset.ativoPat   || '',
+    docId: el.dataset.ativoDocId || '',
+  }));
+
+  // Mescla com ativos já salvos no chamado
+  const ativosExistentes = ch.ativosVinculados || [];
+  const ativosFinais = [...ativosExistentes];
+  for (const av of ativosVinculadosTec) {
+    if (!ativosFinais.some(e => e.id === av.id)) ativosFinais.push(av);
   }
+
+  const mudouLugar = document.querySelector('input[name="mudou-lugar"]:checked')?.value === 'sim';
+  const destino    = document.getElementById('at-destino-antigo')?.value || '';
+
+  const agora = new Date();
+  const update = {
+    status:           mudouLugar ? 'aguardando-aprovacao' : 'em-atendimento',
+    diagnostico,
+    descAtendimento,
+    ativosVinculados: ativosFinais,
+    atualizadoEm:     agora,
+    tecnicoResponsavel: CURRENT_USER?.uid || '',
+  };
+
+  // Registra pat do primeiro ativo se não havia
+  if (!ch.pat && ativosFinais.length) update.pat = ativosFinais[0].pat || '';
+
+  // Registra log de vínculo para cada ativo novo adicionado pelo técnico
+  if (ativosVinculadosTec.length && FB_READY && db) {
+    for (const av of ativosVinculadosTec) {
+      try {
+        await db.collection('ativos').doc(av.docId || av.id).collection('historico').add({
+          evento:  'chamado-vinculado',
+          chamadoId,
+          tecnico: CURRENT_USER?.nome || CURRENT_USER?.uid || 'Técnico',
+          data:    agora,
+          obs:     `Vinculado ao chamado ${chamadoId} durante atendimento`,
+        });
+      } catch(e) { console.warn('[atendimento] histórico ativo:', e.message); }
+    }
+  }
+
+  // Salva no Firestore
+  try {
+    await fsUpdate('chamados', chamadoId, update);
+    // Atualiza STATE local
+    Object.assign(ch, update);
+    showToast('✓ Atendimento salvo com sucesso!', 'success');
+  } catch(e) {
+    showToast('Erro ao salvar: ' + e.message, 'danger');
+    return;
+  }
+
+  // Fluxo de movimentação
+  if (mudouLugar && destino === 'terceirizada') {
+    const aprov = {
+      id: await gerarIdAprovacao(),
+      chamadoId,
+      tipo: 'Envio para Terceirizada',
+      pat: ch.pat || '—',
+      ativo: ch.desc || '—',
+      solicitante: CURRENT_USER?.nome || 'Técnico',
+      data: agora,
+      status: 'pendente',
+      obs: '',
+    };
+    if (!STATE.aprovacoes) STATE.aprovacoes = [];
+    STATE.aprovacoes.unshift(aprov);
+    if (FB_READY && db) await db.collection('aprovacoes').add(aprov).catch(() => {});
+    showToast('⏳ Enviado para aprovação do gestor', 'warning');
+  }
+
+  closeModal('modal-atender-chamado');
+  renderChamados();
   renderDashboard();
+}
+
+// ── Vincular ativo durante atendimento (técnico) ─────────────────
+function atVincularAtivo() {
+  const input = document.getElementById('at-vincular-busca');
+  const q     = (input?.value || '').trim();
+  if (q.length < 2) return showToast('Digite pelo menos 2 caracteres', 'warning');
+
+  const qLow = q.toLowerCase();
+  const fontes = [...(STATE.ativos||[]), ...(STATE.switches||[]), ...(STATE.impressorasDisc||[])];
+  const encontrados = fontes.filter(a =>
+    (a.pat||'').toLowerCase().includes(qLow) ||
+    (a.desc||'').toLowerCase().includes(qLow) ||
+    (a.hostname||'').toLowerCase().includes(qLow) ||
+    (a.nome||'').toLowerCase().includes(qLow)
+  ).slice(0, 10);
+
+  const res = document.getElementById('at-vincular-resultados');
+  if (!encontrados.length) {
+    res.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum ativo encontrado.</div>';
+    res.style.display = '';
+    return;
+  }
+
+  res.innerHTML = encontrados.map(a => `
+    <div onclick="atConfirmarVincularAtivo('${escapeHtml(a.id)}','${escapeHtml(a.pat||a.hostname||'')}','${escapeHtml(a.desc||a.hostname||'')}','${escapeHtml(a.id)}')"
+         style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);font-size:12.5px;display:flex;gap:10px;align-items:center"
+         onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <span style="font-weight:700;color:var(--accent);min-width:90px">${escapeHtml(a.pat||a.hostname||'—')}</span>
+      <span style="color:var(--g700)">${escapeHtml(a.desc||a.hostname||'')}</span>
+      <span style="color:var(--g400);font-size:11px;margin-left:auto">${escapeHtml(a.area||'')}</span>
+    </div>`).join('');
+  res.style.display = '';
+}
+
+function atConfirmarVincularAtivo(id, pat, desc, docId) {
+  const container = document.getElementById('at-itens-vinculados');
+  if (!container) return;
+  if (container.querySelector(`[data-ativo-id="${id}"]`)) {
+    showToast('Ativo já vinculado', 'warning');
+    return;
+  }
+  const label = `${pat} — ${desc}`.trim().replace(/ — $/, '');
+  container.insertAdjacentHTML('beforeend', `
+    <div data-ativo-id="${escapeHtml(id)}" data-ativo-pat="${escapeHtml(pat)}" data-ativo-doc-id="${escapeHtml(docId)}"
+         style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
+      🖥️ ${escapeHtml(label)}
+      <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
+    </div>`);
+  // Fecha dropdown e limpa busca
+  document.getElementById('at-vincular-resultados').style.display = 'none';
+  document.getElementById('at-vincular-busca').value = '';
+  showToast(`✓ ${pat} vinculado ao chamado`);
 }
 
 function salvarRetornoTerc() {
@@ -3504,11 +3688,11 @@ function openModal(id) {
         // Pré-preenche email do requerente
         const emailEl = document.getElementById('ch-sol-email');
         if (emailEl) emailEl.value = emp.email || CURRENT_USER.email || '';
-        // Pré-preenche matrícula e setor se houver campos
-        const matEl   = document.getElementById('ch-mat-requerente');
-        const setorEl = document.getElementById('ch-setor-requerente');
+        // Pré-preenche matrícula e ramal do requerente
+        const matEl   = document.getElementById('ch-sol-matricula');
+        const ramalEl = document.getElementById('ch-sol-ramal');
         if (matEl)   matEl.value   = emp.mat   || '';
-        if (setorEl) setorEl.value = emp.setor || '';
+        if (ramalEl) ramalEl.value = emp.ramal || emp.telefone || '';
         // Pré-preenche área baseado na sigla organizacional do empregado
         const areaEl = document.getElementById('ch-area');
         const _siglaEmp = _siglaDoEmpregado(emp);
@@ -5495,23 +5679,37 @@ function renderAIDashboard() {
 // e exibe um banner informando o que foi classificado.
 
 let _triagemTimer = null;
+let _triagemUltimoTexto = ''; // guarda o último texto enviado para não reclassificar igual
 
 function triagemAutoChamado() {
   const titulo = (document.getElementById('ch-titulo')?.value || '').trim();
   const desc   = (document.getElementById('ch-descricao')?.value || '').trim();
   if (titulo.length < 8 && desc.length < 10) return;   // texto ainda muito curto
 
-  // Debounce — evita múltiplas chamadas se o usuário sair e voltar rápido
+  const textoAtual = titulo + '||' + desc;
+
+  // Não re-analisa se o texto não mudou desde a última análise
+  if (textoAtual === _triagemUltimoTexto) return;
+
+  // Debounce — aguarda 800ms após o usuário parar de digitar
   clearTimeout(_triagemTimer);
-  _triagemTimer = setTimeout(() => _executarTriagem(titulo, desc), 400);
+  _triagemTimer = setTimeout(() => {
+    _triagemUltimoTexto = textoAtual;
+    _executarTriagem(titulo, desc);
+  }, 800);
 }
 
 async function _executarTriagem(titulo, desc) {
   const container = document.getElementById('ai-triage-suggestion');
   if (!container) return;
 
-  // Não re-analisa se o usuário já aplicou manualmente
-  if (container.dataset.aplicado === '1') return;
+  // Não re-analisa se o usuário já aplicou E o texto não mudou
+  if (container.dataset.aplicado === '1') {
+    const textoAtual = titulo + '||' + desc;
+    if (textoAtual === (container.dataset.textoAplicado || '')) return;
+    // Texto mudou — reseta para permitir nova análise
+    container.dataset.aplicado = '0';
+  }
 
   // Mostra loading
   container.style.display = '';
@@ -5658,6 +5856,10 @@ function _mostrarBannerTriagem(container, r) {
       <button onclick="this.closest('#ai-triage-suggestion').dataset.aplicado='0';triagemAutoChamado()" title="Re-analisar" style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:14px;padding:0;flex-shrink:0">↺</button>
       <button onclick="this.closest('#ai-triage-suggestion').style.display='none'" title="Fechar" style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:16px;padding:0;line-height:1;flex-shrink:0">×</button>
     </div>`;
+  // Guarda o texto que foi analisado para detectar mudanças futuras
+  const titulo = (document.getElementById('ch-titulo')?.value||'').trim();
+  const desc   = (document.getElementById('ch-descricao')?.value||'').trim();
+  container.dataset.textoAplicado = titulo + '||' + desc;
   container.dataset.aplicado = '1';
 }
 
@@ -18175,9 +18377,10 @@ async function triagemIAChamado(chamadoId) {
     const r = await callFunction('triageChamado', {
       chamadoId,
       titulo:    ch.desc?.split('\n')[0] || ch.desc || '',
-      desc:      ch.desc || '',
+      descricao: ch.desc || '',
       categoria: ch.categoria || '',
       area:      ch.area || '',
+      tipo:      ch.tipo || '',
     });
     if (!r) return;
 
