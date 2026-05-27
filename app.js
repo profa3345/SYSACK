@@ -1273,7 +1273,7 @@ function renderAtivos() {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
       <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Responsável</th><th>Status</th><th>Localização</th>
-      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">Sistema OP</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
+      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
   }
@@ -1334,7 +1334,8 @@ function renderAtivos() {
         const monitores = ag?.monitores?.length
           ? ag.monitores.map(m => escapeHtml(m.nome||m.caption||'Monitor')).join(', ')
           : (a.monitores?.length ? a.monitores.map(m => escapeHtml(m.nome||m.caption||'Monitor')).join(', ') : '—');
-        const so = escapeHtml(ag?.os || ag?.sistemaOp || a.os || a.sistemaOp || a.osName || '—');
+        const _soRaw = ag?.osNome || ag?.os || ag?.sistemaOp || a.os || a.sistemaOp || a.osName || '';
+        const so = escapeHtml(_soRaw ? _soRaw.replace('Microsoft Windows ','Win ').replace('Windows ','Win ') : '—');
         const ip = a.ip ? `<span style="font-family:monospace;font-size:11px">${escapeHtml(a.ip)}</span>` : '—';
         return `<td style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${monitores}">${monitores}</td>
         <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${so}">${so}</td>
@@ -3494,10 +3495,12 @@ function openModal(id) {
         const setorEl = document.getElementById('ch-setor-requerente');
         if (matEl)   matEl.value   = emp.mat   || '';
         if (setorEl) setorEl.value = emp.setor || '';
-        // Pré-preenche área baseado no setor do empregado
+        // Pré-preenche área baseado no setor/lotação do empregado
         const areaEl = document.getElementById('ch-area');
-        if (areaEl && emp.setor && !areaEl.value) areaEl.value = emp.setor;
-        console.log(`[Chamado] Requerente identificado: ${emp.nome} (${emp.mat}) — ${emp.setor}`);
+        if (areaEl && emp.setor) {
+          _popularSelectArea(areaEl, emp.setor);
+        }
+        console.log(`[Chamado] Requerente identificado: ${emp.nome} (${emp.mat}) — ${emp.setor || emp.lotacao}`);
       } else {
         solEl.value = CURRENT_USER.nome || CURRENT_USER.email || '';
         const emailEl = document.getElementById('ch-sol-email');
@@ -3513,6 +3516,66 @@ function openModal(id) {
   }
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/**
+ * Popula o select de área com os setores únicos dos empregados e
+ * define o valor atual. Garante que o setor do empregado apareça
+ * mesmo que não estivesse nas opções fixas do HTML.
+ */
+function _popularSelectArea(selectEl, setorAtual) {
+  if (!selectEl) return;
+
+  // Coleta setores únicos dos empregados (usa orgUnidades se disponível)
+  const setores = new Set();
+
+  // Tenta primeiro pegar do organograma (siglas como A-DSI, A-GTI…)
+  (STATE.orgUnidades || []).forEach(u => { if (u.sigla) setores.add(u.sigla); });
+
+  // Complementa com setores dos empregados
+  (STATE.empregados || []).forEach(e => {
+    if (e.setor)   setores.add(e.setor);
+    if (e.lotacao) setores.add(e.lotacao);
+    if (e.area)    setores.add(e.area);
+  });
+
+  // Se não tiver dados ainda, mantém as opções estáticas do HTML
+  if (setores.size === 0) {
+    if (setorAtual) {
+      // Adiciona pelo menos o setor do usuário atual
+      const exists = selectEl.querySelector(`option[value="${CSS.escape(setorAtual)}"]`);
+      if (!exists) {
+        const opt = document.createElement('option');
+        opt.value = setorAtual;
+        opt.textContent = setorAtual;
+        selectEl.appendChild(opt);
+      }
+    }
+    selectEl.value = setorAtual || '';
+    return;
+  }
+
+  // Reconstrói as opções
+  const atualVal = selectEl.value || setorAtual;
+  selectEl.innerHTML = '<option value="">— Selecione —</option>';
+  [...setores].sort().forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    if (s === atualVal) opt.selected = true;
+    selectEl.appendChild(opt);
+  });
+
+  // Se o valor atual não estava na lista, adiciona
+  if (setorAtual && !setores.has(setorAtual)) {
+    const opt = document.createElement('option');
+    opt.value = setorAtual;
+    opt.textContent = setorAtual;
+    opt.selected = true;
+    selectEl.appendChild(opt);
+  }
+
+  selectEl.value = setorAtual || atualVal || '';
+}
 
 // ============================================================
 // TOAST
@@ -5362,11 +5425,85 @@ async function _executarTriagem(titulo, desc) {
 }
 
 async function _triagemIA(titulo, desc) {
-  // Chama Firebase Function analisarChamado (Gemini via GOOGLE_GENAI_API_KEY)
-  return await callGenkitFlow('analisarChamado', {
-    titulo:    titulo,
-    descricao: desc || '',
-  });
+  // Tenta via Firebase Function (Gemini). Se falhar (function não deployada),
+  // usa classificação local por palavras-chave como fallback.
+  try {
+    const r = await callGenkitFlow('analisarChamado', {
+      titulo:    titulo,
+      descricao: desc || '',
+    });
+    if (r && (r.categoria || r.prioridade)) return r;
+  } catch (e) {
+    console.info('[Triagem] Function indisponível, usando classificação local:', e.message);
+  }
+  return _triagemLocal(titulo, desc);
+}
+
+function _triagemLocal(titulo, desc) {
+  const txt = (titulo + ' ' + (desc || '')).toLowerCase();
+
+  // Categoria
+  const cat =
+    /impressora|toner|papel|atolamento|jam|bandeja|cartucho/.test(txt)    ? 'impressao'          :
+    /senha|acesso|bloqueado|active directory|ad|login|ldap/.test(txt)   ? 'active-directory'   :
+    /internet|wifi|wi-fi|lento|sem conexão|sem acesso à rede/.test(txt)   ? 'internet'           :
+    /e-?mail|outlook|zimbra|caixa.*entrada|spam/.test(txt)                ? 'email'              :
+    /computador|pc|notebook|tela azul|não liga|travado|lento/.test(txt) ? 'computador'         :
+    /vírus|malware|ransomware|hacke|sequestro/.test(txt)                  ? 'antivirus'          :
+    /backup|restaurar|restore/.test(txt)                                  ? 'backup-restore'     :
+    /servidor|datacenter|raid|vm|virtual/.test(txt)                     ? 'servidor'           :
+    /firewall|bloqueio|webfilter|site bloqueado/.test(txt)                ? 'firewall-webfilter' :
+    /cabo|switch|porta de rede|sem sinal de rede/.test(txt)               ? 'rede-dados'         :
+    /sap|gis|sistema|aplicação|programa|software/.test(txt)               ? 'sistemas-corporativos':
+    /smartphone|celular|mdm|mobile/.test(txt)                             ? 'smartphone-mdm'     :
+    /monitor|tela|display|projetor/.test(txt)                             ? 'equipamento-problema':
+    /certificado|token|assinatura digital/.test(txt)                      ? 'certificado-digital':
+    /usuário|cadastro|conta|perfil|permissão/.test(txt)                   ? 'cadastro-usuario'   :
+    '';
+
+  // Tipo
+  const tipo =
+    /preciso|solicito|gostaria|quero|necessito|pedido|instalar|criar/.test(txt) ? 'requisicao' :
+    /não funciona|parou|caiu|quebrou|erro|falha|problema|travou/.test(txt)      ? 'incidente'  :
+    'incidente';
+
+  // Prioridade
+  const prio =
+    /urgente|crítico|parado|emergência|ransomware|vírus|fora do ar/.test(txt) ? 'urgente' :
+    /alto|importante|prejuízo|cliente esperando/.test(txt)                    ? 'alta'    :
+    /baixa|quando puder|não urgente/.test(txt)                                ? 'baixa'   :
+    'media';
+
+  const tempo = prio === 'urgente' ? '1 hora' : prio === 'alta' ? '2 horas' : '4 horas';
+
+  const resumos = {
+    'impressao':         'Problema com impressora ou suprimentos',
+    'active-directory':  'Acesso ou autenticação no Active Directory',
+    'internet':          'Problema de conectividade com a internet',
+    'email':             'Problema com e-mail corporativo',
+    'computador':        'Problema no computador do usuário',
+    'antivirus':         'Ameaça de segurança detectada',
+    'backup-restore':    'Solicitação de backup ou restauração',
+    'servidor':          'Problema em servidor ou infraestrutura',
+    'firewall-webfilter':'Bloqueio ou problema de firewall',
+    'rede-dados':        'Problema na rede de dados',
+    'sistemas-corporativos': 'Problema em sistema corporativo',
+    'smartphone-mdm':    'Problema com smartphone corporativo',
+    'equipamento-problema': 'Problema com equipamento de TI',
+    'certificado-digital': 'Problema com certificado ou token',
+    'cadastro-usuario':  'Solicitação de cadastro ou permissão',
+  };
+
+  return {
+    categoria:   cat,
+    categoriaAI: cat,
+    tipo,
+    prioridade:  prio,
+    tempoEstimado: tempo,
+    resumo:      resumos[cat] || 'Chamado classificado localmente',
+    confianca:   cat ? 72 : 45,
+    _local:      true,
+  };
 }
 
 function _aplicarTriagemSilenciosa(r) {
@@ -18641,10 +18778,6 @@ function patMetricasHtml(ativo) {
 
   const uptime   = ag?.uptimeH != null ? Math.round(ag.uptimeH) + 'h' : null;
   const usuario  = ag?.usuarioLogado || null;
-  const osNome   = ag?.osNome ? (ag.osNome).replace('Microsoft Windows ','Win ') : null;
-  const monitor  = Array.isArray(ag?.monitores) && ag.monitores.length
-    ? ag.monitores.map(m => (m.nome||m.caption||'Monitor') + (m.serial?' #'+m.serial:'')).join(', ')
-    : null;
   const lastSeen = ag?.lastSeen ? fmtRelative(new Date(ag.lastSeen?.seconds ? ag.lastSeen.seconds*1000 : ag.lastSeen)) : null;
 
   return `<td style="padding:4px 8px;min-width:200px">
@@ -18660,8 +18793,6 @@ function patMetricasHtml(ativo) {
       </div>
       ${usuario  ? `<div style="margin-top:3px;font-size:9.5px;color:var(--g600)">👤 ${escapeHtml(usuario)}</div>` : ''}
       ${uptime   ? `<div style="font-size:9.5px;color:var(--g400)">⏱ Uptime: ${uptime}</div>` : ''}
-      ${osNome   ? `<div style="font-size:9.5px;color:var(--g400)">💻 ${escapeHtml(osNome)}</div>` : ''}
-      ${monitor  ? `<div style="font-size:9.5px;color:var(--g400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(monitor)}">🖥️ ${escapeHtml(monitor)}</div>` : ''}
     </div>
   </td>`;
 }
