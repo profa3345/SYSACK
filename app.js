@@ -18791,7 +18791,6 @@ function patMetricasHtml(ativo) {
         <span style="color:var(--g400,#94a3b8)">MEM</span>${bar(memPct,'#8B5CF6')}
         <span style="color:var(--g400,#94a3b8)">DSK</span>${bar(diskPct,'#10B981')}
       </div>
-      ${usuario  ? `<div style="margin-top:3px;font-size:9.5px;color:var(--g600)">👤 ${escapeHtml(usuario)}</div>` : ''}
       ${uptime   ? `<div style="font-size:9.5px;color:var(--g400)">⏱ Uptime: ${uptime}</div>` : ''}
     </div>
   </td>`;
