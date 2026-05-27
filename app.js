@@ -14192,10 +14192,11 @@ function getImpressoras(){
 
 function renderImpressoras() {
   const imps = getImpressoras();
+  const _impIsOnline = i => i.reachable === true || i.status === 'online' || i.status === 'ok';
   sv('imp-total',       imps.length);
-  sv('imp-online',      imps.filter(i => i.status === 'ok').length);
-  sv('imp-critico',     imps.filter(i => i.status === 'critico' || i.status === 'alerta').length);
-  sv('imp-toner-baixo', imps.filter(i => (i.tonerMin || 100) < 20).length);
+  sv('imp-online',      imps.filter(_impIsOnline).length);
+  sv('imp-critico',     imps.filter(i => i.status === 'critico' || i.status === 'alerta' || i.status === 'atolamento' || i.status === 'sem-toner').length);
+  sv('imp-toner-baixo', imps.filter(i => (i.tonerMinPct ?? i.tonerMin ?? 100) < 20).length);
 
   const paginasHoje = imps.reduce((s, i) => s + (i.paginasHoje || 0), 0);
   sv('imp-paginas-hoje', paginasHoje.toLocaleString('pt-BR'));
@@ -14240,12 +14241,23 @@ function impRenderCards() {
     const toners    = Array.isArray(imp.tonerLevels) ? imp.tonerLevels : [];
     // Sem dados SNMP/WMI recentes = não marcar como crítico
     const agora = Date.now();
+    const _agora = Date.now();
     const ultimoCheck = imp.ultimoSnmp || imp.ultimoCheck || imp.coletadoEm;
-    const checkRecente = ultimoCheck && (agora - new Date(ultimoCheck).getTime()) < 60 * 60 * 1000; // 1h
+    const checkRecente = ultimoCheck && (_agora - new Date(ultimoCheck).getTime()) < 2 * 60 * 60 * 1000; // 2h
     const temDados = checkRecente || imp.reachable === true || imp.fonte === 'agente-wmi';
-    const _st = temDados ? (imp.status || (imp.reachable ? 'online' : 'offline')) : 'sem-dados';
-    const statusCor = _st==='critico' ? '#EF4444' : _st==='alerta' ? '#F59E0B' : _st==='sem-dados' ? '#94A3B8' : '#10B981';
-    const statusBg  = _st==='critico' ? '#FEF2F2' : _st==='alerta' ? '#FFFBEB' : _st==='sem-dados' ? '#F8FAFC' : '#F0FDF4';
+    const _stRaw = imp.status || (imp.reachable ? 'online' : 'offline');
+    const _st = temDados ? _stRaw : 'sem-dados';
+    const _stOffline = _st === 'offline';
+    const statusCor = _st==='critico'||_st==='sem-toner'||_st==='atolamento' ? '#EF4444'
+                    : _st==='alerta'  ? '#F59E0B'
+                    : _st==='sem-dados' ? '#94A3B8'
+                    : _stOffline ? '#64748B'
+                    : '#10B981';
+    const statusBg  = _st==='critico'||_st==='sem-toner'||_st==='atolamento' ? '#FEF2F2'
+                    : _st==='alerta'  ? '#FFFBEB'
+                    : _st==='sem-dados' ? '#F8FAFC'
+                    : _stOffline ? '#F1F5F9'
+                    : '#F0FDF4';
 
     const tonerHtml = toners.length ? toners.map(t => {
       const cor   = { K:'#1E293B', C:'#0EA5E9', M:'#EC4899', Y:'#EAB308' }[t.cor] || '#64748B';
