@@ -13758,6 +13758,9 @@ let _impCharts = {};
 // Retorna impressoras do STATE (switches com tipo='printer')
 function getImpressoras(){
   function isPrinter(x){
+    // Documentos da coleção 'impressoras' são sempre impressoras,
+    // mesmo que o campo tipo tenha sido apagado pelo PATCH sem updateMask
+    if ((STATE.impressorasDisc||[]).some(function(p){ return p.id === x.id; })) return true;
     var t=(x.tipo||'').toLowerCase();
     var ds=(x.sysDescr||x.desc||x.descricao||x.hostname||x.nome||'').toLowerCase();
     return t==='printer'||t==='impressora'||t==='printer-laser'
@@ -17823,8 +17826,11 @@ function patAbrirBusca() {
           Aponte para o patrimônio ou código de barras
         </div>
       </div>
-      <div id="pat-scan-result" style="margin-top:12px"></div>
-      <button onclick="patIniciarCamera()" class="btn btn-primary" style="margin-top:12px;width:100%">▶ Iniciar Câmera</button>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button onclick="patIniciarCamera()" class="btn btn-primary" style="flex:1">▶ Iniciar Câmera</button>
+        <button onclick="patCapturarFotoCamera()" id="pat-btn-capturar" class="btn btn-secondary" style="flex:1" disabled>📸 Capturar e Ler</button>
+      </div>
+      <div id="pat-scan-result" style="margin-top:12px;display:none"></div>
     </div>
 
     <!-- PAINEL FOTO -->
@@ -17907,6 +17913,8 @@ async function patIniciarCamera() {
     _patScanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment', width:1280, height:720 }});
     video.srcObject = _patScanStream;
     if (status) status.textContent = 'Câmera ativa — aponte para o patrimônio';
+    const btnCap = document.getElementById('pat-btn-capturar');
+    if (btnCap) btnCap.disabled = false;
     await patDecodeLoop(video);
   } catch(e) {
     if (status) status.textContent = '❌ Câmera não disponível: ' + e.message;
@@ -17914,6 +17922,46 @@ async function patIniciarCamera() {
 }
 function patPararCamera() {
   if (_patScanStream) { _patScanStream.getTracks().forEach(t => t.stop()); _patScanStream = null; }
+  const btnCap = document.getElementById('pat-btn-capturar');
+  if (btnCap) btnCap.disabled = true;
+}
+
+// Captura frame da câmera ao vivo e processa via OCR por IA
+// Funciona com qualquer formato de etiqueta: impressa, metálica parafusada, placa verde gravada
+async function patCapturarFotoCamera() {
+  const video     = document.getElementById('pat-scan-video');
+  const resultDiv = document.getElementById('pat-scan-result');
+  const status    = document.getElementById('pat-scan-status');
+  if (!video || !_patScanStream) return;
+
+  // Captura frame atual da câmera
+  const canvas = document.createElement('canvas');
+  canvas.width  = video.videoWidth  || 1280;
+  canvas.height = video.videoHeight || 720;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const base64DataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+  if (resultDiv) { resultDiv.style.display=''; resultDiv.innerHTML = '<div style="color:var(--g500,#64748b);font-size:13px">🤖 Lendo etiqueta por IA...</div>'; }
+  if (status) status.textContent = '🤖 Processando imagem...';
+
+  try {
+    const ocr = await patOCR(base64DataUrl);
+    const pat  = (ocr.patrimonio || '').replace(/[^0-9]/g, '');
+    if (pat && pat.length >= 4) {
+      patPararCamera();
+      if (status) status.textContent = '✅ Patrimônio detectado: ' + pat;
+      if (resultDiv) resultDiv.innerHTML = `<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:10px;font-size:13px;color:#166534">
+        ✅ <strong>${pat}</strong>${ocr.tipo ? ' · ' + ocr.tipo : ''}${ocr.responsavel ? ' · ' + ocr.responsavel : ''}${ocr.gerencia ? '<br><span style="font-size:11px;color:#166534">' + ocr.gerencia + '</span>' : ''}
+        <button onclick="patProcessarCodigoLido('${pat}','pat-scan-result')" class="btn btn-primary btn-sm" style="margin-top:8px;width:100%">Usar ${pat}</button>
+      </div>`;
+    } else {
+      if (status) status.textContent = '⚠️ Número não identificado — reposicione e tente novamente';
+      if (resultDiv) resultDiv.innerHTML = patFormBuscaManual('pat-scan-result', 'Não foi possível ler. Digite o PAT:');
+    }
+  } catch(e) {
+    if (status) status.textContent = '❌ Erro ao processar: ' + e.message;
+    if (resultDiv) resultDiv.innerHTML = patFormBuscaManual('pat-scan-result', 'Erro de leitura. Digite o PAT:');
+  }
 }
 
 async function patDecodeLoop(video) {
@@ -17949,29 +17997,61 @@ async function patLerFoto(input) {
   const resultDiv = document.getElementById('pat-foto-result');
   if (resultDiv) resultDiv.innerHTML = '<div style="color:var(--g500,#64748b);font-size:13px">🔄 Processando imagem...</div>';
 
+  // Converte arquivo para base64 (necessário para OCR por IA)
+  const toBase64 = (f) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(f);
+  });
+
+  // Tenta 1: código de barras via ZXing (rápido, offline)
   try {
     const ZXing = await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/esm/index.min.js').catch(()=>null);
-    if (!ZXing) throw new Error('Scanner não disponível');
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = async () => {
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width  = img.width;
-        canvas.height = img.height;
-        canvas.getContext('2d').drawImage(img, 0, 0);
-        const reader = new ZXing.BrowserMultiFormatReader();
-        const result = await reader.decodeFromCanvas(canvas);
-        URL.revokeObjectURL(url);
-        const code = result.getText().replace(/[^0-9A-Za-z\-]/g, '');
-        patProcessarCodigoLido(code, 'pat-foto-result');
-      } catch(e) {
-        if (resultDiv) resultDiv.innerHTML = patFormBuscaManual('pat-foto-result', 'Código não detectado. Digite o PAT manualmente:');
+    if (ZXing) {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      const barcodeResult = await new Promise((res) => {
+        img.onload = async () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width; canvas.height = img.height;
+            canvas.getContext('2d').drawImage(img, 0, 0);
+            const reader = new ZXing.BrowserMultiFormatReader();
+            const result = await reader.decodeFromCanvas(canvas);
+            URL.revokeObjectURL(url);
+            res(result.getText().replace(/[^0-9]/g, ''));
+          } catch { URL.revokeObjectURL(url); res(null); }
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); res(null); };
+        img.src = url;
+      });
+      if (barcodeResult) {
+        patProcessarCodigoLido(barcodeResult, 'pat-foto-result');
+        return;
       }
-    };
-    img.src = url;
+    }
+  } catch(_) {}
+
+  // Tenta 2: OCR por IA (lê qualquer formato de etiqueta — impressa, metálica, verde gravada)
+  try {
+    if (resultDiv) resultDiv.innerHTML = '<div style="color:var(--g500,#64748b);font-size:13px">🤖 Lendo etiqueta por IA...</div>';
+    const base64DataUrl = await toBase64(file);
+    const ocr = await patOCR(base64DataUrl);
+    const pat = (ocr.patrimonio || '').replace(/[^0-9]/g, '');
+    if (pat && pat.length >= 4) {
+      if (resultDiv) resultDiv.innerHTML = \`<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:10px;font-size:13px;color:#166534">
+        ✅ Patrimônio detectado: <strong>\${pat}</strong>\${ocr.tipo ? ' · ' + ocr.tipo : ''}\${ocr.responsavel ? ' · ' + ocr.responsavel : ''}
+        <button onclick="patProcessarCodigoLido('\${pat}','pat-foto-result')" class="btn btn-primary btn-sm" style="margin-top:8px;width:100%">Usar \${pat}</button>
+      </div>\`;
+      return;
+    }
+    // OCR não encontrou número — exibe formulário manual com dica do que foi lido
+    const dica = ocr.tipo || ocr.responsavel || '';
+    if (resultDiv) resultDiv.innerHTML = patFormBuscaManual('pat-foto-result',
+      'Número não identificado na imagem.' + (dica ? ' Detectado: ' + dica + '.' : '') + ' Digite o PAT:');
   } catch(e) {
-    if (resultDiv) resultDiv.innerHTML = patFormBuscaManual('pat-foto-result', 'Scanner indisponível. Digite o PAT:');
+    if (resultDiv) resultDiv.innerHTML = patFormBuscaManual('pat-foto-result', 'Não foi possível ler a etiqueta. Digite o PAT:');
   }
 }
 
