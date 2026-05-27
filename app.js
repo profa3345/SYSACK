@@ -6434,19 +6434,26 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     rvSb('Detectando melhor rota de conexão...');
     rvSetStatus('detectando', 'Conectando...');
 
-    // 1. Tenta WebSocket local (rede interna)
-    const localOk = await rvTestarConexaoLocal();
-    if (localOk) {
-      _modoConexao = 'local';
-      rvSetStatus('local', 'Rede interna ⚡');
-      rvMostrarBannerConexao('local');
-      rvConnect(_wsLocal);
-      return;
-    }
-
-    // 2. Tenta tunnel Cloudflare (qualquer rede)
     const agente = STATE_AGENTS?.list?.find(a => a.id === agentId);
     const tunnelUrl = agente?.tunnelUrl;
+
+    // Página em HTTPS não pode abrir ws:// (mixed content bloqueado pelo browser)
+    // Nesse caso vai direto para o tunnel Cloudflare (wss://)
+    const paginaHttps = location.protocol === 'https:';
+
+    // 1. Tenta WebSocket local apenas se a página estiver em HTTP
+    if (!paginaHttps) {
+      const localOk = await rvTestarConexaoLocal();
+      if (localOk) {
+        _modoConexao = 'local';
+        rvSetStatus('local', 'Rede interna ⚡');
+        rvMostrarBannerConexao('local');
+        rvConnect(_wsLocal);
+        return;
+      }
+    }
+
+    // 2. Tunnel Cloudflare (wss:// — funciona em HTTPS e HTTP)
     if (tunnelUrl && agente?.tunnelAtivo) {
       _modoConexao = 'tunnel';
       rvSetStatus('tunnel', 'Via Cloudflare Tunnel 🌐');
@@ -6454,6 +6461,11 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       rvSb('Conectando via Cloudflare Tunnel...');
       rvConnect(tunnelUrl);
       return;
+    }
+
+    // 2b. Página HTTP — tunnel não disponível, tenta WebSocket local mesmo assim
+    if (!paginaHttps) {
+      // já tentou acima e falhou — cai para sem rota
     }
 
     // 3. Sem rota disponível
