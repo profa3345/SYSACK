@@ -3758,6 +3758,8 @@ window.dispatchEvent(new Event('firebase-ready'));
               <label class="form-label req">Descrição completa</label>
               <textarea class="form-control" id="ch-descricao" rows="5" placeholder="Descreva o problema ou solicitação com o máximo de detalhes possível..." style="background:#fff" oninput="triagemAutoChamado()"></textarea>
             </div>
+            <!-- Banner de triagem automática por IA -->
+            <div id="ai-triage-suggestion" style="display:none;margin-top:10px"></div>
           </div>
         </div>
 
@@ -4209,7 +4211,8 @@ window.dispatchEvent(new Event('firebase-ready'));
       <h3>🛠️ Atender Chamado — <span id="atender-ch-id" style="color:var(--accent)"></span></h3>
       <button class="close-btn" onclick="closeModal('modal-atender-chamado')">✕</button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" id="at-modal-body">
+      <!-- Flow steps -->
       <div class="flow-steps">
         <div class="flow-step done"><div class="step-circle">✓</div><div class="step-label">Chamado Aberto</div></div>
         <div class="flow-step active"><div class="step-circle">2</div><div class="step-label">Diagnóstico</div></div>
@@ -4219,7 +4222,8 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="flow-step"><div class="step-circle">6</div><div class="step-label">Retorno/Destino</div></div>
         <div class="flow-step"><div class="step-circle">7</div><div class="step-label">Concluído</div></div>
       </div>
-      <!-- Descrição original do chamado — para o técnico ver o que foi solicitado -->
+
+      <!-- Solicitação do requerente -->
       <div id="at-descricao-chamado-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:10px;padding:14px 16px;margin-bottom:16px">
         <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">📋 Solicitação do Requerente</div>
         <div id="at-solicitante-nome" style="font-size:12px;font-weight:600;color:var(--g700);margin-bottom:4px"></div>
@@ -4237,23 +4241,25 @@ window.dispatchEvent(new Event('firebase-ready'));
           <label class="form-label req">Diagnóstico</label>
           <select class="form-control" id="at-diagnostico">
             <option value="">Selecione...</option>
-            <option>Problema de software</option><option>Problema de hardware</option>
-            <option>Falha de periférico</option><option>Substituição preventiva</option>
-            <option>Configuração</option><option>Outro</option>
+            <option>Problema de software</option>
+            <option>Problema de hardware</option>
+            <option>Falha de periférico</option>
+            <option>Substituição preventiva</option>
+            <option>Configuração</option>
+            <option>Outro</option>
           </select>
         </div>
       </div>
+
       <div class="form-group">
         <label class="form-label">Descrição do atendimento</label>
         <textarea class="form-control" id="at-desc-atendimento" rows="2" placeholder="O que foi identificado e realizado..."></textarea>
       </div>
 
-      <!-- ── Vincular máquinas ao chamado (técnico) ────────────────── -->
+      <!-- Máquinas vinculadas -->
       <div style="border:1px solid var(--g200);border-radius:10px;padding:14px 16px;margin-bottom:14px;background:var(--g50)">
         <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:10px">🖥️ Máquinas Vinculadas ao Chamado</div>
-        <!-- Ativos já vinculados pelo solicitante -->
         <div id="at-itens-existentes" style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
-        <!-- Busca para técnico vincular/adicionar -->
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
           <input class="form-control" id="at-vincular-busca" placeholder="Buscar por patrimônio ou nome da máquina..."
                  style="flex:1" oninput="atVincularAtivo()"
@@ -4261,12 +4267,13 @@ window.dispatchEvent(new Event('firebase-ready'));
           <button class="btn btn-secondary btn-sm" type="button" onclick="atVincularAtivo()">Buscar</button>
         </div>
         <div id="at-vincular-resultados" style="display:none;border:1px solid var(--g200);border-radius:8px;max-height:160px;overflow-y:auto;background:#fff;margin-bottom:8px"></div>
-        <!-- Chips dos ativos vinculados nesta sessão -->
         <div id="at-itens-vinculados" style="display:flex;flex-wrap:wrap;gap:6px;min-height:24px"></div>
         <div style="font-size:10.5px;color:var(--g400);margin-top:4px">Adicione máquinas ao chamado ou remova vínculos incorretos. Tudo é registrado no histórico do ativo.</div>
       </div>
 
       <div class="divider"></div>
+
+      <!-- Movimentação — renderizado lazily por JS -->
       <div class="form-group">
         <label class="form-label fw-700" style="font-size:13px;margin-bottom:10px">Foi necessário mudar a máquina de lugar?</label>
         <div class="radio-group">
@@ -4274,194 +4281,9 @@ window.dispatchEvent(new Event('firebase-ready'));
           <label class="radio-opt" id="ro-sim"><input type="radio" name="mudou-lugar" value="sim" onclick="toggleMudouLugar('sim')"> Sim — houve movimentação do ativo</label>
         </div>
       </div>
-      <div id="sub-mudou-lugar" style="display:none">
-        <div class="alert alert-warning"><span>⚠️</span><span>Movimentação de ativo exige <strong>aprovação do gestor</strong>. O fluxo ficará pausado até a autorização. Email será enviado automaticamente.</span></div>
+      <!-- Seção de movimentação injetada dinamicamente -->
+      <div id="sub-mudou-lugar" style="display:none"></div>
 
-        <!-- Pergunta se houve troca da máquina -->
-        <div class="form-group" style="margin-bottom:14px">
-          <label class="form-label fw-700" style="font-size:13px;margin-bottom:10px">Foi necessário substituir a máquina por outra?</label>
-          <div class="radio-group">
-            <label class="radio-opt" id="ro-troca-nao"><input type="radio" name="troca-maquina" value="nao" onclick="toggleTrocaMaquina('nao')" checked> Não — mesma máquina, só mudou de lugar</label>
-            <label class="radio-opt" id="ro-troca-sim"><input type="radio" name="troca-maquina" value="sim" onclick="toggleTrocaMaquina('sim')"> Sim — foi entregue uma máquina diferente ao usuário</label>
-          </div>
-        </div>
-
-        <!-- Campos da nova máquina — visível só se troca=sim -->
-        <div id="sub-troca-maquina" style="display:none;contain:layout style;border-left:3px solid var(--accent);padding-left:14px;margin-bottom:14px">
-          <p style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px">🖥️ Nova Máquina Entregue ao Usuário</p>
-          <div class="form-group" style="margin-bottom:10px">
-            <label class="form-label req">Buscar máquina existente no sistema</label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input class="form-control" id="at-nova-maq-busca" placeholder="Patrimônio ou nome da máquina..." oninput="atBuscarNovaMaquina(this.value)" style="flex:1">
-              <button class="btn btn-secondary btn-sm" type="button" onclick="atBuscarNovaMaquina(document.getElementById('at-nova-maq-busca').value)">Buscar</button>
-            </div>
-            <div id="at-nova-maq-resultados" style="display:none;margin-top:6px;border:1px solid var(--g200);border-radius:8px;max-height:160px;overflow-y:auto;background:#fff"></div>
-            <div id="at-nova-maq-selecionada" style="display:none;margin-top:8px;padding:8px 12px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--accent)"></div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-            <div style="flex:1;height:1px;background:var(--g150)"></div>
-            <span style="font-size:10.5px;color:var(--g400);font-weight:600">OU</span>
-            <div style="flex:1;height:1px;background:var(--g150)"></div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Cadastrar nova máquina (patrimônio ainda não registrado)</label>
-            <div class="form-row c2" style="margin-top:6px">
-              <input class="form-control" id="at-nova-maq-pat" placeholder="Patrimônio (PAT-0000)">
-              <input class="form-control" id="at-nova-maq-desc" placeholder="Descrição (ex: Dell Optiplex 7090)">
-            </div>
-            <div class="form-row c2" style="margin-top:8px">
-              <input class="form-control" id="at-nova-maq-serie" placeholder="Número de série (opcional)">
-              <button class="btn btn-ghost btn-sm" type="button" onclick="atRegistrarNovaMaquina()" style="align-self:flex-end">+ Registrar no sistema</button>
-            </div>
-          </div>
-          <input type="hidden" id="at-pat-novo">
-        </div>
-
-        <div class="form-row c2" style="margin-top:8px">
-          <div style="display:none"><input id="at-pat-novo-hidden"></div>
-          <div class="form-group">
-            <label class="form-label req">Destino da Máquina Antiga</label>
-            <select class="form-control" id="at-destino-antigo" onchange="toggleDestinoAntigo()">
-              <option value="">Selecione o destino...</option>
-              <option value="rui-barbosa">→ Rui Barbosa (sede)</option>
-              <option value="terceirizada">→ Empresa Terceirizada (manutenção)</option>
-              <option value="sc">→ Santa Clara / Depósito TI</option>
-              <option value="reutilizada">→ Reaproveitamento interno</option>
-              <option value="descarte">→ Descarte (lixo eletrônico)</option>
-            </select>
-          </div>
-        </div>
-        <!-- DESTINO: TERCEIRIZADA -->
-        <div id="sub-dest-terceirizada" style="display:none;contain:layout style;border-left:3px solid var(--orange);padding-left:14px;margin-bottom:14px">
-          <p style="font-size:12px;font-weight:700;color:var(--orange);margin-bottom:10px">📤 Configuração de Envio para Terceirizada</p>
-          <div class="form-row c2">
-            <div class="form-group">
-              <label class="form-label req">Técnico da Empresa Terceirizada</label>
-              <select class="form-control" id="at-tecnico-terc"><option value="">Selecione...</option></select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Motivo do Envio</label>
-              <input class="form-control" placeholder="Ex: Substituição de HD, manutenção preventiva...">
-            </div>
-          </div>
-          <div class="alert alert-orange"><span>🕐</span><span>Alertas automáticos: técnico recebe aviso quando faltam <strong>5 dias úteis</strong> para o prazo de 10 dias. Gestor é alertado se o prazo for excedido.</span></div>
-        </div>
-        <!-- DESTINO: SANTA CLARA -->
-        <div id="sub-dest-sc" style="display:none;contain:layout style;border-left:3px solid var(--violet);padding-left:14px;margin-bottom:14px">
-          <p style="font-size:12px;font-weight:700;color:var(--violet);margin-bottom:10px">📍 Registro em Santa Clara</p>
-          <div class="form-row c2">
-            <div class="form-group">
-              <label class="form-label req">Localização em Santa Clara</label>
-              <input class="form-control" placeholder="Ex: Rack 3, Prateleira B, Sala 102...">
-            </div>
-            <div class="form-group">
-              <label class="form-label req">Foto do Local</label>
-              <div class="photo-zone" onclick="document.getElementById('sc-foto-in').click()">
-                <div style="font-size:20px;margin-bottom:4px">📷</div>
-                <p style="font-size:11px;color:var(--g500)">Clique para adicionar (obrigatório)</p>
-              </div>
-              <input type="file" id="sc-foto-in" accept="image/*" style="display:none" onchange="previewFoto(this,'sc-foto-prev')">
-              <div id="sc-foto-prev" class="photo-preview"></div>
-            </div>
-          </div>
-        </div>
-        <!-- DESTINO: LEILÃO / PREGÃO -->
-        <div id="sub-dest-leilao" style="display:none;contain:layout style;border-left:3px solid #7C3AED;padding-left:14px;margin-bottom:14px">
-          <p style="font-size:12px;font-weight:700;color:#7C3AED;margin-bottom:10px">🏛️ Encaminhamento para Leilão / Pregão</p>
-          <div class="form-row c2">
-            <div class="form-group">
-              <label class="form-label req">Modalidade</label>
-              <select class="form-control" id="leilao-modalidade">
-                <option value="leilao-publico">Leilão público presencial</option>
-                <option value="pregao-eletronico">Pregão eletrônico</option>
-                <option value="leilao-online">Leilão online (plataforma)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Número do processo licitatório</label>
-              <input class="form-control" id="leilao-processo" placeholder="Ex: Pregão 045/2026">
-            </div>
-          </div>
-          <div class="form-row c2">
-            <div class="form-group">
-              <label class="form-label">Valor mínimo estimado (R$)</label>
-              <input type="number" class="form-control" id="leilao-valor" placeholder="0,00" step="0.01">
-              <p class="form-hint">Baseado na depreciação calculada pelo sistema</p>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Previsão do leilão</label>
-              <input type="date" class="form-control" id="leilao-data">
-            </div>
-          </div>
-          <div class="alert-info" style="background:#EDE9FE;border:1px solid #C4B5FD;border-radius:8px;padding:10px 12px;font-size:12px;color:#5B21B6">
-            📋 O sistema gerará automaticamente a NF de Saída (CFOP 5.551) quando o leilão for concluído. O valor contábil será atualizado com o valor arrematado.
-          </div>
-        </div>
-
-        <!-- DESTINO: REUTILIZADA -->
-        <div id="sub-dest-reutilizada" style="display:none;contain:layout style;border-left:3px solid var(--success);padding-left:14px;margin-bottom:14px">
-          <p style="font-size:12px;font-weight:700;color:var(--success);margin-bottom:10px">🔄 Reutilização Interna</p>
-          <div class="form-row c2">
-            <div class="form-group">
-              <label class="form-label req">Nova Localização</label>
-              <input class="form-control" placeholder="Ex: Sala 205, Recepção...">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Mudança de Nomenclatura?</label>
-              <div class="radio-group">
-                <label class="radio-opt"><input type="radio" name="muda-nome" value="nao" checked> Não</label>
-                <label class="radio-opt"><input type="radio" name="muda-nome" value="sim" onclick="document.getElementById('sub-nome').style.display=''"> Sim</label>
-              </div>
-            </div>
-          </div>
-          <div id="sub-nome" style="display:none" class="form-group">
-            <label class="form-label req">Nova Nomenclatura</label>
-            <input class="form-control" placeholder="Ex: PC-RECEPCAO-01">
-          </div>
-          <div class="form-group">
-            <label class="form-label req">Será utilizada por:</label>
-            <div class="radio-group">
-              <label class="radio-opt"><input type="radio" name="uso-tipo" value="usuario" onclick="toggleUsoTipo('usuario')"> Usuário específico</label>
-              <label class="radio-opt"><input type="radio" name="uso-tipo" value="grupo" onclick="toggleUsoTipo('grupo')"> Grupo de usuários</label>
-            </div>
-          </div>
-          <div id="sub-uso-usuario" style="display:none" class="form-group">
-            <label class="form-label req">Nome do Usuário</label>
-            <input class="form-control" placeholder="Nome completo do usuário">
-          </div>
-          <div id="sub-uso-grupo" style="display:none" class="form-group">
-            <label class="form-label req">Grupo / Setor</label>
-            <input class="form-control" placeholder="Ex: Recepção, Sala de Reuniões...">
-          </div>
-        </div>
-      </div>
-        <!-- DESTINO: DESCARTE -->
-        <div id="sub-dest-descarte" style="display:none;contain:layout style;border-left:3px solid #EF4444;padding-left:14px;margin-bottom:14px">
-          <p style="font-size:12px;font-weight:700;color:#EF4444;margin-bottom:10px">♻️ Descarte de Equipamento</p>
-          <div class="form-row c2">
-            <div class="form-group">
-              <label class="form-label req">Motivo do descarte</label>
-              <select class="form-control" id="descarte-motivo">
-                <option value="obsoleto">Obsolescência tecnológica</option>
-                <option value="dano">Dano irreparável</option>
-                <option value="sem-valor">Sem valor residual para leilão</option>
-                <option value="extravio">Extravio / Roubo (B.O. obrigatório)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Empresa de descarte responsável</label>
-              <input class="form-control" id="descarte-empresa" placeholder="Ex: EcoTech Reciclagem LTDA">
-              <p class="form-hint">Empresa certificada — ABNT NBR 16156</p>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Número do certificado de destruição</label>
-            <input class="form-control" id="descarte-cert" placeholder="Certificado emitido pela empresa de reciclagem">
-          </div>
-          <div style="background:#FEF2F2;border:1px solid #FCA5A5;border-radius:8px;padding:10px 12px;font-size:12px;color:#991B1B">
-            ⚠️ O descarte direto só deve ser utilizado quando o equipamento não possui valor residual para leilão. A CESAN é responsável pelo descarte correto conforme lei de resíduos sólidos (Lei 12.305/2010).
-          </div>
-        </div>
     </div><!-- /modal-body -->
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-atender-chamado')">Cancelar</button>

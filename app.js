@@ -1852,9 +1852,11 @@ function toggleTrocaMaquina(val) {
 
 // ── Busca nova máquina no sistema ─────────────────────────────────
 let _atBuscaTimer = null;
-function atBuscarNovaMaquina(q) {
+function atBuscarNovaMaquina(q, immediate) {
   const res = document.getElementById('at-nova-maq-resultados');
+  if (!res) return;
   if (!q || q.length < 2) { res.style.display = 'none'; return; }
+  if (immediate) { _atBuscarNovaMaquinaExec(q, res); return; }
   clearTimeout(_atBuscaTimer);
   _atBuscaTimer = setTimeout(() => _atBuscarNovaMaquinaExec(q, res), 180);
 }
@@ -1936,18 +1938,139 @@ async function atRegistrarNovaMaquina() {
 
 function toggleMudouLugar(val) {
   const sub = document.getElementById('sub-mudou-lugar');
-  if (sub) {
-    sub.style.display = val === 'sim' ? '' : 'none';
-    // reset troca when hiding
-    if (val === 'nao') {
-      document.querySelectorAll('input[name="troca-maquina"]').forEach(r => r.checked = r.value === 'nao');
-      toggleTrocaMaquina('nao');
-      const dest = document.getElementById('at-destino-antigo');
-      if (dest) { dest.value = ''; toggleDestinoAntigo(); }
-    }
-  }
+  if (!sub) return;
+
   document.getElementById('ro-nao')?.classList.toggle('checked', val === 'nao');
   document.getElementById('ro-sim')?.classList.toggle('checked', val === 'sim');
+
+  if (val === 'nao') {
+    sub.style.display = 'none';
+    sub.innerHTML = ''; // libera memória
+    return;
+  }
+
+  // Lazy render: só injeta o HTML pesado quando usuário escolhe "sim"
+  if (!sub.dataset.rendered) {
+    sub.dataset.rendered = '1';
+    sub.innerHTML = _renderMovimentacaoHTML();
+    // Popula select de técnicos da terceirizada
+    const sel = document.getElementById('at-tecnico-terc');
+    if (sel && STATE.tecnicos) {
+      const terc = STATE.tecnicos.filter(t => t.empresa === 'terceirizada');
+      sel.innerHTML = '<option value="">Selecione...</option>' +
+        terc.map(t => `<option value="${t.id}">${escapeHtml(t.nome)}</option>`).join('');
+    }
+  }
+  sub.style.display = '';
+}
+
+function _renderMovimentacaoHTML() {
+  return `
+    <div class="alert alert-warning"><span>⚠️</span><span>Movimentação de ativo exige <strong>aprovação do gestor</strong>. O fluxo ficará pausado até a autorização. Email será enviado automaticamente.</span></div>
+
+    <div class="form-group" style="margin-bottom:14px">
+      <label class="form-label fw-700" style="font-size:13px;margin-bottom:10px">Foi necessário substituir a máquina por outra?</label>
+      <div class="radio-group">
+        <label class="radio-opt" id="ro-troca-nao"><input type="radio" name="troca-maquina" value="nao" onclick="toggleTrocaMaquina('nao')" checked> Não — mesma máquina, só mudou de lugar</label>
+        <label class="radio-opt" id="ro-troca-sim"><input type="radio" name="troca-maquina" value="sim" onclick="toggleTrocaMaquina('sim')"> Sim — foi entregue uma máquina diferente ao usuário</label>
+      </div>
+    </div>
+
+    <div id="sub-troca-maquina" style="display:none;border-left:3px solid var(--accent);padding-left:14px;margin-bottom:14px;contain:layout style">
+      <p style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px">🖥️ Nova Máquina Entregue ao Usuário</p>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label req">Buscar máquina existente no sistema</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="form-control" id="at-nova-maq-busca" placeholder="Patrimônio ou nome da máquina..." oninput="atBuscarNovaMaquina(this.value)" style="flex:1">
+          <button class="btn btn-secondary btn-sm" type="button" onclick="atBuscarNovaMaquina(document.getElementById('at-nova-maq-busca').value, true)">Buscar</button>
+        </div>
+        <div id="at-nova-maq-resultados" style="display:none;margin-top:6px;border:1px solid var(--g200);border-radius:8px;max-height:160px;overflow-y:auto;background:#fff"></div>
+        <div id="at-nova-maq-selecionada" style="display:none;margin-top:8px;padding:8px 12px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--accent)"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="flex:1;height:1px;background:var(--g150)"></div>
+        <span style="font-size:10.5px;color:var(--g400);font-weight:600">OU</span>
+        <div style="flex:1;height:1px;background:var(--g150)"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Cadastrar nova máquina (patrimônio ainda não registrado)</label>
+        <div class="form-row c2" style="margin-top:6px">
+          <input class="form-control" id="at-nova-maq-pat" placeholder="Patrimônio (PAT-0000)">
+          <input class="form-control" id="at-nova-maq-desc" placeholder="Descrição (ex: Dell Optiplex 7090)">
+        </div>
+        <div class="form-row c2" style="margin-top:8px">
+          <input class="form-control" id="at-nova-maq-serie" placeholder="Número de série (opcional)">
+          <button class="btn btn-ghost btn-sm" type="button" onclick="atRegistrarNovaMaquina()" style="align-self:flex-end">+ Registrar no sistema</button>
+        </div>
+      </div>
+      <input type="hidden" id="at-pat-novo">
+    </div>
+
+    <div class="form-row c2" style="margin-top:8px">
+      <div class="form-group">
+        <label class="form-label req">Destino da Máquina Antiga</label>
+        <select class="form-control" id="at-destino-antigo" onchange="toggleDestinoAntigo()">
+          <option value="">Selecione o destino...</option>
+          <option value="rui-barbosa">→ Rui Barbosa (sede)</option>
+          <option value="terceirizada">→ Empresa Terceirizada (manutenção)</option>
+          <option value="sc">→ Santa Clara / Depósito TI</option>
+          <option value="reutilizada">→ Reaproveitamento interno</option>
+          <option value="descarte">→ Descarte (lixo eletrônico)</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="sub-dest-terceirizada" style="display:none;border-left:3px solid var(--orange);padding-left:14px;margin-bottom:14px;contain:layout style">
+      <p style="font-size:12px;font-weight:700;color:var(--orange);margin-bottom:10px">📤 Configuração de Envio para Terceirizada</p>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">Técnico da Empresa Terceirizada</label>
+          <select class="form-control" id="at-tecnico-terc"><option value="">Selecione...</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Motivo do Envio</label>
+          <input class="form-control" placeholder="Ex: Substituição de HD, manutenção preventiva...">
+        </div>
+      </div>
+    </div>
+
+    <div id="sub-dest-sc" style="display:none;border-left:3px solid var(--violet);padding-left:14px;margin-bottom:14px;contain:layout style">
+      <p style="font-size:12px;font-weight:700;color:var(--violet);margin-bottom:10px">📍 Registro em Santa Clara</p>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">Localização em Santa Clara</label>
+          <input class="form-control" id="at-sc-local" placeholder="Ex: Rack 3, Prateleira B...">
+        </div>
+      </div>
+    </div>
+
+    <div id="sub-dest-reutilizada" style="display:none;border-left:3px solid var(--success);padding-left:14px;margin-bottom:14px;contain:layout style">
+      <p style="font-size:12px;font-weight:700;color:var(--success);margin-bottom:10px">🔄 Reutilização Interna</p>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">Nova Localização</label>
+          <input class="form-control" id="at-reut-local" placeholder="Ex: Sala 205, Recepção...">
+        </div>
+      </div>
+    </div>
+
+    <div id="sub-dest-descarte" style="display:none;border-left:3px solid #EF4444;padding-left:14px;margin-bottom:14px;contain:layout style">
+      <p style="font-size:12px;font-weight:700;color:#EF4444;margin-bottom:10px">♻️ Descarte de Equipamento</p>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">Motivo do descarte</label>
+          <select class="form-control" id="descarte-motivo">
+            <option value="obsoleto">Obsolescência tecnológica</option>
+            <option value="dano">Dano irreparável</option>
+            <option value="sem-valor">Sem valor residual para leilão</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Empresa de descarte</label>
+          <input class="form-control" id="descarte-empresa" placeholder="Ex: EcoTech Reciclagem LTDA">
+        </div>
+      </div>
+    </div>`;
 }
 function toggleDestinoAntigo() {
   const val = document.getElementById('at-destino-antigo')?.value || '';
@@ -3761,7 +3884,15 @@ function openModal(id) {
     }
   }
 }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function closeModal(id) {
+  // Reset lazy-rendered sections
+  if (id === 'modal-atender-chamado') {
+    const sub = document.getElementById('sub-mudou-lugar');
+    if (sub) { sub.innerHTML = ''; delete sub.dataset.rendered; sub.style.display = 'none'; }
+    document.querySelectorAll('input[name="mudou-lugar"]').forEach(r => r.checked = false);
+    document.getElementById('ro-nao')?.classList.remove('checked');
+    document.getElementById('ro-sim')?.classList.remove('checked');
+  } document.getElementById(id).classList.remove('open'); }
 
 /**
  * Retorna a sigla organizacional (ex: A-DSI) de um empregado.
