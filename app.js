@@ -1594,12 +1594,57 @@ function abrirHistorico(pat) {
     ].map(([l,v])=>`<div><div class="text-xs text-muted">${l}</div><div style="font-size:13px;font-weight:600;margin-top:2px">${v}</div></div>`).join('');
   } else { infoRow.innerHTML = '<p class="text-muted">Ativo não encontrado no cadastro</p>'; }
   const movs = STATE.movimentacoes.filter(m=>m.pat===pat);
-  const chs  = STATE.chamados.filter(c=>c.pat===pat);
+
+  // Busca o ativo para ter hostname e ip disponíveis para cruzamento
+  const _hn  = ativo ? hostnameFromAtivo(ativo) : '';
+  const _ip  = ativo?.ip || '';
+  const _id  = ativo?.id || '';
+
+  const chs = (STATE.chamados || []).filter(c => {
+    // 1. Campo pat direto
+    if (c.pat && c.pat === pat) return true;
+    // 2. Ativo vinculado via botão "Vincular Ativo" (ativosVinculados[].pat ou .id ou .docId)
+    if (c.ativosVinculados?.some(av =>
+      (av.pat  && av.pat  === pat) ||
+      (av.id   && av.id   === _id) ||
+      (av.docId && av.docId === _id)
+    )) return true;
+    // 3. Hostname mencionado no título ou descrição do chamado
+    if (_hn && (
+      (c.desc  && c.desc.toLowerCase().includes(_hn.toLowerCase())) ||
+      (c.titulo && c.titulo.toLowerCase().includes(_hn.toLowerCase()))
+    )) return true;
+    // 4. IP mencionado no chamado
+    if (_ip && (
+      (c.desc  && c.desc.includes(_ip)) ||
+      (c.titulo && c.titulo.includes(_ip))
+    )) return true;
+    // 5. movimentacao.patAntigo ou patNovo
+    if (c.movimentacao && (
+      c.movimentacao.patAntigo === pat ||
+      c.movimentacao.patNovo   === pat
+    )) return true;
+    return false;
+  });
   const entries = [
     {dot:'green', title:'Cadastro inicial no sistema', desc:`Patrimônio ${pat} registrado no SYSACK`, time: ativo?fmtDate(ativo.createdAt):'—'},
-    ...chs.map(c=>({dot:'blue', title:`Chamado ${c.id} — ${tipoLabel(c.tipo)}`, desc:c.desc.slice(0,60), time:fmtDate(c.createdAt)})),
+    ...chs.map(c=>{
+      // Descobre como o chamado foi vinculado ao ativo para mostrar no histórico
+      const vinculoPat  = c.pat === pat;
+      const vinculoAv   = !vinculoPat && c.ativosVinculados?.some(av => av.pat===pat || av.id===_id || av.docId===_id);
+      const vinculoNome = !vinculoPat && !vinculoAv && _hn && (c.desc||'').toLowerCase().includes(_hn.toLowerCase());
+      const vinculoIp   = !vinculoPat && !vinculoAv && !vinculoNome && _ip && (c.desc||'').includes(_ip);
+      const origem = vinculoAv ? ' · vinculado' : vinculoNome ? ' · via hostname' : vinculoIp ? ' · via IP' : '';
+      const statusLabel = {aberto:'Aberto',concluido:'Concluído',fechado:'Fechado','em-andamento':'Em andamento','aguardando-aprovacao':'Aguard. aprovação'}[c.status] || c.status || '';
+      return {
+        dot: c.status==='concluido'||c.status==='fechado' ? 'green' : c.status==='aguardando-aprovacao' ? 'orange' : 'blue',
+        title: `Chamado ${c.id} — ${tipoLabel(c.tipo)}${origem}`,
+        desc: `${statusLabel ? '['+statusLabel+'] ' : ''}${(c.desc||'').slice(0,80)}`,
+        time: fmtDate(c.createdAt)
+      };
+    }),
     ...movs.map(m=>({dot:m.tipo==='Terceirizada'?'orange':m.tipo==='Santa Clara'?'violet':'blue', title:`${m.tipo}: ${m.de} → ${m.para}`, desc:`Técnico: ${m.tecnico} · Aprovação: ${m.status}`, time:fmtDate(m.data)})),
-  ].sort((a,b)=>0);
+  ].sort((a,b)=>{ try{ return new Date(b.time||0)-new Date(a.time||0); } catch(e){ return 0; } });
   document.getElementById('hist-timeline').innerHTML = entries.map(e=>`
     <div class="tl-item"><div class="tl-dot ${e.dot}"></div><div class="tl-title">${e.title}</div><div class="tl-desc">${e.desc}</div><div class="tl-time">${e.time}</div></div>`).join('');
   openModal('modal-historico-ativo');
