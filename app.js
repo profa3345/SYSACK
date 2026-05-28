@@ -1093,7 +1093,7 @@ const PAGE_LABELS = {
   movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
-  mdm:'Smartphones / MDM', telecom:'Gestão Telecom', switches:'Switches & Roteadores', apps:'Apps structures',
+  mdm:'Smartphones / MDM', telecom:'Gestão Telecom', localidades:'Localidades', switches:'Switches & Roteadores', apps:'Inventário de Software',
   documentos:'Documentos', lembretes:'Lembretes',
   pesquisas:'Pesquisas Salvas', alertas:'Alertas'
 };
@@ -1127,7 +1127,7 @@ function renderPage(id) {
     'exec-dashboard':() => renderExecDashboard(),
     'ai-dashboard':  () => renderAIDashboard(),
     'mapa-ativos':   () => renderMapaAtivos(),
-    'assistencia-remota': () => renderAssistenciaRemota(),
+    'assistencia-remota': () => { _arEnsureLoaded(); renderAssistenciaRemota(); },
     'impressoras':        () => renderImpressoras(),
     'wsus':               () => renderWSUS(),
     'capacidade':         () => renderRelatorioCapacidade(),
@@ -1154,6 +1154,7 @@ function renderPage(id) {
     kb:              () => renderKB(),
     mdm:             () => typeof renderMDM === 'function' && renderMDM(),
     telecom:         () => typeof renderTelecom === 'function' && renderTelecom(),
+    localidades:     () => renderLocalidades(),
     switches:        () => typeof renderSwitches === 'function' && renderSwitches(),
     reuso:           () => renderReuso(),
     descarte:        () => renderDescarte(),
@@ -1363,6 +1364,7 @@ function renderAtivos() {
         <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
         <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="patAbrirBusca()" title="Vincular PAT">🏷️</button>` : ''}
+        ${isComp ? `<button class="btn btn-ghost btn-xs" title="Ver softwares instalados" onclick="(()=>{const _ag=(STATE_AGENTS?.list||[]).find(x=>(a.ip&&x.ip===a.ip)||(a.hostname&&(x.hostname||'').toLowerCase()===(a.hostname||'').toLowerCase()));_ag?swInvVerSoftwaresMaquina(_ag.id):showToast('Agente não conectado — sem dados de software','warning')})()">🗂️</button>` : ''}
       </div></td>
     </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo — ${tipos.length?'tipo: '+_ativoFiltroTipo:'cadastrado'}</td></tr>`;
   nbUpdate('nb-ativos', lista.length);
@@ -2160,6 +2162,174 @@ function chToggleNomenclatura(val) {
   if (el) el.style.display = val === 'sim' ? '' : 'none';
 }
 
+// ════════════════════════════════════════════════════════════
+// CHAMADO — Para quem é? (eu / outro empregado)
+// ════════════════════════════════════════════════════════════
+
+// Estado do empregado selecionado para "outro"
+let _chEmpSelecionado = null;
+let _chPqTimer = null;
+
+function chToggleParaQuem(val) {
+  const buscaBox = document.getElementById('ch-pq-busca-box');
+  const labelEu  = document.getElementById('ch-pq-label-eu');
+  const labelOut = document.getElementById('ch-pq-label-outro');
+
+  if (val === 'outro') {
+    if (buscaBox) buscaBox.style.display = '';
+    if (labelEu)  { labelEu.style.borderColor  = 'var(--g200)'; labelEu.style.background  = '#fff';            labelEu.style.color  = 'var(--g600)'; }
+    if (labelOut) { labelOut.style.borderColor = 'var(--accent)'; labelOut.style.background = 'var(--accent-l)'; labelOut.style.color = 'var(--accent)'; }
+    setTimeout(() => document.getElementById('ch-pq-busca')?.focus(), 80);
+  } else {
+    if (buscaBox) buscaBox.style.display = 'none';
+    if (labelEu)  { labelEu.style.borderColor  = 'var(--accent)'; labelEu.style.background  = 'var(--accent-l)'; labelEu.style.color  = 'var(--accent)'; }
+    if (labelOut) { labelOut.style.borderColor = 'var(--g200)';   labelOut.style.background = '#fff';             labelOut.style.color = 'var(--g600)'; }
+    chLimparEmpregado();
+    // Restaura os campos do painel lateral para o usuário logado
+    _chPreencherSolicitanteLogado();
+  }
+}
+
+function chBuscarEmpregado(q) {
+  clearTimeout(_chPqTimer);
+  const res = document.getElementById('ch-pq-resultados');
+  if (!q || q.length < 2) { if (res) res.style.display = 'none'; return; }
+  _chPqTimer = setTimeout(() => _chExecBusca(q), 200);
+}
+
+function _chExecBusca(q) {
+  const res = document.getElementById('ch-pq-resultados');
+  if (!res) return;
+  const qL  = q.toLowerCase();
+  const emps = (STATE.empregados || []).filter(e =>
+    (e.nome   || '').toLowerCase().includes(qL) ||
+    (e.mat    || '').toLowerCase().includes(qL) ||
+    (e.login  || '').toLowerCase().includes(qL) ||
+    (e.email  || '').toLowerCase().includes(qL) ||
+    (e.setor  || '').toLowerCase().includes(qL)
+  ).slice(0, 12);
+
+  if (!emps.length) {
+    res.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum empregado encontrado</div>';
+    res.style.display = '';
+    return;
+  }
+
+  res.innerHTML = emps.map(e => {
+    const ini = (e.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
+    const info = [e.mat, e.setor||e.lotacao, e.ramal ? 'Ramal '+e.ramal : ''].filter(Boolean).join(' · ');
+    return `<div onclick="chSelecionarEmpregado(${JSON.stringify(e).replace(/"/g,'&quot;')})"
+      style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;gap:10px;align-items:center"
+      onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;
+                  align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${ini}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:12.5px">${escapeHtml(e.nome||'—')}</div>
+        <div style="font-size:11px;color:var(--g400)">${escapeHtml(info)}</div>
+      </div>
+      <div style="font-size:11px;color:var(--g500);flex-shrink:0">${escapeHtml(e.email||'')}</div>
+    </div>`;
+  }).join('');
+  res.style.display = '';
+}
+
+function chSelecionarEmpregado(emp) {
+  _chEmpSelecionado = emp;
+
+  // Card de confirmação
+  const card = document.getElementById('ch-pq-selecionado');
+  const av   = document.getElementById('ch-pq-av');
+  const nm   = document.getElementById('ch-pq-nome');
+  const inf  = document.getElementById('ch-pq-info');
+  if (card) card.style.display = '';
+  if (av)   av.textContent = (emp.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
+  if (nm)   nm.textContent = emp.nome || '—';
+  if (inf)  inf.textContent = [
+    emp.mat    ? 'Mat. ' + emp.mat       : '',
+    emp.setor  || emp.lotacao            || '',
+    emp.ramal  ? 'Ramal ' + emp.ramal    : '',
+    emp.email  || '',
+  ].filter(Boolean).join(' · ');
+
+  // Fecha dropdown e limpa busca
+  const busca = document.getElementById('ch-pq-busca');
+  const res   = document.getElementById('ch-pq-resultados');
+  if (busca) busca.value = '';
+  if (res)   res.style.display = 'none';
+
+  // Preenche os campos do painel lateral com dados do empregado selecionado
+  _chPreencherSolicitante(emp);
+
+  // Atualiza bolha "Criado por" para mostrar quem vai ser atendido
+  const bolha = document.getElementById('ch-bolha-requerente');
+  if (bolha) bolha.textContent = emp.nome || '—';
+  const ini = document.getElementById('ch-bolha-iniciais');
+  if (ini) ini.textContent = (emp.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
+}
+
+function chLimparEmpregado() {
+  _chEmpSelecionado = null;
+  const card  = document.getElementById('ch-pq-selecionado');
+  const busca = document.getElementById('ch-pq-busca');
+  if (card)  card.style.display = 'none';
+  if (busca) { busca.value = ''; busca.focus(); }
+}
+
+function _chPreencherSolicitante(emp) {
+  // Preenche campos do painel lateral com dados do empregado
+  const setV = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+  setV('ch-solicitante',  emp.nome   || '');
+  setV('ch-sol-matricula', emp.mat   || emp.matricula || '');
+  setV('ch-sol-ramal',    emp.ramal  || emp.telefone  || '');
+  // Localização = setor/área do empregado
+  const locEl = document.getElementById('ch-localizacao');
+  if (locEl && (emp.setor || emp.lotacao)) {
+    // Tenta encontrar a opção correspondente
+    const opts = Array.from(locEl.options);
+    const match = opts.find(o =>
+      o.value === (emp.setor||emp.lotacao) ||
+      o.text.includes(emp.setor||emp.lotacao)
+    );
+    if (match) locEl.value = match.value;
+  }
+}
+
+function _chPreencherSolicitanteLogado() {
+  // Restaura os dados do usuário logado nos campos do painel
+  const emp = _chEmpLogado();
+  if (emp) _chPreencherSolicitante(emp);
+}
+
+function _chEmpLogado() {
+  if (!CURRENT_USER) return null;
+  return (STATE.empregados || []).find(e =>
+    e.email === CURRENT_USER.email ||
+    e.login === CURRENT_USER.login ||
+    e.uid   === CURRENT_USER.uid
+  ) || null;
+}
+
+// Fecha dropdown ao clicar fora
+document.addEventListener('click', e => {
+  if (!e.target.closest('#ch-pq-busca') && !e.target.closest('#ch-pq-resultados')) {
+    const res = document.getElementById('ch-pq-resultados');
+    if (res) res.style.display = 'none';
+  }
+});
+
+// Reset do seletor ao abrir o modal
+const _origOpenModal = window.openModal;
+window.openModal = function(id) {
+  _origOpenModal?.(id);
+  if (id === 'modal-novo-chamado') {
+    // Reset para "para mim mesmo"
+    _chEmpSelecionado = null;
+    const radios = document.querySelectorAll('input[name="ch-para-quem"]');
+    radios.forEach(r => { r.checked = r.value === 'eu'; });
+    chToggleParaQuem('eu');
+  }
+};
+
 async function salvarChamado() {
   // Evita duplo clique
   const btnSalvar = document.getElementById('btn-salvar-chamado');
@@ -2220,6 +2390,22 @@ async function _salvarChamadoInterno() {
     docId: el.dataset.ativoDocId || '',
   }));
 
+  // ── Regra: status de encerramento exige ao menos um ativo vinculado ──────
+  const statusSelecionado = document.getElementById('ch-status')?.value || 'novo';
+  const STATUS_ENCERRAMENTO = ['solucionado', 'fechado', 'concluido'];
+  if (STATUS_ENCERRAMENTO.includes(statusSelecionado) && !ativosVinculados.length) {
+    // Destaca a seção de itens associados
+    const itensBox = document.querySelector('.ch-itens-section, #ch-itens-box');
+    if (itensBox) {
+      itensBox.style.outline = '2px solid var(--danger)';
+      itensBox.style.borderRadius = '8px';
+      setTimeout(() => { itensBox.style.outline = ''; itensBox.style.borderRadius = ''; }, 4000);
+    }
+    // Scrolla até a seção de itens
+    document.getElementById('ch-patrimonio')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return showToast('⚠️ Para encerrar o chamado é obrigatório vincular ao menos um ativo', 'danger', 6000);
+  }
+
   // Coleta smartphones vinculados via botão "Vincular Smartphone"
   const smartphonesVinculados = Array.from(
     document.querySelectorAll('#ch-itens-vinculados [data-sm-id]')
@@ -2229,24 +2415,62 @@ async function _salvarChamadoInterno() {
     imei: el.dataset.smImei || '',
   }));
 
+  // Determina solicitante: o próprio usuário ou empregado selecionado
+  const paraOutro    = document.querySelector('input[name="ch-para-quem"]:checked')?.value === 'outro';
+  const empSol       = paraOutro ? _chEmpSelecionado : _chEmpLogado();
+
+  const solicitanteInfo = empSol ? {
+    solicitanteId:     empSol.id    || '',
+    solicitante:       empSol.nome  || sol,
+    solicitanteMat:    empSol.mat   || empSol.matricula || '',
+    solicitanteEmail:  empSol.email || '',
+    solicitanteRamal:  empSol.ramal || empSol.telefone  || '',
+    solicitanteCelular:empSol.celular|| '',
+    solicitanteArea:   empSol.setor || empSol.lotacao   || '',
+    solicitanteLogin:  empSol.login || '',
+  } : {
+    solicitanteId:    CURRENT_USER?.uid   || '',
+    solicitante:      CURRENT_USER?.nome  || sol,
+    solicitanteMat:   document.getElementById('ch-sol-matricula')?.value?.trim() || '',
+    solicitanteRamal: document.getElementById('ch-sol-ramal')?.value?.trim()     || '',
+    solicitanteEmail: CURRENT_USER?.email || '',
+    solicitanteArea:  document.getElementById('ch-localizacao')?.value           || '',
+  };
+
+  // Registra quem abriu o chamado (pode ser diferente do solicitante)
+  const abertoPor = {
+    uid:   CURRENT_USER?.uid   || '',
+    nome:  CURRENT_USER?.nome  || '',
+    email: CURRENT_USER?.email || '',
+    role:  CURRENT_USER?.role  || '',
+  };
+
   const novo = {
-    id, tipo: document.getElementById('ch-tipo')?.value||'incidente',
-    area: document.getElementById('ch-area')?.value||'TI',
-    localizacaoDetalhe: document.getElementById('ch-localizacao-detalhe')?.value?.trim()||'',
-    solicitante: sol, tecnico: document.getElementById('ch-tecnico')?.value||'',
+    id,
+    tipo:     document.getElementById('ch-tipo')?.value || 'incidente',
+    area:     document.getElementById('ch-area')?.value || 'TI',
+    localizacaoDetalhe: document.getElementById('ch-localizacao-detalhe')?.value?.trim() || '',
+    tecnico:  document.getElementById('ch-tecnico')?.value || '',
     pat: document.getElementById('ch-pat-antigo')?.value?.trim()
       || (ativosVinculados[0]?.pat)
-      || document.getElementById('ch-patrimonio')?.value||'',
+      || document.getElementById('ch-patrimonio')?.value || '',
     ativosVinculados,
     smartphonesVinculados,
-    desc: titulo + (desc?'\n'+desc:''), obs: document.getElementById('ch-obs')?.value||'',
-    status: temMovimentacao ? 'aguardando-aprovacao' : 'aberto',
-    prioridade: document.getElementById('ch-prioridade')?.value||'media',
-    categoria: document.getElementById('ch-categoria')?.value||'',
-    origem: document.getElementById('ch-origem')?.value||'portal',
+    desc:     titulo + (desc ? '\n' + desc : ''),
+    obs:      document.getElementById('ch-obs')?.value || '',
+    status:   temMovimentacao ? 'aguardando-aprovacao' : 'aberto',
+    prioridade: document.getElementById('ch-prioridade')?.value || 'media',
+    categoria:  document.getElementById('ch-categoria')?.value  || '',
+    origem:     document.getElementById('ch-origem')?.value     || 'portal',
     movimentacao,
     temMovimentacao: !!temMovimentacao,
-    createdAt: new Date()
+    // Solicitante (para quem é o chamado)
+    ...solicitanteInfo,
+    // Quem abriu o chamado
+    abertoPor,
+    abertoPorNome: abertoPor.nome,
+    aberturaPropria: !paraOutro, // true = abriu para si mesmo
+    createdAt: new Date(),
   };
   if (!STATE.chamados) STATE.chamados = [];
   STATE.chamados.unshift(novo);
@@ -2584,6 +2808,33 @@ async function _fazerLoginInterno() {
       role:        local.role,
       permissions: local.permissions || permissionsForRole(local.role),
     };
+
+    // Tenta obter Custom Token da Function — autentica com token real, seguro
+    // Se a Function estiver disponível, obtém token com role correta
+    // Se não (bloqueado/offline), o app funciona com listeners via poll
+    if (FB_READY && auth) {
+      try {
+        const resp = await Promise.race([
+          fetch('https://us-central1-sysack-829e2.cloudfunctions.net/gerarCustomToken', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: local.uid, email: local.email, role: local.role }),
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
+        ]);
+        if (resp.ok) {
+          const { token } = await resp.json();
+          if (token) {
+            await auth.signInWithCustomToken(token);
+            console.log('[Auth] Custom Token OK — Firestore autenticado com role:', local.role);
+          }
+        }
+      } catch(e) {
+        console.warn('[Auth] Custom Token indisponível:', e.message, '— usando poll para Firestore');
+        // Fallback: listeners via arPollAgentes() já cobre leitura de agentes
+      }
+    }
+
     loginSuccess(user, true);
 
     // Tenta autenticar no Firebase em background (pode estar bloqueado pelo ad-blocker)
@@ -3008,24 +3259,131 @@ function renderDocumentos() {
 }
 
 function renderLembretes() {
-  const items = [
-    { tipo:'urgente', titulo:'PAT-0103 na Terceirizada há 12 dias', desc:'Prazo de 10 dias úteis excedido. Contatar técnico Roberto Mendes urgentemente.', data:'08/05/2026', autor:'Carlos Souza' },
-    { tipo:'aviso', titulo:'Renovação de contratos de manutenção', desc:'Contratos com empresa terceirizada vencem em 30 dias. Verificar renovação com gestão.', data:'07/05/2026', autor:'Ana Lima' },
-    { tipo:'info', titulo:'Atualização de inventário pendente', desc:'Realizar levantamento de ativos da filial Sul antes do dia 20/05.', data:'06/05/2026', autor:'João Martins' },
-    { tipo:'info', titulo:'Treinamento MDM', desc:'Treinamento de uso do módulo MDM agendado para próxima segunda-feira às 14h.', data:'05/05/2026', autor:'João Martins' },
-  ];
-  document.getElementById('lembretes-grid').innerHTML = items.map(l => `
-    <div class="lembrete-card ${l.tipo}">
-      <div style="font-size:13.5px;font-weight:700;color:var(--g900);margin-bottom:6px">${l.titulo}</div>
-      <div style="font-size:12.5px;color:var(--g600);margin-bottom:10px;line-height:1.5">${l.desc}</div>
+  const grid = document.getElementById('lembretes-grid');
+  if (!grid) return;
+
+  const items = STATE.lembretes || [];
+
+  if (!items.length) {
+    grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)">
+      <div style="font-size:36px;margin-bottom:12px">📝</div>
+      <div style="font-size:14px;font-weight:600">Nenhum lembrete ainda</div>
+      <div style="font-size:12px;margin-top:4px">Clique em "+ Novo Lembrete" para adicionar</div>
+    </div>`;
+    return;
+  }
+
+  const corBorda = { urgente:'var(--danger)', aviso:'var(--warning)', info:'var(--accent)', verde:'var(--success)' };
+
+  grid.innerHTML = items.map(l => `
+    <div class="lembrete-card ${l.tipo||'info'}" style="border-left:4px solid ${corBorda[l.tipo]||'var(--accent)'}">
+      <div style="font-size:13.5px;font-weight:700;color:var(--g900);margin-bottom:6px">${escapeHtml(l.titulo||'')}</div>
+      <div style="font-size:12.5px;color:var(--g600);margin-bottom:10px;line-height:1.5">${escapeHtml(l.desc||'')}</div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:11px;color:var(--g400)">${l.autor} · ${l.data}</span>
+        <span style="font-size:11px;color:var(--g400)">${escapeHtml(l.autor||'—')} · ${l.criadoEm ? new Date(l.criadoEm.seconds ? l.criadoEm.seconds*1000 : l.criadoEm).toLocaleDateString('pt-BR') : '—'}</span>
         <div class="flex gap-4">
-          <button class="btn btn-ghost btn-xs">✏️</button>
-          <button class="btn btn-ghost btn-xs">🗑️</button>
+          <button class="btn btn-ghost btn-xs" onclick="editarLembrete('${escapeHtml(l.id)}')">✏️</button>
+          <button class="btn btn-ghost btn-xs" onclick="excluirLembrete('${escapeHtml(l.id)}')" style="color:var(--danger)">🗑️</button>
         </div>
       </div>
     </div>`).join('');
+}
+
+// ── Listener Firestore para lembretes ─────────────────────────────────────
+(function _initLembretesListener() {
+  document.addEventListener('sysack-login', () => {
+    if (!FB_READY || !db || STATE._lembretesInit) return;
+    STATE._lembretesInit = true;
+    db.collection('lembretes')
+      .orderBy('criadoEm', 'desc')
+      .limit(50)
+      .onSnapshot(snap => {
+        STATE.lembretes = snap2arr(snap);
+        if (isPageActive('lembretes')) renderLembretes();
+      }, e => console.warn('[Lembretes]', e.message));
+  });
+})();
+
+// ── Abrir modal novo/editar ───────────────────────────────────────────────
+function abrirModalLembrete(id) {
+  const lem = id ? (STATE.lembretes||[]).find(l => l.id === id) : null;
+  const modal = document.getElementById('modal-novo-lembrete');
+  if (!modal) return;
+
+  document.getElementById('lem-id').value        = lem?.id    || '';
+  document.getElementById('lem-titulo').value    = lem?.titulo || '';
+  document.getElementById('lem-desc').value      = lem?.desc   || '';
+  document.getElementById('lem-tipo').value      = lem?.tipo   || 'info';
+  document.getElementById('lem-modal-title').textContent = lem ? '✏️ Editar Lembrete' : '📝 Novo Lembrete';
+
+  openModal('modal-novo-lembrete');
+  setTimeout(() => document.getElementById('lem-titulo')?.focus(), 100);
+}
+
+function editarLembrete(id) { abrirModalLembrete(id); }
+
+async function salvarLembrete() {
+  const id     = document.getElementById('lem-id')?.value?.trim();
+  const titulo = document.getElementById('lem-titulo')?.value?.trim();
+  const desc   = document.getElementById('lem-desc')?.value?.trim();
+  const tipo   = document.getElementById('lem-tipo')?.value || 'info';
+
+  if (!titulo) return showToast('Informe o título do lembrete', 'danger');
+  if (!desc)   return showToast('Informe o conteúdo do lembrete', 'danger');
+
+  const btn = document.querySelector('#modal-novo-lembrete .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Salvando...'; }
+
+  const dados = {
+    titulo,
+    desc,
+    tipo,
+    autor:      CURRENT_USER?.nome || CURRENT_USER?.uid || 'Sistema',
+    autorId:    CURRENT_USER?.uid  || '',
+  };
+
+  try {
+    if (FB_READY && db) {
+      if (id) {
+        await db.collection('lembretes').doc(id).update({ ...dados, atualizadoEm: new Date() });
+      } else {
+        dados.criadoEm = new Date();
+        await db.collection('lembretes').add(dados);
+      }
+    } else {
+      // Fallback local
+      if (!STATE.lembretes) STATE.lembretes = [];
+      if (id) {
+        const idx = STATE.lembretes.findIndex(l => l.id === id);
+        if (idx >= 0) Object.assign(STATE.lembretes[idx], dados);
+      } else {
+        STATE.lembretes.unshift({ ...dados, id: 'lem'+Date.now(), criadoEm: new Date() });
+      }
+      renderLembretes();
+    }
+
+    closeModal('modal-novo-lembrete');
+    showToast(id ? '✓ Lembrete atualizado' : '✓ Lembrete criado!', 'success');
+  } catch(e) {
+    showToast('Erro ao salvar: ' + e.message, 'danger');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar'; }
+  }
+}
+
+async function excluirLembrete(id) {
+  if (!confirm('Excluir este lembrete?')) return;
+  try {
+    if (FB_READY && db) {
+      await db.collection('lembretes').doc(id).delete();
+    } else {
+      STATE.lembretes = (STATE.lembretes||[]).filter(l => l.id !== id);
+      renderLembretes();
+    }
+    showToast('Lembrete excluído', 'success');
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
 }
 
 function renderPesquisas() {
@@ -3681,6 +4039,24 @@ async function salvarAtendimento() {
   const mudouLugar = document.querySelector('input[name="mudou-lugar"]:checked')?.value === 'sim';
   const destino    = document.getElementById('at-destino-antigo')?.value || '';
 
+  // ── Regra: nenhum chamado pode ser encerrado sem ativo vinculado ──────────
+  const ativosFinaisCheck = [...(ch.ativosVinculados || [])];
+  for (const av of ativosVinculadosTec) {
+    if (!ativosFinaisCheck.some(e => e.id === av.id)) ativosFinaisCheck.push(av);
+  }
+  // "Salvar Atendimento" não encerra, mas se o diagnóstico indica conclusão avisa
+  if (!ativosFinaisCheck.length) {
+    // Bloco vermelho no modal
+    const vincBox = document.getElementById('at-itens-existentes');
+    if (vincBox) {
+      vincBox.insertAdjacentHTML('afterend',
+        '<div id="at-alerta-ativo" style="color:var(--danger);font-size:12px;font-weight:600;margin-top:6px">' +
+        '⚠️ Vincule ao menos um ativo antes de salvar o atendimento.</div>');
+      setTimeout(() => document.getElementById('at-alerta-ativo')?.remove(), 4000);
+    }
+    return showToast('⚠️ Obrigatório: vincule ao menos um ativo ao chamado', 'danger', 5000);
+  }
+
   const agora = new Date();
   const update = {
     status:           mudouLugar ? 'aguardando-aprovacao' : 'em-atendimento',
@@ -4241,6 +4617,27 @@ function fmtDate(d) { if(!d) return '—'; const dt=d instanceof Date?d:new Date
 function getTecNome(id) { const t=STATE.tecnicos.find(t=>t.id===id); return t?t.nome:id||'—'; }
 function sv(id,v) { const el=document.getElementById(id); if(el) el.textContent=v; }
 function nbUpdate(id,count) { const el=document.getElementById(id); if(!el) return; el.textContent=count; el.style.display=count>0?'':'none'; }
+// ── Validação ao mudar status no painel lateral ──────────────────────────
+function onChStatusChange(sel) {
+  const STATUS_ENCERRAMENTO = ['solucionado', 'fechado', 'concluido'];
+  if (!STATUS_ENCERRAMENTO.includes(sel.value)) return; // mudança segura
+
+  // Verifica ativos vinculados no modal de chamado (se estiver aberto)
+  const itens = document.querySelectorAll('#ch-itens-vinculados [data-ativo-id]');
+  if (itens.length > 0) return; // tem ativo — ok
+
+  // Sem ativos: reverte e avisa
+  const opts = Array.from(sel.options);
+  const anterior = opts.find(o => !['solucionado','fechado','concluido'].includes(o.value));
+  if (anterior) sel.value = anterior.value;
+
+  showToast('⚠️ Para encerrar o chamado é obrigatório vincular ao menos um ativo', 'danger', 5000);
+  // Destaca seção de itens
+  document.getElementById('ch-patrimonio')?.scrollIntoView({ behavior:'smooth', block:'center' });
+  const inp = document.getElementById('ch-patrimonio');
+  if (inp) { inp.style.outline = '2px solid var(--danger)'; setTimeout(()=>inp.style.outline='', 3000); }
+}
+
 function statusBadge(s) { const m={'aberto':'<span class="badge badge-danger">Aberto</span>','em-atendimento':'<span class="badge badge-warning">Em Atendimento</span>','aguardando-aprovacao':'<span class="badge badge-orange">Aguard. Aprovação</span>','concluido':'<span class="badge badge-success">Concluído</span>'}; return m[s]||`<span class="badge badge-gray">${s}</span>`; }
 function statusAtivoHtml(s) { const m={'ativo':'sp-ativo','disponivel':'sp-disponivel','manut':'sp-manut','terceirizada':'sp-terceirizada','sc':'sp-sc','pendente':'sp-pendente'}; const l={'ativo':'Em Uso','disponivel':'Disponível','manut':'Manutenção','terceirizada':'Na Terceirizada','sc':'Santa Clara','pendente':'Pendente'}; return `<span class="status-pill ${m[s]||'sp-pendente'}">${l[s]||s}</span>`; }
 function aprovStatusBadge(s) { const m={'aprovado':'<span class="badge badge-success">✓ Aprovado</span>','pendente':'<span class="badge badge-warning">⏳ Pendente</span>','recusado':'<span class="badge badge-danger">✕ Recusado</span>'}; return m[s]||`<span class="badge badge-gray">${s}</span>`; }
@@ -6473,6 +6870,7 @@ function startAgentsListener() {
     // Usa SDK compat (igual ao resto do app)
     STATE_AGENTS.listener = db.collection('agents')
       .onSnapshot(snap => {
+        STATE_AGENTS._carregou = true;
         STATE_AGENTS.list = snap.docs.map(d => {
           const data = d.data();
           // Garante que campos numéricos não virem string
@@ -6501,6 +6899,7 @@ async function arPollAgentes() {
   if (!FB_READY || !db) return;
   try {
     const snap = await db.collection('agents').orderBy('lastSeen', 'desc').get();
+    STATE_AGENTS._carregou = true;
     STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
     nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
@@ -6581,10 +6980,14 @@ function renderAssistenciaRemota() {
   lista.sort((a,b) => (ORDER[a.status]??4) - (ORDER[b.status]??4));
 
   if (!lista.length) {
+    const carregando = !STATE_AGENTS._carregou;
     tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--g400)">
-      <div style="font-size:32px;margin-bottom:12px">🖥️</div>
-      <div style="font-weight:600;margin-bottom:6px">${agentes.length ? 'Nenhum agente com esses filtros' : 'Nenhum agente instalado'}</div>
-      ${!agentes.length ? '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="arInstalarAgente()">⬇️ Baixar Instalador</button>' : ''}
+      <div style="font-size:32px;margin-bottom:12px">${carregando ? '⏳' : '🖥️'}</div>
+      <div style="font-weight:600;margin-bottom:6px">
+        ${carregando ? 'Carregando agentes...' : (agentes.length ? 'Nenhum agente com esses filtros' : 'Nenhum agente instalado')}
+      </div>
+      ${carregando ? '<div style="font-size:12px;color:var(--g400);margin-top:4px">Conectando ao banco de dados...</div>' : ''}
+      ${!agentes.length && !carregando ? '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="arInstalarAgente()">⬇️ Baixar Instalador</button>' : ''}
     </td></tr>`;
     return;
   }
@@ -7659,6 +8062,41 @@ function initAgentsListener() {
   // Carrega tabela de redes CESAN do Banco e verifica IPs dos ativos
   carregarRedesCesan().then(() => setTimeout(verificarTodosIPs, 8000));
   if (FB_READY) startAgentsListener();
+}
+
+// Garante que os agentes estão carregados ao abrir a página
+// Chamado toda vez que a página de assistência remota é acessada
+let _arEnsureTimer = null;
+function _arEnsureLoaded() {
+  if (!FB_READY || !db) return;
+
+  // Se já carregou e tem dados, só re-renderiza
+  if (STATE_AGENTS._carregou) return;
+
+  // Listener não carregou ainda — faz poll imediato
+  clearTimeout(_arEnsureTimer);
+  _arEnsureTimer = setTimeout(async () => {
+    try {
+      console.log('[Agentes] Carregando via poll...');
+      const snap = await db.collection('agents').orderBy('lastSeen', 'desc').get();
+      STATE_AGENTS._carregou = true;
+      STATE_AGENTS.list = snap.docs.map(d => {
+        const data = d.data();
+        if (data.uptimeH != null) data.uptimeH = Number(data.uptimeH);
+        if (data.cpuPct  != null) data.cpuPct  = Number(data.cpuPct);
+        if (data.ramPct  != null) data.ramPct  = Number(data.ramPct);
+        if (data.memPct  != null) data.memPct  = Number(data.memPct);
+        return { id: d.id, ...data };
+      });
+      console.log('[Agentes] Carregados via poll:', STATE_AGENTS.list.length);
+      renderAssistenciaRemota();
+      nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
+    } catch(e) {
+      console.warn('[Agentes] poll erro:', e.message);
+      STATE_AGENTS._carregou = true; // evita loop infinito
+      renderAssistenciaRemota();
+    }
+  }, 300);
 }
 
 
@@ -11056,12 +11494,14 @@ function renderEmpregados() {
 function listenEmpregados() {
   if (!FB_READY || !db) return;
   // Escuta coleção empregados em tempo real
-  listen('empregados', [orderBy('nome', 'asc'), limit(500)], (empregados) => {
+  listen('empregados', [orderBy('nome', 'asc'), limit(2500)], (empregados) => {
     STATE.empregados = empregados;
     STATE.empregadosSyncAt = empregados[0]?.syncAt ? new Date(empregados[0].syncAt) : null;
     if (isPageActive('empregados')) renderEmpregados();
-    // Atualiza badge
+    // Atualiza badge de ausentes
     nbUpdate('nb-ausentes', empregados.filter(e => e.emAusencia).length);
+    // Reavalia alertas offline suprimidos quando situação de empregados muda
+    if (STATE._alertasOfflineInit) _reavaliarSupressaoAlertas(empregados);
   }, 'empregados_listener');
 }
 
@@ -11104,29 +11544,461 @@ const APPS_DATA = [
   { nome:'Advanced IP Scanner', versao:'2.5', fabricante:'Famatech', licenca:'Gratuito', resp:'TI', status:'ativo' },
 ];
 
+// ════════════════════════════════════════════════════════════════════════
+// INVENTÁRIO DE SOFTWARE — módulo completo
+// Fonte: agents/{id}.inventario (JSON) — campo software[]
+// Estrutura software: { nome, versao, fabricante, Publisher, DisplayName, DisplayVersion }
+// ════════════════════════════════════════════════════════════════════════
+
+// Cache consolidado: { nomeNorm → { nome, fabricante, versoes:[], maquinas:[{id,hostname,pat,versao,area}] } }
+let _swInvIndex   = null;   // índice por software
+let _swInvMaqList = null;   // lista de máquinas com metadados
+let _swInvSyncAt  = null;
+
+// ── Chamado quando a página abre ─────────────────────────────────────────
 function renderApps() {
-  const q = (document.getElementById('apps-search-input')?.value||'').toLowerCase();
-  const list = APPS_DATA.filter(a => !q || a.nome.toLowerCase().includes(q) || a.fabricante.toLowerCase().includes(q));
-  const tbody = document.getElementById('apps-body');
+  _swInvConstruirIndice();
+  renderSwInvPorSoftware();
+  renderSwInvPorMaquina();
+  _swInvAtualizarKPIs();
+  _swInvPopularFabricante();
+}
+
+// ── Constrói índice a partir dos agentes ─────────────────────────────────
+function _swInvConstruirIndice() {
+  const agentes = STATE_AGENTS?.list || [];
+
+  // Tipos de máquina que interessam
+  const TIPOS_MAQUINA = ['computador','notebook','servidor','desktop','laptop','server','workstation'];
+
+  const index = {};   // software normalizado → dados
+  const maqList = [];
+
+  for (const ag of agentes) {
+    // Filtra só computadores/notebooks/servidores (não impressoras, switches, etc.)
+    const tipo = (ag.tipo || ag.deviceType || '').toLowerCase();
+    const deveIncluir = !tipo || TIPOS_MAQUINA.some(t => tipo.includes(t)) || ag.os || ag.so;
+    if (!deveIncluir) continue;
+
+    // Extrai softwares do campo inventario
+    let softwares = [];
+    if (ag.inventario) {
+      try {
+        const inv = typeof ag.inventario === 'string' ? JSON.parse(ag.inventario) : ag.inventario;
+        softwares = inv.software || inv.softwares || [];
+      } catch {}
+    }
+    // Também tenta campo direto
+    if (!softwares.length && Array.isArray(ag.software)) softwares = ag.software;
+    if (!softwares.length && Array.isArray(ag.softwares)) softwares = ag.softwares;
+
+    // Ativo vinculado (para pegar PAT e área)
+    const ativoVinc = (STATE.ativos || []).find(a =>
+      a.hostname === ag.hostname || a.pat === ag.pat
+    );
+
+    const maqInfo = {
+      id:          ag.id,
+      hostname:    ag.hostname   || ag.id,
+      pat:         ag.pat        || ativoVinc?.pat   || '—',
+      area:        ag.area       || ag.empSetor      || ativoVinc?.area || '—',
+      empNome:     ag.empNome    || ativoVinc?.resp   || '',
+      status:      ag.status     || 'offline',
+      lastSeen:    ag.lastSeen,
+      qtdSoftwares: softwares.length,
+      temInventario: softwares.length > 0,
+    };
+    maqList.push(maqInfo);
+
+    for (const sw of softwares) {
+      const nome = (sw.nome || sw.DisplayName || sw.name || '').trim();
+      const versao = (sw.versao || sw.DisplayVersion || sw.version || '').trim();
+      const fab    = (sw.fabricante || sw.Publisher || sw.publisher || '').trim();
+      if (!nome) continue;
+
+      const chave = nome.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!index[chave]) {
+        index[chave] = { nome, fabricante: fab, versoes: new Set(), maquinas: [] };
+      }
+      if (versao) index[chave].versoes.add(versao);
+      if (fab && !index[chave].fabricante) index[chave].fabricante = fab;
+      index[chave].maquinas.push({ ...maqInfo, versao });
+    }
+  }
+
+  // Converte Set para Array
+  for (const k of Object.keys(index)) {
+    index[k].versoes = [...index[k].versoes].sort().reverse();
+  }
+
+  _swInvIndex   = index;
+  _swInvMaqList = maqList;
+  _swInvSyncAt  = new Date();
+}
+
+// ── KPIs ─────────────────────────────────────────────────────────────────
+function _swInvAtualizarKPIs() {
+  if (!_swInvIndex) return;
+  const totalSw  = Object.keys(_swInvIndex).length;
+  const maqComInv = (_swInvMaqList||[]).filter(m => m.temInventario).length;
+  const semInv    = (_swInvMaqList||[]).filter(m => !m.temInventario).length;
+  sv('swinv-total-sw',        totalSw.toLocaleString('pt-BR'));
+  sv('swinv-total-maq',       maqComInv);
+  sv('swinv-sem-inventario',  semInv);
+  sv('swinv-ultima-sync',     _swInvSyncAt ? _swInvSyncAt.toLocaleTimeString('pt-BR') : '—');
+}
+
+function _swInvPopularFabricante() {
+  const sel = document.getElementById('swinv-filtro-fab');
+  if (!sel || !_swInvIndex) return;
+  const fabs = [...new Set(Object.values(_swInvIndex).map(s => s.fabricante).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Todos os fabricantes</option>' +
+    fabs.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
+}
+
+// ── Abas ──────────────────────────────────────────────────────────────────
+function swInvTab(tab) {
+  ['softwares','maquinas'].forEach(t => {
+    const el = document.getElementById(`swinv-view-${t === 'softwares' ? 'sw' : 'maq'}`);
+    const bt = document.getElementById(`swinv-tab-${t === 'softwares' ? 'sw' : 'maq'}`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+    if (bt) bt.classList.toggle('active', t === tab);
+  });
+}
+
+// ── ABA 1: Por Software ───────────────────────────────────────────────────
+function renderSwInvPorSoftware() {
+  if (!_swInvIndex) { _swInvConstruirIndice(); }
+  const tbody = document.getElementById('swinv-sw-body');
   if (!tbody) return;
-  tbody.innerHTML = list.slice(0,5).map(a => `
-    <tr>
-      <td><input type="checkbox" style="accent-color:var(--accent)"></td>
-      <td style="font-weight:600;color:var(--accent);cursor:pointer">${a.nome}</td>
-      <td class="td-mono" style="font-size:10.5px">${a.versao}</td>
-      <td style="font-size:12.5px">${a.fabricante}</td>
-      <td><span class="tag">${a.licenca}</span></td>
-      <td style="font-size:12.5px">${a.resp}</td>
-      <td><span class="status-pill sp-ativo">Ativo</span></td>
-      <td><div class="flex gap-4">
-        <button class="btn btn-ghost btn-xs">✏️</button>
-        <button class="btn btn-ghost btn-xs">📋</button>
-      </div></td>
-    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">Nenhuma aplicação encontrada</td></tr>';
-  const label = document.getElementById('apps-count-label');
-  if (label) label.textContent = `Exibindo 1 a ${Math.min(list.length,5)} de ${list.length} linhas`;
-  const plabel = document.getElementById('apps-pagination-label');
-  if (plabel) plabel.textContent = `Exibindo 1 a ${Math.min(list.length,5)} de ${list.length} linhas`;
+
+  const q   = (document.getElementById('swinv-busca-sw')?.value || '').toLowerCase();
+  const fab = document.getElementById('swinv-filtro-fab')?.value || '';
+
+  let lista = Object.values(_swInvIndex || {});
+  if (q)   lista = lista.filter(s => s.nome.toLowerCase().includes(q) || (s.fabricante||'').toLowerCase().includes(q));
+  if (fab) lista = lista.filter(s => s.fabricante === fab);
+  lista.sort((a, b) => b.maquinas.length - a.maquinas.length || a.nome.localeCompare(b.nome));
+
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--g400)">Nenhum software encontrado</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = lista.slice(0, 200).map(sw => {
+    const maqPreview = sw.maquinas.slice(0, 4).map(m =>
+      `<span style="font-size:10.5px;background:var(--accent-l);color:var(--accent);
+              border-radius:4px;padding:2px 6px;cursor:pointer"
+             onclick="swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')"
+             title="${escapeHtml(m.hostname)} — ${escapeHtml(m.area)}">${escapeHtml(m.hostname)}</span>`
+    ).join('');
+    const extra = sw.maquinas.length > 4
+      ? `<span style="font-size:11px;color:var(--g400)">+${sw.maquinas.length-4} mais</span>` : '';
+
+    return `<tr style="cursor:pointer" onclick="swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')"
+                onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <td style="font-weight:600;color:var(--accent)">${escapeHtml(sw.nome)}</td>
+      <td style="font-size:12px;color:var(--g500)">${escapeHtml(sw.fabricante||'—')}</td>
+      <td class="td-mono" style="font-size:11.5px">${escapeHtml(sw.versoes[0]||'—')}</td>
+      <td style="text-align:center">
+        <span style="font-weight:700;font-size:14px;color:var(--accent)">${sw.maquinas.length}</span>
+      </td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${maqPreview}${extra}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Modal: máquinas com determinado software ──────────────────────────────
+function swInvVerMaquinasSoftware(nomeSw) {
+  if (!_swInvIndex) return;
+  const chave = nomeSw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sw = _swInvIndex[chave];
+  if (!sw) return;
+
+  const maqUnicas = [];
+  const visto = new Set();
+  for (const m of sw.maquinas) {
+    if (!visto.has(m.id)) { visto.add(m.id); maqUnicas.push(m); }
+  }
+
+  const html = `
+  <div class="modal-overlay active" id="modal-swinv-maq" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:680px">
+      <div class="modal-header">
+        <div>
+          <h3 style="margin-bottom:2px">${escapeHtml(nomeSw)}</h3>
+          <div style="font-size:12px;color:var(--g400)">${escapeHtml(sw.fabricante||'')}
+            ${sw.versoes.length ? ' · ' + sw.versoes.slice(0,3).map(escapeHtml).join(', ') : ''}
+          </div>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-swinv-maq').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:12.5px;color:var(--g600);margin-bottom:14px">
+          Instalado em <strong>${maqUnicas.length} máquina${maqUnicas.length!==1?'s':''}</strong>
+        </div>
+        <input class="form-control" placeholder="Filtrar máquinas..." style="margin-bottom:12px"
+               oninput="swInvFiltrarModal(this.value,'modal-swinv-maq-list')">
+        <div id="modal-swinv-maq-list" style="max-height:420px;overflow-y:auto">
+          ${maqUnicas.map(m => `
+          <div onclick="swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')"
+               style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;
+                      border-bottom:1px solid var(--g100);border-radius:8px"
+               onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+            <div style="width:36px;height:36px;border-radius:8px;background:${m.status==='online'?'#DCFCE7':'#F1F5F9'};
+                        display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+              ${m.status === 'online' ? '🟢' : '⚫'}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:700;font-size:13px">${escapeHtml(m.hostname)}</div>
+              <div style="font-size:11.5px;color:var(--g400)">
+                ${m.pat !== '—' ? `PAT: ${escapeHtml(m.pat)} · ` : ''}
+                ${escapeHtml(m.area)}
+                ${m.empNome ? ' · ' + escapeHtml(m.empNome) : ''}
+              </div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-size:11.5px;font-family:monospace;color:var(--g600)">${escapeHtml(m.versao||'—')}</div>
+              <div style="font-size:10.5px;color:var(--g400)">ver. instalada</div>
+            </div>
+            <span style="font-size:11px;color:var(--accent)">→ ver softwares</span>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-swinv-maq').remove()">Fechar</button>
+        <button class="btn btn-secondary btn-sm" onclick="swInvExportarCSV('${escapeHtml(nomeSw)}')">⬇ Exportar CSV</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('modal-swinv-maq')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ── ABA 2: Por Máquina ────────────────────────────────────────────────────
+function renderSwInvPorMaquina() {
+  if (!_swInvMaqList) { _swInvConstruirIndice(); }
+  const tbody = document.getElementById('swinv-maq-body');
+  if (!tbody) return;
+
+  const q      = (document.getElementById('swinv-busca-maq')?.value || '').toLowerCase();
+  const filtro = document.getElementById('swinv-filtro-status-maq')?.value || '';
+
+  let lista = _swInvMaqList || [];
+  if (q) lista = lista.filter(m =>
+    m.hostname.toLowerCase().includes(q) ||
+    m.pat.toLowerCase().includes(q) ||
+    m.area.toLowerCase().includes(q) ||
+    (m.empNome||'').toLowerCase().includes(q)
+  );
+  if (filtro === 'online')   lista = lista.filter(m => m.status === 'online');
+  if (filtro === 'offline')  lista = lista.filter(m => m.status !== 'online');
+  if (filtro === 'sem-inv')  lista = lista.filter(m => !m.temInventario);
+
+  lista.sort((a, b) => b.qtdSoftwares - a.qtdSoftwares);
+
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma máquina encontrada</td></tr>';
+    return;
+  }
+
+  const fmtLastSeen = ls => {
+    if (!ls) return '—';
+    const d = new Date(ls?.seconds ? ls.seconds*1000 : ls);
+    return isNaN(d) ? '—' : d.toLocaleDateString('pt-BR');
+  };
+
+  tbody.innerHTML = lista.map(m => `
+    <tr onclick="swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')" style="cursor:pointer"
+        onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <td>
+        <div style="font-weight:700;font-size:13px">${escapeHtml(m.hostname)}</div>
+        ${m.pat !== '—' ? `<div style="font-size:10.5px;color:var(--g400)">PAT: ${escapeHtml(m.pat)}</div>` : ''}
+        ${m.empNome ? `<div style="font-size:10.5px;color:var(--g500)">👤 ${escapeHtml(m.empNome)}</div>` : ''}
+      </td>
+      <td style="font-size:12px">${escapeHtml(m.area)}</td>
+      <td>${m.status === 'online'
+        ? '<span class="badge badge-success">Online</span>'
+        : '<span class="badge">Offline</span>'}</td>
+      <td style="text-align:center">
+        ${m.temInventario
+          ? `<span style="font-weight:700;font-size:14px;color:var(--accent)">${m.qtdSoftwares}</span>`
+          : '<span style="color:var(--g400);font-size:12px;font-style:italic">sem dados</span>'}
+      </td>
+      <td style="font-size:11.5px;color:var(--g400)">${fmtLastSeen(m.lastSeen)}</td>
+      <td>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')">
+          🗂️ Ver softwares
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+// ── Modal: softwares de uma máquina ──────────────────────────────────────
+function swInvVerSoftwaresMaquina(agentId) {
+  const ag = (STATE_AGENTS?.list || []).find(a => a.id === agentId);
+  if (!ag) return showToast('Agente não encontrado', 'warning');
+
+  let softwares = [];
+  if (ag.inventario) {
+    try {
+      const inv = typeof ag.inventario === 'string' ? JSON.parse(ag.inventario) : ag.inventario;
+      softwares = inv.software || inv.softwares || [];
+    } catch {}
+  }
+  if (!softwares.length && Array.isArray(ag.software))   softwares = ag.software;
+  if (!softwares.length && Array.isArray(ag.softwares))  softwares = ag.softwares;
+
+  softwares = softwares.map(s => ({
+    nome:      s.nome || s.DisplayName || s.name || '',
+    versao:    s.versao || s.DisplayVersion || s.version || '',
+    fabricante:s.fabricante || s.Publisher || s.publisher || '',
+  })).filter(s => s.nome).sort((a,b) => a.nome.localeCompare(b.nome));
+
+  const html = `
+  <div class="modal-overlay active" id="modal-swinv-maqsw" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:700px">
+      <div class="modal-header">
+        <div>
+          <h3 style="margin-bottom:2px">🖥️ ${escapeHtml(ag.hostname||agentId)}</h3>
+          <div style="font-size:12px;color:var(--g400)">
+            ${ag.pat ? 'PAT: '+escapeHtml(ag.pat)+' · ' : ''}
+            ${ag.empNome || ''} · ${ag.area || '—'}
+            · <strong style="color:${softwares.length?'var(--accent)':'var(--g400)'}">${softwares.length} softwares instalados</strong>
+          </div>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-swinv-maqsw').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        ${softwares.length === 0 ? `
+          <div style="text-align:center;padding:32px;color:var(--g400)">
+            <div style="font-size:32px;margin-bottom:8px">📭</div>
+            <div style="font-size:14px;font-weight:600">Inventário não disponível</div>
+            <div style="font-size:12px;margin-top:4px">O agente ainda não enviou dados de software. Solicite um inventário.</div>
+            <button class="btn btn-primary btn-sm" style="margin-top:14px"
+                    onclick="swInvSolicitarInventario('${escapeHtml(agentId)}')">
+              📋 Solicitar inventário agora
+            </button>
+          </div>` : `
+          <input class="form-control" placeholder="🔍 Filtrar softwares..." style="margin-bottom:12px"
+                 oninput="swInvFiltrarModal(this.value,'modal-swinv-maqsw-list')">
+          <div style="font-size:11px;color:var(--g400);margin-bottom:8px">
+            Clique em um software para ver em quais outras máquinas está instalado
+          </div>
+          <div id="modal-swinv-maqsw-list" style="max-height:460px;overflow-y:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr style="background:var(--g50)">
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase">Software</th>
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase">Versão</th>
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase">Fabricante</th>
+                  <th style="padding:8px 12px;text-align:center;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase"># Máquinas</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${softwares.map(sw => {
+                  const chave = sw.nome.toLowerCase().replace(/[^a-z0-9]/g,'');
+                  const qtd   = _swInvIndex?.[chave]?.maquinas?.length || 1;
+                  return `<tr onclick="document.getElementById('modal-swinv-maqsw').remove();swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')"
+                               style="cursor:pointer;border-bottom:1px solid var(--g100)"
+                               onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+                    <td style="padding:8px 12px;font-size:12.5px;font-weight:600;color:var(--accent)">${escapeHtml(sw.nome)}</td>
+                    <td style="padding:8px 12px;font-size:11.5px;font-family:monospace;color:var(--g600)">${escapeHtml(sw.versao||'—')}</td>
+                    <td style="padding:8px 12px;font-size:11.5px;color:var(--g500)">${escapeHtml(sw.fabricante||'—')}</td>
+                    <td style="padding:8px 12px;text-align:center;font-size:12px;font-weight:700;color:var(--g700)">${qtd}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>`}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-swinv-maqsw').remove()">Fechar</button>
+        ${softwares.length ? `<button class="btn btn-secondary btn-sm" onclick="swInvExportarMaqCSV('${escapeHtml(agentId)}')">⬇ Exportar CSV</button>` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="swInvSolicitarInventario('${escapeHtml(agentId)}')">🔄 Atualizar inventário</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('modal-swinv-maqsw')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ── Filtro inline nos modais ───────────────────────────────────────────────
+function swInvFiltrarModal(q, listId) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+  const qL = q.toLowerCase();
+  list.querySelectorAll('tr:not(thead tr), div[onclick]').forEach(el => {
+    const txt = el.textContent.toLowerCase();
+    el.style.display = !qL || txt.includes(qL) ? '' : 'none';
+  });
+}
+
+// ── Solicitar inventário via comando ao agente ────────────────────────────
+async function swInvSolicitarInventario(agentId) {
+  try {
+    if (FB_READY && db) {
+      await db.collection('agent_commands').add({
+        agentId, tipo: 'inventory',
+        criadoEm: new Date(),
+        status:   'pending',
+      });
+    }
+    showToast('✓ Inventário solicitado — o agente coletará os dados na próxima conexão', 'success', 5000);
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
+}
+
+// ── Sincronizar: força reload dos agentes e reconstrói índice ─────────────
+async function swInvSincronizar() {
+  showToast('🔄 Sincronizando agentes...', 'info', 3000);
+  _swInvIndex   = null;
+  _swInvMaqList = null;
+  // Recarrega agentes do Firestore
+  try {
+    if (FB_READY && db) {
+      const snap = await db.collection('agents').orderBy('lastSeen','desc').get();
+      STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch {}
+  renderApps();
+  showToast('✓ Inventário atualizado', 'success');
+}
+
+// ── Exportar CSV ──────────────────────────────────────────────────────────
+function swInvExportarCSV(nomeSw) {
+  const chave = nomeSw.toLowerCase().replace(/[^a-z0-9]/g,'');
+  const sw    = _swInvIndex?.[chave];
+  if (!sw) return;
+  const rows = [['Hostname','PAT','Área','Responsável','Versão','Status']];
+  const visto = new Set();
+  for (const m of sw.maquinas) {
+    if (visto.has(m.id)) continue;
+    visto.add(m.id);
+    rows.push([m.hostname, m.pat, m.area, m.empNome, m.versao, m.status]);
+  }
+  const csv = rows.map(r => r.map(c => `"${(c||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `software_${nomeSw.replace(/[^a-z0-9]/gi,'_')}.csv`;
+  a.click();
+}
+
+function swInvExportarMaqCSV(agentId) {
+  const ag = (STATE_AGENTS?.list||[]).find(a => a.id === agentId);
+  if (!ag) return;
+  let softwares = [];
+  if (ag.inventario) { try { const inv = JSON.parse(ag.inventario); softwares = inv.software||[]; } catch {} }
+  const rows = [['Software','Versão','Fabricante']];
+  softwares.forEach(sw => rows.push([sw.nome||sw.DisplayName||'', sw.versao||sw.DisplayVersion||'', sw.fabricante||sw.Publisher||'']));
+  const csv = rows.map(r => r.map(c => `"${(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `softwares_${ag.hostname||agentId}.csv`;
+  a.click();
 }
 
 // ============================================================
@@ -24168,4 +25040,1186 @@ function tcVerRelatorioFatura(id) {
     }
   });
 })();
+
+
+// ════════════════════════════════════════════════════════════════════════
+// ALERTAS DE MÁQUINAS DESLIGADAS — Regras de negócio:
+// • Máquina offline > 5 dias consecutivos → alerta para TI
+// • Alerta se repete a cada 5 dias enquanto não houver justificativa
+// • Se responsável estiver em ausência (férias/licença) → alerta suprimido
+// • Técnico pode inserir justificativa para suprimir até próxima verificação
+// Coleção Firestore: alertas_maquina_offline
+// ════════════════════════════════════════════════════════════════════════
+
+const ALERTA_OFFLINE_DIAS      = 5;   // dias offline para disparar 1º alerta
+const ALERTA_OFFLINE_CICLO     = 5;   // dias entre alertas recorrentes
+const ALERTA_OFFLINE_COLECAO   = 'alertas_maquina_offline';
+
+// ── Inicializa listener de alertas ────────────────────────────────────────
+function initAlertasMaquinaOffline() {
+  if (!FB_READY || !db || STATE._alertasOfflineInit) return;
+  STATE._alertasOfflineInit = true;
+
+  db.collection(ALERTA_OFFLINE_COLECAO)
+    .where('status', 'in', ['ativo', 'suprimido'])
+    .orderBy('criadoEm', 'desc')
+    .onSnapshot(snap => {
+      STATE.alertasOffline = snap2arr(snap);
+      _renderAlertasOfflineBadge();
+    }, e => console.warn('[AlertasOffline]', e.message));
+}
+
+document.addEventListener('sysack-login', () => {
+  setTimeout(initAlertasMaquinaOffline, 4000);
+  // Verifica máquinas offline periodicamente (a cada 30min enquanto app aberto)
+  setTimeout(_verificarMaquinasOffline, 10000);
+  setInterval(_verificarMaquinasOffline, 30 * 60 * 1000);
+});
+
+// ── Verificação principal ─────────────────────────────────────────────────
+async function _verificarMaquinasOffline() {
+  if (!FB_READY || !db) return;
+
+  const agora     = Date.now();
+  const limiteMs  = ALERTA_OFFLINE_DIAS * 24 * 60 * 60 * 1000;
+  const cicloMs   = ALERTA_OFFLINE_CICLO * 24 * 60 * 60 * 1000;
+  const agentes   = STATE_AGENTS?.list || [];
+  const empregados = STATE.empregados  || [];
+
+  // Carrega alertas ativos existentes
+  let alertasExistentes = {};
+  try {
+    const snap = await db.collection(ALERTA_OFFLINE_COLECAO)
+      .where('status', 'in', ['ativo', 'suprimido']).get();
+    snap.docs.forEach(d => { alertasExistentes[d.data().agentId] = { id: d.id, ...d.data() }; });
+  } catch(e) { console.warn('[AlertasOffline] load:', e.message); return; }
+
+  const batch = [];
+
+  for (const ag of agentes) {
+    if (!ag.lastSeen) continue;
+
+    const lastSeenMs  = ag.lastSeen?.seconds ? ag.lastSeen.seconds * 1000
+                        : new Date(ag.lastSeen).getTime();
+    const offlineMs   = agora - lastSeenMs;
+
+    // Ainda está online ou offline recente — limpa alerta se existia
+    if (offlineMs < limiteMs) {
+      const existente = alertasExistentes[ag.id];
+      if (existente && existente.status === 'ativo') {
+        batch.push(
+          db.collection(ALERTA_OFFLINE_COLECAO).doc(existente.id)
+            .update({ status: 'resolvido', resolvidoEm: new Date(),
+                      obs: 'Máquina voltou a ficar online automaticamente.' })
+        );
+        console.log(`[AlertasOffline] ✓ ${ag.hostname} voltou online — alerta encerrado`);
+      }
+      continue;
+    }
+
+    // Busca empregado responsável pela máquina
+    // Tenta várias chaves: login do agente, matrícula, e-mail
+    // Também tenta via ativo vinculado (campo resp = login do responsável)
+    const ativoVinculado = (STATE.ativos || []).find(a =>
+      a.pat === ag.pat || a.hostname === ag.hostname
+    );
+    const respLogin = ag.empLogin || ativoVinculado?.resp || '';
+    const respMat   = ag.empMat   || '';
+
+    const emp = empregados.find(e =>
+      (respLogin && e.login === respLogin)       ||
+      (respMat   && e.mat   === respMat)         ||
+      (ag.empEmail && e.email === ag.empEmail)
+    );
+
+    // Suprime se empregado estiver em qualquer tipo de ausência
+    const responsavelAusente = emp?.emAusencia === true;
+
+    const existente = alertasExistentes[ag.id];
+
+    if (!existente) {
+      // Primeiro alerta
+      const novoAlerta = {
+        agentId:           ag.id,
+        hostname:          ag.hostname  || ag.id,
+        empNome:           ag.empNome   || emp?.nome  || '—',
+        empMat:            ag.empMat    || emp?.mat   || '',
+        empLogin:          ag.empLogin  || '',
+        area:              ag.area      || ag.empSetor || emp?.setor || emp?.lotacao || '',
+        pat:               ag.pat       || '',
+        offlineDias:       Math.floor(offlineMs / (24*60*60*1000)),
+        lastSeen:          new Date(lastSeenMs),
+        status:            responsavelAusente ? 'suprimido' : 'ativo',
+        suprimidoMotivo:   responsavelAusente ? `Responsável em ausência: ${emp?.ausencia || 'ausência'}` : '',
+        criadoEm:          new Date(),
+        ultimoAlertaEm:    responsavelAusente ? null : new Date(),
+        ciclosEnviados:    responsavelAusente ? 0 : 1,
+        justificativa:     '',
+        justificativaEm:   null,
+        justificativaPor:  '',
+      };
+      batch.push(db.collection(ALERTA_OFFLINE_COLECAO).add(novoAlerta));
+      if (!responsavelAusente) {
+        console.log(`[AlertasOffline] ⚠ Novo alerta: ${ag.hostname} — ${Math.floor(offlineMs/86400000)} dias offline`);
+        _notificarAlertaOffline(novoAlerta);
+      }
+
+    } else {
+      // Alerta já existe
+      const updates = { offlineDias: Math.floor(offlineMs / (24*60*60*1000)) };
+
+      if (responsavelAusente && existente.status === 'ativo') {
+        // Suprimir — responsável entrou em ausência
+        updates.status         = 'suprimido';
+        updates.suprimidoMotivo = `Responsável em ausência: ${emp?.ausencia || 'ausência'}`;
+        batch.push(db.collection(ALERTA_OFFLINE_COLECAO).doc(existente.id).update(updates));
+
+      } else if (!responsavelAusente && existente.status === 'suprimido' && !existente.justificativa) {
+        // Reativar — responsável voltou
+        updates.status         = 'ativo';
+        updates.suprimidoMotivo = '';
+        updates.ultimoAlertaEm = new Date();
+        updates.ciclosEnviados = (existente.ciclosEnviados || 0) + 1;
+        batch.push(db.collection(ALERTA_OFFLINE_COLECAO).doc(existente.id).update(updates));
+        _notificarAlertaOffline({ ...existente, ...updates });
+
+      } else if (existente.status === 'ativo' && !existente.justificativa) {
+        // Verifica se é hora de enviar alerta recorrente
+        const ultimoEnvioMs = existente.ultimoAlertaEm?.seconds
+          ? existente.ultimoAlertaEm.seconds * 1000
+          : existente.ultimoAlertaEm ? new Date(existente.ultimoAlertaEm).getTime() : 0;
+
+        if (agora - ultimoEnvioMs >= cicloMs) {
+          updates.ultimoAlertaEm = new Date();
+          updates.ciclosEnviados = (existente.ciclosEnviados || 0) + 1;
+          batch.push(db.collection(ALERTA_OFFLINE_COLECAO).doc(existente.id).update(updates));
+          _notificarAlertaOffline({ ...existente, ...updates });
+          console.log(`[AlertasOffline] 🔁 Ciclo ${updates.ciclosEnviados}: ${existente.hostname}`);
+        } else {
+          // Só atualiza dias offline
+          batch.push(db.collection(ALERTA_OFFLINE_COLECAO).doc(existente.id).update(updates));
+        }
+      }
+    }
+  }
+
+  if (batch.length) await Promise.allSettled(batch);
+}
+
+// ── Notificação (toast + e-mail) ──────────────────────────────────────────
+function _notificarAlertaOffline(alerta) {
+  const dias = alerta.offlineDias || ALERTA_OFFLINE_DIAS;
+  const ciclo = alerta.ciclosEnviados > 1 ? ` (${alerta.ciclosEnviados}º aviso)` : '';
+  showToast(
+    `⚠️ ${alerta.hostname} desligada há ${dias} dias${ciclo} — ${alerta.empNome}`,
+    'warning', 8000
+  );
+
+  // Envia e-mail via fila
+  if (FB_READY && db) {
+    const assunto = `[SYSACK] Máquina offline: ${alerta.hostname} — ${dias} dias${ciclo}`;
+    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#F1F5F9;padding:20px">
+<div style="background:#fff;border-radius:12px;max-width:600px;margin:0 auto;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08)">
+  <div style="background:#D97706;color:#fff;padding:20px 28px">
+    <h1 style="margin:0;font-size:18px">⚠️ Máquina Offline — SYSACK</h1>
+    <p style="margin:4px 0 0;font-size:12px;opacity:.85">${ciclo ? 'Aviso recorrente' : 'Primeiro aviso'}</p>
+  </div>
+  <div style="padding:24px 28px">
+    <p>A máquina abaixo está <strong>desligada há ${dias} dias consecutivos</strong>${ciclo}.</p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0">
+      <tr><th style="text-align:left;padding:8px 12px;background:#F8FAFC;font-size:11px;text-transform:uppercase;color:#64748B">Máquina</th><td style="padding:8px 12px;font-weight:700">${alerta.hostname}</td></tr>
+      <tr><th style="text-align:left;padding:8px 12px;background:#F8FAFC;font-size:11px;text-transform:uppercase;color:#64748B">Patrimônio</th><td style="padding:8px 12px">${alerta.pat || '—'}</td></tr>
+      <tr><th style="text-align:left;padding:8px 12px;background:#F8FAFC;font-size:11px;text-transform:uppercase;color:#64748B">Responsável</th><td style="padding:8px 12px">${alerta.empNome}</td></tr>
+      <tr><th style="text-align:left;padding:8px 12px;background:#F8FAFC;font-size:11px;text-transform:uppercase;color:#64748B">Área</th><td style="padding:8px 12px">${alerta.area || '—'}</td></tr>
+      <tr><th style="text-align:left;padding:8px 12px;background:#F8FAFC;font-size:11px;text-transform:uppercase;color:#64748B">Último online</th><td style="padding:8px 12px">${alerta.lastSeen ? new Date(alerta.lastSeen?.seconds ? alerta.lastSeen.seconds*1000 : alerta.lastSeen).toLocaleString('pt-BR') : '—'}</td></tr>
+    </table>
+    <p style="font-size:13px;color:#64748B">Acesse o SYSACK para verificar a situação e inserir uma justificativa caso necessário.</p>
+    <a href="https://sysack.vercel.app/" style="display:inline-block;background:#D97706;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;margin-top:8px">Ver no SYSACK →</a>
+  </div>
+</div></body></html>`;
+
+    db.collection('emails_pendentes').add({
+      para:      CURRENT_USER?.email || 'ti@cesan.com.br',
+      assunto,
+      htmlBody:  html,
+      criadoEm:  new Date(),
+      enviado:   false,
+      tipo:      'alerta-offline',
+      agentId:   alerta.agentId || alerta.id || '',
+    }).catch(() => {});
+  }
+}
+
+// ── Reavalia supressão quando lista de empregados muda ───────────────────
+// Chamado sempre que o STATE.empregados é atualizado pelo listener
+async function _reavaliarSupressaoAlertas(empregados) {
+  const alertas = STATE.alertasOffline || [];
+  if (!alertas.length || !FB_READY || !db) return;
+
+  const ativos    = alertas.filter(a => a.status === 'ativo');
+  const suprimidos = alertas.filter(a => a.status === 'suprimido');
+  const batch = [];
+
+  // Ativos: verifica se o responsável entrou em ausência → suprimir
+  for (const al of ativos) {
+    const emp = empregados.find(e =>
+      (al.empLogin && e.login === al.empLogin) ||
+      (al.empMat   && e.mat   === al.empMat)
+    );
+    if (emp?.emAusencia) {
+      batch.push(
+        db.collection(ALERTA_OFFLINE_COLECAO).doc(al.id).update({
+          status:          'suprimido',
+          suprimidoMotivo: `Responsável em ${emp.ausencia || 'ausência'} — alertas suspensos automaticamente`,
+          suprimidoEm:     new Date(),
+        })
+      );
+      console.log(`[AlertasOffline] ⏸ ${al.hostname} suprimido — ${emp.nome} em ${emp.ausencia||'ausência'}`);
+    }
+  }
+
+  // Suprimidos: verifica se o responsável voltou → reativar
+  for (const al of suprimidos) {
+    if (al.justificativa) continue; // suprimido por justificativa manual — não reativa automático
+    const emp = empregados.find(e =>
+      (al.empLogin && e.login === al.empLogin) ||
+      (al.empMat   && e.mat   === al.empMat)
+    );
+    if (emp && !emp.emAusencia) {
+      batch.push(
+        db.collection(ALERTA_OFFLINE_COLECAO).doc(al.id).update({
+          status:          'ativo',
+          suprimidoMotivo: '',
+          reativadoEm:     new Date(),
+          ultimoAlertaEm:  new Date(),
+          ciclosEnviados:  (al.ciclosEnviados || 0) + 1,
+        })
+      );
+      console.log(`[AlertasOffline] 🔔 ${al.hostname} reativado — ${emp.nome} voltou de ${al.suprimidoMotivo||'ausência'}`);
+      _notificarAlertaOffline({ ...al, status:'ativo', ciclosEnviados:(al.ciclosEnviados||0)+1 });
+    }
+  }
+
+  if (batch.length) await Promise.allSettled(batch);
+}
+
+// ── Badge de alertas no menu ──────────────────────────────────────────────
+function _renderAlertasOfflineBadge() {
+  const ativos = (STATE.alertasOffline || []).filter(a => a.status === 'ativo').length;
+  // Mostra/esconde botão na topbar
+  const btn = document.getElementById('btn-alertas-offline');
+  if (btn) btn.style.display = ativos > 0 ? '' : 'none';
+  const badge = document.getElementById('nb-alertas-offline');
+  if (badge) {
+    badge.textContent = ativos;
+    badge.style.display = ativos > 0 ? '' : 'none';
+  }
+}
+
+// ── Modal: painel de alertas de máquinas offline ──────────────────────────
+function abrirPainelAlertasOffline() {
+  const alertas = STATE.alertasOffline || [];
+  const ativos    = alertas.filter(a => a.status === 'ativo');
+  const suprimidos = alertas.filter(a => a.status === 'suprimido');
+
+  const renderCard = (a) => {
+    const dias = a.offlineDias || '?';
+    const lastStr = a.lastSeen
+      ? new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleDateString('pt-BR')
+      : '—';
+    const corBorda = a.status === 'suprimido' ? 'var(--g300)' : dias >= 15 ? 'var(--danger)' : 'var(--warning)';
+    return `
+    <div style="border-left:4px solid ${corBorda};background:var(--g50);border-radius:0 10px 10px 0;
+                padding:12px 16px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-weight:700;font-size:13px;color:var(--g900)">${escapeHtml(a.hostname)}</span>
+          ${a.pat ? `<span class="tag" style="font-size:10px">${escapeHtml(a.pat)}</span>` : ''}
+          ${a.ciclosEnviados > 1 ? `<span class="tag tag-warning" style="font-size:10px">${a.ciclosEnviados}º aviso</span>` : ''}
+          ${a.status === 'suprimido' ? `<span class="tag" style="background:var(--g100);font-size:10px">😴 Suprimido</span>` : ''}
+        </div>
+        <div style="font-size:12px;color:var(--g600)">
+          👤 ${escapeHtml(a.empNome || '—')}
+          ${a.area ? ` · ${escapeHtml(a.area)}` : ''}
+        </div>
+        <div style="font-size:11.5px;color:var(--danger);font-weight:600;margin-top:4px">
+          ${a.status !== 'suprimido' ? `⏱ Desligada há <strong>${dias} dias</strong> · Último online: ${lastStr}` : ''}
+          ${a.status === 'suprimido' ? `<span style="color:var(--g500)">⏸ ${escapeHtml(a.suprimidoMotivo||'Suprimido')}</span>` : ''}
+        </div>
+        ${a.justificativa ? `<div style="font-size:11.5px;color:var(--success);margin-top:4px">✓ Justificativa: ${escapeHtml(a.justificativa)}</div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        ${a.status === 'ativo' && !a.justificativa ? `
+          <button class="btn btn-secondary btn-xs" onclick="abrirJustificativaOffline('${a.id}')">✏️ Justificar</button>
+        ` : ''}
+        <button class="btn btn-ghost btn-xs" style="color:var(--danger)" onclick="encerrarAlertaOffline('${a.id}')">✕</button>
+      </div>
+    </div>`;
+  };
+
+  const html = `
+  <div class="modal-overlay active" id="modal-alertas-offline" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:620px">
+      <div class="modal-header">
+        <h3>⚠️ Máquinas Offline (${ativos.length} ativo${ativos.length!==1?'s':''})</h3>
+        <button class="close-btn" onclick="document.getElementById('modal-alertas-offline').remove()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+        ${ativos.length ? `
+          <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
+            Alertas ativos (${ativos.length})
+          </div>
+          ${ativos.map(renderCard).join('')}
+        ` : `
+          <div style="text-align:center;padding:32px;color:var(--g400)">
+            ✓ Nenhum alerta ativo no momento
+          </div>
+        `}
+        ${suprimidos.length ? `
+          <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 10px">
+            Suprimidos por ausência (${suprimidos.length})
+          </div>
+          ${suprimidos.map(renderCard).join('')}
+        ` : ''}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-alertas-offline').remove()">Fechar</button>
+        <button class="btn btn-secondary" onclick="_verificarMaquinasOffline().then(()=>showToast('✓ Verificação concluída'))">🔄 Verificar agora</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('modal-alertas-offline')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function abrirJustificativaOffline(alertaId) {
+  const alerta = (STATE.alertasOffline || []).find(a => a.id === alertaId);
+  if (!alerta) return;
+
+  const html = `
+  <div class="modal-overlay active" id="modal-justif-offline" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3>✏️ Justificativa — ${escapeHtml(alerta.hostname)}</h3>
+        <button class="close-btn" onclick="document.getElementById('modal-justif-offline').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--g600);margin-bottom:14px">
+          Explique o motivo da máquina estar desligada. O alerta ficará suspenso até o próximo ciclo de ${ALERTA_OFFLINE_CICLO} dias.
+        </p>
+        <div class="form-group">
+          <label class="form-label req">Justificativa</label>
+          <textarea class="form-control" id="justif-offline-texto" rows="3"
+            placeholder="Ex: Empregado em férias, máquina aguardando manutenção, transferência em andamento..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-justif-offline').remove()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarJustificativaOffline('${alertaId}')">💾 Salvar Justificativa</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('modal-justif-offline')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+  setTimeout(() => document.getElementById('justif-offline-texto')?.focus(), 100);
+}
+
+async function salvarJustificativaOffline(alertaId) {
+  const texto = document.getElementById('justif-offline-texto')?.value?.trim();
+  if (!texto) return showToast('Informe a justificativa', 'danger');
+
+  try {
+    const agora = new Date();
+    await db.collection(ALERTA_OFFLINE_COLECAO).doc(alertaId).update({
+      justificativa:    texto,
+      justificativaEm:  agora,
+      justificativaPor: CURRENT_USER?.nome || CURRENT_USER?.uid || '',
+      // Reseta o ciclo — próximo alerta só em CICLO dias
+      ultimoAlertaEm:   agora,
+    });
+    document.getElementById('modal-justif-offline')?.remove();
+    showToast('✓ Justificativa registrada. Alerta suspenso por mais ' + ALERTA_OFFLINE_CICLO + ' dias.', 'success');
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
+}
+
+async function encerrarAlertaOffline(alertaId) {
+  if (!confirm('Encerrar este alerta manualmente?')) return;
+  try {
+    await db.collection(ALERTA_OFFLINE_COLECAO).doc(alertaId).update({
+      status:       'resolvido',
+      resolvidoEm:  new Date(),
+      resolvidoPor: CURRENT_USER?.nome || '',
+    });
+    showToast('Alerta encerrado', 'success');
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// IMPORTAÇÃO EM LOTE DE ATIVOS (TXT / CSV)
+// Fluxo: upload → IA interpreta → prévia com aprovação por item → cadastra
+// ════════════════════════════════════════════════════════════════════════
+
+// Tipos e áreas aceitos pelo sistema (para a IA usar como referência)
+const TIPOS_ATIVO = ['Computador Desktop','Notebook','Monitor','Servidor',
+  'Impressora','Switch','Access Point','Firewall','Storage',
+  'Appliance de Backup','Rack','Outro'];
+
+const AREAS_ATIVO = ['TI','RH','Financeiro','Comercial','Jurídico',
+  'Operações','Logística','Diretoria','A-DSI','A-GTI','O-DTN'];
+
+// ── Abre modal de importação ──────────────────────────────────────────────
+function abrirImportarAtivos() {
+  document.getElementById('modal-importar-ativos')?.remove();
+
+  const html = `
+  <div class="modal-overlay active" id="modal-importar-ativos"
+       onclick="if(event.target===this)this.remove()">
+    <div class="modal modal-xl" style="max-height:92vh;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <h3>📥 Importar Ativos em Lote</h3>
+        <button class="close-btn" onclick="document.getElementById('modal-importar-ativos').remove()">✕</button>
+      </div>
+
+      <!-- ETAPA 1: Upload -->
+      <div id="imp-step-upload" class="modal-body" style="flex:1;overflow-y:auto">
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 16px;margin-bottom:18px;font-size:12.5px;color:#1E40AF;line-height:1.7">
+          <strong>Como funciona:</strong> Envie um arquivo <code>.csv</code> ou <code>.txt</code> com os dados dos ativos.
+          A IA identifica automaticamente os campos (patrimônio, tipo, descrição, área, responsável, série, etc.)
+          independente do formato. Você revisa e aprova cada ativo antes de cadastrar.
+        </div>
+
+        <!-- Zona de drop -->
+        <div id="imp-dropzone"
+             style="border:2px dashed var(--g300);border-radius:12px;padding:40px;text-align:center;
+                    cursor:pointer;transition:border-color .2s,background .2s"
+             onclick="document.getElementById('imp-file-input').click()"
+             ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='var(--accent-l)'"
+             ondragleave="this.style.borderColor='var(--g300)';this.style.background=''"
+             ondrop="impHandleDrop(event)">
+          <div style="font-size:36px;margin-bottom:10px">📁</div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:6px">Clique ou arraste o arquivo aqui</div>
+          <div style="font-size:12px;color:var(--g400)">Formatos aceitos: CSV, TXT — qualquer separador (vírgula, ponto-e-vírgula, tabulação)</div>
+          <input type="file" id="imp-file-input" accept=".csv,.txt" style="display:none" onchange="impCarregarArquivo(this.files[0])">
+        </div>
+
+        <!-- Preview do arquivo -->
+        <div id="imp-arquivo-info" style="display:none;margin-top:14px;background:var(--g50);border-radius:8px;padding:12px 14px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:24px">📄</span>
+            <div style="flex:1">
+              <div id="imp-arquivo-nome" style="font-weight:700;font-size:13px"></div>
+              <div id="imp-arquivo-info-txt" style="font-size:11.5px;color:var(--g400);margin-top:2px"></div>
+            </div>
+            <button class="btn btn-ghost btn-xs" onclick="impLimparArquivo()">✕ Remover</button>
+          </div>
+          <!-- Prévia das primeiras linhas -->
+          <div id="imp-arquivo-preview" style="margin-top:10px;font-size:11px;font-family:monospace;
+               background:#1e1e2e;color:#cdd6f4;border-radius:6px;padding:10px;max-height:120px;
+               overflow-y:auto;white-space:pre;"></div>
+        </div>
+
+        <div id="imp-status-ia" style="display:none;margin-top:14px"></div>
+      </div>
+
+      <div class="modal-footer" id="imp-footer-upload">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-importar-ativos').remove()">Cancelar</button>
+        <button class="btn btn-primary" id="imp-btn-processar" onclick="impProcessarComIA()" disabled>
+          🤖 Processar com IA
+        </button>
+      </div>
+
+      <!-- ETAPA 2: Revisão (oculta inicialmente) -->
+      <div id="imp-step-revisao" style="display:none;flex:1;overflow-y:auto;padding:20px 24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:14px;font-weight:700" id="imp-revisao-titulo">Revisão dos ativos importados</div>
+            <div style="font-size:12px;color:var(--g400)" id="imp-revisao-subtitulo"></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="impSelecionarTodos(true)">✓ Selecionar todos</button>
+            <button class="btn btn-ghost btn-sm" onclick="impSelecionarTodos(false)">✕ Desmarcar todos</button>
+          </div>
+        </div>
+        <div id="imp-tabela-revisao"></div>
+      </div>
+
+      <div class="modal-footer" id="imp-footer-revisao" style="display:none">
+        <button class="btn btn-ghost" onclick="impVoltarUpload()">← Voltar</button>
+        <div style="flex:1;font-size:12px;color:var(--g500)" id="imp-footer-count"></div>
+        <button class="btn btn-primary" id="imp-btn-cadastrar" onclick="impCadastrarAprovados()">
+          💾 Cadastrar selecionados
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ── Handlers de arquivo ───────────────────────────────────────────────────
+let _impArquivoTexto = '';
+let _impAtivosParseados = [];
+
+function impHandleDrop(e) {
+  e.preventDefault();
+  const dz = document.getElementById('imp-dropzone');
+  dz.style.borderColor = 'var(--g300)';
+  dz.style.background  = '';
+  const file = e.dataTransfer.files[0];
+  if (file) impCarregarArquivo(file);
+}
+
+function impCarregarArquivo(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    _impArquivoTexto = e.target.result;
+    const linhas = _impArquivoTexto.split('\n').filter(l => l.trim()).length;
+
+    document.getElementById('imp-arquivo-info').style.display = '';
+    document.getElementById('imp-arquivo-nome').textContent = file.name;
+    document.getElementById('imp-arquivo-info-txt').textContent =
+      `${(file.size/1024).toFixed(1)} KB · ${linhas} linhas · ${file.type || file.name.split('.').pop().toUpperCase()}`;
+
+    // Prévia das primeiras 8 linhas
+    const preview = _impArquivoTexto.split('\n').slice(0, 8).join('\n');
+    document.getElementById('imp-arquivo-preview').textContent = preview;
+
+    document.getElementById('imp-btn-processar').disabled = false;
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function impLimparArquivo() {
+  _impArquivoTexto = '';
+  document.getElementById('imp-arquivo-info').style.display = 'none';
+  document.getElementById('imp-btn-processar').disabled = true;
+  document.getElementById('imp-status-ia').style.display = 'none';
+  document.getElementById('imp-file-input').value = '';
+}
+
+// ── Processamento IA ──────────────────────────────────────────────────────
+async function impProcessarComIA() {
+  if (!_impArquivoTexto) return;
+
+  const statusEl = document.getElementById('imp-status-ia');
+  const btnEl    = document.getElementById('imp-btn-processar');
+  statusEl.style.display = '';
+  btnEl.disabled = true;
+  btnEl.textContent = '⏳ Processando...';
+
+  statusEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;
+                background:var(--accent-l);border-radius:8px;font-size:12.5px;color:var(--accent)">
+      <div style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;
+                  border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0"></div>
+      <span>Analisando arquivo com IA — identificando campos e normalizando dados...</span>
+    </div>`;
+
+  // Limita o texto para não extrapolar tokens
+  const texto = _impArquivoTexto.slice(0, 12000);
+
+  const prompt = `Você é um sistema de importação de ativos de TI. Analise o arquivo abaixo e extraia TODOS os ativos encontrados.
+
+TIPOS ACEITOS: ${TIPOS_ATIVO.join(', ')}
+ÁREAS ACEITAS: ${AREAS_ATIVO.join(', ')}
+STATUS ACEITOS: ativo, disponivel, manut
+
+Para cada ativo, retorne um objeto JSON com os seguintes campos (use null se não encontrado):
+- pat: número de patrimônio (somente dígitos, sem letras)
+- tipo: um dos tipos aceitos acima (infira pelo modelo/descrição se não explícito)
+- desc: descrição completa / modelo (ex: "Dell OptiPlex 7090 i5 8GB")
+- area: área responsável (use uma das áreas aceitas ou a que melhor corresponder)
+- sala: sala ou local físico
+- loc: localização específica dentro da sala
+- resp: nome do responsável/usuário
+- serie: número de série (S/N)
+- fab: fabricante (ex: Dell, HP, Lenovo...)
+- status: status do ativo
+- data: data de aquisição (formato YYYY-MM-DD)
+- garantia: data de fim de garantia (formato YYYY-MM-DD)
+- obs: observações adicionais
+
+Retorne APENAS um array JSON válido, sem texto adicional, sem markdown, sem explicações.
+Exemplo: [{"pat":"70678","tipo":"Computador Desktop","desc":"Dell OptiPlex 7090","area":"TI",...}]
+
+ARQUIVO:
+${texto}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: prompt }],
+      })
+    });
+
+    if (!resp.ok) throw new Error(`API ${resp.status}`);
+    const data = await resp.json();
+    const txt  = data.content?.find(c => c.type === 'text')?.text || '[]';
+    const clean = txt.replace(/```json|```/g, '').trim();
+    const ativos = JSON.parse(clean);
+
+    if (!Array.isArray(ativos) || !ativos.length) {
+      throw new Error('Nenhum ativo encontrado no arquivo. Verifique o formato.');
+    }
+
+    _impAtivosParseados = ativos.map((a, i) => ({
+      ...a,
+      _idx:       i,
+      _aprovado:  true,
+      _editando:  false,
+    }));
+
+    impMostrarRevisao();
+
+  } catch(e) {
+    statusEl.innerHTML = `
+      <div style="padding:12px 14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;font-size:12.5px;color:var(--danger)">
+        ❌ ${escapeHtml(e.message)}
+        <div style="margin-top:4px;font-size:11.5px;color:var(--g500)">
+          Tente um arquivo com cabeçalho na primeira linha (ex: patrimônio;tipo;descrição;área;responsável)
+        </div>
+      </div>`;
+    btnEl.disabled = false;
+    btnEl.textContent = '🤖 Processar com IA';
+  }
+}
+
+// ── Tela de revisão ───────────────────────────────────────────────────────
+function impMostrarRevisao() {
+  document.getElementById('imp-step-upload').style.display    = 'none';
+  document.getElementById('imp-footer-upload').style.display  = 'none';
+  document.getElementById('imp-step-revisao').style.display   = '';
+  document.getElementById('imp-footer-revisao').style.display = '';
+
+  const total = _impAtivosParseados.length;
+  document.getElementById('imp-revisao-titulo').textContent   = `${total} ativo${total!==1?'s':''} identificado${total!==1?'s':''}`;
+  document.getElementById('imp-revisao-subtitulo').textContent = 'Revise cada item, edite se necessário e selecione os que deseja cadastrar.';
+  impRenderTabelaRevisao();
+  impAtualizarFooterCount();
+}
+
+function impRenderTabelaRevisao() {
+  const container = document.getElementById('imp-tabela-revisao');
+  const STATUS_COR = { ativo:'#16A34A', disponivel:'#2563EB', manut:'#D97706' };
+
+  container.innerHTML = _impAtivosParseados.map((a, i) => {
+    const campoEd = (id, label, val, tipo='text') => `
+      <div style="margin-bottom:8px">
+        <label style="font-size:10px;font-weight:700;color:var(--g500);text-transform:uppercase;display:block;margin-bottom:2px">${label}</label>
+        ${tipo === 'select-tipo' ? `
+          <select class="form-control" style="font-size:12px;padding:5px 8px" onchange="_impAtivosParseados[${i}].${id}=this.value">
+            ${TIPOS_ATIVO.map(t => `<option ${a.tipo===t?'selected':''}>${t}</option>`).join('')}
+          </select>` :
+        tipo === 'select-status' ? `
+          <select class="form-control" style="font-size:12px;padding:5px 8px" onchange="_impAtivosParseados[${i}].${id}=this.value">
+            <option value="ativo" ${a.status==='ativo'?'selected':''}>Em Uso</option>
+            <option value="disponivel" ${a.status==='disponivel'?'selected':''}>Disponível</option>
+            <option value="manut" ${a.status==='manut'?'selected':''}>Manutenção</option>
+          </select>` :
+        `<input class="form-control" type="${tipo}" style="font-size:12px;padding:5px 8px"
+               value="${escapeHtml(val||'')}"
+               onchange="_impAtivosParseados[${i}].${id}=this.value">`}
+      </div>`;
+
+    // Problemas detectados
+    const problemas = [];
+    if (!a.pat)  problemas.push('Patrimônio ausente');
+    if (!a.desc) problemas.push('Descrição ausente');
+    // Duplicata
+    if (a.pat && (STATE.ativos||[]).some(x => x.pat === String(a.pat)))
+      problemas.push('⚠ Patrimônio já cadastrado');
+
+    const corCard   = !a._aprovado ? 'var(--g100)' : problemas.length ? '#FFF7ED' : '#F0FDF4';
+    const bordaCard = !a._aprovado ? 'var(--g300)'  : problemas.length ? '#FED7AA'  : '#86EFAC';
+
+    return `
+    <div id="imp-card-${i}" style="border:1px solid ${bordaCard};border-radius:10px;background:${corCard};
+              margin-bottom:12px;overflow:hidden;transition:opacity .2s;
+              ${!a._aprovado?'opacity:.55':''}">
+      <!-- Cabeçalho do card -->
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+                  border-bottom:1px solid var(--g100);flex-wrap:wrap">
+        <input type="checkbox" ${a._aprovado?'checked':''}
+               onchange="_impAtivosParseados[${i}]._aprovado=this.checked;impAtualizarCard(${i})"
+               style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+        <span style="font-weight:700;font-size:13px;color:var(--accent);min-width:80px">
+          ${a.pat ? escapeHtml(String(a.pat)) : '<span style="color:var(--danger)">Sem PAT</span>'}
+        </span>
+        <span style="font-size:12px;color:var(--g600);flex:1;font-weight:600">${escapeHtml(a.desc||'—')}</span>
+        <span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${STATUS_COR[a.status]||'var(--g400)'};color:#fff;font-weight:600">
+          ${a.status||'—'}
+        </span>
+        <span style="font-size:11.5px;padding:2px 8px;border-radius:12px;background:var(--g100);color:var(--g600)">
+          ${escapeHtml(a.tipo||'—')}
+        </span>
+        ${problemas.length ? `<span style="font-size:11px;color:var(--danger);font-weight:600">${problemas.join(' · ')}</span>` : ''}
+        <button onclick="_impAtivosParseados[${i}]._editando=!_impAtivosParseados[${i}]._editando;impRenderTabelaRevisao()"
+                style="background:none;border:1px solid var(--g200);border-radius:6px;padding:3px 10px;
+                       cursor:pointer;font-size:11.5px;color:var(--g600);flex-shrink:0">
+          ${a._editando ? '▲ Fechar' : '✏️ Editar'}
+        </button>
+      </div>
+
+      <!-- Linha de resumo (sempre visível) -->
+      <div style="padding:8px 14px;font-size:11.5px;color:var(--g500);display:flex;gap:16px;flex-wrap:wrap">
+        ${a.fab  ? `<span>🏭 ${escapeHtml(a.fab)}</span>`  : ''}
+        ${a.resp ? `<span>👤 ${escapeHtml(a.resp)}</span>` : ''}
+        ${a.area ? `<span>🏢 ${escapeHtml(a.area)}</span>` : ''}
+        ${a.sala ? `<span>📍 ${escapeHtml(a.sala)}</span>` : ''}
+        ${a.serie? `<span>S/N: ${escapeHtml(a.serie)}</span>` : ''}
+        ${a.data ? `<span>📅 ${escapeHtml(a.data)}</span>` : ''}
+      </div>
+
+      <!-- Painel de edição (expansível) -->
+      ${a._editando ? `
+      <div style="padding:14px 16px;border-top:1px solid var(--g100);background:#fff">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0 16px">
+          ${campoEd('pat',      'Patrimônio',  a.pat)}
+          ${campoEd('tipo',     'Tipo',        a.tipo,     'select-tipo')}
+          ${campoEd('status',   'Status',      a.status,   'select-status')}
+          ${campoEd('desc',     'Descrição',   a.desc)}
+          ${campoEd('fab',      'Fabricante',  a.fab)}
+          ${campoEd('serie',    'Série (S/N)', a.serie)}
+          ${campoEd('resp',     'Responsável', a.resp)}
+          ${campoEd('area',     'Área',        a.area)}
+          ${campoEd('sala',     'Sala',        a.sala)}
+          ${campoEd('loc',      'Localização', a.loc)}
+          ${campoEd('data',     'Aquisição',   a.data,     'date')}
+          ${campoEd('garantia', 'Garantia',    a.garantia, 'date')}
+        </div>
+        <div style="margin-top:8px">
+          ${campoEd('obs', 'Observações', a.obs)}
+        </div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function impAtualizarCard(i) {
+  // Re-renderiza só o card alterado sem re-renderizar a tabela inteira
+  const a = _impAtivosParseados[i];
+  const card = document.getElementById(`imp-card-${i}`);
+  if (!card) return;
+  const corCard   = !a._aprovado ? 'var(--g100)' : '#F0FDF4';
+  const bordaCard = !a._aprovado ? 'var(--g300)'  : '#86EFAC';
+  card.style.background = corCard;
+  card.style.borderColor = bordaCard;
+  card.style.opacity = a._aprovado ? '1' : '.55';
+  impAtualizarFooterCount();
+}
+
+function impAtualizarFooterCount() {
+  const aprovados = _impAtivosParseados.filter(a => a._aprovado).length;
+  const total     = _impAtivosParseados.length;
+  const countEl   = document.getElementById('imp-footer-count');
+  const btnEl     = document.getElementById('imp-btn-cadastrar');
+  if (countEl) countEl.textContent = `${aprovados} de ${total} selecionados`;
+  if (btnEl)   btnEl.textContent = `💾 Cadastrar ${aprovados} ativo${aprovados!==1?'s':''}`;
+}
+
+function impSelecionarTodos(val) {
+  _impAtivosParseados.forEach(a => a._aprovado = val);
+  impRenderTabelaRevisao();
+  impAtualizarFooterCount();
+}
+
+function impVoltarUpload() {
+  document.getElementById('imp-step-upload').style.display    = '';
+  document.getElementById('imp-footer-upload').style.display  = '';
+  document.getElementById('imp-step-revisao').style.display   = 'none';
+  document.getElementById('imp-footer-revisao').style.display = 'none';
+  const btnEl = document.getElementById('imp-btn-processar');
+  if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🤖 Processar com IA'; }
+  document.getElementById('imp-status-ia').style.display = 'none';
+}
+
+// ── Cadastrar aprovados ───────────────────────────────────────────────────
+async function impCadastrarAprovados() {
+  const aprovados = _impAtivosParseados.filter(a => a._aprovado);
+  if (!aprovados.length) return showToast('Selecione ao menos um ativo', 'warning');
+
+  const btn = document.getElementById('imp-btn-cadastrar');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Cadastrando...'; }
+
+  let ok = 0, erros = 0;
+  const agora = new Date();
+
+  for (const a of aprovados) {
+    try {
+      const novo = {
+        pat:       String(a.pat || '').trim(),
+        tipo:      a.tipo    || 'Outro',
+        desc:      a.desc    || '',
+        area:      a.area    || 'TI',
+        sala:      a.sala    || '',
+        loc:       a.loc     || '',
+        resp:      a.resp    || '',
+        serie:     a.serie   || '',
+        fab:       a.fab     || '',
+        status:    a.status  || 'ativo',
+        obs:       a.obs     || '',
+        data:      a.data    || null,
+        garantia:  a.garantia|| null,
+        origemImportacao: 'importacao-lote',
+        createdAt: agora,
+        criadoPor: CURRENT_USER?.nome || CURRENT_USER?.uid || '',
+      };
+
+      if (FB_READY && db) {
+        const ref = await db.collection('ativos').add(novo);
+        novo.id = ref.id;
+      } else {
+        novo.id = 'a' + Date.now() + '_' + ok;
+      }
+
+      if (!STATE.ativos) STATE.ativos = [];
+      STATE.ativos.unshift(novo);
+      ok++;
+
+      // Feedback visual no card
+      const card = document.getElementById(`imp-card-${a._idx}`);
+      if (card) {
+        card.style.background   = '#F0FDF4';
+        card.style.borderColor  = '#86EFAC';
+        const header = card.querySelector('div');
+        if (header) header.insertAdjacentHTML('beforeend',
+          '<span style="color:var(--success);font-weight:700;font-size:12px">✓ Cadastrado</span>');
+      }
+    } catch(e) {
+      erros++;
+      console.error('[ImportAtivos]', e.message);
+    }
+  }
+
+  renderAtivos?.();
+  renderDashboard?.();
+
+  if (btn) { btn.disabled = false; btn.textContent = '✓ Concluído'; }
+
+  const msg = erros
+    ? `✓ ${ok} cadastrados, ${erros} com erro`
+    : `✓ ${ok} ativo${ok!==1?'s':''} cadastrado${ok!==1?'s':''} com sucesso!`;
+  showToast(msg, ok > 0 ? 'success' : 'danger', 6000);
+
+  if (ok > 0 && !erros) {
+    setTimeout(() => {
+      document.getElementById('modal-importar-ativos')?.remove();
+    }, 2500);
+  }
+}
+
+const LOCALIDADES_CESAN = [{"nome": "Atendimento Afonso Cláudio", "entidade": "CESAN", "cidade": "Afonso Cláudio", "endereco": "Avenida Francisco Salles, 39 - Centro", "cep": "29600-000", "lat": -20.078328, "lng": -41.123484, "cnpj": "28.151.363/0019-76", "rede": "172.22.236.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.078328,-41.123484"}, {"nome": "Atendimento Água Doce do Norte", "entidade": "CESAN", "cidade": "Água Doce do Norte", "endereco": "Rua Iraci Marques, s/n - Centro", "cep": "29820-000", "lat": -18.549075, "lng": -40.980934, "cnpj": "28.151.363/0056-10", "rede": "172.22.222.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.549075,-40.980934"}, {"nome": "Atendimento Águia Branca", "entidade": "CESAN", "cidade": "Águia Branca", "endereco": "Rua Lindolfo Pinheiro Lacerda, s/n - Centro", "cep": "29795-000", "lat": -18.984683, "lng": -40.738992, "cnpj": "28.151.363/0055-30", "rede": "172.22.100.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.984683,-40.738992"}, {"nome": "Atendimento Alto Rio Novo", "entidade": "CESAN", "cidade": "Alto Rio Novo", "endereco": "Rua José Thomaz, 16 - Centro", "cep": "29760-000", "lat": -19.059057, "lng": -41.016131, "cnpj": "28.151.363/0076-64", "rede": "172.22.154.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-19.059057,-41.016131"}, {"nome": "Atendimento Anchieta", "entidade": "CESAN", "cidade": "Anchieta", "endereco": "Rua Marechal Deodoro da Fonseca, 965 - Centro", "cep": "29230-000", "lat": null, "lng": null, "cnpj": "28.151.363/0071-50", "rede": "172.22.110.0/24", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Apiacá", "entidade": "CESAN", "cidade": "Apiacá", "endereco": "Rua Jerônimo Monteiro, 21 (galeria loja Le Dethale) - Centro", "cep": "29450-000", "lat": null, "lng": null, "cnpj": "28.151.363/0021-90", "rede": "172.22.116.0/24", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Atílio Vivacqua", "entidade": "CESAN", "cidade": "Atílio Vivácqua", "endereco": "Rua Primo Luiz Batista, s/n - Centro", "cep": "29490-000", "lat": -20.920683, "lng": -41.189666, "cnpj": "28.151.363/0037-58", "rede": "172.22.118.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.920683,-41.189666"}, {"nome": "Atendimento Barra de São Francisco", "entidade": "CESAN", "cidade": "Barra de São Francisco", "endereco": "Avenida Prefeito Edson Henrique Pereira, 330 - Centro", "cep": "29800-000", "lat": null, "lng": null, "cnpj": "28.151.363/0024-33", "rede": "", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Bom Jesus do Norte", "entidade": "CESAN", "cidade": "Bom Jesus do Norte", "endereco": "Avenida Major Bley, 57 / loja 05 (galeria do Cartório Eleitoral e Cartório Poubel) - Centro", "cep": "29460-000", "lat": -21.132157, "lng": -41.677319, "cnpj": "28.151.363/0058-82", "rede": "172.22.95.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-21.132157,-41.677319"}, {"nome": "Atendimento Braço do Rio", "entidade": "CESAN", "cidade": "Conceição da Barra", "endereco": "Avenida Valderedo Farias, s/n - Braço do Rio", "cep": "29960-000", "lat": -18.434999, "lng": -39.929962, "cnpj": "28.151.363/0009-02", "rede": "172.22.122.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.434999,-39.929962"}, {"nome": "Atendimento Brejetuba", "entidade": "CESAN", "cidade": "Brejetuba", "endereco": "Avenida Firmino Teixeira Grifo, 93 - Centro", "cep": "29630-000", "lat": -20.150831, "lng": -41.293152, "cnpj": "28.151.363/0063-40", "rede": "", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.150831,-41.293152"}, {"nome": "Atendimento Cariacica", "entidade": "CESAN", "cidade": "Cariacica", "endereco": "Rodovia Leste-Oeste, 154 / 1º pavimento - Central Faça Fácil", "cep": "29144-794", "lat": null, "lng": null, "cnpj": "28.151.363/0086-36", "rede": "", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Castelo", "entidade": "CESAN", "cidade": "Castelo", "endereco": "Rua Antônio Bento, 55 - Centro", "cep": "29360-000", "lat": -20.602453, "lng": -41.202436, "cnpj": "28.151.363/0007-32", "rede": "172.22.50.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.602453,-41.202436"}, {"nome": "Atendimento Conceição da Barra", "entidade": "CESAN", "cidade": "Conceição da Barra", "endereco": "Avenida Nossa Senhora da Conceição, s/n (em frente rotatória principal) - Centro", "cep": "29960-000", "lat": -18.583369, "lng": -39.7329, "cnpj": "28.151.363/0009-02", "rede": "172.22.171.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.583369,-39.732900"}, {"nome": "Atendimento Conceição do Castelo", "entidade": "CESAN", "cidade": "Conceição do Castelo", "endereco": "Avenida José Grilo, 101 - Centro", "cep": "29370-000", "lat": -20.356095, "lng": -41.242823, "cnpj": "28.151.363/0039-10", "rede": "172.22.132.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.356095,-41.242823"}, {"nome": "Atendimento Coqueiral", "entidade": "CESAN", "cidade": "Aracruz", "endereco": "Praça Flamboyant, Lojas 08 e 09 - Coqueiral", "cep": "29199-030", "lat": -19.932602, "lng": -40.145692, "cnpj": "28.151.363/0002-28", "rede": "172.25.94.0/26", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-19.932602,-40.145692"}, {"nome": "Atendimento Divino São Lourenço", "entidade": "CESAN", "cidade": "Divino de São Lourenço", "endereco": "Rua Francisco Gomes da Cunha, 76 - Centro", "cep": "29590-000", "lat": null, "lng": null, "cnpj": "28.151.363/0041-34", "rede": "172.22.76.0/24", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Domingos Martins", "entidade": "CESAN", "cidade": "Domingos Martins", "endereco": "Rua Aldolfo Hulle, 17 - Centro", "cep": "29260-000", "lat": null, "lng": null, "cnpj": "28.151.363/0089-89", "rede": "", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Dores do Rio Preto", "entidade": "CESAN", "cidade": "Dores do Rio Preto", "endereco": "Rua Firmino Dias, 220 - Centro", "cep": "29580-000", "lat": -20.690832, "lng": -41.848223, "cnpj": "28.151.363/0042-15", "rede": "172.22.66.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.690832,-41.848223"}, {"nome": "Atendimento e ETA Boa Esperança", "entidade": "CESAN", "cidade": "Boa Esperança", "endereco": "Rua Democrata, 667 - Centro", "cep": "29845-000", "lat": -18.540403, "lng": -40.29702, "cnpj": "28.151.363/0028-67", "rede": "172.22.114.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.540403,-40.297020"}, {"nome": "Atendimento Ecoporanga", "entidade": "CESAN", "cidade": "Ecoporanga", "endereco": "Rua Simião Teixeira Sá, 132 - Centro", "cep": "29850-000", "lat": -18.372481, "lng": -40.83101, "cnpj": "28.151.363/0026-03", "rede": "172.22.86.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.372481,-40.831010"}, {"nome": "Atendimento Fundão", "entidade": "CESAN", "cidade": "Fundão", "endereco": "Rua Sezenando Braga, 35 / loja 04 (em frente à BR101) - São José", "cep": "29185-000", "lat": null, "lng": null, "cnpj": "28.151.363/0059-63", "rede": "", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Guarapari", "entidade": "CESAN", "cidade": "Guarapari", "endereco": "Rua Doutor Silva Mello, 09 / loja 01 - Centro", "cep": "29215-002", "lat": -20.663175, "lng": -40.501196, "cnpj": "28.151.363/0048-00", "rede": "172.22.28.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.663175,-40.501196"}, {"nome": "Atendimento Ibatiba", "entidade": "CESAN", "cidade": "Ibatiba", "endereco": "Praça Davi Gomes, 26 - Centro", "cep": "29395-000", "lat": -20.237811, "lng": -41.507035, "cnpj": "28.151.363/0047-20", "rede": "172.22.106.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.237811,-41.507035"}, {"nome": "Atendimento Irupi", "entidade": "CESAN", "cidade": "Irupi", "endereco": "Travessa Geralda Alves de Oliveira, 25 - Centro", "cep": "29398-000", "lat": -20.345855, "lng": -41.64255, "cnpj": "28.151.363/0116-96", "rede": "172.22.220.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.345855,-41.642550"}, {"nome": "Atendimento Iúna", "entidade": "CESAN", "cidade": "Iúna", "endereco": "Rua Galaor Rios, 195 / loja 01 - Centro", "cep": "29390-000", "lat": null, "lng": null, "cnpj": "28.151.363/0014-61", "rede": "172.25.35.0/26", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Laranja da Terra", "entidade": "CESAN", "cidade": "Laranja da Terra", "endereco": "Rua Projetada, 10 (Praça Carlos Tesch) - Centro", "cep": "29615-000", "lat": -19.89997, "lng": -41.056348, "cnpj": "28.151.363/0067-73", "rede": "172.22.234.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-19.899970,-41.056348"}, {"nome": "Atendimento Laranjeiras", "entidade": "CESAN", "cidade": "Serra", "endereco": "Primeira Avenida, 160 - Parque Residencial Laranjeiras", "cep": "29165-155", "lat": -20.196236, "lng": -40.255515, "cnpj": "28.151.363/0057-00", "rede": "172.22.30.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.196236,-40.255515"}, {"nome": "Atendimento Mantenópolis", "entidade": "CESAN", "cidade": "Mantenópolis", "endereco": "Rua Maria Teodoro, 18 - Centro", "cep": "29770-000", "lat": -18.863212, "lng": -41.123032, "cnpj": "28.151.363/0032-43", "rede": "172.22.124.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.863212,-41.123032"}, {"nome": "Atendimento Marechal Floriano", "entidade": "CESAN", "cidade": "Marechal Floriano", "endereco": "Rua Adão Kiefer Sobrinho, 34 - Centro", "cep": "29255-000", "lat": -20.410897, "lng": -40.675172, "cnpj": "28.151.363/0049-91", "rede": "172.22.70.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.410897,-40.675172"}, {"nome": "Atendimento Montanha", "entidade": "CESAN", "cidade": "Montanha", "endereco": "Rua Ítalo Benso, 44 - Centro", "cep": "29890-000", "lat": -18.127511, "lng": -40.363664, "cnpj": "28.151.363/0044-87", "rede": "172.22.89.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.127511,-40.363664"}, {"nome": "Atendimento Mucurici", "entidade": "CESAN", "cidade": "Mucurici", "endereco": "Avenida Presidente Kennedy, 175 - Centro", "cep": "29880-000", "lat": -18.095386, "lng": -40.519112, "cnpj": "28.151.363/0023-52", "rede": "172.22.237.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.095386,-40.519112"}, {"nome": "Atendimento Muniz Freire", "entidade": "CESAN", "cidade": "Muniz Freire", "endereco": "Rua Pedro Deps, 100 - Centro", "cep": "29380-000", "lat": -20.464699, "lng": -41.412257, "cnpj": "28.151.363/0050-25", "rede": "172.25.40.0/26", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.464699,-41.412257"}, {"nome": "Atendimento Muqui", "entidade": "CESAN", "cidade": "Muqui", "endereco": "Rua Vieira Machado, 307 / loja 02", "cep": "29480-000", "lat": -20.953512, "lng": -41.347867, "cnpj": "28.151.363/0016-23", "rede": "172.22.189.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.953512,-41.347867"}, {"nome": "Atendimento Nova Venécia", "entidade": "CESAN", "cidade": "Nova Venécia", "endereco": "Praça Jones dos Santos Neves, 119 / loja 2 - Centro", "cep": "29830-000", "lat": -18.709449, "lng": -40.401686, "cnpj": "28.151.363/0010-38", "rede": "172.22.64.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.709449,-40.401686"}, {"nome": "Atendimento Pancas", "entidade": "CESAN", "cidade": "Pancas", "endereco": "Rua Diamante, 15 - Nossa Senhora Aparecida", "cep": "29750-000", "lat": null, "lng": null, "cnpj": "28.151.363/0045-68", "rede": "", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Pedro Canário", "entidade": "CESAN", "cidade": "Pedro Canário", "endereco": "Avenida Antonio Guedes Alcoforado, 696 / loja 01 - Centro", "cep": "29970-000", "lat": -18.300154, "lng": -39.95382, "cnpj": "28.151.363/0051-06", "rede": "172.22.87.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.300154,-39.953820"}, {"nome": "Atendimento Pinheiros", "entidade": "CESAN", "cidade": "Pinheiros", "endereco": "Avenida Setembrino Pelissari, 533 - Centro", "cep": "29980-000", "lat": -18.413181, "lng": -40.213827, "cnpj": "28.151.363/0030-81", "rede": "172.22.91.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.413181,-40.213827"}, {"nome": "Atendimento Piúma", "entidade": "CESAN", "cidade": "Piúma", "endereco": "Avenida Izaias Scherre, 86 - Centro", "cep": "29285-000", "lat": -20.841096, "lng": -40.727347, "cnpj": "28.151.363/0070-79", "rede": "172.22.60.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.841096,-40.727347"}, {"nome": "Atendimento Ponto Belo", "entidade": "CESAN", "cidade": "Ponto Belo", "endereco": "Avenida Sebastião Rabelo, 278 - Centro", "cep": "29885-000", "lat": -18.12186, "lng": -40.541565, "cnpj": "28.151.363/0054-59", "rede": "172.24.26.0/26", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.121860,-40.541565"}, {"nome": "Atendimento Praia Grande", "entidade": "CESAN", "cidade": "Fundão", "endereco": "N/D", "cep": "", "lat": null, "lng": null, "cnpj": "28.151.363/0059-63", "rede": "172.25.93.0/26", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Presidente Kennedy", "entidade": "CESAN", "cidade": "Presidente Kennedy", "endereco": "Rua Atila Vivaqua Vieira, 261 - Centro", "cep": "29350-000", "lat": null, "lng": null, "cnpj": "28.151.363/0062-69", "rede": "172.22.248.0/24", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Rio Novo do Sul", "entidade": "CESAN", "cidade": "Rio Novo do Sul", "endereco": "Rua Major Caetano, 43 - Centro", "cep": "29290-000", "lat": -20.864399, "lng": -40.937481, "cnpj": "28.151.363/0046-49", "rede": "172.22.128.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.864399,-40.937481"}, {"nome": "Atendimento Santa Leopoldina", "entidade": "CESAN", "cidade": "Santa Leopoldina", "endereco": "Rua Marechal Floriano Peixoto, 1715 - Centro", "cep": "29640-000", "lat": -20.099282, "lng": -40.530355, "cnpj": "28.151.363/0085-55", "rede": "", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.099282,-40.530355"}, {"nome": "Atendimento Santa Maria de Jetibá", "entidade": "CESAN", "cidade": "Santa Maria de Jetibá", "endereco": "Rua do Imigrante, 40 - Centro", "cep": "29645-000", "lat": -20.030082, "lng": -40.741213, "cnpj": "28.151.363/0053-78", "rede": "172.22.108.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.030082,-40.741213"}, {"nome": "Atendimento Santa Teresa", "entidade": "CESAN", "cidade": "Santa Teresa", "endereco": "Rua Coronel Bonfim Junior, 246 - Centro", "cep": "29650-000", "lat": -19.931793, "lng": -40.603273, "cnpj": "28.151.363/0038-40", "rede": "172.22.56.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-19.931793,-40.603273"}, {"nome": "Atendimento São Gabriel da Palha", "entidade": "CESAN", "cidade": "São Gabriel da Palha", "endereco": "Rua Amado Almeida, 185 - Glória", "cep": "29780-000", "lat": -19.01949, "lng": -40.532267, "cnpj": "28.151.363/0008-13", "rede": "172.22.84.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-19.019490,-40.532267"}, {"nome": "Atendimento São José do Calçado", "entidade": "CESAN", "cidade": "São José do Calçado", "endereco": "Rua Manoel Ferreira Marques, 52 - Centro", "cep": "29470-000", "lat": -21.025871, "lng": -41.653115, "cnpj": "28.151.363/0018-95", "rede": "172.22.112.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-21.025871,-41.653115"}, {"nome": "Atendimento São Roque do Canaã", "entidade": "CESAN", "cidade": "São Roque do Canaã", "endereco": "Rua André Regattieri, 22 - Centro", "cep": "29665-000", "lat": null, "lng": null, "cnpj": "28.151.363/0018-95", "rede": "172.25.86.0/26", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Venda Nova do Imigrante", "entidade": "CESAN", "cidade": "Venda Nova do Imigrante", "endereco": "Rua Pedro Altoé, 05 - Vila da Mata", "cep": "29375-000", "lat": -20.338735, "lng": -41.129913, "cnpj": "28.151.363/0040-53", "rede": "172.22.82.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.338735,-41.129913"}, {"nome": "Atendimento Viana", "entidade": "CESAN", "cidade": "Viana", "endereco": "Avenida Vitória, s/n / Praça Central (Centro de Múltiplo Uso ''É Pra Já'') - Marcílio de Noronha", "cep": "29135-000", "lat": null, "lng": null, "cnpj": "28.151.363/0084-74", "rede": "", "tipo": "Atendimento", "mapsUrl": ""}, {"nome": "Atendimento Vila Pavão", "entidade": "CESAN", "cidade": "Vila Pavão", "endereco": "Rua 15 de Novembro, 195 - Centro", "cep": "29843-000", "lat": -18.620861, "lng": -40.604699, "cnpj": "28.151.363/0066-92", "rede": "172.22.226.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.620861,-40.604699"}, {"nome": "Atendimento Vila Valério", "entidade": "CESAN", "cidade": "Vila Valério", "endereco": "Rua Martin Lutero, 135 - Centro", "cep": "29785-000", "lat": -18.996199, "lng": -40.388926, "cnpj": "28.151.363/0074-00", "rede": "172.22.252.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-18.996199,-40.388926"}, {"nome": "Atendimento Vila Velha", "entidade": "CESAN", "cidade": "Vila Velha", "endereco": "Rua Henrique Moscoso, 1375 / Loja 2 - Centro", "cep": "29100-021", "lat": -20.334904, "lng": -40.294437, "cnpj": "28.151.363/0060-05", "rede": "172.22.32.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.334904,-40.294437"}, {"nome": "Atendimento Vitória", "entidade": "CESAN", "cidade": "Vitória", "endereco": "Rua Marcelino Duarte, Galeria do Edifício Martinho de Freitas - Centro", "cep": "29010-180", "lat": -20.320741, "lng": -40.334956, "cnpj": "28.151.363/0001-47", "rede": "172.22.120.0/24", "tipo": "Atendimento", "mapsUrl": "https://www.google.com/maps?q=-20.320741,-40.334956"}, {"nome": "Carapina", "entidade": "CESAN", "cidade": "Serra", "endereco": "Avenida Guarapari, 444 - Jardim Limoeiro", "cep": "29164-120", "lat": -20.206443, "lng": -40.264134, "cnpj": "28.151.363/0057-00", "rede": "172.22.10.96/28", "tipo": "Outro", "mapsUrl": "https://www.google.com/maps?q=-20.206443,-40.264134"}, {"nome": "Central Faça Fácil", "entidade": "CESAN", "cidade": "Cariacica", "endereco": "Rua Aloizio Santos, 500 - Santo André", "cep": "29144-900", "lat": -20.346493, "lng": -40.398265, "cnpj": "28.151.363/0086-36", "rede": "", "tipo": "Sede/Escritório", "mapsUrl": "https://www.google.com/maps?q=-20.346493,-40.398265"}, {"nome": "Ed. Des. Moniz Freire", "entidade": "CESAN", "cidade": "Vitória", "endereco": "Rua Muniz Freire, 49 - Centro", "cep": "29015-140", "lat": -20.320086, "lng": -40.338653, "cnpj": "28.151.363/0001-47", "rede": "", "tipo": "Sede/Escritório", "mapsUrl": "https://www.google.com/maps?q=-20.320086,-40.338653"}, {"nome": "Ed. Rui Barbosa", "entidade": "CESAN", "cidade": "Vitória", "endereco": "Avenida Leitão da Silva, 1375 / Ed. Rui Barbosa sala 303 - Gurigica", "cep": "29046-005", "lat": -20.302717, "lng": -40.303794, "cnpj": "28.151.363/0001-47", "rede": "172.23.64.0/24", "tipo": "Sede/Escritório", "mapsUrl": "https://www.google.com/maps?q=-20.302717,-40.303794"}, {"nome": "Elevatória Alto Recalque", "entidade": "CESAN", "cidade": "Vila Velha", "endereco": "Rua Amélia Ferreira, s/n - Cobilândia", "cep": "29111-165", "lat": -20.350973, "lng": -40.354645, "cnpj": "28.151.363/0060-05", "rede": "172.22.144.0/24", "tipo": "Outro", "mapsUrl": "https://www.google.com/maps?q=-20.350973,-40.354645"}, {"nome": "Escritório Central (Bemge)", "entidade": "CESAN", "cidade": "Vitória", "endereco": "Avenida Governador Bley, 186 / Ed. BEMGE 3 Andar - Centro", "cep": "29010-150", "lat": -20.321234, "lng": -40.335537, "cnpj": "28.151.363/0001-47", "rede": "172.22.22.0/23", "tipo": "Sede/Escritório", "mapsUrl": "https://www.google.com/maps?q=-20.321234,-40.335537"}, {"nome": "ETA Afonso Cláudio", "entidade": "CESAN", "cidade": "Afonso Cláudio", "endereco": "Rua Manoel Alves Correa, 97 - São Vicente", "cep": "29600-000", "lat": -20.080872, "lng": -41.123942, "cnpj": "28.151.363/0019-76", "rede": "172.22.162.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.080872,-41.123942"}, {"nome": "ETA Água Doce do Norte", "entidade": "CESAN", "cidade": "Água Doce do Norte", "endereco": "Rua Abelar Altivo Elizeu (Rua da ETA), s/n - Centro", "cep": "29820-000", "lat": -18.548345, "lng": -40.976496, "cnpj": "28.151.363/0056-10", "rede": "172.22.223.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.548345,-40.976496"}, {"nome": "ETA Águia Branca", "entidade": "CESAN", "cidade": "Águia Branca", "endereco": "Rua da ETA, s/n - Centro", "cep": "29795-000", "lat": -18.98568, "lng": -40.74505, "cnpj": "28.151.363/0055-30", "rede": "172.24.57.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.985680,-40.745050"}, {"nome": "ETA Alto Rio Novo", "entidade": "CESAN", "cidade": "Alto Rio Novo", "endereco": "Rua Lucindo Farias, s/n - Padre Pedro Passo, ref. Estrada do Cemitério", "cep": "29760-000", "lat": -19.059082, "lng": -41.027643, "cnpj": "28.151.363/0076-64", "rede": "172.22.246.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.059082,-41.027643"}, {"nome": "ETA Alto Rio Possmouser", "entidade": "CESAN", "cidade": "Santa Maria de Jetibá", "endereco": "Rua da ETA, s/n - Alto Rio Possmouser", "cep": "29645-980", "lat": -20.068693, "lng": -40.835369, "cnpj": "28.151.363/0053-78", "rede": "172.25.78.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.068693,-40.835369"}, {"nome": "ETA Apiacá", "entidade": "CESAN", "cidade": "Apiacá", "endereco": "Rua Francisco de Castro, s/n - Centro", "cep": "29450-000", "lat": -21.156114, "lng": -41.563109, "cnpj": "28.151.363/0021-90", "rede": "172.22.164.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-21.156114,-41.563109"}, {"nome": "ETA Aracê", "entidade": "CESAN", "cidade": "Domingos Martins", "endereco": "Rodovia Geraldo Sartório - ES-164 (Trevo entrada de Vargem Alta) - Aracê", "cep": "29278-000", "lat": -20.376562, "lng": -41.061993, "cnpj": "28.151.363/0089-89", "rede": "172.22.160.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.376562,-41.061993"}, {"nome": "ETA Atílio Vivacqua", "entidade": "CESAN", "cidade": "Atílio Vivácqua", "endereco": "Rua Capitão Jovino Alves Pedra, s/n - Niterói", "cep": "29490-000", "lat": -20.916538, "lng": -41.200342, "cnpj": "28.151.363/0037-58", "rede": "172.22.119.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.916538,-41.200342"}, {"nome": "ETA Barra de São Francisco / Almoxarifado", "entidade": "CESAN", "cidade": "Barra de São Francisco", "endereco": "Rua Prefeito Manoel Gonçalves, s/n - Colina", "cep": "29800-000", "lat": -18.762, "lng": -40.89, "cnpj": "28.151.363/0024-33", "rede": "172.22.136.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.762000,-40.890000"}, {"nome": "ETA Bom Jesus do Norte", "entidade": "CESAN", "cidade": "Bom Jesus do Norte", "endereco": "Rua Sônia Maria Azevedo Passalini, s/n - Centro", "cep": "29460-000", "lat": -21.122766, "lng": -41.676002, "cnpj": "28.151.363/0058-82", "rede": "172.22.166.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-21.122766,-41.676002"}, {"nome": "ETA Braço do Rio", "entidade": "CESAN", "cidade": "Conceição da Barra", "endereco": "Rua Projetada K, s/n - Braço do Rio", "cep": "29967-000", "lat": -18.42779, "lng": -39.939564, "cnpj": "28.151.363/0009-02", "rede": "172.22.168.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.427790,-39.939564"}, {"nome": "ETA Brejetuba", "entidade": "CESAN", "cidade": "Brejetuba", "endereco": "Rua da ETA, s/n - Zona Rural", "cep": "29630-000", "lat": -20.149595, "lng": -41.289992, "cnpj": "28.151.363/0063-40", "rede": "172.22.170.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.149595,-41.289992"}, {"nome": "ETA Caçaroca / Elevatória Baixo Recalque", "entidade": "CESAN", "cidade": "Vila Velha", "endereco": "Rio Jucu, Estrada do dique - Caçaroca", "cep": "29000-000", "lat": -20.399313, "lng": -40.361839, "cnpj": "28.151.363/0060-05", "rede": "172.22.142.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.399313,-40.361839"}, {"nome": "ETA Camará", "entidade": "CESAN", "cidade": "Muqui", "endereco": "Rua Jarbas Coelho, s/n - Distrito de Camará", "cep": "29485-000", "lat": -20.89571, "lng": -41.269603, "cnpj": "28.151.363/0016-23", "rede": "172.25.15.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.895710,-41.269603"}, {"nome": "ETA Castelo / Almoxarifado", "entidade": "CESAN", "cidade": "Castelo", "endereco": "Alameda das Vistas Soberbas, s/n - Independência", "cep": "29360-000", "lat": -20.597618, "lng": -41.202823, "cnpj": "28.151.363/0007-32", "rede": "172.22.134.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.597618,-41.202823"}, {"nome": "ETA Cobi", "entidade": "CESAN", "cidade": "Vila Velha", "endereco": "Rua Francisca Guimarães, s/n - Ipessa", "cep": "29117-750", "lat": -20.340258, "lng": -40.352091, "cnpj": "28.151.363/0060-05", "rede": "172.22.34.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.340258,-40.352091"}, {"nome": "ETA Conceição da Barra", "entidade": "CESAN", "cidade": "Conceição da Barra", "endereco": "Rodovia Adolfo Serra, s/n - Santana", "cep": "29960-000", "lat": -18.567536, "lng": -39.749271, "cnpj": "28.151.363/0009-02", "rede": "172.22.172.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.567536,-39.749271"}, {"nome": "ETA Conceição do Castelo", "entidade": "CESAN", "cidade": "Conceição do Castelo", "endereco": "Rodovia ES-165, s/n - Centro", "cep": "29370-000", "lat": -20.354698, "lng": -41.240415, "cnpj": "28.151.363/0039-10", "rede": "172.22.174.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.354698,-41.240415"}, {"nome": "ETA Cotaxé", "entidade": "CESAN", "cidade": "Ecoporanga", "endereco": "Rua da ETA, s/n - Centro, Cotaxé", "cep": "29850-000", "lat": -18.187622, "lng": -40.713861, "cnpj": "28.151.363/0026-03", "rede": "172.24.23.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.187622,-40.713861"}, {"nome": "ETA Cristal do Norte", "entidade": "CESAN", "cidade": "Pedro Canário", "endereco": "Rodovia ES 209 (sentido Montanha), s/n - Cristal", "cep": "29978-990", "lat": -18.090688, "lng": -40.111103, "cnpj": "28.151.363/0051-06", "rede": "172.24.12.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.090688,-40.111103"}, {"nome": "ETA Divino São Lourenço", "entidade": "CESAN", "cidade": "Divino de São Lourenço", "endereco": "Rua Valmir Alves Resende, 70 - Centro", "cep": "29590-000", "lat": -20.620328, "lng": -41.686496, "cnpj": "28.151.363/0041-34", "rede": "172.22.177.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.620328,-41.686496"}, {"nome": "ETA Dores do Rio Preto", "entidade": "CESAN", "cidade": "Dores do Rio Preto", "endereco": "Rua Sebastiao Moreira Neto, s/n - Centro", "cep": "29580-000", "lat": -20.687374, "lng": -41.84552, "cnpj": "28.151.363/0042-15", "rede": "172.22.176.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.687374,-41.845520"}, {"nome": "ETA Duas Bocas", "entidade": "CESAN", "cidade": "Cariacica", "endereco": "Rua Principal, s/n - Duas Bocas", "cep": "29140-000", "lat": -20.272618, "lng": -40.477352, "cnpj": "28.151.363/0086-36", "rede": "172.22.138.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.272618,-40.477352"}, {"nome": "ETA e Elevatória Santa Maria", "entidade": "CESAN", "cidade": "Serra", "endereco": "Rodovia do Contorno, s/n - Rio Santa Maria da Vitória, altura da fazenda Jacui", "cep": "29160-000", "lat": -20.217022, "lng": -40.359978, "cnpj": "28.151.363/0057-00", "rede": "172.22.146.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.217022,-40.359978"}, {"nome": "ETA Ecoporanga", "entidade": "CESAN", "cidade": "Ecoporanga", "endereco": "Rua da ETA, s/n (Estrada Ecoporanga x Prata dos Baianos)", "cep": "29850-000", "lat": -18.358408, "lng": -40.859242, "cnpj": "28.151.363/0026-03", "rede": "172.24.21.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.358408,-40.859242"}, {"nome": "ETA Fartura", "entidade": "CESAN", "cidade": "São Gabriel da Palha", "endereco": "Fartura - Referência: Atrás do cemitério", "cep": "29780-000", "lat": null, "lng": null, "cnpj": "", "rede": "", "tipo": "ETA", "mapsUrl": ""}, {"nome": "ETA Floresta do Sul", "entidade": "CESAN", "cidade": "Pedro Canário", "endereco": "Praça Principal, s/n - Floresta do Sul", "cep": "29970-000", "lat": -18.261656, "lng": -40.078815, "cnpj": "28.151.363/0051-06", "rede": "172.24.11.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.261656,-40.078815"}, {"nome": "ETA Fundão", "entidade": "CESAN", "cidade": "Fundão", "endereco": "Rua Amor Perfeito, s/n - São José", "cep": "29185-000", "lat": -19.935939, "lng": -40.408974, "cnpj": "28.151.363/0059-63", "rede": "172.22.180.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.935939,-40.408974"}, {"nome": "ETA Garrafão", "entidade": "CESAN", "cidade": "Santa Maria de Jetibá", "endereco": "Avenida João Pedro Lauers, s/n -  Garrafão", "cep": "29649-000", "lat": -20.154015, "lng": -40.945856, "cnpj": "28.151.363/0053-78", "rede": "172.25.77.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.154015,-40.945856"}, {"nome": "ETA Governador Lacerda de Aguiar", "entidade": "CESAN", "cidade": "Água Doce do Norte", "endereco": "Rua da ETA, s/n - Governador Lacerda", "cep": "29820-000", "lat": -18.635585, "lng": -40.944411, "cnpj": "28.151.363/0056-10", "rede": "172.24.47.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.635585,-40.944411"}, {"nome": "ETA Guarapari", "entidade": "CESAN", "cidade": "Guarapari", "endereco": "Avenida Jones Santos Neves, s/n - Morro do Raspado, Sol Nascente", "cep": "29200-000", "lat": -20.652174, "lng": -40.508167, "cnpj": "28.151.363/0048-00", "rede": "172.22.152.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.652174,-40.508167"}, {"nome": "ETA Ibatiba", "entidade": "CESAN", "cidade": "Ibatiba", "endereco": "Rua Olegário Silveira de Amorim, s/n - Centro", "cep": "29395-000", "lat": -20.235364, "lng": -41.514019, "cnpj": "28.151.363/0047-20", "rede": "172.22.107.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.235364,-41.514019"}, {"nome": "ETA Imburana", "entidade": "CESAN", "cidade": "Ecoporanga", "endereco": "Rua da ETA, s/n - Centro, Imburana", "cep": "29850-000", "lat": -18.280489, "lng": -40.711566, "cnpj": "28.151.363/0026-03", "rede": "172.24.24.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.280489,-40.711566"}, {"nome": "ETA Iriri", "entidade": "CESAN", "cidade": "Anchieta", "endereco": "Estrada Existente, s/n - Iriri", "cep": "29230-000", "lat": -20.822974, "lng": -40.692377, "cnpj": "28.151.363/0071-50", "rede": "172.22.182.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.822974,-40.692377"}, {"nome": "ETA Irupi", "entidade": "CESAN", "cidade": "Irupi", "endereco": "Rua da ETA, s/n - Centro", "cep": "29398-000", "lat": -20.345468, "lng": -41.644568, "cnpj": "28.151.363/0116-96", "rede": "172.22.184.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.345468,-41.644568"}, {"nome": "ETA Itabaiana", "entidade": "CESAN", "cidade": "Mucurici", "endereco": "Rua Ataléia, s/n - Itabaiana", "cep": "29884-000", "lat": -17.940504, "lng": -40.549751, "cnpj": "28.151.363/0023-52", "rede": "172.24.18.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-17.940504,-40.549751"}, {"nome": "ETA Itamira", "entidade": "CESAN", "cidade": "Ponto Belo", "endereco": "Rua Cassimiro José de Oliveira, s/n - Itamira", "cep": "29889-000", "lat": -18.255419, "lng": -40.509378, "cnpj": "28.151.363/0054-59", "rede": "172.24.28.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.255419,-40.509378"}, {"nome": "ETA Itaúnas", "entidade": "CESAN", "cidade": "Conceição da Barra", "endereco": "Rua Dermeval Leite da Silva, s/n - Itaúnas", "cep": "29965-000", "lat": -18.420658, "lng": -39.709065, "cnpj": "28.151.363/0009-02", "rede": "172.22.238.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.420658,-39.709065"}, {"nome": "ETA Iúna", "entidade": "CESAN", "cidade": "Iúna", "endereco": "Rua José Bonifácio de Souza, 184 - Centro", "cep": "29390-000", "lat": -20.347234, "lng": -41.530272, "cnpj": "28.151.363/0014-61", "rede": "172.22.104.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.347234,-41.530272"}, {"nome": "ETA Jucu / Antártica", "entidade": "CESAN", "cidade": "Viana", "endereco": "Rua Erwin Ball, s/n - Jucu (próximo ao supermercado Rede Mais)", "cep": "29135-000", "lat": -20.421866, "lng": -40.465766, "cnpj": "28.151.363/0084-74", "rede": "172.22.150.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.421866,-40.465766"}, {"nome": "ETA Jucu Nova", "entidade": "CESAN", "cidade": "Viana", "endereco": "Rua Projetada, s/n - Jucu (direita após a ponte do Rio Jucu sentido Araçatiba)", "cep": "29135-000", "lat": -20.461204, "lng": -40.48898, "cnpj": "28.151.363/0084-74", "rede": "172.23.165.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.461204,-40.488980"}, {"nome": "ETA Laranja da Terra", "entidade": "CESAN", "cidade": "Laranja da Terra", "endereco": "Rua Sebastião Ferreira de Souza, s/n - Bela Vista", "cep": "29615-000", "lat": -19.899524, "lng": -41.060295, "cnpj": "28.151.363/0067-73", "rede": "172.22.186.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.899524,-41.060295"}, {"nome": "ETA Mantenópolis", "entidade": "CESAN", "cidade": "Mantenópolis", "endereco": "Estrada Manteninha - Zona Rural", "cep": "29770-000", "lat": -18.853352, "lng": -41.103993, "cnpj": "28.151.363/0032-43", "rede": "172.22.188.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.853352,-41.103993"}, {"nome": "ETA Marechal Floriano", "entidade": "CESAN", "cidade": "Marechal Floriano", "endereco": "Rua Thiers Veloso, 648 - Centro", "cep": "29255-000", "lat": -20.412393, "lng": -40.682003, "cnpj": "28.151.363/0049-91", "rede": "172.22.68.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.412393,-40.682003"}, {"nome": "ETA Montanha", "entidade": "CESAN", "cidade": "Montanha", "endereco": "Avenida Antônio Paulino, 1231 - Centro", "cep": "29890-000", "lat": -18.126214, "lng": -40.360308, "cnpj": "28.151.363/0044-87", "rede": "172.22.90.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.126214,-40.360308"}, {"nome": "ETA Mucurici", "entidade": "CESAN", "cidade": "Mucurici", "endereco": "Rua Presidente Castelo Branco, s/n - Centro", "cep": "29880-000", "lat": -18.094492, "lng": -40.519409, "cnpj": "28.151.363/0023-52", "rede": "172.22.240.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.094492,-40.519409"}, {"nome": "ETA Muniz Freire", "entidade": "CESAN", "cidade": "Muniz Freire", "endereco": "Rua José Cabriano Aguiar, 152 - São Francisco", "cep": "29380-000", "lat": -20.466, "lng": -41.412, "cnpj": "28.151.363/0050-25", "rede": "172.22.130.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.466000,-41.412000"}, {"nome": "ETA Muqui", "entidade": "CESAN", "cidade": "Muqui", "endereco": "Rua Espirito Santo, s/n - Boa Esperança", "cep": "29480-000", "lat": -20.96129, "lng": -41.338983, "cnpj": "28.151.363/0016-23", "rede": "172.22.190.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.961290,-41.338983"}, {"nome": "ETA Nova Venécia", "entidade": "CESAN", "cidade": "Nova Venécia", "endereco": "Rua Caixa Dágua, s/n - Bairro Bonfim", "cep": "29830-000", "lat": -18.714117, "lng": -40.406833, "cnpj": "28.151.363/0010-38", "rede": "172.22.192.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.714117,-40.406833"}, {"nome": "ETA Pancas", "entidade": "CESAN", "cidade": "Pancas", "endereco": "Rua Cristalina, 21 - Nossa Senhora Aparecida", "cep": "29750-000", "lat": -19.225012, "lng": -40.85548, "cnpj": "28.151.363/0045-68", "rede": "172.22.102.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.225012,-40.855480"}, {"nome": "ETA Paulista", "entidade": "CESAN", "cidade": "Barra de São Francisco", "endereco": "Rua da ETA, Rodovia ES 320 - B.S.Francisco x Ecoporanga, Km 22, Paulista", "cep": "29800-000", "lat": -18.657945, "lng": -40.79827, "cnpj": "28.151.363/0024-33", "rede": "172.24.44.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.657945,-40.798270"}, {"nome": "ETA Pedra Menina", "entidade": "CESAN", "cidade": "Dores do Rio Preto", "endereco": "Rua Principal, s/n - Pedra Menina", "cep": "29580-000", "lat": null, "lng": null, "cnpj": "28.151.363/0042-15", "rede": "172.25.30.0/26", "tipo": "ETA", "mapsUrl": ""}, {"nome": "ETA Pedro Canário", "entidade": "CESAN", "cidade": "Pedro Canário", "endereco": "Avenida Cristal, s/n - Centro", "cep": "29970-000", "lat": -18.299946, "lng": -39.958555, "cnpj": "28.151.363/0051-06", "rede": "172.22.88.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.299946,-39.958555"}, {"nome": "ETA Pequiá", "entidade": "CESAN", "cidade": "Iúna", "endereco": "Rodovia BR-262 KM 195, s/n - Distrito de Pequiá", "cep": "29392-000", "lat": -20.280202, "lng": -41.7772, "cnpj": "28.151.363/0014-61", "rede": "172.25.37.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.280202,-41.777200"}, {"nome": "ETA Piaçu", "entidade": "CESAN", "cidade": "Muniz Freire", "endereco": "Rua Nestor Machado de Ávila, s/n - Centro, Piaçú", "cep": "29386-000", "lat": -20.336684, "lng": -41.394721, "cnpj": "28.151.363/0050-25", "rede": "172.22.194.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.336684,-41.394721"}, {"nome": "ETA Pinheiros", "entidade": "CESAN", "cidade": "Pinheiros", "endereco": "Rodovia ES-313, Km 08 - Zona Rural sentido Sayonara", "cep": "29980-000", "lat": -18.47363, "lng": -40.177109, "cnpj": "28.151.363/0030-81", "rede": "172.22.93.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.473630,-40.177109"}, {"nome": "ETA Piúma", "entidade": "CESAN", "cidade": "Piúma", "endereco": "Estrada do Orobó, s/n - Orobó", "cep": "29285-000", "lat": -20.845937, "lng": -40.77021, "cnpj": "28.151.363/0070-79", "rede": "172.22.196.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.845937,-40.770210"}, {"nome": "ETA Ponto Alto", "entidade": "CESAN", "cidade": "Domingos Martins", "endereco": "Rua Adilio Ewald, s/n - Ponto Alto", "cep": "29273-993", "lat": -20.287007, "lng": -40.819213, "cnpj": "28.151.363/0089-89", "rede": "172.25.71.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.287007,-40.819213"}, {"nome": "ETA Ponto Belo", "entidade": "CESAN", "cidade": "Ponto Belo", "endereco": "Rua Jaime Santos, 4 - Centro", "cep": "29885-000", "lat": -18.123234, "lng": -40.544529, "cnpj": "28.151.363/0054-59", "rede": "172.22.126.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.123234,-40.544529"}, {"nome": "ETA Prata dos Baianos", "entidade": "CESAN", "cidade": "Ecoporanga", "endereco": "Rua da ETA, s/n - Centro, Prata dos Baianos", "cep": "29850-000", "lat": -18.339665, "lng": -41.00344, "cnpj": "28.151.363/0026-03", "rede": "172.24.25.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.339665,-41.003440"}, {"nome": "ETA Presidente Kennedy", "entidade": "CESAN", "cidade": "Presidente Kennedy", "endereco": "Rua da ETA, Parque de Exposições - Centro", "cep": "29350-000", "lat": -21.100768, "lng": -41.041111, "cnpj": "28.151.363/0062-69", "rede": "172.22.198.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-21.100768,-41.041111"}, {"nome": "ETA Reis Magos", "entidade": "CESAN", "cidade": "Serra", "endereco": "Avenida Edvaldo Lima, s/n - Nova Almeida, Centro (Rod ES 264 Fazenda Dal Col / Zona rural)", "cep": "29174-090", "lat": -20.034717, "lng": -40.299126, "cnpj": "28.151.363/0057-00", "rede": "172.22.224.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.034717,-40.299126"}, {"nome": "ETA Rio Novo do Sul", "entidade": "CESAN", "cidade": "Rio Novo do Sul", "endereco": "Rua Getúlio Oliveira, s/n - Centro", "cep": "29290-000", "lat": -20.859153, "lng": -40.934538, "cnpj": "28.151.363/0046-49", "rede": "172.22.200.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.859153,-40.934538"}, {"nome": "ETA Santa Leopoldina", "entidade": "CESAN", "cidade": "Santa Leopoldina", "endereco": "Ladeira Padre Henrique Otto, s/n - Centro", "cep": "29640-000", "lat": -20.099987, "lng": -40.53155, "cnpj": "28.151.363/0085-55", "rede": "172.22.202.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.099987,-40.531550"}, {"nome": "ETA Santa Luzia de Mantenópolis", "entidade": "CESAN", "cidade": "Mantenópolis", "endereco": "Rua da ETA, s/n - Centro, Zona Rural, Santa Luzia de Mantenópolis", "cep": "29772-000", "lat": -18.885277, "lng": -41.010774, "cnpj": "28.151.363/0032-43", "rede": "172.24.52.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.885277,-41.010774"}, {"nome": "ETA Santa Maria de Jetibá", "entidade": "CESAN", "cidade": "Santa Maria de Jetibá", "endereco": "Rua Tharso Bortolini Tietz, 225 - Centro", "cep": "29645-000", "lat": -20.028414, "lng": -40.744301, "cnpj": "28.151.363/0053-78", "rede": "172.22.218.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.028414,-40.744301"}, {"nome": "ETA Santa Teresa", "entidade": "CESAN", "cidade": "Santa Teresa", "endereco": "Ladeira Fortunato Carlos Bonino, s/n - Vila Nova", "cep": "29650-000", "lat": -19.944045, "lng": -40.606753, "cnpj": "28.151.363/0038-39", "rede": "172.22.204.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.944045,-40.606753"}, {"nome": "ETA Santo Agostinho", "entidade": "CESAN", "cidade": "Água Doce do Norte", "endereco": "Rua São José, s/n - Centro, Santo Agostinho", "cep": "29820-000", "lat": -18.412127, "lng": -41.03856, "cnpj": "28.151.363/0056-10", "rede": "172.24.48.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.412127,-41.038560"}, {"nome": "ETA Santo Antônio do Canaã", "entidade": "CESAN", "cidade": "Santa Teresa", "endereco": "Rua da ETA, s/n - Santo Antonio do Canaã", "cep": "29654-000", "lat": -19.825572, "lng": -40.653411, "cnpj": "28.151.363/0038-39", "rede": "172.25.83.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.825572,-40.653411"}, {"nome": "ETA São Gabriel da Palha", "entidade": "CESAN", "cidade": "São Gabriel da Palha", "endereco": "N/D", "cep": "29780-000", "lat": -19.019413, "lng": -40.539501, "cnpj": "28.151.363/0008-13", "rede": "172.22.250.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.019413,-40.539501"}, {"nome": "ETA São João do Sobrado", "entidade": "CESAN", "cidade": "Pinheiros", "endereco": "Rodovia ES-313 - Zona Rural, São João Do Sobrado", "cep": "29980-000", "lat": -18.317048, "lng": -40.410743, "cnpj": "28.151.363/0030-81", "rede": "172.24.33.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.317048,-40.410743"}, {"nome": "ETA São José de Mantenópolis", "entidade": "CESAN", "cidade": "Mantenópolis", "endereco": "Rua Doralina Alves Barcelar, s/n / KM 07 - Centro, São José Mantenópolis", "cep": "29770-000", "lat": -18.897787, "lng": -41.080885, "cnpj": "28.151.363/0032-43", "rede": "172.24.53.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.897787,-41.080885"}, {"nome": "ETA São José do Calçado", "entidade": "CESAN", "cidade": "São José do Calçado", "endereco": "Rua Dr. José Fernando Medina, 440 - Centro", "cep": "29470-000", "lat": -21.022637, "lng": -41.652219, "cnpj": "28.151.363/0018-95", "rede": "172.22.208.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-21.022637,-41.652219"}, {"nome": "ETA São Roque do Canaã", "entidade": "CESAN", "cidade": "São Roque do Canaã", "endereco": "Rua da ETA, s/n", "cep": "29665-000", "lat": -19.745009, "lng": -40.656312, "cnpj": "28.151.363/0018-95", "rede": "172.22.210.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.745009,-40.656312"}, {"nome": "ETA Serra Pelada", "entidade": "CESAN", "cidade": "Afonso Cláudio", "endereco": "Rua Augusto Dias de Almeida, s/n - Serra Pelada", "cep": "29600-000", "lat": -20.003988, "lng": -41.027616, "cnpj": "28.151.363/0019-76", "rede": "172.25.61.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.003988,-41.027616"}, {"nome": "ETA Sobreiro", "entidade": "CESAN", "cidade": "Laranja da Terra", "endereco": "Rua da ETA, s/n - Centro, Sobreiro", "cep": "29619-000", "lat": -19.823674, "lng": -41.116295, "cnpj": "28.151.363/0067-73", "rede": "", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.823674,-41.116295"}, {"nome": "ETA Timbuí", "entidade": "CESAN", "cidade": "Fundão", "endereco": "Rua CESAN BR-101 KM 239 - Timbuí (Zona Rural)", "cep": "29185-000", "lat": -20.013685, "lng": -40.407884, "cnpj": "28.151.363/0059-63", "rede": "172.22.214.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.013685,-40.407884"}, {"nome": "ETA Ubú", "entidade": "CESAN", "cidade": "Anchieta", "endereco": "Avenida Anchieta, s/n - Parati", "cep": "29230-000", "lat": -20.802871, "lng": -40.597101, "cnpj": "28.151.363/0071-50", "rede": "172.22.78.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.802871,-40.597101"}, {"nome": "ETA Várzea Alegre", "entidade": "CESAN", "cidade": "Santa Teresa", "endereco": "Rua da ETA, s/n - Centro, Várzea Alegre", "cep": "29662-000", "lat": -19.902849, "lng": -40.758165, "cnpj": "28.151.363/0038-39", "rede": "", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-19.902849,-40.758165"}, {"nome": "ETA Venda Nova do Imigrante", "entidade": "CESAN", "cidade": "Venda Nova do Imigrante", "endereco": "Rua Vista Linda, s/n", "cep": "29375-000", "lat": -20.3335, "lng": -41.131323, "cnpj": "28.151.363/0040-53", "rede": "172.22.216.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.333500,-41.131323"}, {"nome": "ETA Viana", "entidade": "CESAN", "cidade": "Viana", "endereco": "Rua da ETA, s/n, BR262 - Viana Sede", "cep": "29135-000", "lat": -20.389127, "lng": -40.493683, "cnpj": "28.151.363/0084-74", "rede": "172.22.140.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-20.389127,-40.493683"}, {"nome": "ETA Vila Pavão", "entidade": "CESAN", "cidade": "Vila Pavão", "endereco": "Rua Padre Sérgio Banzza, s/n - Centro", "cep": "29843-000", "lat": -18.620576, "lng": -40.607909, "cnpj": "28.151.363/0066-92", "rede": "172.22.242.0/24", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.620576,-40.607909"}, {"nome": "ETA Vila Valério", "entidade": "CESAN", "cidade": "Vila Valério", "endereco": "Rua Marcelino de Castro e Souza, 130 - Nossa Senhora da Penha", "cep": "29785-000", "lat": -18.998151, "lng": -40.385589, "cnpj": "28.151.363/0074-00", "rede": "172.24.62.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.998151,-40.385589"}, {"nome": "ETA Vila Verde", "entidade": "CESAN", "cidade": "Pancas", "endereco": "Rua São José - Centro, Vila Verde", "cep": "29752-000", "lat": -18.973205, "lng": -40.878513, "cnpj": "28.151.363/0045-68", "rede": "172.24.66.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.973205,-40.878513"}, {"nome": "ETA Vinhatico", "entidade": "CESAN", "cidade": "Montanha", "endereco": "Avenida Cristiano Dias Lopes Filho, s/n - Vinhatico", "cep": "29894-000", "lat": -18.199053, "lng": -40.2657, "cnpj": "28.151.363/0044-87", "rede": "172.24.15.0/26", "tipo": "ETA", "mapsUrl": "https://www.google.com/maps?q=-18.199053,-40.265700"}, {"nome": "ETE Afonso Cláudio", "entidade": "CESAN", "cidade": "Afonso Cláudio", "endereco": "Rua Neuza Coelho Barcelos, s/n - Zona Rural", "cep": "29600-000", "lat": -20.072902, "lng": -41.142571, "cnpj": "28.151.363/0019-76", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.072902,-41.142571"}, {"nome": "ETE Araçás", "entidade": "CESAN", "cidade": "Vila Velha", "endereco": "Rua Carlos Larica, s/n - Jardim Guaranhuns", "cep": "29103-470", "lat": -20.37885, "lng": -40.326848, "cnpj": "28.151.363/0060-05", "rede": "172.22.230.0/24", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.378850,-40.326848"}, {"nome": "ETE Barra de São Francisco", "entidade": "CESAN", "cidade": "Barra de São Francisco", "endereco": "Avenida Jones dos Santos Neves, s/n - Irmãos Fernandes", "cep": "29800-000", "lat": -18.7457, "lng": -40.888587, "cnpj": "28.151.363/0024-33", "rede": "172.24.43.0/26", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-18.745700,-40.888587"}, {"nome": "ETE Barra do Sahy", "entidade": "CESAN", "cidade": "Aracruz", "endereco": "Rua Vitória, s/n - Santa Marta", "cep": "29198-517", "lat": -19.870848, "lng": -40.078408, "cnpj": "28.151.363/0002-28", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-19.87084800000000,-40.07840800000000"}, {"nome": "ETE Bom Jesus do Norte", "entidade": "CESAN", "cidade": "Bom Jesus do Norte", "endereco": "Estrada BJN x Barra Alegre, s/n - Alverino S. Martins", "cep": "29460-000", "lat": -21.122406, "lng": -41.658166, "cnpj": "28.151.363/0058-82", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-21.122406,-41.658166"}, {"nome": "ETE Camburi", "entidade": "CESAN", "cidade": "Vitória", "endereco": "Avenida Gelu Vervloet dos Santos, 35 - Jardim Camburi", "cep": "29090-100", "lat": -20.265585, "lng": -40.274133, "cnpj": "28.151.363/0001-47", "rede": "172.22.46.0/24", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.265585,-40.274133"}, {"nome": "ETE Castelo", "entidade": "CESAN", "cidade": "Castelo", "endereco": "Rua Pedro Magnago, s/n - Aracuí", "cep": "29360-000", "lat": -20.646126, "lng": -41.206787, "cnpj": "28.151.363/0007-32", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.646126,-41.206787"}, {"nome": "ETE Domingos Martins", "entidade": "CESAN", "cidade": "Domingos Martins", "endereco": "Rodovia João Ricardo Schorling, s/n - Centro", "cep": "29260-000", "lat": -20.370435, "lng": -40.651032, "cnpj": "28.151.363/0089-89", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.370435,-40.651032"}, {"nome": "ETE Ecoporanga", "entidade": "CESAN", "cidade": "Ecoporanga", "endereco": "Rua Henrique Ferreira, s/n - Teófilo Figueiredo", "cep": "29850-000", "lat": -18.376352, "lng": -40.827123, "cnpj": "28.151.363/0026-03", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-18.376352,-40.827123"}, {"nome": "ETE Itaúnas", "entidade": "CESAN", "cidade": "Conceição da Barra", "endereco": "Rodovia ES-209, s/n - Itaúnas", "cep": "29960-000", "lat": -18.43155, "lng": -39.71107, "cnpj": "28.151.363/0009-02", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-18.431550,-39.711070"}, {"nome": "ETE Laranja da Terra", "entidade": "CESAN", "cidade": "Laranja da Terra", "endereco": "Área Rural", "cep": "29615-000", "lat": -19.893188, "lng": -41.062171, "cnpj": "28.151.363/0067-73", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-19.893188,-41.062171"}, {"nome": "ETE Manguinhos", "entidade": "CESAN", "cidade": "Serra", "endereco": "Avenida Meridional, 2025 - Cidade Continental / Setor Oceania", "cep": "29163-451", "lat": -20.211496, "lng": -40.219282, "cnpj": "28.151.363/0057-00", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.211496,-40.219282"}, {"nome": "ETE Mantenópolis", "entidade": "CESAN", "cidade": "Mantenópolis", "endereco": "Estrada saída para São Geraldo, Zona Rural", "cep": "29770-000", "lat": -18.864863, "lng": -41.128361, "cnpj": "28.151.363/0032-43", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-18.864863,-41.128361"}, {"nome": "ETE Marechal Floriano", "entidade": "CESAN", "cidade": "Marechal Floriano", "endereco": "Rua nº 01, s/n - Vale das Palmas", "cep": "29255-000", "lat": -20.409383, "lng": -40.666757, "cnpj": "28.151.363/0049-91", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.409383,-40.666757"}, {"nome": "ETE Meaípe", "entidade": "CESAN", "cidade": "Guarapari", "endereco": "N/D", "cep": "", "lat": null, "lng": null, "cnpj": "", "rede": "", "tipo": "ETE", "mapsUrl": ""}, {"nome": "ETE Mucurici", "entidade": "CESAN", "cidade": "Mucurici", "endereco": "Rodovia ES-137, s/n", "cep": "29880-000", "lat": -18.091441, "lng": -40.515527, "cnpj": "28.151.363/0023-52", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-18.091441,-40.515527"}, {"nome": "ETE Muniz Freire", "entidade": "CESAN", "cidade": "Muniz Freire", "endereco": "Rua Joaquim Ribeiro Soares, s/n - São Vicente", "cep": "29380-000", "lat": -20.462229, "lng": -41.422888, "cnpj": "28.151.363/0050-25", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.462229,-41.422888"}, {"nome": "ETE Nova Venécia", "entidade": "CESAN", "cidade": "Nova Venécia", "endereco": "Rodovia Miguel Curry Carneiro, KM 59 - referência antigo Matadouro", "cep": "29830-000", "lat": -18.725492, "lng": -40.380852, "cnpj": "28.151.363/0010-38", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-18.725492,-40.380852"}, {"nome": "ETE Piaçú", "entidade": "CESAN", "cidade": "Muniz Freire", "endereco": "Rua Argemiro José da Silva, s/n - Piaçú", "cep": "29386-000", "lat": -20.341766, "lng": -41.392865, "cnpj": "28.151.363/0050-25", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.341766,-41.392865"}, {"nome": "ETE Pinheiros", "entidade": "CESAN", "cidade": "Pinheiros", "endereco": "Rodovia ES-313, s/n", "cep": "29980-000", "lat": -18.432143, "lng": -40.212928, "cnpj": "28.151.363/0030-81", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-18.432143,-40.212928"}, {"nome": "ETE Santa Maria de Jetibá", "entidade": "CESAN", "cidade": "Santa Maria de Jetibá", "endereco": "Rodovia Dalmacio Espíndula, s/n - Centro", "cep": "29645-000", "lat": -20.032113, "lng": -40.746617, "cnpj": "28.151.363/0053-78", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.032113,-40.746617"}, {"nome": "ETE Santa Teresa", "entidade": "CESAN", "cidade": "Santa Teresa", "endereco": "Rodovia Josil Espíndula Agostini, s/n - Penha", "cep": "29650-000", "lat": -19.942813, "lng": -40.578242, "cnpj": "28.151.363/0038-39", "rede": "172.22.205.0/24", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-19.942813,-40.578242"}, {"nome": "ETE São Gabriel da Palha", "entidade": "CESAN", "cidade": "São Gabriel da Palha", "endereco": "Cachoeira da Onça, Zona Rural", "cep": "29780-000", "lat": -19.05181, "lng": -40.526764, "cnpj": "28.151.363/0008-13", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-19.051810,-40.526764"}, {"nome": "ETE Ubú", "entidade": "CESAN", "cidade": "Anchieta", "endereco": "Rodovia Gilberto Domingues (ES- 146), s/n - Próximo ao trevo de Ubú, à direita, Ubú", "cep": "29230-000", "lat": -20.798341, "lng": -40.596753, "cnpj": "28.151.363/0071-50", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.798341,-40.596753"}, {"nome": "ETE Venda Nova do Imigrante", "entidade": "CESAN", "cidade": "Venda Nova do Imigrante", "endereco": "Avenida Angelo Altoé, s/n - Bananeiras", "cep": "29375-000", "lat": -20.324716, "lng": -41.145225, "cnpj": "28.151.363/0040-53", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.324716,-41.145225"}, {"nome": "ETE Viana", "entidade": "CESAN", "cidade": "Viana", "endereco": "N/D", "cep": "", "lat": null, "lng": null, "cnpj": "", "rede": "", "tipo": "ETE", "mapsUrl": ""}, {"nome": "ETE Vila Pedra Azul", "entidade": "CESAN", "cidade": "Domingos Martins", "endereco": "Rua Grecco, s/n - Aracê", "cep": "29278-000", "lat": -20.380547, "lng": -41.028715, "cnpj": "28.151.363/0089-89", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.380547,-41.028715"}, {"nome": "ETE Vila Valério", "entidade": "CESAN", "cidade": "Vila Valério", "endereco": "Rua Padre Francisco - Zona Rural", "cep": "29785-000", "lat": -19.008498, "lng": -40.393787, "cnpj": "28.151.363/0074-00", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-19.008498,-40.393787"}, {"nome": "ETE Vivendas de Pedra Azul", "entidade": "CESAN", "cidade": "Domingos Martins", "endereco": "Rua Projetada B, s/n - Aracê", "cep": "29278-000", "lat": -20.376678, "lng": -41.044257, "cnpj": "28.151.363/0089-89", "rede": "", "tipo": "ETE", "mapsUrl": "https://www.google.com/maps?q=-20.376678,-41.044257"}, {"nome": "Externo", "entidade": "CESAN", "cidade": "", "endereco": "", "cep": "", "lat": null, "lng": null, "cnpj": "", "rede": "Usado para os usuários terceirizados que não atuam nas dependências da Cesan.", "tipo": "Outro", "mapsUrl": ""}, {"nome": "Fonte Grande", "entidade": "CESAN", "cidade": "Vitória", "endereco": "N/D", "cep": "", "lat": null, "lng": null, "cnpj": "", "rede": "172.23.152.0/24", "tipo": "Outro", "mapsUrl": ""}, {"nome": "Polo Afonso Cláudio", "entidade": "CESAN", "cidade": "Afonso Cláudio", "endereco": "Avenida José Cupertino, 90 - Centro", "cep": "29600-000", "lat": -20.079125, "lng": -41.123627, "cnpj": "28.151.363/0019-76", "rede": "172.22.80.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.079125,-41.123627"}, {"nome": "Polo Anchieta", "entidade": "CESAN", "cidade": "Anchieta", "endereco": "Rodovia ES-060, 19 - Centro (Casa Do Cidadão)", "cep": "29230-000", "lat": -20.806179, "lng": -40.649176, "cnpj": "28.151.363/0071-50", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.806179,-40.649176"}, {"nome": "Polo Apiacá", "entidade": "CESAN", "cidade": "Apiacá", "endereco": "Praça Nossa Senhora Santana, 04 - Centro", "cep": "29450-000", "lat": -21.157067, "lng": -41.564835, "cnpj": "28.151.363/0021-90", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-21.157067,-41.564835"}, {"nome": "Polo Atílio Vivacqua", "entidade": "CESAN", "cidade": "Atílio Vivácqua", "endereco": "N/D", "cep": "", "lat": null, "lng": null, "cnpj": "28.151.363/0037-58", "rede": "172.22.62.0/24", "tipo": "Polo", "mapsUrl": ""}, {"nome": "Polo Barra de São Francisco", "entidade": "CESAN", "cidade": "Barra de São Francisco", "endereco": "Rua José Alberto Costa, 385 - Centro", "cep": "29800-000", "lat": -18.760358, "lng": -40.887066, "cnpj": "28.151.363/0024-33", "rede": "172.22.52.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-18.760358,-40.887066"}, {"nome": "Pólo Boa Vista", "entidade": "CESAN", "cidade": "Vila Velha", "endereco": "Rua Braga, 650 - Boa Vista", "cep": "29102-760", "lat": -20.356132, "lng": -40.30291, "cnpj": "28.151.363/0060-05", "rede": "172.22.36.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.356132,-40.302910"}, {"nome": "Polo Bom Jesus do Norte", "entidade": "CESAN", "cidade": "Bom Jesus do Norte", "endereco": "Avenida Progresso, 194 - Centro", "cep": "29460-000", "lat": -21.130598, "lng": -41.675729, "cnpj": "28.151.363/0058-82", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-21.130598,-41.675729"}, {"nome": "Polo Conceição da Barra", "entidade": "CESAN", "cidade": "Conceição da Barra", "endereco": "Rua Nova Venécia, 112 - Centro", "cep": "29960-000", "lat": -18.587608, "lng": -39.733411, "cnpj": "28.151.363/0009-02", "rede": "172.22.58.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-18.587608,-39.733411"}, {"nome": "Polo de Esgoto - Muquiçaba", "entidade": "CESAN", "cidade": "Guarapari", "endereco": "Rua Laura Loureiro das Neves, 538 - Muquiçaba", "cep": "29215-330", "lat": -20.657057, "lng": -40.499551, "cnpj": "28.151.363/0048-00", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.657057,-40.499551"}, {"nome": "Polo Divino São Lourenço", "entidade": "CESAN", "cidade": "Divino de São Lourenço", "endereco": "Rua Lino Furtado de Mendonça, 76 - Centro", "cep": "29590-000", "lat": -20.619859, "lng": -41.684724, "cnpj": "28.151.363/0041-34", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.619859,-41.684724"}, {"nome": "Polo Domingos Martins", "entidade": "CESAN", "cidade": "Domingos Martins", "endereco": "Avenida Senador Jeferson de Aguiar, 27 - Centr", "cep": "29260-000", "lat": -20.363638, "lng": -40.659415, "cnpj": "28.151.363/0089-89", "rede": "172.22.72.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.363638,-40.659415"}, {"nome": "Polo Fundão", "entidade": "CESAN", "cidade": "Fundão", "endereco": "Rua Afonso Duarte Nascimento, 05 - São José", "cep": "29185-000", "lat": -19.933264, "lng": -40.409545, "cnpj": "28.151.363/0059-63", "rede": "172.22.74.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-19.933264,-40.409545"}, {"nome": "Polo Guarapari", "entidade": "CESAN", "cidade": "Guarapari", "endereco": "Rua da Matriz, s/n - Centro", "cep": "29200-110", "lat": -20.669283, "lng": -40.49533, "cnpj": "28.151.363/0048-00", "rede": "172.22.48.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.669283,-40.495330"}, {"nome": "Polo Iúna", "entidade": "CESAN", "cidade": "Iúna", "endereco": "Centro", "cep": "29390-000", "lat": -20.347777, "lng": -41.531058, "cnpj": "28.151.363/0014-61", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.347777,-41.531058"}, {"nome": "Polo Muqui", "entidade": "CESAN", "cidade": "Muqui", "endereco": "Rua João Jacinto, 121 - Boa Esperança", "cep": "29480-000", "lat": -20.952037, "lng": -41.342491, "cnpj": "28.151.363/0016-23", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.952037,-41.342491"}, {"nome": "Polo Nova Venécia", "entidade": "CESAN", "cidade": "Nova Venécia", "endereco": "Avenida Vitória, 888 - Centro", "cep": "29830-000", "lat": -18.709424, "lng": -40.404936, "cnpj": "28.151.363/0010-38", "rede": "172.22.54.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-18.709424,-40.404936"}, {"nome": "Polo Pancas", "entidade": "CESAN", "cidade": "Pancas", "endereco": "Avenida José Nunes de Miranda, s/n / loja 04 - Centro", "cep": "29750-000", "lat": -19.222707, "lng": -40.85139, "cnpj": "28.151.363/0045-68", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-19.222707,-40.851390"}, {"nome": "Polo Pinheiros", "entidade": "CESAN", "cidade": "Pinheiros", "endereco": "Avenida Agenor Luiz Heringer, 1230 - Centro", "cep": "29980-000", "lat": -18.418833, "lng": -40.209486, "cnpj": "28.151.363/0030-81", "rede": "172.22.92.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-18.418833,-40.209486"}, {"nome": "Pólo Piúma", "entidade": "CESAN", "cidade": "Piúma", "endereco": "Rua Antônio Miranda Neto, s/n - Niterói", "cep": "29285-000", "lat": -20.837472, "lng": -40.719183, "cnpj": "28.151.363/0070-79", "rede": "172.22.96.0/24", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.837472,-40.719183"}, {"nome": "Polo Presidente Kennedy", "entidade": "CESAN", "cidade": "Presidente Kennedy", "endereco": "Rua Olimpio Pinto Campos Figueiredo, 13 - Centro", "cep": "29350-000", "lat": -21.099726, "lng": -41.044286, "cnpj": "28.151.363/0062-69", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-21.099726,-41.044286"}, {"nome": "Polo São José do Calçado", "entidade": "CESAN", "cidade": "São José do Calçado", "endereco": "Rua Pedro Medina, 53 - Centro", "cep": "29470-000", "lat": -21.026451, "lng": -41.65505, "cnpj": "28.151.363/0018-95", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-21.026451,-41.655050"}, {"nome": "Polo São Roque do Canaã", "entidade": "CESAN", "cidade": "São Roque do Canaã", "endereco": "Centro", "cep": "29665-000", "lat": -19.739797, "lng": -40.657797, "cnpj": "28.151.363/0018-95", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-19.739797,-40.657797"}, {"nome": "Polo Viana", "entidade": "CESAN", "cidade": "Viana", "endereco": "Avenida Florentino Avidos, 01 - Viana Sede", "cep": "29130-915", "lat": -20.389334, "lng": -40.49505, "cnpj": "28.151.363/0084-74", "rede": "", "tipo": "Polo", "mapsUrl": "https://www.google.com/maps?q=-20.389334,-40.495050"}, {"nome": "Santa Clara", "entidade": "CESAN", "cidade": "Vitória", "endereco": "Rua Antônio da Vitória, s/n - Santa Clara", "cep": "29018-670", "lat": -20.31857, "lng": -40.344855, "cnpj": "28.151.363/0001-47", "rede": "172.22.98.0/24", "tipo": "Outro", "mapsUrl": "https://www.google.com/maps?q=-20.318570,-40.344855"}, {"nome": "Santa Lúcia", "entidade": "CESAN", "cidade": "Vitória", "endereco": "Ladeira Sandro Machado Barroso, 176 - Santa Lúcia", "cep": "29056-215", "lat": -20.301788, "lng": -40.302282, "cnpj": "28.151.363/0001-47", "rede": "172.22.26.0/24", "tipo": "Outro", "mapsUrl": "https://www.google.com/maps?q=-20.301788,-40.302282"}, {"nome": "Vale Esperança", "entidade": "CESAN", "cidade": "Cariacica", "endereco": "Avenida Perimetral, s/n - Vale Esperança", "cep": "29141-010", "lat": -20.340433, "lng": -40.371444, "cnpj": "28.151.363/0086-36", "rede": "172.22.44.0/24", "tipo": "Outro", "mapsUrl": "https://www.google.com/maps?q=-20.340433,-40.371444"}];
+
+// ════════════════════════════════════════════════════════════════════════
+// MÓDULO LOCALIDADES CESAN
+// ════════════════════════════════════════════════════════════════════════
+
+const COR_TIPO = {
+  'Atendimento': '#2563EB',
+  'ETA':         '#0891B2',
+  'ETE':         '#7C3AED',
+  'Polo':        '#D97706',
+  'Sede/Escritório': '#DC2626',
+  'Outro':       '#6B7280',
+};
+
+let _locView = 'grid';
+
+// ── Registra a página no sistema de navegação ─────────────────────────────
+(function() {
+  // Adiciona ao mapa de páginas
+  const _prevPageMap = window._pageRenderers || {};
+})();
+
+// ── Inicializa página ─────────────────────────────────────────────────────
+function renderLocalidades() {
+  _locPopularCidades();
+  const lista = _locFiltrar();
+  _locAtualizarKPIs(lista);
+  document.getElementById('loc-count').textContent =
+    `${lista.length} localidade${lista.length !== 1 ? 's' : ''} encontrada${lista.length !== 1 ? 's' : ''}`;
+  if (_locView === 'grid') _locRenderGrid(lista);
+  else if (_locView === 'list') _locRenderLista(lista);
+}
+
+function _locPopularCidades() {
+  const sel = document.getElementById('loc-filtro-cidade');
+  if (!sel || sel.dataset.loaded) return;
+  sel.dataset.loaded = '1';
+  const cidades = [...new Set(LOCALIDADES_CESAN.map(l => l.cidade).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Todas as cidades</option>' +
+    cidades.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+}
+
+function _locFiltrar() {
+  const q      = (document.getElementById('loc-busca')?.value || '').toLowerCase();
+  const tipo   = document.getElementById('loc-filtro-tipo')?.value  || '';
+  const cidade = document.getElementById('loc-filtro-cidade')?.value || '';
+  return LOCALIDADES_CESAN.filter(l => {
+    if (tipo   && l.tipo   !== tipo)   return false;
+    if (cidade && l.cidade !== cidade) return false;
+    if (q && !( (l.nome||'').toLowerCase().includes(q)    ||
+                (l.cidade||'').toLowerCase().includes(q)  ||
+                (l.endereco||'').toLowerCase().includes(q)||
+                (l.rede||'').toLowerCase().includes(q)    )) return false;
+    return true;
+  });
+}
+
+function _locAtualizarKPIs(lista) {
+  const c = lista.reduce((acc, l) => { acc[l.tipo] = (acc[l.tipo]||0)+1; return acc; }, {});
+  sv('loc-kpi-total', lista.length);
+  sv('loc-kpi-atend', c['Atendimento'] || 0);
+  sv('loc-kpi-eta',   c['ETA']         || 0);
+  sv('loc-kpi-ete',   c['ETE']         || 0);
+  sv('loc-kpi-polo',  c['Polo']        || 0);
+  sv('loc-kpi-outras', (c['Sede/Escritório']||0) + (c['Outro']||0));
+}
+
+// ── Grid de cards ─────────────────────────────────────────────────────────
+function _locRenderGrid(lista) {
+  const grid = document.getElementById('loc-cards-grid');
+  if (!grid) return;
+  if (!lista.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)">Nenhuma localidade encontrada</div>';
+    return;
+  }
+  grid.innerHTML = lista.map(l => {
+    const cor    = COR_TIPO[l.tipo] || '#6B7280';
+    const temGeo = l.lat && l.lng;
+    return `
+    <div style="border:1px solid var(--g200);border-radius:12px;background:var(--color-background-primary);
+                overflow:hidden;transition:box-shadow .15s;cursor:pointer"
+         onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.10)'"
+         onmouseout="this.style.boxShadow=''"
+         onclick="locAbrirDetalhe(${JSON.stringify(l.nome).replace(/'/g,'&#39;')})">
+      <!-- Topo colorido por tipo -->
+      <div style="height:4px;background:${cor}"></div>
+      <div style="padding:14px 16px">
+        <!-- Badge tipo + cidade -->
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
+          <span style="font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:12px;
+                       background:${cor}18;color:${cor};white-space:nowrap">${escapeHtml(l.tipo)}</span>
+          <span style="font-size:11px;color:var(--g400);text-align:right;flex:1;overflow:hidden;
+                       text-overflow:ellipsis;white-space:nowrap">${escapeHtml(l.cidade||'—')}</span>
+        </div>
+        <!-- Nome -->
+        <div style="font-weight:700;font-size:13.5px;color:var(--g900);margin-bottom:6px;line-height:1.4">
+          ${escapeHtml(l.nome)}
+        </div>
+        <!-- Endereço -->
+        <div style="font-size:12px;color:var(--g500);margin-bottom:10px;line-height:1.5;
+                    min-height:32px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
+          📍 ${escapeHtml(l.endereco && l.endereco !== 'N/D' ? l.endereco : 'Endereço não disponível')}
+        </div>
+        <!-- CEP + Rede -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          ${l.cep ? `<span style="font-size:10.5px;background:var(--g100);color:var(--g600);padding:2px 7px;border-radius:6px;font-family:monospace">${escapeHtml(l.cep)}</span>` : ''}
+          ${l.rede ? `<span style="font-size:10.5px;background:var(--g100);color:var(--g600);padding:2px 7px;border-radius:6px;font-family:monospace" title="Faixa de rede">${escapeHtml(l.rede)}</span>` : ''}
+        </div>
+        <!-- Ações -->
+        <div style="display:flex;gap:8px;border-top:1px solid var(--g100);padding-top:10px">
+          ${temGeo ? `
+          <a href="${escapeHtml(l.mapsUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()"
+             style="flex:1;text-align:center;padding:6px;border-radius:8px;font-size:12px;font-weight:600;
+                    background:var(--accent-l);color:var(--accent);text-decoration:none">
+            🗺️ Google Maps
+          </a>` : `
+          <span style="flex:1;text-align:center;padding:6px;font-size:11.5px;color:var(--g400);font-style:italic">
+            Sem coordenadas
+          </span>`}
+          <button onclick="event.stopPropagation();locVerAtivos('${escapeHtml(l.nome)}')"
+                  style="padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;
+                         background:var(--g100);color:var(--g700);border:none;cursor:pointer">
+            🖥️ Ativos
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Tabela ────────────────────────────────────────────────────────────────
+function _locRenderLista(lista) {
+  const tbody = document.getElementById('loc-tabela-body');
+  if (!tbody) return;
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma localidade encontrada</td></tr>';
+    return;
+  }
+  const cor = t => COR_TIPO[t] || '#6B7280';
+  tbody.innerHTML = lista.map(l => `
+    <tr onclick="locAbrirDetalhe('${escapeHtml(l.nome)}')" style="cursor:pointer"
+        onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <td>
+        <div style="font-weight:700;font-size:13px">${escapeHtml(l.nome)}</div>
+        ${l.cnpj ? `<div style="font-size:10.5px;color:var(--g400);font-family:monospace">${escapeHtml(l.cnpj)}</div>` : ''}
+      </td>
+      <td><span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:12px;
+                       background:${cor(l.tipo)}18;color:${cor(l.tipo)}">${escapeHtml(l.tipo)}</span></td>
+      <td style="font-size:12.5px">${escapeHtml(l.cidade||'—')}</td>
+      <td style="font-size:12px;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+          title="${escapeHtml(l.endereco||'')}">
+        ${escapeHtml(l.endereco && l.endereco !== 'N/D' ? l.endereco : '—')}
+      </td>
+      <td class="td-mono" style="font-size:11.5px">${escapeHtml(l.cep||'—')}</td>
+      <td class="td-mono" style="font-size:11px;color:var(--g500)">${escapeHtml(l.rede||'—')}</td>
+      <td>
+        ${l.mapsUrl ? `
+        <a href="${escapeHtml(l.mapsUrl)}" target="_blank" rel="noopener"
+           onclick="event.stopPropagation()"
+           style="font-size:12px;color:var(--accent);font-weight:600;text-decoration:none;
+                  padding:4px 8px;border-radius:6px;background:var(--accent-l)">
+          🗺️ Maps
+        </a>` : '<span style="font-size:11px;color:var(--g300)">—</span>'}
+      </td>
+    </tr>`).join('');
+}
+
+// ── Modal de detalhe ──────────────────────────────────────────────────────
+function locAbrirDetalhe(nome) {
+  const l = LOCALIDADES_CESAN.find(x => x.nome === nome);
+  if (!l) return;
+  const cor    = COR_TIPO[l.tipo] || '#6B7280';
+  const temGeo = l.lat && l.lng;
+
+  const embedUrl = temGeo
+    ? `https://maps.google.com/maps?q=${l.lat},${l.lng}&z=15&output=embed`
+    : '';
+
+  const html = `
+  <div class="modal-overlay active" id="modal-loc-detalhe" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:640px">
+      <div style="height:5px;background:${cor};border-radius:10px 10px 0 0"></div>
+      <div class="modal-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;
+                         background:${cor}18;color:${cor}">${escapeHtml(l.tipo)}</span>
+            <span style="font-size:12px;color:var(--g400)">${escapeHtml(l.cidade||'')}, ES</span>
+          </div>
+          <h3 style="margin:0">${escapeHtml(l.nome)}</h3>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-loc-detalhe').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Mapa embed -->
+        ${temGeo ? `
+        <div style="border-radius:10px;overflow:hidden;margin-bottom:16px;height:240px">
+          <iframe src="${embedUrl}" width="100%" height="240" style="border:none"
+                  loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+        </div>` : `
+        <div style="height:80px;background:var(--g50);border-radius:10px;display:flex;align-items:center;
+                    justify-content:center;margin-bottom:16px;color:var(--g400);font-size:13px">
+          📍 Coordenadas não disponíveis para esta unidade
+        </div>`}
+
+        <!-- Informações -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div style="background:var(--g50);border-radius:8px;padding:12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:6px">Endereço</div>
+            <div style="font-size:13px;line-height:1.5">${escapeHtml(l.endereco && l.endereco !== 'N/D' ? l.endereco : 'Não disponível')}</div>
+            ${l.cep ? `<div style="font-size:11.5px;color:var(--g500);margin-top:4px;font-family:monospace">CEP: ${escapeHtml(l.cep)}</div>` : ''}
+          </div>
+          <div style="background:var(--g50);border-radius:8px;padding:12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:6px">Identificação</div>
+            ${l.cnpj ? `<div style="font-size:11.5px;color:var(--g600);font-family:monospace">CNPJ: ${escapeHtml(l.cnpj)}</div>` : ''}
+            ${l.rede ? `<div style="font-size:11.5px;color:var(--g600);font-family:monospace;margin-top:4px">Rede: ${escapeHtml(l.rede)}</div>` : ''}
+            ${temGeo ? `<div style="font-size:11px;color:var(--g400);margin-top:4px">
+              ${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}
+            </div>` : ''}
+          </div>
+        </div>
+
+        <!-- Ações -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          ${temGeo ? `
+          <a href="${escapeHtml(l.mapsUrl)}" target="_blank" rel="noopener"
+             class="btn btn-primary btn-sm" style="text-decoration:none">
+            🗺️ Abrir no Google Maps
+          </a>
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${l.lat},${l.lng}"
+             target="_blank" rel="noopener"
+             class="btn btn-secondary btn-sm" style="text-decoration:none">
+            🧭 Como chegar
+          </a>` : ''}
+          <button class="btn btn-ghost btn-sm"
+                  onclick="document.getElementById('modal-loc-detalhe').remove();locVerAtivos('${escapeHtml(l.nome)}')">
+            🖥️ Ver ativos desta localidade
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('modal-loc-detalhe')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ── Ver ativos da localidade ──────────────────────────────────────────────
+function locVerAtivos(nomeLocalidade) {
+  // Navega para ativos com filtro pela cidade
+  const loc = LOCALIDADES_CESAN.find(l => l.nome === nomeLocalidade);
+  if (!loc) return;
+  goPage('ativos');
+  setTimeout(() => {
+    const busca = document.getElementById('ativos-search');
+    if (busca) {
+      busca.value = loc.cidade || nomeLocalidade;
+      busca.dispatchEvent(new Event('input'));
+    }
+  }, 300);
+}
+
+// ── Alternar view ─────────────────────────────────────────────────────────
+function locSetView(view) {
+  _locView = view;
+  ['grid','list','map'].forEach(v => {
+    const el = document.getElementById(`loc-view-${v}-content`);
+    const bt = document.getElementById(`loc-view-${v}`);
+    if (el) el.style.display = v === view ? '' : 'none';
+    if (bt) {
+      bt.className = v === view ? 'btn btn-secondary btn-sm' : 'btn btn-ghost btn-sm';
+      if (v === view) bt.style.fontWeight = '700';
+    }
+  });
+  if (view !== 'map') renderLocalidades();
+}
+
+// ── Mapa geral (link externo com todas as localidades) ────────────────────
+function locAbrirMapaGeral() {
+  // Abre Google Maps com a primeira localidade como centro do ES
+  window.open('https://www.google.com/maps/search/CESAN+Esp%C3%ADrito+Santo/@-19.9,-40.5,8z', '_blank');
+}
+
+// ── Exportar CSV ──────────────────────────────────────────────────────────
+function locExportarCSV() {
+  const lista = _locFiltrar();
+  const headers = ['Nome','Tipo','Cidade','Endereço','CEP','CNPJ','Rede','Latitude','Longitude','Google Maps'];
+  const rows = lista.map(l => [
+    l.nome, l.tipo, l.cidade, l.endereco, l.cep, l.cnpj, l.rede,
+    l.lat||'', l.lng||'', l.mapsUrl||''
+  ]);
+  const csv = [headers, ...rows]
+    .map(r => r.map(c => `"${(c||'').toString().replace(/"/g,'""')}"`).join(','))
+    .join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'localidades_cesan.csv';
+  a.click();
+}
 

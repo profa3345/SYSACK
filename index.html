@@ -230,6 +230,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       </a>
       <a class="nav-i nav-sub" data-page="switches"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="5" width="14" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="4" cy="8" r="1" fill="currentColor"/><circle cx="7" cy="8" r="1" fill="currentColor"/><circle cx="10" cy="8" r="1" fill="currentColor"/><rect x="12" y="6.5" width="2" height="3" rx=".5" fill="currentColor" opacity=".6"/></svg>Switches &amp; Roteadores<span class="nav-badge o" id="nb-switches">0</span></a>
       <a class="nav-i nav-sub" data-page="mdm"><svg viewBox="0 0 16 16" fill="none"><rect x="4" y="1" width="8" height="14" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="12" r=".7" fill="currentColor"/></svg>Smartphones / MDM<span class="nav-badge" id="nb-mdm">0</span></a>
+      <a class="nav-i nav-sub" onclick="goPage('localidades')"><svg viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M8 1.5C5.52 1.5 3.5 3.52 3.5 6c0 3.75 4.5 8.5 4.5 8.5s4.5-4.75 4.5-8.5C12.5 3.52 10.48 1.5 8 1.5z" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="6" r="1.5" stroke="currentColor" stroke-width="1.3"/></svg>Localidades</a>
       <a class="nav-i nav-sub" data-page="mobiliario"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="10" width="14" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M3 10V6a1 1 0 011-1h8a1 1 0 011 1v4" stroke="currentColor" stroke-width="1.4"/><path d="M4 13v2M12 13v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Mobiliário &amp; Copa</a>
       <a class="nav-i nav-sub" data-page="apps"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Apps structures</a>
       <a class="nav-i nav-sub" data-page="reuso"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 1 0 10 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13 5l-1 3 3 1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Disponível p/ Reuso <span class="nav-badge nav-badge-green" id="nb-reuso">0</span></a>
@@ -375,6 +376,15 @@ window.dispatchEvent(new Event('firebase-ready'));
       <button class="tb-btn" id="notif-btn">
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1.5A4 4 0 003.5 5.5V8L2 9.5h11L11.5 8V5.5A4 4 0 007.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 11.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span class="notif-count" id="notif-count-badge">5</span>
+      </button>
+      <button class="tb-btn" id="btn-alertas-offline" onclick="abrirPainelAlertasOffline()"
+              title="Máquinas desligadas" style="position:relative;display:none">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="2" y1="3" x2="22" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span class="notif-count" id="nb-alertas-offline" style="display:none;background:#D97706">0</span>
       </button>
       <div class="tb-div"></div>
       <div class="tb-avatar" onclick="abrirMenuUsuario()" style="cursor:pointer" title="Meu perfil">JM<div class="ring"></div></div>
@@ -861,13 +871,122 @@ window.dispatchEvent(new Event('firebase-ready'));
   </div>
 </div>
 
+<div class="page" id="page-localidades">
+  <div class="flex items-center justify-between mb-20">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:var(--g900)">📍 Localidades CESAN</h2>
+      <p class="text-muted" style="margin-top:4px">203 unidades operacionais em todo o Espírito Santo</p>
+    </div>
+    <div class="flex gap-8">
+      <button class="btn btn-ghost btn-sm" onclick="locExportarCSV()">⬇ Exportar CSV</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:20px">
+    <div class="stat-card" style="border-left:3px solid #2563EB">
+      <div class="stat-value" id="loc-kpi-total">203</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #059669">
+      <div class="stat-value" id="loc-kpi-atend">55</div>
+      <div class="stat-label">Atendimento</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #0891B2">
+      <div class="stat-value" id="loc-kpi-eta">85</div>
+      <div class="stat-label">ETA</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #7C3AED">
+      <div class="stat-value" id="loc-kpi-ete">29</div>
+      <div class="stat-label">ETE</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #D97706">
+      <div class="stat-value" id="loc-kpi-polo">23</div>
+      <div class="stat-label">Polo</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #DC2626">
+      <div class="stat-value" id="loc-kpi-outras">11</div>
+      <div class="stat-label">Sede / Outros</div>
+    </div>
+  </div>
+
+  <!-- Busca e filtros -->
+  <div class="flex gap-8 mb-16" style="flex-wrap:wrap">
+    <input class="form-control" id="loc-busca"
+           placeholder="🔍 Buscar por nome, cidade ou endereço..."
+           style="flex:1;min-width:260px;max-width:400px"
+           oninput="renderLocalidades()">
+    <select class="form-control" id="loc-filtro-tipo" style="max-width:180px" onchange="renderLocalidades()">
+      <option value="">Todos os tipos</option>
+      <option value="Atendimento">Atendimento</option>
+      <option value="ETA">ETA</option>
+      <option value="ETE">ETE</option>
+      <option value="Polo">Polo</option>
+      <option value="Sede/Escritório">Sede / Escritório</option>
+      <option value="Outro">Outro</option>
+    </select>
+    <select class="form-control" id="loc-filtro-cidade" style="max-width:200px" onchange="renderLocalidades()">
+      <option value="">Todas as cidades</option>
+    </select>
+    <div class="flex gap-6" style="margin-left:auto">
+      <button class="btn btn-secondary btn-sm" id="loc-view-grid" onclick="locSetView('grid')" style="font-weight:700">⊞ Cards</button>
+      <button class="btn btn-ghost btn-sm" id="loc-view-list" onclick="locSetView('list')">☰ Lista</button>
+      <button class="btn btn-ghost btn-sm" id="loc-view-map" onclick="locSetView('map')">🗺️ Mapa</button>
+    </div>
+  </div>
+
+  <div id="loc-count" style="font-size:12px;color:var(--g400);margin-bottom:12px"></div>
+
+  <!-- View: Grid de cards -->
+  <div id="loc-view-grid-content">
+    <div id="loc-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px"></div>
+  </div>
+
+  <!-- View: Tabela -->
+  <div id="loc-view-list-content" style="display:none">
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr>
+          <th>Nome</th>
+          <th>Tipo</th>
+          <th>Cidade</th>
+          <th>Endereço</th>
+          <th>CEP</th>
+          <th>Rede</th>
+          <th>Mapa</th>
+        </tr></thead>
+        <tbody id="loc-tabela-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- View: Mapa -->
+  <div id="loc-view-map-content" style="display:none">
+    <div style="background:var(--g50);border:1px solid var(--g200);border-radius:12px;overflow:hidden">
+      <div id="loc-mapa-container" style="height:580px;position:relative">
+        <iframe id="loc-mapa-frame" style="width:100%;height:100%;border:none" loading="lazy"></iframe>
+        <div id="loc-mapa-placeholder" style="position:absolute;inset:0;display:flex;flex-direction:column;
+             align-items:center;justify-content:center;background:var(--g50);gap:12px">
+          <div style="font-size:48px">🗺️</div>
+          <div style="font-size:14px;font-weight:600;color:var(--g700)">Visualização no Google Maps</div>
+          <div style="font-size:12px;color:var(--g400);text-align:center;max-width:320px">
+            Selecione uma localidade e clique em "Ver no Mapa" para visualizar a localização
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="locAbrirMapaGeral()">🗺️ Ver todas no Maps</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="page" id="page-ativos">
       <div class="flex items-center justify-between mb-20">
         <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Gestão de Ativos</h2><p class="text-sm text-muted mt-8">Controle patrimonial completo</p></div>
         <div class="flex gap-8" style="flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="patAbrirBusca()">📷 Buscar PAT / Câmera</button>
           <button class="btn btn-secondary btn-sm" onclick="openModal('modal-transferencia')">↔ Transferência</button>
-          <button class="btn btn-primary" onclick="openModal('modal-novo-ativo')">+ Cadastrar Ativo</button>
+          <button class="btn btn-secondary btn-sm" onclick="abrirImportarAtivos()" title="Importar múltiplos ativos de CSV/TXT">📥 Importar em lote</button>
+            <button class="btn btn-primary" onclick="openModal('modal-novo-ativo')">+ Cadastrar Ativo</button>
           <button class="btn btn-secondary btn-sm" onclick="abrirInventarioSala()">🏢 Inventário por Sala</button>
         </div>
       </div>
@@ -2125,63 +2244,106 @@ window.dispatchEvent(new Event('firebase-ready'));
     <!-- APPS STRUCTURES -->
 
     <div class="page" id="page-apps">
-      <div class="flex items-center justify-between mb-20">
-        <div>
-          <div style="font-size:11.5px;color:var(--g400);margin-bottom:4px">Home / Ativos / <strong style="color:var(--g700)">Apps structures</strong></div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Apps structures</h2>
-          <p class="text-sm text-muted mt-8">Sistemas e aplicações corporativas cadastradas</p>
-        </div>
-        <div class="flex gap-8">
-          <button class="btn btn-primary btn-sm">+ Adicionar</button>
-          <button class="btn btn-ghost btn-sm">🔍 Pesquisar</button>
-        </div>
-      </div>
-      <div class="doc-filter-row" style="margin-bottom:10px">
-        <select class="form-control" style="width:80px;margin:0;font-size:12px"><option>—————</option></select>
-        <select class="form-control" style="width:130px;margin:0;font-size:12px"><option>Itens encontrados</option></select>
-        <select class="form-control" style="width:100px;margin:0;font-size:12px"><option>contém</option></select>
-        <input class="form-control" style="width:240px;margin:0;font-size:12px" placeholder="Buscar aplicação..." id="apps-search-input" oninput="renderApps()">
-        <div class="flex gap-6" style="margin-left:auto">
-          <button class="doc-tag-btn">⊕ regra</button>
-          <button class="doc-tag-btn">(+) grupo</button>
-          <button class="doc-tag-btn active">🔍 Pesquisar</button>
-          <button class="doc-tag-btn">☆</button>
-          <button class="doc-tag-btn">ℹ</button>
-        </div>
-      </div>
-      <div class="doc-toolbar mb-12">
-        <button class="doc-tag-btn">⚡ Ações</button>
-        <div class="tb-div" style="height:18px;margin:0 4px"></div>
-        <button class="doc-tag-btn">🗑️</button>
-        <button class="doc-tag-btn">🔍</button>
-        <button class="doc-tag-btn">🔗</button>
-        <button class="doc-tag-btn">⬇</button>
-        <span style="margin-left:auto;font-size:11.5px;color:var(--g500)" id="apps-count-label">Exibindo 1 a 5 de 33 linhas</span>
-        <div class="flex gap-4" style="align-items:center">
-          <select class="form-control" style="width:60px;margin:0;font-size:12px"><option>5</option><option>10</option><option>25</option></select>
-          <span style="font-size:11.5px;color:var(--g500)">linhas/página</span>
-        </div>
-      </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th style="width:30px"><input type="checkbox" style="accent-color:var(--accent)"></th><th>Nome ↑</th><th>Versão</th><th>Fabricante</th><th>Licença</th><th>Responsável</th><th>Status</th><th>Ações</th></tr></thead>
-            <tbody id="apps-body"></tbody>
-          </table>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--g100)">
-          <span style="font-size:11.5px;color:var(--g400)" id="apps-pagination-label">Exibindo 1 a 5 de 33 linhas</span>
-          <div class="flex gap-4">
-            <button class="doc-tag-btn">«</button><button class="doc-tag-btn">‹</button>
-            <button class="doc-tag-btn active">1</button><button class="doc-tag-btn">2</button><button class="doc-tag-btn">3</button>
-            <button class="doc-tag-btn">›</button><button class="doc-tag-btn">»</button>
-          </div>
-        </div>
-      </div>
+  <div class="flex items-center justify-between mb-20">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:var(--g900)">🗂️ Inventário de Software</h2>
+      <p class="text-muted" style="margin-top:4px">Softwares instalados em computadores, notebooks e servidores</p>
     </div>
+    <div class="flex gap-8">
+      <button class="btn btn-secondary btn-sm" onclick="swInvSincronizar()">🔄 Sincronizar agentes</button>
+    </div>
+  </div>
 
-    <!-- KB -->
-    <div class="page" id="page-kb">
+  <!-- KPIs -->
+  <div class="grid-4 mb-20">
+    <div class="stat-card">
+      <div class="stat-value" id="swinv-total-sw">—</div>
+      <div class="stat-label">Softwares distintos</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="swinv-total-maq">—</div>
+      <div class="stat-label">Máquinas inventariadas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="swinv-sem-inventario" style="color:var(--warning)">—</div>
+      <div class="stat-label">Sem inventário</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="swinv-ultima-sync">—</div>
+      <div class="stat-label">Última sincronização</div>
+    </div>
+  </div>
+
+  <!-- Abas -->
+  <div class="tab-bar mb-16">
+    <button class="tab-btn active" onclick="swInvTab('softwares')" id="swinv-tab-sw">Por Software</button>
+    <button class="tab-btn" onclick="swInvTab('maquinas')" id="swinv-tab-maq">Por Máquina</button>
+  </div>
+
+  <!-- ABA: Por Software -->
+  <div id="swinv-view-sw">
+    <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
+      <input class="form-control" id="swinv-busca-sw"
+             placeholder="🔍 Buscar software pelo nome..."
+             style="max-width:360px;flex:1"
+             oninput="renderSwInvPorSoftware()">
+      <select class="form-control" style="max-width:180px" id="swinv-filtro-fab" onchange="renderSwInvPorSoftware()">
+        <option value="">Todos os fabricantes</option>
+      </select>
+    </div>
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr>
+          <th>Software</th>
+          <th>Fabricante</th>
+          <th>Versão mais recente</th>
+          <th style="text-align:center">Máquinas</th>
+          <th>Instalado em</th>
+        </tr></thead>
+        <tbody id="swinv-sw-body">
+          <tr><td colspan="5" style="text-align:center;padding:32px;color:var(--g400)">
+            Carregando inventário...
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ABA: Por Máquina -->
+  <div id="swinv-view-maq" style="display:none">
+    <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
+      <input class="form-control" id="swinv-busca-maq"
+             placeholder="🔍 Buscar por hostname, PAT ou área..."
+             style="max-width:360px;flex:1"
+             oninput="renderSwInvPorMaquina()">
+      <select class="form-control" style="max-width:180px" id="swinv-filtro-status-maq" onchange="renderSwInvPorMaquina()">
+        <option value="">Todas as máquinas</option>
+        <option value="online">Online</option>
+        <option value="offline">Offline</option>
+        <option value="sem-inv">Sem inventário</option>
+      </select>
+    </div>
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr>
+          <th>Máquina</th>
+          <th>Área</th>
+          <th>Status</th>
+          <th style="text-align:center">Softwares</th>
+          <th>Última coleta</th>
+          <th>Ações</th>
+        </tr></thead>
+        <tbody id="swinv-maq-body">
+          <tr><td colspan="6" style="text-align:center;padding:32px;color:var(--g400)">
+            Carregando máquinas...
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="page" id="page-kb">
       <div class="flex items-center justify-between mb-20">
         <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Base de Conhecimento</h2><p class="text-sm text-muted mt-8">Instruções e procedimentos por área</p></div>
         <button class="btn btn-primary">+ Novo Artigo</button>
@@ -2349,7 +2511,7 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div class="page" id="page-lembretes">
       <div class="flex items-center justify-between mb-20">
         <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Lembretes</h2><p class="text-sm text-muted mt-8">Notas e lembretes da equipe de TI</p></div>
-        <button class="btn btn-primary" onclick="openModal('modal-novo-lembrete')">+ Novo Lembrete</button>
+        <button class="btn btn-primary" onclick="abrirModalLembrete()">+ Novo Lembrete</button>
       </div>
       <div class="grid-3" id="lembretes-grid"></div>
     </div>
@@ -3853,6 +4015,46 @@ window.dispatchEvent(new Event('firebase-ready'));
       <!-- ABA: CHAMADO (coluna esquerda — conversas) -->
       <div id="chtab-chamado" style="flex:1;overflow-y:auto;padding:18px 20px;min-width:0;background:#fff">
 
+        <!-- SELETOR: para quem é o chamado? -->
+        <div id="ch-para-quem-box" style="background:var(--g50);border:1px solid var(--g200);border-radius:10px;padding:12px 16px;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:10px">Este chamado é para:</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <label id="ch-pq-label-eu" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 16px;border-radius:8px;border:2px solid var(--accent);background:var(--accent-l);font-size:12.5px;font-weight:600;color:var(--accent)">
+              <input type="radio" name="ch-para-quem" value="eu" checked onchange="chToggleParaQuem('eu')" style="accent-color:var(--accent)">
+              👤 Para mim mesmo
+            </label>
+            <label id="ch-pq-label-outro" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 16px;border-radius:8px;border:2px solid var(--g200);background:#fff;font-size:12.5px;font-weight:600;color:var(--g600)">
+              <input type="radio" name="ch-para-quem" value="outro" onchange="chToggleParaQuem('outro')" style="accent-color:var(--accent)">
+              👥 Para outro empregado
+            </label>
+          </div>
+
+          <!-- Busca de empregado (visível só quando "outro" selecionado) -->
+          <div id="ch-pq-busca-box" style="display:none;margin-top:12px">
+            <div style="position:relative">
+              <input class="form-control" id="ch-pq-busca"
+                     placeholder="Digite nome, matrícula ou login do empregado..."
+                     oninput="chBuscarEmpregado(this.value)"
+                     onkeydown="if(event.key==='Escape')document.getElementById('ch-pq-resultados').style.display='none'"
+                     autocomplete="off">
+              <div id="ch-pq-resultados" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);
+                   background:var(--color-background-primary);border:1px solid var(--g200);border-radius:8px;
+                   max-height:220px;overflow-y:auto;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
+            </div>
+            <!-- Card do empregado selecionado -->
+            <div id="ch-pq-selecionado" style="display:none;margin-top:10px;background:#fff;border:1px solid var(--g200);border-radius:10px;padding:10px 14px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div id="ch-pq-av" style="width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0"></div>
+                <div style="flex:1;min-width:0">
+                  <div id="ch-pq-nome" style="font-weight:700;font-size:13px"></div>
+                  <div id="ch-pq-info" style="font-size:11px;color:var(--g400);margin-top:2px"></div>
+                </div>
+                <button type="button" onclick="chLimparEmpregado()" style="background:none;border:none;cursor:pointer;color:var(--g400);font-size:15px;padding:4px">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- CARD DE DESCRIÇÃO (estilo bolha GLPI) -->
         <div style="border:1px solid #C3E6CB;border-radius:10px;background:#F0FFF4;margin-bottom:16px;overflow:hidden">
           <div style="padding:10px 14px;border-bottom:1px solid #C3E6CB;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -4042,7 +4244,7 @@ window.dispatchEvent(new Event('firebase-ready'));
             </div>
             <div class="ch-prop-row">
               <label class="ch-prop-label">Status</label>
-              <select class="form-control ch-prop-ctrl" id="ch-status" style="background:var(--accent-l);color:var(--accent);font-weight:700">
+              <select class="form-control ch-prop-ctrl" id="ch-status" onchange="onChStatusChange(this)" style="background:var(--accent-l);color:var(--accent);font-weight:700">
                 <option value="novo">● Novo</option>
                 <option value="em-atendimento">● Em Atendimento</option>
                 <option value="pendente">● Pendente</option>
@@ -4573,9 +4775,11 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-novo-ativo')">Cancelar</button>
-      
-          <button class="btn btn-secondary btn-sm" id="btn-deploy-client" onclick="deployClientRemoto()" title="Instalar SYSACK Client neste computador" style="display:none">&#11015; Instalar Client</button>
-          <button class="btn btn-primary" onclick="salvarAtivo()">💾 Cadastrar Ativo</button>
+      <button class="btn btn-secondary btn-sm" onclick="abrirImportarAtivos()" title="Importar múltiplos ativos de arquivo TXT/CSV">
+        📥 Importar em lote
+      </button>
+      <button class="btn btn-secondary btn-sm" id="btn-deploy-client" onclick="deployClientRemoto()" title="Instalar SYSACK Client neste computador" style="display:none">&#11015; Instalar Client</button>
+      <button class="btn btn-primary" onclick="salvarAtivo()">💾 Cadastrar Ativo</button>
     </div>
   </div>
 </div>
@@ -6110,5 +6314,57 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
   <button class="btn btn-ghost" onclick="smFecharCamera()" style="color:#fff;border-color:rgba(255,255,255,.3)">✕ Cancelar</button>
 </div>
 
+
+<!-- MODAL: Novo / Editar Lembrete -->
+<div class="modal-overlay" id="modal-novo-lembrete">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <h3 id="lem-modal-title">📝 Novo Lembrete</h3>
+      <button class="close-btn" onclick="closeModal('modal-novo-lembrete')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="lem-id">
+
+      <div class="form-group">
+        <label class="form-label req">Título</label>
+        <input class="form-control" id="lem-titulo" placeholder="Título do lembrete..."
+               onkeydown="if(event.key==='Enter')document.getElementById('lem-desc').focus()">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label req">Conteúdo</label>
+        <textarea class="form-control" id="lem-desc" rows="4"
+                  placeholder="Descreva o lembrete com detalhes..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Tipo</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid var(--g200);font-size:12.5px;font-weight:600">
+            <input type="radio" name="lem-tipo-r" value="info" checked onchange="document.getElementById('lem-tipo').value=this.value">
+            <span style="color:#2563EB">ℹ️ Info</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid var(--g200);font-size:12.5px;font-weight:600">
+            <input type="radio" name="lem-tipo-r" value="aviso" onchange="document.getElementById('lem-tipo').value=this.value">
+            <span style="color:#D97706">⚠️ Aviso</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid var(--g200);font-size:12.5px;font-weight:600">
+            <input type="radio" name="lem-tipo-r" value="urgente" onchange="document.getElementById('lem-tipo').value=this.value">
+            <span style="color:#DC2626">🚨 Urgente</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid var(--g200);font-size:12.5px;font-weight:600">
+            <input type="radio" name="lem-tipo-r" value="verde" onchange="document.getElementById('lem-tipo').value=this.value">
+            <span style="color:#16A34A">✅ Concluído</span>
+          </label>
+        </div>
+        <input type="hidden" id="lem-tipo" value="info">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-novo-lembrete')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarLembrete()">💾 Salvar</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
