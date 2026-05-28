@@ -1162,6 +1162,7 @@ function renderPage(id) {
     mdm:             () => typeof renderMDM === 'function' && renderMDM(),
     telecom:         () => typeof renderTelecom === 'function' && renderTelecom(),
     localidades:     () => renderLocalidades(),
+    usuarios:        () => renderUsuarios(),
     switches:        () => typeof renderSwitches === 'function' && renderSwitches(),
     reuso:           () => renderReuso(),
     descarte:        () => renderDescarte(),
@@ -2773,6 +2774,26 @@ async function _fazerLoginInterno() {
         }
       } catch (_) {}
 
+      // 3b. Se role ainda é viewer, tenta LOCAL_USERS pelo email (fallback seguro)
+      if (!claimsRole && (profile.role === 'viewer' || !profile.role)) {
+        const localUser = LOCAL_USERS[emailNorm] || LOCAL_USERS[emailRaw] ||
+          Object.values(LOCAL_USERS).find(u => u.email === emailNorm || u.email === emailRaw);
+        if (localUser?.role && localUser.role !== 'viewer') {
+          profile.role = localUser.role;
+          profile.permissions = localUser.permissions || permissionsForRole(localUser.role);
+          console.log('[Auth] Role corrigido via LOCAL_USERS:', profile.role);
+          // Atualiza no Firestore para corrigir para o futuro
+          try {
+            if (FB_READY && db) {
+              await db.collection('users').doc(fbUser.uid).set(
+                { role: profile.role, email: emailNorm, nome: profile.nome, updatedAt: new Date() },
+                { merge: true }
+              );
+            }
+          } catch(_) {}
+        }
+      }
+
       // 3. Garante que viewer não acessa admin mesmo se Banco for adulterado
       const VALID_ROLES = ['admin','gestor','tecnico','mdm_admin','viewer'];
       if (!VALID_ROLES.includes(profile.role)) profile.role = 'viewer';
@@ -2923,6 +2944,9 @@ function loginSuccess(user, showWelcome = true) {
     iniciarWatcherIP?.();
     iniciarWatcherAlertasIA?.();
     startAgentsListener();
+    // Mostra "Gestão de Contas" no menu apenas para admins
+    const navUsuarios = document.getElementById('nav-usuarios');
+    if (navUsuarios) navUsuarios.style.display = isAdmin() ? '' : 'none';
     document.dispatchEvent(new Event('sysack-login'));
   }
 
@@ -4905,6 +4929,7 @@ function renderMDM() {
             <button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSm('${s.id}')">⚙️ Gerenciar</button>
             <button class="mdm-action-btn mab-success" onclick="abrirChamadoSm('${s.id}')">🎫 Chamado</button>
             <button class="mdm-action-btn mab-violet" onclick="gerarTermoSm('${s.id}')">📄 Termo</button>
+            <button class="mdm-action-btn" style="background:#7C3AED;color:#fff" onclick="abrirAcessoRemotoMobile('${s.id}')">📡 Remoto</button>
           </div>
         </td>
       </tr>`).join('') || '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--g400)">Nenhum smartphone encontrado</td></tr>';
@@ -4932,8 +4957,7 @@ function renderMDM() {
           <button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSm('${s.id}')">⚙️ Gerenciar</button>
           <button class="mdm-action-btn mab-success" onclick="abrirChamadoSm('${s.id}')">🎫 Chamado</button>
           <button class="mdm-action-btn mab-violet" onclick="gerarTermoSm('${s.id}')">📄 Termo</button>
-          <button class="mdm-action-btn mab-warning" onclick="mdmActionDirect('localize','${s.id}')">📍 Localizar</button>
-          <button class="mdm-action-btn mab-danger" onclick="mdmActionDirect('lock','${s.id}')">🔒 Bloquear</button>
+          <button class="mdm-action-btn" style="background:#7C3AED;color:#fff" onclick="abrirAcessoRemotoMobile('${s.id}')">📡 Acesso Remoto</button>
         </div>
       </div>`).join('') || '<div style="grid-column:1/-1;text-align:center;padding:56px;color:var(--g400)"><div style="font-size:32px;margin-bottom:12px">📱</div><h3>Nenhum smartphone encontrado</h3></div>';
   }
@@ -24441,6 +24465,8 @@ if (!STATE.faturasTelecom) STATE.faturasTelecom = [];
 function initTelecomListeners() {
   if (!FB_READY || !db || STATE._telecomInit) return;
   STATE._telecomInit = true;
+  // Inicia listener de comodatos junto
+  initTelecomComodatos();
 
   db.collection('planos_telecom').onSnapshot(snap => {
     STATE.planosTelecom = snap2arr(snap);
@@ -24660,7 +24686,7 @@ function _tcPopularFiltroMes() {
 
 // ── Abas ──────────────────────────────────────────────────────────────────
 function tcTab(tab) {
-  ['linhas','faturas','alertas','relatorio'].forEach(t => {
+  ['linhas','comodato','faturas','alertas','relatorio'].forEach(t => {
     const el = document.getElementById(`tc-view-${t}`);
     const bt = document.getElementById(`tc-tab-${t}`);
     if (el) el.style.display = t === tab ? '' : 'none';
@@ -26467,5 +26493,960 @@ function abrirDownloadMobile() {
   </div>`;
 
   document.body.insertAdjacentHTML('beforeend', html);
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// GESTÃO DE CONTAS — Usuários do SYSACK
+// Fonte: coleção Firestore /users + LOCAL_USERS (fallback)
+// ════════════════════════════════════════════════════════════════════════
+
+const ROLE_LABEL = {
+  admin:     { label:'Admin',         cor:'#DC2626', bg:'#FEF2F2' },
+  gestor:    { label:'Gestor',        cor:'#7C3AED', bg:'#F5F3FF' },
+  tecnico:   { label:'Técnico',       cor:'#2563EB', bg:'#EFF6FF' },
+  mdm_admin: { label:'MDM Admin',     cor:'#0891B2', bg:'#ECFEFF' },
+  viewer:    { label:'Visualizador',  cor:'#D97706', bg:'#FFFBEB' },
+};
+
+const PERM_LABEL = {
+  canApprove:      '✓ Aprovar',
+  canDeleteAssets: '✓ Excluir ativos',
+  canWipeDevice:   '✓ Wipe remoto',
+  canGeolocate:    '✓ Geolocalizar',
+  canViewAudit:    '✓ Ver auditoria',
+  canExecDashboard:'✓ Dashboard exec.',
+};
+
+// ── Renderiza página de usuários ──────────────────────────────────────────
+async function renderUsuarios() {
+  if (!isAdmin()) {
+    showToast('Acesso restrito a administradores', 'danger');
+    goPage('dashboard');
+    return;
+  }
+
+  // Carrega usuários do Firestore
+  let usuarios = [];
+  try {
+    if (FB_READY && db) {
+      const snap = await db.collection('users').get();
+      usuarios = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch(e) {
+    console.warn('[Usuários]', e.message);
+  }
+
+  // Mescla com LOCAL_USERS para mostrar usuários de fallback
+  const locais = Object.values(LOCAL_USERS).filter(u => u.email);
+  for (const lu of locais) {
+    if (!usuarios.some(u => u.email === lu.email || u.uid === lu.uid)) {
+      usuarios.push({ ...lu, id: lu.uid, _local: true });
+    }
+  }
+
+  // Deduplica por email
+  const visto = new Set();
+  usuarios = usuarios.filter(u => {
+    const key = (u.email || u.id || '').toLowerCase();
+    if (visto.has(key)) return false;
+    visto.add(key);
+    return true;
+  });
+
+  // KPIs
+  const count = r => usuarios.filter(u => u.role === r).length;
+  sv('gu-kpi-total',   usuarios.length);
+  sv('gu-kpi-admin',   count('admin'));
+  sv('gu-kpi-gestor',  count('gestor'));
+  sv('gu-kpi-tecnico', count('tecnico'));
+  sv('gu-kpi-viewer',  count('viewer') + count('mdm_admin'));
+
+  // Filtros
+  const q    = (document.getElementById('gu-busca')?.value || '').toLowerCase();
+  const role = document.getElementById('gu-filtro-role')?.value || '';
+  let lista = usuarios;
+  if (q)    lista = lista.filter(u =>
+    (u.nome ||'').toLowerCase().includes(q) ||
+    (u.email||'').toLowerCase().includes(q) ||
+    (u.login||'').toLowerCase().includes(q)
+  );
+  if (role) lista = lista.filter(u => u.role === role);
+  lista.sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
+
+  const tbody = document.getElementById('gu-tabela-body');
+  if (!tbody) return;
+
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--g400)">Nenhum usuário encontrado</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = lista.map(u => {
+    const ini  = (u.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
+    const rl   = ROLE_LABEL[u.role] || { label: u.role || '—', cor:'#6B7280', bg:'#F9FAFB' };
+    const perms= Object.entries(u.permissions || {})
+      .filter(([,v]) => v)
+      .map(([k]) => PERM_LABEL[k] || k)
+      .join(' · ') || '—';
+    const ultimo = u.lastLogin
+      ? new Date(u.lastLogin?.seconds ? u.lastLogin.seconds*1000 : u.lastLogin).toLocaleDateString('pt-BR')
+      : '—';
+
+    return `<tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:50%;background:${rl.cor}22;color:${rl.cor};
+                      display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">
+            ${escapeHtml(ini)}
+          </div>
+          <div>
+            <div style="font-weight:700;font-size:13px">${escapeHtml(u.nome||'—')}</div>
+            ${u._local ? '<div style="font-size:10px;color:var(--g400)">⚡ Fallback local</div>' : ''}
+          </div>
+        </div>
+      </td>
+      <td>
+        <div style="font-size:12px">${escapeHtml(u.email||'—')}</div>
+        ${u.login ? `<div style="font-size:10.5px;color:var(--g400);font-family:monospace">${escapeHtml(u.login)}</div>` : ''}
+      </td>
+      <td>
+        <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;
+                     background:${rl.bg};color:${rl.cor}">
+          ${escapeHtml(rl.label)}
+        </span>
+      </td>
+      <td style="font-size:11px;color:var(--g500);max-width:200px">${escapeHtml(perms)}</td>
+      <td style="font-size:12px;color:var(--g400)">${escapeHtml(ultimo)}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-xs" onclick="editarUsuario('${escapeHtml(u.id||u.uid||'')}')">✏️ Editar</button>
+          ${u.id !== (CURRENT_USER?.uid||'') ? `
+          <button class="btn btn-ghost btn-xs" style="color:var(--danger)"
+                  onclick="excluirUsuario('${escapeHtml(u.id||u.uid||'')}','${escapeHtml(u.nome||'')}')">🗑️</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Modal: Novo / Editar usuário ──────────────────────────────────────────
+function abrirNovoUsuario(uid = null) {
+  const u = uid ? [...Object.values(LOCAL_USERS)].find(x => x.uid === uid) : null;
+
+  document.getElementById('modal-novo-usuario')?.remove();
+
+  const html = `
+  <div class="modal-overlay active" id="modal-novo-usuario" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3>${uid ? '✏️ Editar Usuário' : '+ Novo Usuário'}</h3>
+        <button class="close-btn" onclick="document.getElementById('modal-novo-usuario').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label req">Nome completo</label>
+          <input class="form-control" id="gu-nome" value="${escapeHtml(u?.nome||'')}" placeholder="Nome do usuário">
+        </div>
+        <div class="form-group">
+          <label class="form-label req">E-mail</label>
+          <input class="form-control" id="gu-email" type="email" value="${escapeHtml(u?.email||'')}"
+                 placeholder="usuario@cesan.com.br" ${uid ? 'readonly style="opacity:.6"' : ''}>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Login de rede (opcional)</label>
+          <input class="form-control" id="gu-login" value="${escapeHtml(u?.login||'')}" placeholder="nome.sobrenome">
+        </div>
+        <div class="form-group">
+          <label class="form-label req">Perfil de acesso</label>
+          <select class="form-control" id="gu-role">
+            ${Object.entries(ROLE_LABEL).map(([v,r]) =>
+              `<option value="${v}" ${u?.role===v?'selected':''}>${r.label}</option>`
+            ).join('')}
+          </select>
+        </div>
+        ${!uid ? `
+        <div class="form-group">
+          <label class="form-label req">Senha inicial</label>
+          <input class="form-control" id="gu-senha" type="password" placeholder="Mínimo 8 caracteres">
+        </div>` : ''}
+        <div class="form-group">
+          <label class="form-label" style="font-size:12px;font-weight:700;margin-bottom:8px">Permissões especiais</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            ${Object.entries(PERM_LABEL).map(([k,l]) => `
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" id="gu-perm-${k}" ${u?.permissions?.[k]?'checked':''}
+                     style="accent-color:var(--accent)">
+              ${escapeHtml(l.replace('✓ ',''))}
+            </label>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-novo-usuario').remove()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarUsuario('${uid||''}')">
+          💾 ${uid ? 'Salvar Alterações' : 'Criar Usuário'}
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+  setTimeout(() => document.getElementById('gu-nome')?.focus(), 100);
+}
+
+async function editarUsuario(uid) {
+  // Carrega do Firestore primeiro
+  let u = null;
+  try {
+    if (FB_READY && db) {
+      const doc = await db.collection('users').doc(uid).get();
+      if (doc.exists) u = { id: doc.id, ...doc.data() };
+    }
+  } catch {}
+  // Fallback para LOCAL_USERS
+  if (!u) u = Object.values(LOCAL_USERS).find(x => x.uid === uid);
+  if (!u) return showToast('Usuário não encontrado', 'danger');
+
+  document.getElementById('modal-novo-usuario')?.remove();
+  abrirNovoUsuario(uid);
+
+  // Preenche após abrir (aguarda DOM)
+  setTimeout(() => {
+    const set = (id, val) => { const el = document.getElementById(id); if(el) el.value = val||''; };
+    set('gu-nome',  u.nome  || '');
+    set('gu-email', u.email || '');
+    set('gu-login', u.login || '');
+    set('gu-role',  u.role  || 'viewer');
+    Object.keys(PERM_LABEL).forEach(k => {
+      const cb = document.getElementById(`gu-perm-${k}`);
+      if (cb) cb.checked = !!(u.permissions?.[k]);
+    });
+  }, 100);
+}
+
+async function salvarUsuario(uid) {
+  const nome  = document.getElementById('gu-nome')?.value?.trim();
+  const email = document.getElementById('gu-email')?.value?.trim();
+  const login = document.getElementById('gu-login')?.value?.trim();
+  const role  = document.getElementById('gu-role')?.value;
+  const senha = document.getElementById('gu-senha')?.value;
+
+  if (!nome)  return showToast('Informe o nome', 'danger');
+  if (!email) return showToast('Informe o e-mail', 'danger');
+  if (!uid && (!senha || senha.length < 8))
+    return showToast('Senha mínima de 8 caracteres', 'danger');
+
+  const perms = {};
+  Object.keys(PERM_LABEL).forEach(k => {
+    perms[k] = !!(document.getElementById(`gu-perm-${k}`)?.checked);
+  });
+
+  const dados = { nome, email, login, role, permissions: perms, updatedAt: new Date() };
+
+  try {
+    if (FB_READY && db) {
+      if (uid) {
+        await db.collection('users').doc(uid).set(dados, { merge: true });
+      } else {
+        // Novo usuário: hash da senha
+        const hash = await _sha256(senha);
+        const novoRef = await db.collection('users').add({
+          ...dados,
+          _hash: hash,
+          createdAt: new Date(),
+          criadoPor: CURRENT_USER?.nome || '',
+        });
+        showToast(`✓ Usuário ${nome} criado com sucesso`, 'success');
+      }
+      if (uid) showToast(`✓ ${nome} atualizado`, 'success');
+    }
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+    return;
+  }
+
+  document.getElementById('modal-novo-usuario')?.remove();
+  renderUsuarios();
+}
+
+async function excluirUsuario(uid, nome) {
+  if (!confirm(`Excluir o usuário "${nome}"?\n\nEsta ação não pode ser desfeita.`)) return;
+  if (!isAdmin()) return showToast('Acesso negado', 'danger');
+  try {
+    if (FB_READY && db) await db.collection('users').doc(uid).delete();
+    showToast(`✓ ${nome} removido`, 'success');
+    renderUsuarios();
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// TELECOM — Gestão de Comodatos (linha + aparelho + empregado)
+// Coleção Firestore: comodatos_telecom
+// ════════════════════════════════════════════════════════════════════════
+
+// ── Listener ─────────────────────────────────────────────────────────────
+function initTelecomComodatos() {
+  if (!FB_READY || !db || STATE._comodatosInit) return;
+  STATE._comodatosInit = true;
+  db.collection('comodatos_telecom')
+    .orderBy('empNome', 'asc')
+    .onSnapshot(snap => {
+      STATE.comodatosTelecom = snap2arr(snap);
+      if (isPageActive('telecom')) renderTelecomComodatos();
+    }, e => console.warn('[Comodatos]', e.message));
+}
+
+// ── Render tabela ─────────────────────────────────────────────────────────
+function renderTelecomComodatos() {
+  initTelecomComodatos();
+  const tbody = document.getElementById('tc-comodato-body');
+  if (!tbody) return;
+
+  const q      = (document.getElementById('tc-cmd-busca')?.value || '').toLowerCase();
+  const status = document.getElementById('tc-cmd-status')?.value || '';
+  let lista    = STATE.comodatosTelecom || [];
+
+  if (q) lista = lista.filter(c =>
+    (c.empNome    || '').toLowerCase().includes(q) ||
+    (c.empMat     || '').toLowerCase().includes(q) ||
+    (c.linha      || '').toLowerCase().includes(q) ||
+    (c.imei1      || '').toLowerCase().includes(q) ||
+    (c.iccid      || '').toLowerCase().includes(q) ||
+    (c.modelo     || '').toLowerCase().includes(q)
+  );
+  if (status) lista = lista.filter(c => c.status === status);
+
+  if (!lista.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">
+      ${q || status ? 'Nenhum comodato encontrado' : 'Nenhum comodato cadastrado — clique em "+ Cadastrar Comodato"'}
+    </td></tr>`;
+    return;
+  }
+
+  const STATUS_COR = {
+    ativo:      { bg:'#DCFCE7', cor:'#166534', label:'Em uso' },
+    disponivel: { bg:'#EFF6FF', cor:'#1E40AF', label:'Disponível' },
+    manut:      { bg:'#FEF3C7', cor:'#92400E', label:'Manutenção' },
+    devolvido:  { bg:'#F1F5F9', cor:'#64748B', label:'Devolvido' },
+  };
+
+  const fmtData = d => d ? new Date(d?.seconds ? d.seconds*1000 : d).toLocaleDateString('pt-BR') : '—';
+  const planos  = STATE.planosTelecom || [];
+
+  tbody.innerHTML = lista.map(c => {
+    const st  = STATUS_COR[c.status] || STATUS_COR.disponivel;
+    const plano = planos.find(p => p.linha === c.linha);
+    const ini = c.inicioComodato
+      ? fmtData(c.inicioComodato)
+      : '—';
+
+    return `<tr>
+      <td>
+        <div style="font-weight:700;font-size:13px">${escapeHtml(c.empNome||'—')}</div>
+        <div style="font-size:10.5px;color:var(--g400)">${escapeHtml(c.empMat||'')} · ${escapeHtml(c.empSetor||'')}</div>
+      </td>
+      <td>
+        <div style="font-family:monospace;font-weight:700;color:var(--accent)">${escapeHtml(c.linha||'—')}</div>
+        <div style="font-size:10.5px;color:var(--g400)">${escapeHtml(c.operadora||'Vivo')}</div>
+      </td>
+      <td>
+        <div style="font-weight:600">${escapeHtml(c.marca||'')} ${escapeHtml(c.modelo||'—')}</div>
+        <div style="font-size:10.5px;color:var(--g400)">${escapeHtml(c.so||'')} ${escapeHtml(c.soVersao||'')}</div>
+      </td>
+      <td style="font-family:monospace;font-size:11.5px">${escapeHtml(c.imei1||'—')}</td>
+      <td style="font-family:monospace;font-size:11px;color:var(--g500)">${escapeHtml(c.iccid||'—')}</td>
+      <td style="font-size:12px">${plano ? escapeHtml(plano.nomePlano) + `<div style="font-size:10.5px;color:var(--g400)">R$ ${Number(plano.valor||0).toFixed(2)}</div>` : '<span style="color:var(--g300);font-style:italic">Sem plano</span>'}</td>
+      <td style="font-size:12px;color:var(--g400)">${ini}</td>
+      <td>
+        <span style="font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:12px;
+                     background:${st.bg};color:${st.cor}">${st.label}</span>
+      </td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-xs" onclick="editarComodato('${escapeHtml(c.id)}')">✏️</button>
+          <button class="btn btn-ghost btn-xs" onclick="abrirCadastrarPlano('',${JSON.stringify(c.linha||'').replace(/"/g,'&quot;')})" title="Gerenciar plano">📋</button>
+          <button class="btn btn-ghost btn-xs" onclick="tcHistoricoComodato('${escapeHtml(c.id)}')" title="Histórico">📜</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Modal: Cadastrar / Editar Comodato ────────────────────────────────────
+function abrirCadastrarComodato(comodatoId = null) {
+  document.getElementById('modal-comodato-telecom')?.remove();
+
+  const c = comodatoId
+    ? (STATE.comodatosTelecom || []).find(x => x.id === comodatoId)
+    : null;
+
+  // Busca smartphones cadastrados para sugerir modelo/IMEI
+  const smOptions = (STATE.smartphones || []).map(s =>
+    `<option value="${escapeHtml(s.id)}"
+             data-linha="${escapeHtml(s.linha||'')}"
+             data-imei="${escapeHtml(s.imei1||s.imei||'')}"
+             data-marca="${escapeHtml(s.marca||'')}"
+             data-modelo="${escapeHtml(s.modelo||'')}"
+             data-so="${escapeHtml(s.so||'')}"
+             data-sover="${escapeHtml(s.versao||s.soVersao||'')}">
+      ${escapeHtml(s.empNome||s.empLogin||'—')} — ${escapeHtml(s.marca||'')} ${escapeHtml(s.modelo||'')}
+      ${s.linha ? ' (' + s.linha + ')' : ''}
+    </option>`
+  ).join('');
+
+  const html = `
+  <div class="modal-overlay active" id="modal-comodato-telecom"
+       onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:600px">
+      <div class="modal-header">
+        <h3>${c ? '✏️ Editar Comodato' : '📱 Cadastrar Comodato'}</h3>
+        <button class="close-btn" onclick="document.getElementById('modal-comodato-telecom').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Vincular ao smartphone cadastrado -->
+        <div class="form-group">
+          <label class="form-label">Vincular ao smartphone cadastrado (opcional)</label>
+          <select class="form-control" id="cmd-sm-id" onchange="tcPreencherDoSmartphone(this)">
+            <option value="">— Selecionar dispositivo do MDM —</option>
+            ${smOptions}
+          </select>
+          <div style="font-size:11px;color:var(--g400);margin-top:4px">
+            Ao selecionar, os campos abaixo são preenchidos automaticamente
+          </div>
+        </div>
+
+        <hr style="margin:16px 0;border:none;border-top:1px solid var(--g100)">
+
+        <!-- Empregado -->
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label req">Nome do empregado</label>
+            <input class="form-control" id="cmd-emp-nome" value="${escapeHtml(c?.empNome||'')}"
+                   placeholder="Nome completo" oninput="tcBuscarEmpregadoCmd(this.value)">
+            <div id="cmd-emp-resultados" style="display:none;position:absolute;z-index:99;background:#fff;
+                 border:1px solid var(--g200);border-radius:8px;max-height:180px;overflow-y:auto;
+                 box-shadow:0 4px 16px rgba(0,0,0,.1);width:calc(100% - 28px)"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Matrícula</label>
+            <input class="form-control" id="cmd-emp-mat" value="${escapeHtml(c?.empMat||'')}" placeholder="Mat. CESAN">
+          </div>
+        </div>
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">Setor / Unidade</label>
+            <input class="form-control" id="cmd-emp-setor" value="${escapeHtml(c?.empSetor||'')}" placeholder="Ex: A-DSI">
+          </div>
+          <div class="form-group">
+            <label class="form-label">E-mail corporativo</label>
+            <input class="form-control" id="cmd-emp-email" type="email" value="${escapeHtml(c?.empEmail||'')}" placeholder="nome@cesan.com.br">
+          </div>
+        </div>
+
+        <!-- Linha telefônica -->
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin:12px 0 8px;
+                    padding-bottom:6px;border-bottom:1px solid var(--g100)">📡 Linha Telefônica</div>
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label req">Número da linha</label>
+            <input class="form-control" id="cmd-linha" value="${escapeHtml(c?.linha||'')}"
+                   placeholder="27 9XXXX-XXXX" style="font-family:monospace">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Operadora</label>
+            <select class="form-control" id="cmd-operadora">
+              <option value="Vivo" ${(!c?.operadora||c?.operadora==='Vivo')?'selected':''}>Vivo</option>
+              <option value="Claro" ${c?.operadora==='Claro'?'selected':''}>Claro</option>
+              <option value="TIM" ${c?.operadora==='TIM'?'selected':''}>TIM</option>
+              <option value="Oi" ${c?.operadora==='Oi'?'selected':''}>Oi</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">ICCID (número do chip)</label>
+            <input class="form-control" id="cmd-iccid" value="${escapeHtml(c?.iccid||'')}"
+                   placeholder="89550..." style="font-family:monospace">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tipo de contrato</label>
+            <select class="form-control" id="cmd-contrato">
+              <option value="controle" ${c?.tipoContrato==='controle'?'selected':''}>Controle</option>
+              <option value="pos" ${c?.tipoContrato==='pos'?'selected':''}>Pós-pago</option>
+              <option value="corporativo" ${(!c?.tipoContrato||c?.tipoContrato==='corporativo')?'selected':''}>Corporativo</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Dispositivo -->
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin:12px 0 8px;
+                    padding-bottom:6px;border-bottom:1px solid var(--g100)">📱 Dispositivo</div>
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">Marca</label>
+            <input class="form-control" id="cmd-marca" value="${escapeHtml(c?.marca||'')}" placeholder="Ex: Samsung, Motorola">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Modelo</label>
+            <input class="form-control" id="cmd-modelo" value="${escapeHtml(c?.modelo||'')}" placeholder="Ex: Galaxy A54">
+          </div>
+        </div>
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">IMEI 1</label>
+            <input class="form-control" id="cmd-imei1" value="${escapeHtml(c?.imei1||'')}"
+                   placeholder="15 dígitos" style="font-family:monospace" maxlength="15">
+          </div>
+          <div class="form-group">
+            <label class="form-label">IMEI 2 (opcional)</label>
+            <input class="form-control" id="cmd-imei2" value="${escapeHtml(c?.imei2||'')}"
+                   placeholder="15 dígitos" style="font-family:monospace" maxlength="15">
+          </div>
+        </div>
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">Sistema Operacional</label>
+            <select class="form-control" id="cmd-so">
+              <option value="Android" ${(!c?.so||c?.so==='Android')?'selected':''}>Android</option>
+              <option value="iOS" ${c?.so==='iOS'?'selected':''}>iOS</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Versão do SO</label>
+            <input class="form-control" id="cmd-sover" value="${escapeHtml(c?.soVersao||'')}" placeholder="Ex: Android 14">
+          </div>
+        </div>
+
+        <!-- Comodato -->
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin:12px 0 8px;
+                    padding-bottom:6px;border-bottom:1px solid var(--g100)">📄 Comodato</div>
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">Início do comodato</label>
+            <input class="form-control" id="cmd-inicio" type="date" value="${c?.inicioComodato||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-control" id="cmd-status">
+              <option value="ativo"      ${(!c?.status||c?.status==='ativo')?'selected':''}>Em uso</option>
+              <option value="disponivel" ${c?.status==='disponivel'?'selected':''}>Disponível</option>
+              <option value="manut"      ${c?.status==='manut'?'selected':''}>Manutenção</option>
+              <option value="devolvido"  ${c?.status==='devolvido'?'selected':''}>Devolvido</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Observações</label>
+          <textarea class="form-control" id="cmd-obs" rows="2" placeholder="Informações adicionais...">${escapeHtml(c?.obs||'')}</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-comodato-telecom').remove()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarComodato('${c?.id||''}')">
+          💾 ${c ? 'Salvar Alterações' : 'Cadastrar Comodato'}
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// Preenche campos do modal a partir de um smartphone do MDM
+function tcPreencherDoSmartphone(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt.value) return;
+  const set = (id, val) => { const el = document.getElementById(id); if(el) el.value = val||''; };
+  set('cmd-linha',   opt.dataset.linha);
+  set('cmd-imei1',   opt.dataset.imei);
+  set('cmd-marca',   opt.dataset.marca);
+  set('cmd-modelo',  opt.dataset.modelo);
+  set('cmd-so',      opt.dataset.so || 'Android');
+  set('cmd-sover',   opt.dataset.sover);
+  // Busca o empregado pelo smartphone
+  const sm = (STATE.smartphones || []).find(s => s.id === opt.value);
+  if (sm) {
+    set('cmd-emp-nome',  sm.empNome  || '');
+    set('cmd-emp-mat',   sm.empMat   || '');
+    set('cmd-emp-setor', sm.empSetor || '');
+    set('cmd-emp-email', sm.empEmail || '');
+  }
+}
+
+// Busca empregado em tempo real
+let _tcEmpTimer = null;
+function tcBuscarEmpregadoCmd(q) {
+  clearTimeout(_tcEmpTimer);
+  const res = document.getElementById('cmd-emp-resultados');
+  if (!res) return;
+  if (!q || q.length < 2) { res.style.display = 'none'; return; }
+  _tcEmpTimer = setTimeout(() => {
+    const emps = (STATE.empregados || [])
+      .filter(e => (e.nome||'').toLowerCase().includes(q.toLowerCase()) ||
+                   (e.mat||'').includes(q))
+      .slice(0, 8);
+    if (!emps.length) { res.style.display = 'none'; return; }
+    res.innerHTML = emps.map(e => `
+      <div onclick="tcSelecionarEmpCmd(${JSON.stringify(e).replace(/"/g,'&quot;')})"
+           style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--g100);font-size:12.5px"
+           onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+        <div style="font-weight:600">${escapeHtml(e.nome||'')}</div>
+        <div style="font-size:10.5px;color:var(--g400)">${escapeHtml(e.mat||'')} · ${escapeHtml(e.setor||e.lotacao||'')}</div>
+      </div>`).join('');
+    res.style.display = '';
+  }, 250);
+}
+
+function tcSelecionarEmpCmd(emp) {
+  const set = (id, val) => { const el = document.getElementById(id); if(el) el.value = val||''; };
+  set('cmd-emp-nome',  emp.nome  || '');
+  set('cmd-emp-mat',   emp.mat   || '');
+  set('cmd-emp-setor', emp.setor || emp.lotacao || '');
+  set('cmd-emp-email', emp.email || '');
+  const res = document.getElementById('cmd-emp-resultados');
+  if (res) res.style.display = 'none';
+}
+
+// Salva comodato no Firestore
+async function salvarComodato(docId = '') {
+  const get = id => document.getElementById(id)?.value?.trim() || '';
+  const empNome = get('cmd-emp-nome');
+  const linha   = get('cmd-linha');
+  if (!empNome) return showToast('Informe o nome do empregado', 'danger');
+  if (!linha)   return showToast('Informe o número da linha', 'danger');
+
+  const dados = {
+    smId:          document.getElementById('cmd-sm-id')?.value || '',
+    empNome,
+    empMat:        get('cmd-emp-mat'),
+    empSetor:      get('cmd-emp-setor'),
+    empEmail:      get('cmd-emp-email'),
+    linha,
+    operadora:     get('cmd-operadora'),
+    iccid:         get('cmd-iccid'),
+    tipoContrato:  get('cmd-contrato'),
+    marca:         get('cmd-marca'),
+    modelo:        get('cmd-modelo'),
+    imei1:         get('cmd-imei1'),
+    imei2:         get('cmd-imei2'),
+    so:            get('cmd-so'),
+    soVersao:      get('cmd-sover'),
+    inicioComodato:get('cmd-inicio') || null,
+    status:        get('cmd-status'),
+    obs:           get('cmd-obs'),
+    atualizadoEm:  new Date(),
+    atualizadoPor: CURRENT_USER?.nome || '',
+  };
+
+  try {
+    if (FB_READY && db) {
+      if (docId) {
+        await db.collection('comodatos_telecom').doc(docId).update(dados);
+      } else {
+        dados.criadoEm = new Date();
+        dados.criadoPor = CURRENT_USER?.nome || '';
+        await db.collection('comodatos_telecom').add(dados);
+      }
+    }
+    document.getElementById('modal-comodato-telecom')?.remove();
+    showToast(`✓ Comodato ${docId ? 'atualizado' : 'cadastrado'} — ${empNome}`, 'success');
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
+}
+
+function editarComodato(id) {
+  abrirCadastrarComodato(id);
+}
+
+async function tcHistoricoComodato(id) {
+  showToast('Histórico em desenvolvimento', 'info');
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// ACESSO REMOTO MOBILE — Painel de controle de smartphones via SYSACK Agent
+// Comandos suportados pelo app mobile: ring, message, checkin, lock_screen
+// ════════════════════════════════════════════════════════════════════════
+
+async function abrirAcessoRemotoMobile(smId) {
+  const sm = (STATE.smartphones || []).find(s => s.id === smId);
+  if (!sm) return showToast('Smartphone não encontrado', 'danger');
+
+  // Verifica se tem agente instalado (lastCheckin preenchido)
+  const temAgente = !!(sm.lastCheckin || sm.origemCadastro === 'mobile-agent');
+  const ultimoCheckin = sm.lastCheckin
+    ? new Date(sm.lastCheckin?.seconds ? sm.lastCheckin.seconds*1000 : sm.lastCheckin)
+    : null;
+  const checkinAgo = ultimoCheckin ? fmtRelative(ultimoCheckin) : null;
+  const online     = ultimoCheckin && (Date.now() - ultimoCheckin.getTime()) < 35 * 60 * 1000; // < 35min
+
+  // Carrega comandos pendentes/recentes
+  let cmdRecentes = [];
+  try {
+    if (FB_READY && db) {
+      const snap = await db.collection('agent_commands')
+        .where('agentId', '==', smId)
+        .orderBy('criadoEm', 'desc')
+        .limit(5)
+        .get();
+      cmdRecentes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch {}
+
+  document.getElementById('modal-remoto-mobile')?.remove();
+
+  const statusCor  = online ? '#10B981' : '#94A3B8';
+  const statusTxt  = online ? 'Online' : 'Offline';
+  const batPct     = sm.bateriaNivel ?? null;
+  const batCor     = batPct >= 50 ? '#10B981' : batPct >= 20 ? '#F59E0B' : '#EF4444';
+  const fmtCmd = c => {
+    const STATUS = { pending:'⏳ Aguardando', sent:'📤 Enviado', executed:'✅ Executado', failed:'❌ Falhou' };
+    const TIPO = { ring:'🔔 Alarme sonoro', message:'💬 Mensagem', checkin:'📍 Localizar', lock_screen:'🔒 Bloquear tela', wipe:'⚠️ Wipe' };
+    const d = c.criadoEm?.seconds ? new Date(c.criadoEm.seconds*1000) : new Date(c.criadoEm||0);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--g100)">
+      <span style="font-size:12px;flex:1">${TIPO[c.tipo]||c.tipo}</span>
+      <span style="font-size:11px;color:var(--g400)">${fmtRelative(d)}</span>
+      <span style="font-size:11px">${STATUS[c.status]||c.status}</span>
+    </div>`;
+  };
+
+  const html = `
+  <div class="modal-overlay active" id="modal-remoto-mobile" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:560px">
+      <!-- Header dark -->
+      <div style="background:#0F172A;border-radius:10px 10px 0 0;padding:20px 24px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:44px;height:44px;border-radius:12px;background:#1E293B;
+                        display:flex;align-items:center;justify-content:center;font-size:22px">📱</div>
+            <div>
+              <div style="font-weight:700;font-size:15px;color:#F1F5F9">
+                ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'—')}
+              </div>
+              <div style="font-size:12px;color:#64748B;margin-top:2px">
+                ${escapeHtml(sm.empNome||'—')} · ${escapeHtml(sm.empSetor||sm.empLogin||'—')}
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            ${batPct != null ? `
+            <div style="font-size:12px;font-weight:700;color:${batCor}">🔋 ${batPct}%</div>` : ''}
+            <div style="display:flex;align-items:center;gap:5px">
+              <div style="width:8px;height:8px;border-radius:50%;background:${statusCor}"></div>
+              <span style="font-size:12px;color:${statusCor};font-weight:600">${statusTxt}</span>
+            </div>
+            <button class="close-btn" onclick="document.getElementById('modal-remoto-mobile').remove()"
+                    style="color:rgba(255,255,255,.4)">✕</button>
+          </div>
+        </div>
+        ${checkinAgo ? `<div style="font-size:11px;color:#475569;margin-top:10px">
+          Último check-in: ${checkinAgo}
+          ${sm.redeIp ? ' · IP: ' + escapeHtml(sm.redeIp) : ''}
+          ${sm.redeTipo ? ' · ' + escapeHtml(sm.redeTipo) : ''}
+        </div>` : ''}
+      </div>
+
+      <div class="modal-body">
+        ${!temAgente ? `
+        <div style="background:#FEF3C7;border:1px solid #FCD34D;border-radius:10px;padding:14px 16px;
+                    font-size:13px;color:#92400E;margin-bottom:16px">
+          ⚠️ <strong>Agente não instalado</strong> — Este dispositivo não tem o SYSACK Mobile instalado.
+          Os comandos remotos só funcionam com o agente.
+          <a href="/sysack-mobile-agent.html" target="_blank"
+             style="color:#D97706;font-weight:600;margin-left:6px">Instalar agente →</a>
+        </div>` : ''}
+
+        <!-- Info do dispositivo -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;
+                    background:var(--g50);border-radius:10px;padding:12px 14px">
+          <div style="font-size:12px"><span style="color:var(--g400)">SO:</span>
+            <strong> ${escapeHtml(sm.so||'—')} ${escapeHtml(sm.versao||sm.soVersao||'')}</strong></div>
+          <div style="font-size:12px"><span style="color:var(--g400)">IMEI:</span>
+            <strong style="font-family:monospace"> ${escapeHtml(sm.imei1||'—')}</strong></div>
+          <div style="font-size:12px"><span style="color:var(--g400)">Linha:</span>
+            <strong> ${escapeHtml(sm.linha||'—')}</strong></div>
+          <div style="font-size:12px"><span style="color:var(--g400)">RAM:</span>
+            <strong> ${sm.ramGB ? sm.ramGB + ' GB' : '—'}</strong></div>
+          ${sm.storageDisponivelGB ? `
+          <div style="font-size:12px"><span style="color:var(--g400)">Armazenamento livre:</span>
+            <strong> ${sm.storageDisponivelGB} GB</strong></div>` : ''}
+          ${sm.geoLat ? `
+          <div style="font-size:12px"><span style="color:var(--g400)">Última localização:</span>
+            <a href="https://maps.google.com/?q=${sm.geoLat},${sm.geoLng}" target="_blank"
+               style="color:var(--accent);font-weight:600"> 🗺️ Ver no Maps</a></div>` : ''}
+        </div>
+
+        <!-- Comandos remotos -->
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:10px">
+          📡 Comandos Remotos
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+
+          <!-- Localizar -->
+          <button onclick="mdmEnviarComando('${smId}','checkin',{},'Localização solicitada via SYSACK')"
+                  style="background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:12px;padding:14px;
+                         cursor:pointer;text-align:left;transition:background .15s"
+                  onmouseover="this.style.background='#DBEAFE'" onmouseout="this.style.background='#EFF6FF'"
+                  ${!temAgente?'disabled':''}>
+            <div style="font-size:22px;margin-bottom:6px">📍</div>
+            <div style="font-weight:700;font-size:13px;color:#1E40AF">Localizar</div>
+            <div style="font-size:11px;color:#64748B;margin-top:2px">Força check-in com GPS agora</div>
+          </button>
+
+          <!-- Alarme sonoro -->
+          <button onclick="mdmEnviarComando('${smId}','ring',{},'Alarme ativado pelo TI')"
+                  style="background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:12px;padding:14px;
+                         cursor:pointer;text-align:left;transition:background .15s"
+                  onmouseover="this.style.background='#DCFCE7'" onmouseout="this.style.background='#F0FDF4'"
+                  ${!temAgente?'disabled':''}>
+            <div style="font-size:22px;margin-bottom:6px">🔔</div>
+            <div style="font-weight:700;font-size:13px;color:#166534">Alarme sonoro</div>
+            <div style="font-size:11px;color:#64748B;margin-top:2px">Toca alarme por 30 segundos</div>
+          </button>
+
+          <!-- Mensagem -->
+          <button onclick="mdmEnviarMensagem('${smId}')"
+                  style="background:#FAF5FF;border:1.5px solid #D8B4FE;border-radius:12px;padding:14px;
+                         cursor:pointer;text-align:left;transition:background .15s"
+                  onmouseover="this.style.background='#F3E8FF'" onmouseout="this.style.background='#FAF5FF'"
+                  ${!temAgente?'disabled':''}>
+            <div style="font-size:22px;margin-bottom:6px">💬</div>
+            <div style="font-weight:700;font-size:13px;color:#6D28D9">Enviar mensagem</div>
+            <div style="font-size:11px;color:#64748B;margin-top:2px">Exibe popup no dispositivo</div>
+          </button>
+
+          <!-- Bloquear tela -->
+          <button onclick="mdmEnviarComando('${smId}','lock_screen',{},'Bloqueio de tela solicitado pelo TI')"
+                  style="background:#FEF2F2;border:1.5px solid #FECACA;border-radius:12px;padding:14px;
+                         cursor:pointer;text-align:left;transition:background .15s"
+                  onmouseover="this.style.background='#FEE2E2'" onmouseout="this.style.background='#FEF2F2'"
+                  ${!temAgente?'disabled':''}>
+            <div style="font-size:22px;margin-bottom:6px">🔒</div>
+            <div style="font-weight:700;font-size:13px;color:#991B1B">Bloquear tela</div>
+            <div style="font-size:11px;color:#64748B;margin-top:2px">Solicita bloqueio imediato</div>
+          </button>
+        </div>
+
+        <!-- Aviso Device Owner -->
+        <div style="background:#F8FAFC;border:1px solid var(--g200);border-radius:8px;padding:10px 14px;
+                    font-size:11.5px;color:var(--g500);margin-bottom:16px">
+          ℹ️ Bloqueio e wipe completo requerem permissão <strong>Device Owner</strong> no Android.
+          Os demais comandos funcionam com o agente instalado normalmente.
+        </div>
+
+        <!-- Histórico de comandos -->
+        ${cmdRecentes.length ? `
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:8px">
+          Últimos comandos
+        </div>
+        <div style="background:var(--g50);border-radius:8px;padding:8px 12px">
+          ${cmdRecentes.map(fmtCmd).join('')}
+        </div>` : ''}
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-remoto-mobile').remove()">Fechar</button>
+        <button class="btn btn-secondary btn-sm" onclick="abrirAcessoRemotoMobile('${smId}')">🔄 Atualizar</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ── Envia comando ao dispositivo ──────────────────────────────────────────
+async function mdmEnviarComando(smId, tipo, dados = {}, motivo = '') {
+  if (!isAdmin() && !isTecnico()) return showToast('Sem permissão', 'danger');
+  if (!FB_READY || !db) return showToast('Sem conexão com o banco', 'danger');
+
+  // Pede motivo se não fornecido (LGPD)
+  if (!motivo) {
+    motivo = prompt(`Motivo para enviar "${tipo}" ao dispositivo (obrigatório por LGPD):`);
+    if (!motivo?.trim()) return showToast('Motivo obrigatório', 'warning');
+  }
+
+  try {
+    await db.collection('agent_commands').add({
+      agentId:   smId,
+      tipo,
+      dados:     dados || {},
+      status:    'pending',
+      motivo,
+      criadoEm:  new Date(),
+      criadoPor: CURRENT_USER?.nome || CURRENT_USER?.email || '',
+      criadoPorId: CURRENT_USER?.uid || '',
+    });
+
+    // Log de auditoria
+    await db.collection('audit_logs').add({
+      acao:    'mdm_comando_remoto',
+      tipo,
+      alvo:    smId,
+      motivo,
+      usuario: CURRENT_USER?.nome || '',
+      data:    new Date(),
+    }).catch(() => {});
+
+    const LABELS = { ring:'🔔 Alarme', message:'💬 Mensagem', checkin:'📍 Localizar', lock_screen:'🔒 Bloquear' };
+    showToast(`✓ ${LABELS[tipo]||tipo} enviado — o dispositivo executará no próximo check-in`, 'success', 5000);
+
+    // Fecha e reabre para mostrar o comando na lista
+    setTimeout(() => {
+      document.getElementById('modal-remoto-mobile')?.remove();
+      abrirAcessoRemotoMobile(smId);
+    }, 1500);
+
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'danger');
+  }
+}
+
+// ── Modal para enviar mensagem personalizada ──────────────────────────────
+function mdmEnviarMensagem(smId) {
+  document.getElementById('modal-mdm-msg')?.remove();
+  const html = `
+  <div class="modal-overlay active" id="modal-mdm-msg" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <h3>💬 Enviar Mensagem ao Dispositivo</h3>
+        <button class="close-btn" onclick="document.getElementById('modal-mdm-msg').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label req">Mensagem</label>
+          <textarea class="form-control" id="mdm-msg-texto" rows="3"
+            placeholder="Ex: Por favor, devolva o dispositivo ao TI até as 17h de hoje."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label req">Motivo (LGPD)</label>
+          <input class="form-control" id="mdm-msg-motivo"
+                 placeholder="Ex: Notificação operacional urgente">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-mdm-msg').remove()">Cancelar</button>
+        <button class="btn btn-primary" onclick="
+          const txt = document.getElementById('mdm-msg-texto')?.value?.trim();
+          const mot = document.getElementById('mdm-msg-motivo')?.value?.trim();
+          if (!txt) return showToast('Digite a mensagem', 'danger');
+          if (!mot) return showToast('Informe o motivo', 'danger');
+          document.getElementById('modal-mdm-msg').remove();
+          mdmEnviarComando('${smId}','message',{ mensagem: txt }, mot);
+        ">📤 Enviar</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  setTimeout(() => document.getElementById('mdm-msg-texto')?.focus(), 100);
+}
+
+function isTecnico() {
+  return ['admin','gestor','tecnico','mdm_admin'].includes(CURRENT_USER?.role || '');
 }
 

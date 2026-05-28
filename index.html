@@ -184,6 +184,10 @@ window.dispatchEvent(new Event('firebase-ready'));
       <span style="color:#60A5FA;font-weight:700">Patrimônio</span>
       <span style="font-size:9px;background:#2563EB;color:#fff;padding:1px 5px;border-radius:6px;margin-left:auto">PAT</span>
     </a>
+    <a class="nav-i" onclick="goPage('usuarios')" id="nav-usuarios" style="display:none">
+        <svg viewBox="0 0 16 16" fill="none" width="14" height="14"><circle cx="5.5" cy="5" r="2.5" stroke="currentColor" stroke-width="1.4"/><circle cx="11" cy="5" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M1 14c0-2.5 2-4 4.5-4h6c2.5 0 4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Gestão de Contas
+      </a>
     <a class="nav-i" data-page="ai-dashboard" title="IA & Insights" style="background:linear-gradient(135deg,rgba(37,99,235,.08),rgba(124,58,237,.08));border:1px solid rgba(37,99,235,.15);margin:4px 8px;border-radius:var(--r)">
       <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       IA &amp; Insights
@@ -230,6 +234,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       </a>
       <a class="nav-i nav-sub" data-page="switches"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="5" width="14" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="4" cy="8" r="1" fill="currentColor"/><circle cx="7" cy="8" r="1" fill="currentColor"/><circle cx="10" cy="8" r="1" fill="currentColor"/><rect x="12" y="6.5" width="2" height="3" rx=".5" fill="currentColor" opacity=".6"/></svg>Switches &amp; Roteadores<span class="nav-badge o" id="nb-switches">0</span></a>
       <a class="nav-i nav-sub" data-page="mdm"><svg viewBox="0 0 16 16" fill="none"><rect x="4" y="1" width="8" height="14" rx="1.5" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="12" r=".7" fill="currentColor"/></svg>Smartphones / MDM<span class="nav-badge" id="nb-mdm">0</span></a>
+      <a class="nav-i nav-sub" onclick="goPage('telecom')"><svg viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M3 3h10v10H3z" stroke="currentColor" stroke-width="1.3" rx="1"/><path d="M6 6h4M6 9h4M6 12h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="12" cy="4" r="2.5" fill="currentColor" opacity=".7"/></svg>Gestão Telecom</a>
       <a class="nav-i nav-sub" onclick="goPage('localidades')"><svg viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M8 1.5C5.52 1.5 3.5 3.52 3.5 6c0 3.75 4.5 8.5 4.5 8.5s4.5-4.75 4.5-8.5C12.5 3.52 10.48 1.5 8 1.5z" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="6" r="1.5" stroke="currentColor" stroke-width="1.3"/></svg>Localidades</a>
       <a class="nav-i nav-sub" data-page="mobiliario"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="10" width="14" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M3 10V6a1 1 0 011-1h8a1 1 0 011 1v4" stroke="currentColor" stroke-width="1.4"/><path d="M4 13v2M12 13v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Mobiliário &amp; Copa</a>
       <a class="nav-i nav-sub" data-page="apps"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Apps structures</a>
@@ -791,10 +796,11 @@ window.dispatchEvent(new Event('firebase-ready'));
 
   <!-- Abas -->
   <div class="tab-bar mb-16">
-    <button class="tab-btn active" onclick="tcTab('linhas')" id="tc-tab-linhas">Linhas e Planos</button>
-    <button class="tab-btn" onclick="tcTab('faturas')" id="tc-tab-faturas">Faturas</button>
-    <button class="tab-btn" onclick="tcTab('alertas')" id="tc-tab-alertas">Alertas</button>
-    <button class="tab-btn" onclick="tcTab('relatorio')" id="tc-tab-relatorio">Relatório mensal</button>
+    <button class="tab-btn active" onclick="tcTab('linhas')" id="tc-tab-linhas">📋 Linhas e Planos</button>
+    <button class="tab-btn" onclick="tcTab('comodato')" id="tc-tab-comodato">📱 Comodatos</button>
+    <button class="tab-btn" onclick="tcTab('faturas')" id="tc-tab-faturas">💰 Faturas</button>
+    <button class="tab-btn" onclick="tcTab('alertas')" id="tc-tab-alertas">⚠️ Alertas</button>
+    <button class="tab-btn" onclick="tcTab('relatorio')" id="tc-tab-relatorio">📊 Relatório</button>
   </div>
 
   <!-- ABA: Linhas e Planos -->
@@ -825,6 +831,41 @@ window.dispatchEvent(new Event('firebase-ready'));
         </tr></thead>
         <tbody id="tc-linhas-body">
           <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--g400)">Carregando linhas...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ABA: Comodatos (linha + aparelho + empregado) -->
+  <div id="tc-view-comodato" style="display:none">
+    <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
+      <input class="form-control" id="tc-cmd-busca"
+             placeholder="🔍 Buscar por linha, IMEI, nome ou matrícula..."
+             style="max-width:360px;flex:1" oninput="renderTelecomComodatos()">
+      <select class="form-control" style="max-width:180px" id="tc-cmd-status" onchange="renderTelecomComodatos()">
+        <option value="">Todos os status</option>
+        <option value="ativo">Em uso</option>
+        <option value="disponivel">Disponível</option>
+        <option value="manut">Em manutenção</option>
+        <option value="devolvido">Devolvido</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="abrirCadastrarComodato()">+ Cadastrar Comodato</button>
+    </div>
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr>
+          <th>Empregado</th>
+          <th>Linha / Número</th>
+          <th>Dispositivo</th>
+          <th>IMEI</th>
+          <th>Chip (ICCID)</th>
+          <th>Plano</th>
+          <th>Início comodato</th>
+          <th>Status</th>
+          <th>Ações</th>
+        </tr></thead>
+        <tbody id="tc-comodato-body">
+          <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">Carregando...</td></tr>
         </tbody>
       </table>
     </div>
@@ -976,6 +1017,71 @@ window.dispatchEvent(new Event('firebase-ready'));
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="page" id="page-usuarios">
+  <div class="flex items-center justify-between mb-20">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:var(--g900)">👤 Gestão de Contas</h2>
+      <p class="text-muted" style="margin-top:4px">Usuários com acesso ao SYSACK</p>
+    </div>
+    <button class="btn btn-primary" onclick="abrirNovoUsuario()">+ Novo Usuário</button>
+  </div>
+
+  <!-- KPIs -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px">
+    <div class="stat-card" style="border-left:3px solid #DC2626">
+      <div class="stat-value" id="gu-kpi-total">—</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #7C3AED">
+      <div class="stat-value" id="gu-kpi-admin">—</div>
+      <div class="stat-label">Admins</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #2563EB">
+      <div class="stat-value" id="gu-kpi-gestor">—</div>
+      <div class="stat-label">Gestores</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #059669">
+      <div class="stat-value" id="gu-kpi-tecnico">—</div>
+      <div class="stat-label">Técnicos</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid #D97706">
+      <div class="stat-value" id="gu-kpi-viewer">—</div>
+      <div class="stat-label">Visualizadores</div>
+    </div>
+  </div>
+
+  <!-- Busca -->
+  <div class="flex gap-8 mb-12">
+    <input class="form-control" id="gu-busca" placeholder="🔍 Buscar por nome, e-mail ou login..."
+           style="max-width:360px;flex:1" oninput="renderUsuarios()">
+    <select class="form-control" id="gu-filtro-role" style="max-width:180px" onchange="renderUsuarios()">
+      <option value="">Todos os perfis</option>
+      <option value="admin">Admin</option>
+      <option value="gestor">Gestor</option>
+      <option value="tecnico">Técnico</option>
+      <option value="mdm_admin">MDM Admin</option>
+      <option value="viewer">Visualizador</option>
+    </select>
+  </div>
+
+  <!-- Tabela -->
+  <div class="table-container">
+    <table class="data-table">
+      <thead><tr>
+        <th>Usuário</th>
+        <th>E-mail / Login</th>
+        <th>Perfil</th>
+        <th>Permissões especiais</th>
+        <th>Último acesso</th>
+        <th>Ações</th>
+      </tr></thead>
+      <tbody id="gu-tabela-body">
+        <tr><td colspan="6" style="text-align:center;padding:32px;color:var(--g400)">Carregando...</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
