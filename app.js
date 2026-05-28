@@ -24707,11 +24707,11 @@ function abrirCadastrarPlano(smId, linha) {
     .join('');
 
   const html = `
-  <div class="modal-overlay active" id="modal-plano-telecom" onclick="if(event.target===this)closeModal('modal-plano-telecom')">
+  <div class="modal-overlay active" id="modal-plano-telecom" onclick="if(event.target===this)document.getElementById('modal-plano-telecom').remove()">
     <div class="modal" style="max-width:560px">
       <div class="modal-header">
         <h3>${plano ? '✏️ Editar Plano' : '+ Cadastrar Plano'}</h3>
-        <button class="close-btn" onclick="closeModal('modal-plano-telecom')">✕</button>
+        <button class="close-btn" onclick="document.getElementById('modal-plano-telecom').remove()">✕</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="tc-plano-id" value="${plano?.id || ''}">
@@ -24778,7 +24778,7 @@ function abrirCadastrarPlano(smId, linha) {
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="closeModal('modal-plano-telecom')">Cancelar</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-plano-telecom').remove()">Cancelar</button>
         <button class="btn btn-primary" onclick="salvarPlanoTelecom()">💾 Salvar Plano</button>
       </div>
     </div>
@@ -24827,7 +24827,7 @@ async function salvarPlanoTelecom() {
       await db.collection('planos_telecom').add(dados);
     }
     showToast(`✓ Plano ${nome} salvo!`, 'success');
-    closeModal('modal-plano-telecom');
+    document.getElementById('modal-plano-telecom')?.remove();
     document.getElementById('modal-plano-telecom')?.remove();
   } catch(e) {
     showToast('Erro ao salvar: ' + e.message, 'danger');
@@ -24838,11 +24838,11 @@ async function salvarPlanoTelecom() {
 function abrirImportarFatura() {
   document.getElementById('modal-importar-fatura')?.remove();
   const html = `
-  <div class="modal-overlay active" id="modal-importar-fatura" onclick="if(event.target===this)closeModal('modal-importar-fatura')">
+  <div class="modal-overlay active" id="modal-importar-fatura" onclick="if(event.target===this)document.getElementById('modal-importar-fatura').remove()">
     <div class="modal" style="max-width:520px">
       <div class="modal-header">
         <h3>📄 Importar Fatura Vivo</h3>
-        <button class="close-btn" onclick="closeModal('modal-importar-fatura')">✕</button>
+        <button class="close-btn" onclick="document.getElementById('modal-importar-fatura').remove()">✕</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -24867,7 +24867,7 @@ function abrirImportarFatura() {
         <div id="tc-imp-status" style="margin-top:12px;display:none"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="closeModal('modal-importar-fatura')">Cancelar</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-importar-fatura').remove()">Cancelar</button>
         <button class="btn btn-primary" id="tc-imp-btn" onclick="tcProcessarFatura()" disabled>📥 Importar</button>
       </div>
     </div>
@@ -25163,7 +25163,7 @@ function tcVerDetalhe(smId) {
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="closeModal('modal-tc-detalhe')">Fechar</button>
-        <button class="btn btn-secondary" onclick="closeModal('modal-tc-detalhe');abrirCadastrarPlano('${escapeHtml(smId)}','${escapeHtml(sm.linha||'')}')">✏️ Editar plano</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('modal-tc-detalhe')?.remove();abrirCadastrarPlano('${escapeHtml(smId)}','${escapeHtml(sm.linha||'')}')">✏️ Editar plano</button>
       </div>
     </div>
   </div>`;
