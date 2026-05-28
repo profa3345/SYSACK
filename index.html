@@ -746,7 +746,122 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <!-- ATIVOS -->
-    <div class="page" id="page-ativos">
+    <div class="page" id="page-telecom">
+  <div class="flex items-center justify-between mb-20">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:var(--g900)">📡 Gestão Telecom — Vivo</h2>
+      <p class="text-muted" style="margin-top:4px">Comodato de celulares · planos individuais · análise de faturas</p>
+    </div>
+    <div class="flex gap-8">
+      <button class="btn btn-ghost btn-sm" onclick="goPage('mdm')">← MDM</button>
+      <button class="btn btn-secondary btn-sm" onclick="abrirImportarFatura()">📄 Importar Fatura</button>
+      <button class="btn btn-primary btn-sm" onclick="abrirCadastrarPlano()">+ Cadastrar Plano</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="grid-4 mb-20" id="telecom-kpis">
+    <div class="stat-card">
+      <div class="stat-value" id="tc-total-linhas">—</div>
+      <div class="stat-label">Linhas ativas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="tc-custo-mes">—</div>
+      <div class="stat-label">Custo mês atual</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid var(--danger)">
+      <div class="stat-value" id="tc-alertas" style="color:var(--danger)">—</div>
+      <div class="stat-label">Linhas com alerta</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid var(--warning)">
+      <div class="stat-value" id="tc-sem-uso" style="color:var(--warning)">—</div>
+      <div class="stat-label">Sem uso (30 dias)</div>
+    </div>
+  </div>
+
+  <!-- Abas -->
+  <div class="tab-bar mb-16">
+    <button class="tab-btn active" onclick="tcTab('linhas')" id="tc-tab-linhas">Linhas e Planos</button>
+    <button class="tab-btn" onclick="tcTab('faturas')" id="tc-tab-faturas">Faturas</button>
+    <button class="tab-btn" onclick="tcTab('alertas')" id="tc-tab-alertas">Alertas</button>
+    <button class="tab-btn" onclick="tcTab('relatorio')" id="tc-tab-relatorio">Relatório mensal</button>
+  </div>
+
+  <!-- ABA: Linhas e Planos -->
+  <div id="tc-view-linhas">
+    <div class="flex gap-8 mb-12">
+      <input class="form-control" id="tc-busca" placeholder="Buscar por linha, nome, matrícula..." style="max-width:320px" oninput="renderTelecomLinhas()">
+      <select class="form-control" id="tc-filtro-alerta" style="max-width:180px" onchange="renderTelecomLinhas()">
+        <option value="">Todos os status</option>
+        <option value="ok">Dentro do plano</option>
+        <option value="alerta">Com alerta</option>
+        <option value="sem-uso">Sem uso</option>
+        <option value="sem-plano">Sem plano cadastrado</option>
+      </select>
+    </div>
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr>
+          <th>Linha</th>
+          <th>Empregado</th>
+          <th>Unidade</th>
+          <th>Plano</th>
+          <th>Franquia dados</th>
+          <th>Voz (min/mês)</th>
+          <th>Valor R$</th>
+          <th>Última fatura</th>
+          <th>Status</th>
+          <th>Ações</th>
+        </tr></thead>
+        <tbody id="tc-linhas-body">
+          <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--g400)">Carregando linhas...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ABA: Faturas -->
+  <div id="tc-view-faturas" style="display:none">
+    <div class="flex gap-8 mb-12">
+      <select class="form-control" id="tc-filtro-mes" style="max-width:200px" onchange="renderTelecomFaturas()">
+        <option value="">Todas as competências</option>
+      </select>
+    </div>
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr>
+          <th>Competência</th>
+          <th>Linhas</th>
+          <th>Total R$</th>
+          <th>Excedentes</th>
+          <th>Fora expediente</th>
+          <th>Sem uso</th>
+          <th>Importada em</th>
+          <th>Ações</th>
+        </tr></thead>
+        <tbody id="tc-faturas-body">
+          <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma fatura importada</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ABA: Alertas -->
+  <div id="tc-view-alertas" style="display:none">
+    <div id="tc-alertas-lista" style="display:flex;flex-direction:column;gap:10px">
+      <div style="text-align:center;padding:32px;color:var(--g400)">Nenhum alerta no momento</div>
+    </div>
+  </div>
+
+  <!-- ABA: Relatório mensal -->
+  <div id="tc-view-relatorio" style="display:none">
+    <div id="tc-relatorio-content" style="padding:20px;text-align:center;color:var(--g400)">
+      Importe uma fatura para gerar o relatório
+    </div>
+  </div>
+</div>
+
+<div class="page" id="page-ativos">
       <div class="flex items-center justify-between mb-20">
         <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Gestão de Ativos</h2><p class="text-sm text-muted mt-8">Controle patrimonial completo</p></div>
         <div class="flex gap-8" style="flex-wrap:wrap">
@@ -5799,6 +5914,148 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
     <div class="modal-footer">
       <button onclick="closeModal('modal-atribuir-pat-monitor')" class="btn btn-secondary">Cancelar</button>
       <button onclick="confirmarPatMonitor()" class="btn btn-primary">✅ Salvar Patrimônio</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Cadastrar Smartphone -->
+<div class="modal-overlay" id="modal-novo-smartphone">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>📱 Cadastrar Smartphone</h3>
+      <button class="close-btn" onclick="closeModal('modal-novo-smartphone')">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Identificação -->
+      <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Identificação</div>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">Patrimônio (PAT)</label>
+          <input class="form-control" id="sm-pat" placeholder="PAT-0000">
+        </div>
+        <div class="form-group">
+          <label class="form-label req">Marca</label>
+          <select class="form-control" id="sm-marca">
+            <option value="">Selecione...</option>
+            <option>Samsung</option>
+            <option>Apple</option>
+            <option>Motorola</option>
+            <option>Xiaomi</option>
+            <option>LG</option>
+            <option>Nokia</option>
+            <option>Outro</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">Modelo</label>
+          <input class="form-control" id="sm-modelo" placeholder="Ex: Galaxy A54, iPhone 14...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sistema Operacional</label>
+          <select class="form-control" id="sm-so">
+            <option value="Android">Android</option>
+            <option value="iOS">iOS</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">IMEI 1</label>
+          <input class="form-control" id="sm-imei1" placeholder="15 dígitos" maxlength="20">
+        </div>
+        <div class="form-group">
+          <label class="form-label">IMEI 2 (dual SIM)</label>
+          <input class="form-control" id="sm-imei2" placeholder="15 dígitos (opcional)" maxlength="20">
+        </div>
+      </div>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label">Número de série</label>
+          <input class="form-control" id="sm-serie" placeholder="S/N do aparelho">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Versão SO</label>
+          <input class="form-control" id="sm-versao" placeholder="Ex: Android 14, iOS 17.4">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Linha e operadora -->
+      <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Linha Telefônica (Comodato)</div>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label">Número da linha</label>
+          <input class="form-control" id="sm-linha" placeholder="Ex: 27999998888" maxlength="20">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Operadora</label>
+          <select class="form-control" id="sm-operadora">
+            <option value="">Sem linha</option>
+            <option value="Vivo">Vivo</option>
+            <option value="Claro">Claro</option>
+            <option value="TIM">TIM</option>
+            <option value="Oi">Oi</option>
+            <option value="Outro">Outro</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Responsável -->
+      <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Responsável</div>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label">Matrícula do empregado</label>
+          <input class="form-control" id="sm-emp-mat" placeholder="Ex: 100332" oninput="smBuscarEmpregado(this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nome (preenchido automaticamente)</label>
+          <input class="form-control" id="sm-emp-nome" placeholder="Digite a matrícula ao lado..." readonly style="background:var(--g50)">
+        </div>
+      </div>
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label">Login (empLogin)</label>
+          <input class="form-control" id="sm-emp-login" placeholder="Ex: ana.penha" readonly style="background:var(--g50)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Setor / Unidade</label>
+          <input class="form-control" id="sm-emp-setor" placeholder="Preenchido pelo empregado" readonly style="background:var(--g50)">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Status e localização -->
+      <div class="form-row c2">
+        <div class="form-group">
+          <label class="form-label req">Status</label>
+          <select class="form-control" id="sm-status">
+            <option value="uso">Em uso</option>
+            <option value="estoque">Estoque</option>
+            <option value="manut">Em manutenção</option>
+            <option value="extraviado">Extraviado</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data de entrega ao usuário</label>
+          <input class="form-control" id="sm-ultima-troca" type="date">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Observações</label>
+        <textarea class="form-control" id="sm-obs" rows="2" placeholder="Acessórios inclusos, condição física, etc."></textarea>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-novo-smartphone')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarSmartphone()">💾 Cadastrar Smartphone</button>
     </div>
   </div>
 </div>

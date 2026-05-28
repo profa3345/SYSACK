@@ -23020,6 +23020,109 @@ function mapaImprimir() {
   setTimeout(function(){win.print();},700);
 }
 
+
+// ════════════════════════════════════════════════════════════
+// MDM — Cadastrar Smartphone
+// ════════════════════════════════════════════════════════════
+
+function smBuscarEmpregado(mat) {
+  if (!mat || mat.length < 3) return;
+  const emp = (STATE.empregados || []).find(e =>
+    (e.mat || '').toLowerCase() === mat.toLowerCase() ||
+    (e.matricula || '').toLowerCase() === mat.toLowerCase()
+  );
+  if (emp) {
+    const sv = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    sv('sm-emp-nome',  emp.nome  || '');
+    sv('sm-emp-login', emp.login || emp.empLogin || '');
+    sv('sm-emp-setor', emp.setor || emp.lotacao  || '');
+  }
+}
+
+async function salvarSmartphone() {
+  const pat    = document.getElementById('sm-pat')?.value?.trim();
+  const marca  = document.getElementById('sm-marca')?.value;
+  const modelo = document.getElementById('sm-modelo')?.value?.trim();
+  const imei1  = document.getElementById('sm-imei1')?.value?.trim();
+
+  if (!pat)    return showToast('Patrimônio é obrigatório', 'danger');
+  if (!marca)  return showToast('Selecione a marca', 'danger');
+  if (!modelo) return showToast('Informe o modelo', 'danger');
+  if (!imei1)  return showToast('IMEI 1 é obrigatório', 'danger');
+
+  // Verifica duplicata
+  const jaExiste = (STATE.smartphones || []).find(s => s.pat === pat || s.imei1 === imei1);
+  if (jaExiste) return showToast(`Patrimônio ou IMEI já cadastrado (${jaExiste.pat})`, 'danger');
+
+  const linha    = document.getElementById('sm-linha')?.value?.trim()?.replace(/\D/g,'') || '';
+  const empMat   = document.getElementById('sm-emp-mat')?.value?.trim()  || '';
+  const empNome  = document.getElementById('sm-emp-nome')?.value?.trim() || '';
+  const empLogin = document.getElementById('sm-emp-login')?.value?.trim()|| '';
+  const empSetor = document.getElementById('sm-emp-setor')?.value?.trim()|| '';
+
+  const novo = {
+    pat,
+    marca,
+    modelo,
+    so:          document.getElementById('sm-so')?.value || 'Android',
+    versao:      document.getElementById('sm-versao')?.value?.trim() || '',
+    imei1,
+    imei2:       document.getElementById('sm-imei2')?.value?.trim() || '',
+    serie:       document.getElementById('sm-serie')?.value?.trim() || '',
+    linha,
+    operadora:   document.getElementById('sm-operadora')?.value || '',
+    empMat,
+    empNome,
+    empLogin,
+    empSetor,
+    status:      document.getElementById('sm-status')?.value || 'estoque',
+    ultimaTroca: document.getElementById('sm-ultima-troca')?.value || null,
+    obs:         document.getElementById('sm-obs')?.value?.trim() || '',
+    mdmCompliant: false,
+    createdAt:   new Date(),
+    criadoPor:   CURRENT_USER?.nome || CURRENT_USER?.uid || '',
+  };
+
+  try {
+    if (FB_READY && db) {
+      const ref = await db.collection('smartphones').add(novo);
+      novo.id = ref.id;
+      if (!STATE.smartphones) STATE.smartphones = [];
+      STATE.smartphones.unshift(novo);
+
+      // Histórico
+      await ref.collection('historico').add({
+        evento:  'cadastro',
+        data:    new Date(),
+        usuario: CURRENT_USER?.nome || 'Sistema',
+        obs:     `Smartphone cadastrado — ${marca} ${modelo} (${pat})`,
+      }).catch(() => {});
+    } else {
+      novo.id = 'sm' + Date.now();
+      if (!STATE.smartphones) STATE.smartphones = [];
+      STATE.smartphones.unshift(novo);
+    }
+
+    closeModal('modal-novo-smartphone');
+    // Limpa o modal
+    ['sm-pat','sm-modelo','sm-imei1','sm-imei2','sm-serie','sm-versao',
+     'sm-linha','sm-emp-mat','sm-emp-nome','sm-emp-login','sm-emp-setor',
+     'sm-ultima-troca','sm-obs'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    ['sm-marca','sm-so','sm-status','sm-operadora'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.selectedIndex = 0;
+    });
+
+    renderMDM?.();
+    showToast(`✓ ${marca} ${modelo} (${pat}) cadastrado com sucesso!`, 'success');
+  } catch(e) {
+    showToast('Erro ao cadastrar: ' + e.message, 'danger');
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // MÓDULO TELECOM — Gestão de Contas Vivo (comodato CESAN)
 // Coleções: planos_telecom / faturas_telecom / linhas_telecom (subcol smartphones)
