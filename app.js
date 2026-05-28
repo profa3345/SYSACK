@@ -1032,6 +1032,8 @@ function startProtectedListeners(snap2arr, norm) {
   // organograma_unidades — sincronizado pelo agent.js a cada 5 min
   db.collection('organograma_unidades').onSnapshot(function(snap) {
     STATE.orgUnidades = snap2arr(snap);
+    // Atualiza selects de área com dados reais do organograma
+    setTimeout(popularSelectsArea, 100);
     _debounce('org',function(){
       if (!window._lastOrgCount || window._lastOrgCount !== STATE.orgUnidades.length) {
         window._lastOrgCount = STATE.orgUnidades.length;
@@ -2332,6 +2334,8 @@ window.openModal = function(id) {
     const radios = document.querySelectorAll('input[name="ch-para-quem"]');
     radios.forEach(r => { r.checked = r.value === 'eu'; });
     chToggleParaQuem('eu');
+    // Popula áreas com dados reais do organograma
+    setTimeout(popularSelectsArea, 50);
   }
 };
 
@@ -11270,6 +11274,53 @@ function renderSelfService() {
 
 // ─── ORGANOGRAMA ─────────────────────────────────────────────────
 let _orgSetorAberto = null;
+
+// ── Popula selects de área com dados reais do organograma ────────────────
+function popularSelectsArea() {
+  const unidades = (STATE.orgUnidades || []);
+  if (!unidades.length) return;
+
+  // Gera opções ordenadas por sigla
+  const siglas = [...new Set(
+    unidades
+      .map(u => u.sigla)
+      .filter(Boolean)
+  )].sort();
+
+  const opcoesHtml = siglas.map(s => `<option value="${s}">${s}</option>`).join('');
+  const opcoesComTodas = `<option value="">Todas as áreas</option>` + opcoesHtml;
+
+  // Atualiza todos os selects de área no DOM
+  const seletores = [
+    'select#ch-area',                           // modal novo chamado
+    'select[id="filtro-area-chamados"]',         // filtro lista chamados
+    'select[id="filtro-area-ativos"]',           // filtro lista ativos
+  ];
+
+  // Busca por conteúdo (para selects sem id fixo)
+  document.querySelectorAll('select').forEach(sel => {
+    const opts = Array.from(sel.options).map(o => o.text);
+    const isAreaSelect = opts.includes('TI') && opts.includes('RH') &&
+                         opts.includes('Financeiro') && opts.includes('Comercial');
+    if (!isAreaSelect) return;
+
+    const temTodas = opts[0] === 'Todas as áreas';
+    const valorAtual = sel.value;
+    sel.innerHTML = temTodas ? opcoesComTodas : opcoesHtml;
+    // Restaura valor selecionado se ainda existir
+    if (valorAtual && sel.querySelector(`option[value="${valorAtual}"]`)) {
+      sel.value = valorAtual;
+    }
+  });
+
+  // Atualiza select ch-area especificamente
+  const chArea = document.getElementById('ch-area');
+  if (chArea) {
+    const cur = chArea.value;
+    chArea.innerHTML = opcoesHtml;
+    if (cur) chArea.value = cur;
+  }
+}
 
 function renderOrganograma() {
   const unidades  = STATE.orgUnidades || [];
