@@ -792,12 +792,17 @@ async function fsDelete(col, docId) {
 // ── FIRESTORE REAL-TIME LISTENERS ────────────────────────────
 const _deb={};function _debounce(k,f,ms){if(_deb[k])clearTimeout(_deb[k]);_deb[k]=setTimeout(f,ms||300);}
 
+// snap2arr disponível globalmente para todos os listeners
+if (typeof snap2arr === 'undefined') {
+  window.snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
 function startFirestoreListeners() {
   if (!db || !FB_READY) return;
   if (window._listenersAtivos) return; // evita dupla chamada
   window._listenersAtivos = true;
 
-  const snap2arr = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const snap2arr = window.snap2arr;
 
   function norm(d) {
     return {
@@ -25101,9 +25106,10 @@ function initAlertasMaquinaOffline() {
 
   db.collection(ALERTA_OFFLINE_COLECAO)
     .where('status', 'in', ['ativo', 'suprimido'])
-    .orderBy('criadoEm', 'desc')
     .onSnapshot(snap => {
-      STATE.alertasOffline = snap2arr(snap);
+      STATE.alertasOffline = snap2arr(snap).sort((a,b) =>
+        (b.criadoEm?.seconds || 0) - (a.criadoEm?.seconds || 0)
+      );
       _renderAlertasOfflineBadge();
     }, e => console.warn('[AlertasOffline]', e.message));
 }
