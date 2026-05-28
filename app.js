@@ -1293,13 +1293,26 @@ function renderAtivos() {
     </tr>`;
   }
 
-  const lista = STATE.ativos.filter(a => {
-    if (tipos.length > 0) {
+  // Fonte de dados: ativos + impressoras (coleção separada) quando aba impressoras
+  const isImpressoraTab = tipos.length > 0 && tipos.some(t =>
+    ['impressora','printer'].includes(t.toLowerCase())
+  );
+  const fonteDados = isImpressoraTab
+    ? [...(STATE.impressorasDisc || []).map(imp => ({
+        ...imp,
+        tipo: imp.tipo || 'Impressora',
+        desc: imp.desc || imp.modelo || imp.nome || imp.ip || '',
+        area: imp.area || imp.setor || '',
+      }))]
+    : (STATE.ativos || []);
+
+  const lista = fonteDados.filter(a => {
+    if (tipos.length > 0 && !isImpressoraTab) {
       const t = (a.tipo || '').toLowerCase();
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
-    if (q && !`${a.pat} ${a.desc} ${a.area} ${a.resp||''} ${a.ip||''}`.toLowerCase().includes(q)) return false;
+    if (q && !`${a.pat||''} ${a.desc||''} ${a.area||''} ${a.resp||''} ${a.ip||''} ${a.modelo||''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -3938,13 +3951,63 @@ function chSelecionarAtivo(id, pat, desc, docId) {
     <div data-ativo-id="${escapeHtml(id)}" data-ativo-pat="${escapeHtml(pat)}" data-ativo-doc-id="${escapeHtml(docId)}"
          style="display:inline-flex;align-items:center;gap:5px;background:var(--accent-l);border:1px solid #93C5FD;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--accent)">
       🖥️ ${escapeHtml(label)}
-      <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove()">✕</span>
+      <span style="cursor:pointer;color:var(--g400);margin-left:3px" onclick="this.parentElement.remove();_chSincronizarPainelItens()">✕</span>
     </div>`);
   const res = document.getElementById('ch-patrimonio-resultados');
   if (res) res.style.display = 'none';
   const input = document.getElementById('ch-patrimonio');
   if (input) input.value = '';
   showToast(`✓ ${pat} vinculado!`);
+
+  // Sincroniza com o painel direito de itens
+  _chSincronizarPainelItens();
+
+  // Preenche tipo de item automaticamente baseado no ativo
+  const ativo = [...(STATE.ativos||[]), ...(STATE.impressorasDisc||[])].find(a => a.id === id || a.pat === pat);
+  if (ativo) {
+    const tipoMap = {
+      'computador':'computador','desktop':'computador','workstation':'computador',
+      'notebook':'notebook','laptop':'notebook',
+      'monitor':'monitor',
+      'impressora':'impressora','printer':'impressora',
+      'smartphone':'smartphone','celular':'smartphone',
+      'switch':'switch','router':'switch',
+      'servidor':'servidor','server':'servidor',
+    };
+    const tipoAtivo = (ativo.tipo||'').toLowerCase();
+    const tipoMapeado = Object.entries(tipoMap).find(([k]) => tipoAtivo.includes(k))?.[1] || '';
+    const selTipo = document.getElementById('ch-item-tipo');
+    if (selTipo && tipoMapeado) selTipo.value = tipoMapeado;
+
+    // Preenche também o PAT no campo do painel direito
+    const patInput = document.getElementById('ch-patrimonio-modal');
+    if (patInput && !patInput.value) patInput.value = pat;
+  }
+}
+
+// Sincroniza ch-itens-vinculados (esquerda) → ch-itens-vinculados-panel (direita)
+function _chSincronizarPainelItens() {
+  const panel = document.getElementById('ch-itens-vinculados-panel');
+  const countEl = document.getElementById('itens-ch-count');
+  const source = document.getElementById('ch-itens-vinculados');
+  if (!panel || !source) return;
+
+  const itens = Array.from(source.querySelectorAll('[data-ativo-id]'));
+  if (countEl) countEl.textContent = itens.length;
+
+  panel.innerHTML = itens.map(el => {
+    const pat  = el.dataset.ativoPat   || '';
+    const id   = el.dataset.ativoId    || '';
+    const docId= el.dataset.ativoDocId || '';
+    const txt  = el.textContent.replace('✕','').trim();
+    return `
+    <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--accent-l);
+                border:1px solid #93C5FD;border-radius:8px;font-size:12px;font-weight:600;color:var(--accent)">
+      🖥️ <span style="flex:1">${escapeHtml(txt)}</span>
+      <span style="cursor:pointer;color:var(--g400);font-size:11px"
+            onclick="document.querySelector('#ch-itens-vinculados [data-ativo-id=\'${escapeHtml(id)}\']')?.remove();_chSincronizarPainelItens()">✕</span>
+    </div>`;
+  }).join('');
 }
 
 function vincularSmartphone() {

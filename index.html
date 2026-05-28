@@ -992,12 +992,13 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
       <div class="tabs" id="ativos-tabs">
         <div class="tab active" onclick="filtrarAtivosPorTipo('',this)">Todos</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('computador,workstation,notebook,desktop',this)">Computadores</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('notebook',this)">Notebooks</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('computador,workstation,desktop',this)">Computadores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('notebook,laptop',this)">Notebooks</div>
         <div class="tab" onclick="filtrarAtivosPorTipo('monitor',this)">Monitores</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('switch,router,ap,firewall',this)">Rede</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('servidor,server-linux',this)">Servidores</div>
-        <div class="tab" onclick="filtrarAtivosPorTipo('printer,impressora,ups,camera',this)">Outros</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('servidor,server,server-linux',this)">Servidores</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('impressora,printer,Impressora,Printer',this)">Impressoras</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('switch,router,ap,firewall,Switch,Router',this)">Rede</div>
+        <div class="tab" onclick="filtrarAtivosPorTipo('ups,camera,outros,Outro',this)">Outros</div>
       </div>
       <div class="card">
         <div class="card-header">
@@ -3294,6 +3295,20 @@ window.dispatchEvent(new Event('firebase-ready'));
           <div style="font-size:12px;color:var(--g400)">
             Requisitos: Windows 10/11 ou Windows Server 2016+ | Node.js 18+ | PowerShell 5+<br>
             O agente roda como Servico Windows (SYSTEM) e usa ~50MB de RAM.
+          </div>
+
+          <div style="border-top:1px solid var(--g200);margin-top:16px;padding-top:16px">
+            <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:10px">📱 Agente para Smartphone</div>
+            <div style="display:flex;gap:10px;align-items:center;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:10px;padding:14px 16px">
+              <div style="font-size:28px">📱</div>
+              <div style="flex:1">
+                <div style="font-weight:700;font-size:13px;color:#fff">SYSACK Mobile Agent</div>
+                <div style="font-size:11.5px;color:rgba(255,255,255,.5);margin-top:2px">Coleta IMEI, modelo, SO, apps e envia ao sistema</div>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="closeModal('modal-ar-download');abrirDownloadMobile()">
+                📲 Instalar
+              </button>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
