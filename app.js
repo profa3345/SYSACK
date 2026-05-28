@@ -1093,7 +1093,7 @@ const PAGE_LABELS = {
   movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
-  mdm:'Smartphones / MDM', switches:'Switches & Roteadores', apps:'Apps structures',
+  mdm:'Smartphones / MDM', telecom:'Gestão Telecom', switches:'Switches & Roteadores', apps:'Apps structures',
   documentos:'Documentos', lembretes:'Lembretes',
   pesquisas:'Pesquisas Salvas', alertas:'Alertas'
 };
@@ -1153,6 +1153,7 @@ function renderPage(id) {
     tecnicos:        () => renderTecnicos(),
     kb:              () => renderKB(),
     mdm:             () => typeof renderMDM === 'function' && renderMDM(),
+    telecom:         () => typeof renderTelecom === 'function' && renderTelecom(),
     switches:        () => typeof renderSwitches === 'function' && renderSwitches(),
     reuso:           () => renderReuso(),
     descarte:        () => renderDescarte(),
@@ -3821,34 +3822,6 @@ function _atVincularAtivoExec() {
   }).join('');
   res.style.display = '';
 }
-
-  const qLow = q.toLowerCase();
-  const fontes = [...(STATE.ativos||[]), ...(STATE.switches||[]), ...(STATE.impressorasDisc||[])];
-  const encontrados = fontes.filter(a =>
-    (a.pat||'').toLowerCase().includes(qLow) ||
-    (a.desc||'').toLowerCase().includes(qLow) ||
-    (a.hostname||'').toLowerCase().includes(qLow) ||
-    (a.nome||'').toLowerCase().includes(qLow)
-  ).slice(0, 10);
-
-  const res = document.getElementById('at-vincular-resultados');
-  if (!encontrados.length) {
-    res.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum ativo encontrado.</div>';
-    res.style.display = '';
-    return;
-  }
-
-  res.innerHTML = encontrados.map(a => `
-    <div onclick="atConfirmarVincularAtivo('${escapeHtml(a.id)}','${escapeHtml(a.pat||a.hostname||'')}','${escapeHtml(a.desc||a.hostname||'')}','${escapeHtml(a.id)}')"
-         style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);font-size:12.5px;display:flex;gap:10px;align-items:center"
-         onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
-      <span style="font-weight:700;color:var(--accent);min-width:90px">${escapeHtml(a.pat||a.hostname||'—')}</span>
-      <span style="color:var(--g700)">${escapeHtml(a.desc||a.hostname||'')}</span>
-      <span style="color:var(--g400);font-size:11px;margin-left:auto">${escapeHtml(a.area||'')}</span>
-    </div>`).join('');
-  res.style.display = '';
-}
-
 function atConfirmarVincularAtivo(id, pat, desc, docId) {
   const container = document.getElementById('at-itens-vinculados');
   if (!container) return;
@@ -3984,7 +3957,10 @@ function closeModal(id) {
     document.querySelectorAll('input[name="mudou-lugar"]').forEach(r => r.checked = false);
     document.getElementById('ro-nao')?.classList.remove('checked');
     document.getElementById('ro-sim')?.classList.remove('checked');
-  } document.getElementById(id).classList.remove('open'); }
+  }
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('open');
+}
 
 /**
  * Retorna a sigla organizacional (ex: A-DSI) de um empregado.
@@ -23043,3 +23019,775 @@ function mapaImprimir() {
   win.document.close();
   setTimeout(function(){win.print();},700);
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// MÓDULO TELECOM — Gestão de Contas Vivo (comodato CESAN)
+// Coleções: planos_telecom / faturas_telecom / linhas_telecom (subcol smartphones)
+// ════════════════════════════════════════════════════════════════════════
+
+// ── Estado local do módulo ───────────────────────────────────────────────
+if (!STATE.planosTelecom)  STATE.planosTelecom  = [];
+if (!STATE.faturasTelecom) STATE.faturasTelecom = [];
+
+// ── Inicializa listeners Firestore para telecom ──────────────────────────
+function initTelecomListeners() {
+  if (!FB_READY || !db || STATE._telecomInit) return;
+  STATE._telecomInit = true;
+
+  db.collection('planos_telecom').onSnapshot(snap => {
+    STATE.planosTelecom = snap2arr(snap);
+    if (isPageActive('telecom')) renderTelecom();
+  }, e => console.warn('[Telecom] planos:', e.message));
+
+  db.collection('faturas_telecom').orderBy('competencia', 'desc').limit(24).onSnapshot(snap => {
+    STATE.faturasTelecom = snap2arr(snap);
+    if (isPageActive('telecom')) renderTelecom();
+  }, e => console.warn('[Telecom] faturas:', e.message));
+}
+
+// Dispara ao entrar na página
+document.addEventListener('sysack-login', () => setTimeout(initTelecomListeners, 3000));
+
+// ── Render principal ─────────────────────────────────────────────────────
+function renderTelecom() {
+  initTelecomListeners();
+  renderTelecomKpis();
+  renderTelecomLinhas();
+  renderTelecomFaturas();
+  renderTelecomAlertas();
+  _tcPopularFiltroMes();
+}
+
+// ── KPIs ─────────────────────────────────────────────────────────────────
+function renderTelecomKpis() {
+  const sms = (STATE.smartphones || []).filter(s => s.linha);
+  const planos = STATE.planosTelecom || [];
+  const faturas = STATE.faturasTelecom || [];
+
+  sv('tc-total-linhas', sms.length);
+
+  // Custo do mês mais recente
+  const faturaRecente = faturas[0];
+  if (faturaRecente?.totalGeral) {
+    sv('tc-custo-mes', 'R$ ' + Number(faturaRecente.totalGeral).toLocaleString('pt-BR', {minimumFractionDigits:2}));
+  } else {
+    sv('tc-custo-mes', '—');
+  }
+
+  // Alertas: linhas com excedente ou fora expediente na última fatura
+  const alertas = _tcLinhasComAlerta();
+  sv('tc-alertas', alertas.length);
+
+  // Sem uso: linhas sem registro de chamada/dado em 30 dias (baseado na última fatura)
+  const semUso = sms.filter(s => {
+    const p = planos.find(p => p.linha === s.linha);
+    return p && p.semUso;
+  });
+  sv('tc-sem-uso', semUso.length);
+}
+
+// ── Linhas + Planos ───────────────────────────────────────────────────────
+function renderTelecomLinhas() {
+  const tbody = document.getElementById('tc-linhas-body');
+  if (!tbody) return;
+
+  const q      = (document.getElementById('tc-busca')?.value || '').toLowerCase();
+  const filtro = document.getElementById('tc-filtro-alerta')?.value || '';
+  const sms    = (STATE.smartphones || []).filter(s => s.linha || s.operadora === 'Vivo');
+  const planos = STATE.planosTelecom || [];
+
+  const rows = sms.map(s => {
+    const plano   = planos.find(p => p.linha === s.linha) || null;
+    const alertas = _tcAlertasLinha(s.linha, plano);
+    const status  = !plano ? 'sem-plano' : alertas.length ? 'alerta' : plano.semUso ? 'sem-uso' : 'ok';
+
+    return { s, plano, alertas, status };
+  }).filter(({ s, status }) => {
+    const matchQ = !q
+      || (s.linha    || '').includes(q)
+      || (s.empNome  || '').toLowerCase().includes(q)
+      || (s.empMat   || '').toLowerCase().includes(q)
+      || (s.empSetor || '').toLowerCase().includes(q);
+    const matchF = !filtro || status === filtro;
+    return matchQ && matchF;
+  });
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma linha encontrada</td></tr>';
+    return;
+  }
+
+  const statusBadge = st => ({
+    ok:         '<span class="tag tag-success">✓ OK</span>',
+    alerta:     '<span class="tag tag-danger">⚠ Alerta</span>',
+    'sem-uso':  '<span class="tag tag-warning">📵 Sem uso</span>',
+    'sem-plano':'<span class="tag" style="background:var(--g100);color:var(--g600)">Sem plano</span>',
+  }[st] || '—');
+
+  tbody.innerHTML = rows.map(({ s, plano, alertas, status }) => `
+    <tr>
+      <td class="td-mono" style="color:var(--accent);font-weight:700">${escapeHtml(s.linha || '—')}</td>
+      <td>
+        <div style="font-weight:600">${escapeHtml(s.empNome || '—')}</div>
+        <div style="font-size:10.5px;color:var(--g400)">${escapeHtml(s.empMat || '')}</div>
+      </td>
+      <td style="font-size:12px">${escapeHtml(s.empSetor || '—')}</td>
+      <td>
+        ${plano
+          ? `<div style="font-weight:600;font-size:12.5px">${escapeHtml(plano.nomePlano || 'Plano')}</div>
+             <div style="font-size:10.5px;color:var(--g400)">${escapeHtml(plano.descricao || '')}</div>`
+          : '<span style="color:var(--g400);font-size:12px;font-style:italic">Não cadastrado</span>'}
+      </td>
+      <td class="td-mono">${plano?.franquiaDados ? plano.franquiaDados + ' GB' : '—'}</td>
+      <td class="td-mono">${plano?.franquiaVoz  ? plano.franquiaVoz  + ' min' : '—'}</td>
+      <td class="td-mono" style="font-weight:600">${plano?.valor ? 'R$ ' + Number(plano.valor).toFixed(2).replace('.',',') : '—'}</td>
+      <td class="td-mono" style="font-size:11px">${plano?.ultimaFaturaRef || '—'}</td>
+      <td>${statusBadge(status)}
+        ${alertas.length ? `<div style="font-size:10px;color:var(--danger);margin-top:2px">${alertas.slice(0,2).map(escapeHtml).join(' · ')}</div>` : ''}
+      </td>
+      <td>
+        <div class="flex gap-4">
+          <button class="btn btn-ghost btn-xs" onclick="abrirCadastrarPlano('${escapeHtml(s.id)}','${escapeHtml(s.linha||'')}')">
+            ${plano ? '✏️ Plano' : '+ Plano'}
+          </button>
+          <button class="btn btn-ghost btn-xs" onclick="tcVerDetalhe('${escapeHtml(s.id)}')">📊</button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+// ── Faturas importadas ─────────────────────────────────────────────────────
+function renderTelecomFaturas() {
+  const tbody = document.getElementById('tc-faturas-body');
+  if (!tbody) return;
+
+  const mes    = document.getElementById('tc-filtro-mes')?.value || '';
+  const fats   = (STATE.faturasTelecom || []).filter(f => !mes || f.competencia === mes);
+
+  if (!fats.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma fatura importada</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = fats.map(f => `
+    <tr>
+      <td class="td-mono" style="font-weight:700">${escapeHtml(f.competencia || '—')}</td>
+      <td class="td-mono">${f.totalLinhas || 0}</td>
+      <td class="td-mono" style="font-weight:700;color:var(--accent)">R$ ${Number(f.totalGeral||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+      <td>${f.qtdExcedentes ? `<span class="tag tag-danger">${f.qtdExcedentes} linhas</span>` : '<span class="tag tag-success">Nenhum</span>'}</td>
+      <td>${f.qtdForaExpediente ? `<span class="tag tag-warning">${f.qtdForaExpediente} linhas</span>` : '—'}</td>
+      <td>${f.qtdSemUso ? `<span class="tag" style="background:var(--g100)">${f.qtdSemUso} linhas</span>` : '—'}</td>
+      <td style="font-size:11px;color:var(--g400)">${f.importadaEm ? new Date(f.importadaEm.seconds ? f.importadaEm.seconds*1000 : f.importadaEm).toLocaleDateString('pt-BR') : '—'}</td>
+      <td>
+        <div class="flex gap-4">
+          <button class="btn btn-ghost btn-xs" onclick="tcVerRelatorioFatura('${escapeHtml(f.id)}')">📊 Ver</button>
+          <button class="btn btn-ghost btn-xs" onclick="tcExcluirFatura('${escapeHtml(f.id)}')" style="color:var(--danger)">🗑</button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+// ── Alertas ───────────────────────────────────────────────────────────────
+function renderTelecomAlertas() {
+  const el = document.getElementById('tc-alertas-lista');
+  if (!el) return;
+
+  const todos = _tcLinhasComAlerta();
+  if (!todos.length) {
+    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)">✓ Nenhum alerta no momento</div>';
+    return;
+  }
+
+  el.innerHTML = todos.map(a => `
+    <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 16px;border:1px solid var(--g200);border-radius:10px;background:var(--g50)">
+      <div style="font-size:22px;flex-shrink:0">${a.tipo === 'excedente' ? '⚠️' : a.tipo === 'fora-expediente' ? '🌙' : '📵'}</div>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:13px">${escapeHtml(a.linha)} — ${escapeHtml(a.empNome || 'Sem empregado')}</div>
+        <div style="font-size:12px;color:var(--g600);margin-top:2px">${escapeHtml(a.mensagem)}</div>
+        <div style="font-size:11px;color:var(--g400);margin-top:4px">${escapeHtml(a.unidade || '')}</div>
+      </div>
+      <span class="tag ${a.tipo === 'excedente' ? 'tag-danger' : a.tipo === 'fora-expediente' ? 'tag-warning' : ''}" style="flex-shrink:0">${
+        a.tipo === 'excedente' ? 'Excedente' : a.tipo === 'fora-expediente' ? 'Fora expediente' : 'Sem uso'
+      }</span>
+    </div>`).join('');
+}
+
+// ── Helpers de alerta ─────────────────────────────────────────────────────
+function _tcAlertasLinha(linha, plano) {
+  if (!linha || !plano) return [];
+  const alertas = [];
+  if (plano.excedenteDados)      alertas.push(`Dados excedidos: ${plano.excedenteDados} GB extra`);
+  if (plano.excedenteVoz)        alertas.push(`Voz excedida: ${plano.excedenteVoz} min extra`);
+  if (plano.foraExpediente)      alertas.push('Uso fora do expediente detectado');
+  if (plano.semUso)              alertas.push('Sem uso nos últimos 30 dias');
+  return alertas;
+}
+
+function _tcLinhasComAlerta() {
+  const sms    = (STATE.smartphones || []).filter(s => s.linha);
+  const planos = STATE.planosTelecom || [];
+  const result = [];
+
+  for (const s of sms) {
+    const plano = planos.find(p => p.linha === s.linha);
+    if (!plano) continue;
+    const checks = [
+      plano.excedenteDados  && { tipo:'excedente',        linha:s.linha, empNome:s.empNome, unidade:s.empSetor, mensagem:`Dados excedidos em ${plano.excedenteDados} GB` },
+      plano.excedenteVoz    && { tipo:'excedente',        linha:s.linha, empNome:s.empNome, unidade:s.empSetor, mensagem:`Voz excedida em ${plano.excedenteVoz} min` },
+      plano.foraExpediente  && { tipo:'fora-expediente',  linha:s.linha, empNome:s.empNome, unidade:s.empSetor, mensagem:'Chamadas/dados registrados fora do expediente' },
+      plano.semUso          && { tipo:'sem-uso',          linha:s.linha, empNome:s.empNome, unidade:s.empSetor, mensagem:'Linha sem uso nos últimos 30 dias' },
+    ].filter(Boolean);
+    result.push(...checks);
+  }
+  return result;
+}
+
+function _tcPopularFiltroMes() {
+  const sel = document.getElementById('tc-filtro-mes');
+  if (!sel) return;
+  const meses = [...new Set((STATE.faturasTelecom || []).map(f => f.competencia).filter(Boolean))];
+  sel.innerHTML = '<option value="">Todas as competências</option>' +
+    meses.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+}
+
+// ── Abas ──────────────────────────────────────────────────────────────────
+function tcTab(tab) {
+  ['linhas','faturas','alertas','relatorio'].forEach(t => {
+    const el = document.getElementById(`tc-view-${t}`);
+    const bt = document.getElementById(`tc-tab-${t}`);
+    if (el) el.style.display = t === tab ? '' : 'none';
+    if (bt) bt.classList.toggle('active', t === tab);
+  });
+}
+
+// ── Modal: Cadastrar / Editar Plano ───────────────────────────────────────
+function abrirCadastrarPlano(smId, linha) {
+  const planos = STATE.planosTelecom || [];
+  const plano  = linha ? planos.find(p => p.linha === linha) : null;
+  const sms    = STATE.smartphones || [];
+
+  // Monta select de linhas sem plano (+ a linha atual se edição)
+  const linhasDisp = sms
+    .filter(s => s.linha && (!planos.find(p => p.linha === s.linha) || s.linha === linha))
+    .map(s => `<option value="${escapeHtml(s.linha)}" ${s.linha===linha?'selected':''}>${escapeHtml(s.linha)} — ${escapeHtml(s.empNome||s.pat||'')}</option>`)
+    .join('');
+
+  const html = `
+  <div class="modal-overlay active" id="modal-plano-telecom" onclick="if(event.target===this)closeModal('modal-plano-telecom')">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header">
+        <h3>${plano ? '✏️ Editar Plano' : '+ Cadastrar Plano'}</h3>
+        <button class="close-btn" onclick="closeModal('modal-plano-telecom')">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="tc-plano-id" value="${plano?.id || ''}">
+
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label req">Linha (número)</label>
+            <select class="form-control" id="tc-plano-linha" ${plano ? 'disabled' : ''}>
+              <option value="">Selecione a linha...</option>
+              ${linhasDisp}
+            </select>
+            ${!linhasDisp ? '<div style="font-size:11px;color:var(--warning);margin-top:4px">Todas as linhas já têm plano</div>' : ''}
+          </div>
+          <div class="form-group">
+            <label class="form-label req">Nome do plano</label>
+            <input class="form-control" id="tc-plano-nome" placeholder="Ex: Vivo Controle 15GB" value="${escapeHtml(plano?.nomePlano||'')}">
+          </div>
+        </div>
+
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label req">Valor mensal (R$)</label>
+            <input class="form-control" id="tc-plano-valor" type="number" step="0.01" placeholder="0,00" value="${plano?.valor||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Franquia de dados (GB)</label>
+            <input class="form-control" id="tc-plano-dados" type="number" step="0.5" placeholder="Ex: 15" value="${plano?.franquiaDados||''}">
+          </div>
+        </div>
+
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">Franquia de voz (min/mês)</label>
+            <input class="form-control" id="tc-plano-voz" type="number" placeholder="Ex: 300" value="${plano?.franquiaVoz||''}">
+            <div style="font-size:11px;color:var(--g400);margin-top:4px">0 = ilimitado</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">SMS incluso</label>
+            <select class="form-control" id="tc-plano-sms">
+              <option value="sim" ${plano?.smsIncluso!==false?'selected':''}>Sim — ilimitado</option>
+              <option value="nao" ${plano?.smsIncluso===false?'selected':''}>Não incluso</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Descrição / observações</label>
+          <input class="form-control" id="tc-plano-desc" placeholder="Ex: Roaming nacional incluso, portabilidade de 2023..." value="${escapeHtml(plano?.descricao||'')}">
+        </div>
+
+        <div class="form-row c2">
+          <div class="form-group">
+            <label class="form-label">Vencimento fatura (dia)</label>
+            <input class="form-control" id="tc-plano-venc" type="number" min="1" max="31" placeholder="Ex: 15" value="${plano?.diaVencimento||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Data início contrato</label>
+            <input class="form-control" id="tc-plano-inicio" type="date" value="${plano?.dataInicio||''}">
+          </div>
+        </div>
+
+        <div style="background:var(--g50);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--g600)">
+          💡 Os campos de alerta (excedente, fora expediente, sem uso) são preenchidos automaticamente ao importar a fatura da Vivo.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-plano-telecom')">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarPlanoTelecom()">💾 Salvar Plano</button>
+      </div>
+    </div>
+  </div>`;
+
+  // Remove modal anterior se existir
+  document.getElementById('modal-plano-telecom')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Pre-seleciona linha se veio do botão da tabela
+  if (linha) {
+    const sel = document.getElementById('tc-plano-linha');
+    if (sel) sel.value = linha;
+  }
+}
+
+async function salvarPlanoTelecom() {
+  const id    = document.getElementById('tc-plano-id')?.value?.trim();
+  const linha = document.getElementById('tc-plano-linha')?.value?.trim();
+  const nome  = document.getElementById('tc-plano-nome')?.value?.trim();
+  const valor = parseFloat(document.getElementById('tc-plano-valor')?.value || '0');
+
+  if (!linha) return showToast('Selecione a linha', 'danger');
+  if (!nome)  return showToast('Informe o nome do plano', 'danger');
+  if (!valor) return showToast('Informe o valor mensal', 'danger');
+
+  const dados = {
+    linha,
+    nomePlano:    nome,
+    valor,
+    franquiaDados: parseFloat(document.getElementById('tc-plano-dados')?.value || '0') || null,
+    franquiaVoz:   parseInt(document.getElementById('tc-plano-voz')?.value || '0')    || null,
+    smsIncluso:    document.getElementById('tc-plano-sms')?.value !== 'nao',
+    descricao:     document.getElementById('tc-plano-desc')?.value?.trim() || '',
+    diaVencimento: parseInt(document.getElementById('tc-plano-venc')?.value || '0') || null,
+    dataInicio:    document.getElementById('tc-plano-inicio')?.value || null,
+    atualizadoEm:  new Date(),
+    atualizadoPor: CURRENT_USER?.nome || CURRENT_USER?.uid || '',
+  };
+
+  try {
+    if (id) {
+      await db.collection('planos_telecom').doc(id).update(dados);
+    } else {
+      dados.criadoEm = new Date();
+      await db.collection('planos_telecom').add(dados);
+    }
+    showToast(`✓ Plano ${nome} salvo!`, 'success');
+    closeModal('modal-plano-telecom');
+    document.getElementById('modal-plano-telecom')?.remove();
+  } catch(e) {
+    showToast('Erro ao salvar: ' + e.message, 'danger');
+  }
+}
+
+// ── Modal: Importar fatura (CSV ou PDF) ───────────────────────────────────
+function abrirImportarFatura() {
+  document.getElementById('modal-importar-fatura')?.remove();
+  const html = `
+  <div class="modal-overlay active" id="modal-importar-fatura" onclick="if(event.target===this)closeModal('modal-importar-fatura')">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <h3>📄 Importar Fatura Vivo</h3>
+        <button class="close-btn" onclick="closeModal('modal-importar-fatura')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label req">Competência (mês/ano)</label>
+          <input class="form-control" id="tc-imp-mes" type="month" value="${new Date().toISOString().slice(0,7)}">
+        </div>
+
+        <div style="border:2px dashed var(--g300);border-radius:10px;padding:28px;text-align:center;margin-bottom:16px">
+          <div style="font-size:32px;margin-bottom:8px">📁</div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">Selecione o arquivo da fatura</div>
+          <div style="font-size:11.5px;color:var(--g400);margin-bottom:14px">PDF ou CSV exportado do portal Vivo Empresas</div>
+          <input type="file" id="tc-imp-file" accept=".csv,.pdf" style="display:none" onchange="tcPreviewArquivo(this)">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('tc-imp-file').click()">Escolher arquivo</button>
+          <div id="tc-imp-preview" style="margin-top:12px;font-size:12px;color:var(--g600)"></div>
+        </div>
+
+        <div style="background:var(--accent-l);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--accent)">
+          <strong>Para CSV:</strong> exporte do portal Vivo Empresas → Relatórios → Detalhamento por linha.<br>
+          <strong>Para PDF:</strong> a IA (Gemini) extrai os dados automaticamente — pode levar alguns segundos.
+        </div>
+
+        <div id="tc-imp-status" style="margin-top:12px;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-importar-fatura')">Cancelar</button>
+        <button class="btn btn-primary" id="tc-imp-btn" onclick="tcProcessarFatura()" disabled>📥 Importar</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function tcPreviewArquivo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const prev = document.getElementById('tc-imp-preview');
+  const btn  = document.getElementById('tc-imp-btn');
+  const ext  = file.name.split('.').pop().toLowerCase();
+
+  prev.innerHTML = `<span style="color:var(--success)">✓ ${escapeHtml(file.name)}</span> — ${(file.size/1024).toFixed(1)} KB · ${ext.toUpperCase()}`;
+  btn.disabled = false;
+  btn.dataset.ext = ext;
+}
+
+async function tcProcessarFatura() {
+  const file = document.getElementById('tc-imp-file')?.files[0];
+  const mes  = document.getElementById('tc-imp-mes')?.value;
+  if (!file || !mes) return showToast('Selecione arquivo e competência', 'danger');
+
+  const btn    = document.getElementById('tc-imp-btn');
+  const status = document.getElementById('tc-imp-status');
+  btn.disabled = true;
+  btn.textContent = '⏳ Processando...';
+  status.style.display = '';
+
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  try {
+    let linhas = [];
+
+    if (ext === 'csv') {
+      status.innerHTML = '<span style="color:var(--accent)">📊 Lendo CSV...</span>';
+      linhas = await _tcParseCsv(file);
+    } else if (ext === 'pdf') {
+      status.innerHTML = '<span style="color:var(--accent)">🤖 Enviando para Gemini extrair dados...</span>';
+      linhas = await _tcParsePdfGemini(file, mes);
+    }
+
+    if (!linhas.length) {
+      throw new Error('Nenhuma linha encontrada no arquivo. Verifique o formato.');
+    }
+
+    status.innerHTML = `<span style="color:var(--accent)">⚙️ Analisando ${linhas.length} linhas...</span>`;
+    const resultado = await _tcAnalisarEPersistir(linhas, mes);
+
+    status.innerHTML = `<span style="color:var(--success)">✓ ${resultado.total} linhas importadas · ${resultado.alertas} alertas detectados</span>`;
+    showToast(`✓ Fatura ${mes} importada com sucesso!`, 'success');
+
+    setTimeout(() => {
+      document.getElementById('modal-importar-fatura')?.remove();
+      renderTelecom();
+      tcTab('faturas');
+    }, 1800);
+
+  } catch(e) {
+    status.innerHTML = `<span style="color:var(--danger)">❌ ${escapeHtml(e.message)}</span>`;
+    btn.disabled = false;
+    btn.textContent = '📥 Importar';
+  }
+}
+
+// ── Parser CSV Vivo ───────────────────────────────────────────────────────
+async function _tcParseCsv(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const text  = e.target.result;
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length < 2) return reject(new Error('CSV vazio ou sem dados'));
+
+        // Detecta separador
+        const sep = lines[0].includes(';') ? ';' : ',';
+        const headers = lines[0].split(sep).map(h => h.replace(/"/g,'').trim().toLowerCase());
+
+        // Mapeia colunas Vivo (nomes podem variar ligeiramente)
+        const col = name => {
+          const idx = headers.findIndex(h => h.includes(name));
+          return idx;
+        };
+
+        const iLinha = col('número') >= 0 ? col('número') : col('linha') >= 0 ? col('linha') : col('msisdn');
+        const iTotal = col('total') >= 0 ? col('total') : col('valor');
+        const iDados = col('dado') >= 0 ? col('dado') : col('data');
+        const iVoz   = col('voz') >= 0 ? col('voz') : col('minuto');
+        const iSms   = col('sms');
+        const iNome  = col('nome') >= 0 ? col('nome') : col('usuário') >= 0 ? col('usuário') : col('usuario');
+
+        const parsed = lines.slice(1).map(line => {
+          const cols = line.split(sep).map(c => c.replace(/"/g,'').trim());
+          if (cols.length < 2) return null;
+          return {
+            linha: iLinha >= 0 ? cols[iLinha]?.replace(/\D/g,'') : '',
+            nome:  iNome  >= 0 ? cols[iNome]  : '',
+            total: iTotal >= 0 ? parseFloat(cols[iTotal]?.replace(',','.')) || 0 : 0,
+            dados: iDados >= 0 ? parseFloat(cols[iDados]?.replace(',','.')) || 0 : 0,
+            voz:   iVoz   >= 0 ? parseInt(cols[iVoz])   || 0 : 0,
+            sms:   iSms   >= 0 ? parseInt(cols[iSms])   || 0 : 0,
+          };
+        }).filter(r => r && r.linha);
+
+        resolve(parsed);
+      } catch(e) { reject(e); }
+    };
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+// ── Parser PDF via Gemini ─────────────────────────────────────────────────
+async function _tcParsePdfGemini(file, mes) {
+  const base64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = () => rej(new Error('Falha ao ler PDF'));
+    r.readAsDataURL(file);
+  });
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4000,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+          },
+          {
+            type: 'text',
+            text: `Esta é uma fatura da Vivo Empresas referente a ${mes}. Extraia os dados de cada linha telefônica e retorne APENAS um JSON válido sem nenhum texto adicional, no formato:
+[
+  {
+    "linha": "27999998888",
+    "nome": "Nome do usuário",
+    "total": 89.90,
+    "dados": 12.5,
+    "dadosExtra": 0,
+    "voz": 240,
+    "vozExtra": 0,
+    "sms": 0,
+    "foraExpediente": false,
+    "semUso": false
+  }
+]
+Se não conseguir extrair um campo, use null. Linha deve ter apenas dígitos. Total e dados em número decimal. Voz em minutos inteiros.`
+          }
+        ]
+      }]
+    })
+  });
+
+  if (!resp.ok) throw new Error('Erro na API: ' + resp.status);
+  const data = await resp.json();
+  const text = data.content?.find(c => c.type === 'text')?.text || '[]';
+
+  try {
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch {
+    throw new Error('Não foi possível interpretar a resposta da IA. Tente com CSV.');
+  }
+}
+
+// ── Análise e persistência ────────────────────────────────────────────────
+async function _tcAnalisarEPersistir(linhas, mes) {
+  const planos  = STATE.planosTelecom || [];
+  const agora   = new Date();
+  const expedInicio = 7, expedFim = 19; // 07h–19h útil (configurável futuramente)
+
+  let totalGeral = 0, qtdExcedentes = 0, qtdForaExp = 0, qtdSemUso = 0;
+  const alertas  = [];
+  const batch    = [];
+
+  for (const l of linhas) {
+    if (!l.linha) continue;
+    const plano = planos.find(p => p.linha === l.linha);
+    totalGeral += l.total || 0;
+
+    const excedenteDados = plano?.franquiaDados && l.dados > plano.franquiaDados
+      ? +(l.dados - plano.franquiaDados).toFixed(2) : 0;
+    const excedenteVoz = plano?.franquiaVoz && plano.franquiaVoz > 0 && l.voz > plano.franquiaVoz
+      ? l.voz - plano.franquiaVoz : 0;
+    const foraExp  = l.foraExpediente || false;
+    const semUso   = l.semUso || (l.total === 0 && !l.dados && !l.voz);
+
+    if (excedenteDados) { qtdExcedentes++; alertas.push({ tipo:'excedente', linha:l.linha, mensagem:`Dados excedidos: +${excedenteDados} GB` }); }
+    if (excedenteVoz)   { qtdExcedentes++; alertas.push({ tipo:'excedente', linha:l.linha, mensagem:`Voz excedida: +${excedenteVoz} min` }); }
+    if (foraExp)        { qtdForaExp++;    alertas.push({ tipo:'fora-expediente', linha:l.linha, mensagem:'Uso fora do expediente' }); }
+    if (semUso)         { qtdSemUso++;     alertas.push({ tipo:'sem-uso', linha:l.linha, mensagem:'Linha sem uso no período' }); }
+
+    // Atualiza plano com dados de alerta da fatura
+    if (plano && FB_READY && db) {
+      batch.push(db.collection('planos_telecom').doc(plano.id).update({
+        excedenteDados:   excedenteDados || null,
+        excedenteVoz:     excedenteVoz   || null,
+        foraExpediente:   foraExp || null,
+        semUso:           semUso  || null,
+        ultimaFaturaRef:  mes,
+        ultimaFaturaTotal: l.total,
+        ultimaFaturaEm:   agora,
+      }));
+    }
+  }
+
+  // Persiste fatura consolidada
+  if (FB_READY && db) {
+    batch.push(db.collection('faturas_telecom').add({
+      competencia:       mes,
+      totalLinhas:       linhas.length,
+      totalGeral:        +totalGeral.toFixed(2),
+      qtdExcedentes,
+      qtdForaExpediente: qtdForaExp,
+      qtdSemUso,
+      alertas,
+      importadaEm:       agora,
+      importadaPor:      CURRENT_USER?.nome || CURRENT_USER?.uid || '',
+    }));
+
+    await Promise.allSettled(batch);
+  }
+
+  return { total: linhas.length, alertas: alertas.length };
+}
+
+// ── Ver detalhe de uma linha ──────────────────────────────────────────────
+function tcVerDetalhe(smId) {
+  const sm    = (STATE.smartphones || []).find(s => s.id === smId);
+  const plano = sm?.linha ? (STATE.planosTelecom || []).find(p => p.linha === sm.linha) : null;
+  if (!sm) return;
+
+  const alertas = _tcAlertasLinha(sm.linha, plano);
+  const html = `
+  <div class="modal-overlay active" id="modal-tc-detalhe" onclick="if(event.target===this)closeModal('modal-tc-detalhe')">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <h3>📊 ${escapeHtml(sm.linha || sm.pat)}</h3>
+        <button class="close-btn" onclick="closeModal('modal-tc-detalhe')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div style="padding:12px;background:var(--g50);border-radius:8px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:4px">Empregado</div>
+            <div style="font-weight:600">${escapeHtml(sm.empNome || '—')}</div>
+            <div style="font-size:11.5px;color:var(--g400)">${escapeHtml(sm.empSetor || '')}</div>
+          </div>
+          <div style="padding:12px;background:var(--g50);border-radius:8px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:4px">Valor mensal</div>
+            <div style="font-weight:700;font-size:18px;color:var(--accent)">${plano?.valor ? 'R$ ' + Number(plano.valor).toFixed(2).replace('.',',') : '—'}</div>
+            <div style="font-size:11.5px;color:var(--g400)">${escapeHtml(plano?.nomePlano || 'Sem plano cadastrado')}</div>
+          </div>
+        </div>
+
+        ${plano ? `
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
+          <div style="text-align:center;padding:10px;background:var(--g50);border-radius:8px">
+            <div style="font-size:16px;font-weight:700">${plano.franquiaDados || '∞'}</div>
+            <div style="font-size:10.5px;color:var(--g400)">GB dados</div>
+          </div>
+          <div style="text-align:center;padding:10px;background:var(--g50);border-radius:8px">
+            <div style="font-size:16px;font-weight:700">${plano.franquiaVoz || '∞'}</div>
+            <div style="font-size:10.5px;color:var(--g400)">min voz</div>
+          </div>
+          <div style="text-align:center;padding:10px;background:var(--g50);border-radius:8px">
+            <div style="font-size:16px;font-weight:700">${plano.smsIncluso ? '∞' : '—'}</div>
+            <div style="font-size:10.5px;color:var(--g400)">SMS</div>
+          </div>
+        </div>
+        ` : ''}
+
+        ${alertas.length ? `
+        <div style="background:var(--danger-l,#FEF2F2);border:1px solid #FECACA;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--danger);margin-bottom:8px">⚠️ Alertas desta linha</div>
+          ${alertas.map(a => `<div style="font-size:12px;color:var(--danger);margin-bottom:4px">• ${escapeHtml(a)}</div>`).join('')}
+        </div>` : `
+        <div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#166534">
+          ✓ Linha dentro dos limites do plano
+        </div>`}
+
+        ${plano?.ultimaFaturaRef ? `
+        <div style="font-size:11.5px;color:var(--g400)">
+          Última fatura: <strong>${escapeHtml(plano.ultimaFaturaRef)}</strong>
+          · Total: <strong>R$ ${Number(plano.ultimaFaturaTotal||0).toFixed(2).replace('.',',')}</strong>
+        </div>` : ''}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-tc-detalhe')">Fechar</button>
+        <button class="btn btn-secondary" onclick="closeModal('modal-tc-detalhe');abrirCadastrarPlano('${escapeHtml(smId)}','${escapeHtml(sm.linha||'')}')">✏️ Editar plano</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('modal-tc-detalhe')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function tcExcluirFatura(id) {
+  if (!confirm('Excluir esta fatura? Os alertas nas linhas serão mantidos.')) return;
+  try {
+    await db.collection('faturas_telecom').doc(id).delete();
+    showToast('Fatura excluída', 'success');
+  } catch(e) { showToast('Erro: ' + e.message, 'danger'); }
+}
+
+function tcVerRelatorioFatura(id) {
+  const fatura = (STATE.faturasTelecom || []).find(f => f.id === id);
+  if (!fatura) return;
+  tcTab('relatorio');
+  const el = document.getElementById('tc-relatorio-content');
+  if (!el) return;
+
+  const alertas = fatura.alertas || [];
+  el.innerHTML = `
+    <div style="max-width:600px;margin:0 auto;text-align:left">
+      <h3 style="font-size:16px;font-weight:700;margin-bottom:16px">📊 Relatório — Fatura ${escapeHtml(fatura.competencia)}</h3>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-value">${fatura.totalLinhas || 0}</div><div class="stat-label">Linhas</div></div>
+        <div class="stat-card"><div class="stat-value" style="font-size:16px">R$ ${Number(fatura.totalGeral||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</div><div class="stat-label">Total</div></div>
+        <div class="stat-card" style="border-left:3px solid var(--danger)"><div class="stat-value" style="color:var(--danger)">${fatura.qtdExcedentes || 0}</div><div class="stat-label">Excedentes</div></div>
+        <div class="stat-card" style="border-left:3px solid var(--warning)"><div class="stat-value" style="color:var(--warning)">${fatura.qtdSemUso || 0}</div><div class="stat-label">Sem uso</div></div>
+      </div>
+      ${alertas.length ? `
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px">Alertas detectados</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${alertas.map(a => `
+          <div style="display:flex;gap:10px;align-items:center;padding:10px 12px;background:var(--g50);border-radius:8px;font-size:12.5px">
+            <span>${a.tipo === 'excedente' ? '⚠️' : a.tipo === 'fora-expediente' ? '🌙' : '📵'}</span>
+            <span class="td-mono" style="color:var(--accent);font-weight:600">${escapeHtml(a.linha || '')}</span>
+            <span>${escapeHtml(a.mensagem || '')}</span>
+          </div>`).join('')}
+      </div>` : '<div style="color:var(--g400);font-size:13px">✓ Nenhum alerta nesta fatura</div>'}
+    </div>`;
+}
+
+// ── Entrada no menu lateral ───────────────────────────────────────────────
+(function _registrarMenuTelecom() {
+  // Adiciona entrada no menu após MDM quando o DOM estiver pronto
+  document.addEventListener('DOMContentLoaded', () => {
+    const mdmItem = document.querySelector('[onclick*="goPage(\'mdm\')"]');
+    if (mdmItem && !document.querySelector('[onclick*="goPage(\'telecom\')"]')) {
+      mdmItem.insertAdjacentHTML('afterend', `
+        <button class="nav-item" onclick="goPage('telecom')" title="Gestão Telecom">
+          <span class="nav-icon">📡</span>
+          <span class="nav-label">Gestão Telecom</span>
+        </button>`);
+    }
+  });
+})();
+
