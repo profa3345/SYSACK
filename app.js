@@ -6903,7 +6903,41 @@ async function arPollAgentes() {
     STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
     nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
-  } catch(e) { console.warn('[Agentes] poll erro:', e.message); }
+  } catch(e) {
+    console.warn('[Agentes] poll SDK erro:', e.message, '— tentando REST direto...');
+    try {
+      const _PROJECT = 'sysack-829e2';
+      const _KEY     = 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
+      const resp = await fetch(
+        `https://firestore.googleapis.com/v1/projects/${_PROJECT}/databases/(default)/documents/agents?pageSize=200&key=${_KEY}`
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        STATE_AGENTS._carregou = true;
+        STATE_AGENTS.list = (data.documents || []).map(doc => {
+          const id     = doc.name.split('/').pop();
+          const fields = doc.fields || {};
+          const out    = { id };
+          for (const [k, v] of Object.entries(fields)) {
+            if      (v.stringValue   !== undefined) out[k] = v.stringValue;
+            else if (v.integerValue  !== undefined) out[k] = Number(v.integerValue);
+            else if (v.doubleValue   !== undefined) out[k] = v.doubleValue;
+            else if (v.booleanValue  !== undefined) out[k] = v.booleanValue;
+            else if (v.timestampValue!== undefined) out[k] = new Date(v.timestampValue);
+            else if (v.nullValue     !== undefined) out[k] = null;
+          }
+          return out;
+        });
+        console.log('[Agentes] REST direto OK:', STATE_AGENTS.list.length, 'agentes');
+        if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
+        nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
+      }
+    } catch(e2) {
+      console.warn('[Agentes] REST fallback erro:', e2.message);
+      STATE_AGENTS._carregou = true;
+      if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
+    }
+  }
 }
 
 
@@ -8070,8 +8104,13 @@ let _arEnsureTimer = null;
 function _arEnsureLoaded() {
   if (!FB_READY || !db) return;
 
-  // Se já carregou e tem dados, só re-renderiza
-  if (STATE_AGENTS._carregou) return;
+  // Se já carregou E tem dados reais, não precisa recarregar
+  if (STATE_AGENTS._carregou && STATE_AGENTS.list.length > 0) return;
+
+  // Se carregou mas lista vazia, tenta de novo (pode ter sido erro de permissão anterior)
+  if (STATE_AGENTS._carregou && STATE_AGENTS.list.length === 0) {
+    STATE_AGENTS._carregou = false; // força nova tentativa
+  }
 
   // Listener não carregou ainda — faz poll imediato
   clearTimeout(_arEnsureTimer);
@@ -26221,5 +26260,92 @@ function locExportarCSV() {
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   a.download = 'localidades_cesan.csv';
   a.click();
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// SYSACK MOBILE AGENT — Download e QR Code
+// ════════════════════════════════════════════════════════════════════════
+
+function abrirDownloadMobile() {
+  document.getElementById('modal-mobile-agent')?.remove();
+
+  // QR Code para o URL do agente mobile
+  const agentUrl = 'https://sysack.vercel.app/sysack-mobile-agent.html';
+  const qrUrl    = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(agentUrl)}&bgcolor=0F172A&color=F1F5F9&format=png`;
+
+  const html = `
+  <div class="modal-overlay active" id="modal-mobile-agent" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:480px">
+      <div style="background:#0F172A;border-radius:10px 10px 0 0;padding:20px 24px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <h3 style="color:#fff;font-size:16px;margin:0">📱 SYSACK Mobile Agent</h3>
+            <p style="color:rgba(255,255,255,.4);font-size:12px;margin:4px 0 0">Instalação em smartphones corporativos</p>
+          </div>
+          <button class="close-btn" onclick="document.getElementById('modal-mobile-agent').remove()" style="color:rgba(255,255,255,.4)">✕</button>
+        </div>
+      </div>
+      <div class="modal-body">
+
+        <!-- Como instalar -->
+        <div style="text-align:center;margin-bottom:20px">
+          <div style="font-size:13px;font-weight:700;color:var(--g700);margin-bottom:12px">
+            📲 Aponte a câmera do celular para o QR Code
+          </div>
+          <div style="display:inline-block;background:#0F172A;border-radius:16px;padding:16px">
+            <img src="${qrUrl}" width="180" height="180" style="display:block;border-radius:8px" alt="QR Code SYSACK Mobile">
+          </div>
+          <div style="font-size:11px;color:var(--g400);margin-top:10px">
+            Funciona em Android e iPhone sem instalação de app
+          </div>
+        </div>
+
+        <!-- URL para copiar -->
+        <div style="background:var(--g50);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+          <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:6px">
+            Ou abra este link no celular
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <code style="flex:1;font-size:11.5px;color:var(--accent);background:var(--accent-l);
+                         padding:6px 10px;border-radius:6px;word-break:break-all">${agentUrl}</code>
+            <button class="btn btn-secondary btn-xs" onclick="navigator.clipboard.writeText('${agentUrl}').then(()=>showToast('✓ Link copiado!'))">
+              📋
+            </button>
+          </div>
+        </div>
+
+        <!-- O que coleta -->
+        <div style="font-size:12.5px;color:var(--g600);margin-bottom:12px;font-weight:600">
+          📦 O agente coleta automaticamente:
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;color:var(--g500);margin-bottom:16px">
+          <span>✓ Marca e modelo</span>
+          <span>✓ Versão do SO</span>
+          <span>✓ RAM e armazenamento</span>
+          <span>✓ Nível de bateria</span>
+          <span>✓ Tipo de rede</span>
+          <span>✓ Resolução da tela</span>
+          <span>✓ Login do responsável</span>
+          <span>✓ Localização (opcional)</span>
+        </div>
+
+        <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400E">
+          <strong>⚠️ Atenção:</strong> Após abrir o link, o funcionário preenche seu login e toca em
+          "Enviar ao SYSACK". O aparelho é cadastrado automaticamente na coleção <code>smartphones</code>
+          do Firestore aguardando vinculação com a linha telefônica.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-mobile-agent').remove()">Fechar</button>
+        <a href="/sysack-mobile-agent.html" download="sysack-mobile-agent.html"
+           class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+          ⬇ Baixar arquivo HTML
+        </a>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
 }
 
