@@ -23284,63 +23284,99 @@ async function salvarSmartphone() {
   if (!modelo) return showToast('Informe o modelo', 'danger');
   if (!imei1 || imei1.length !== 15) return showToast('IMEI 1 inválido — deve ter 15 dígitos', 'danger');
 
-  // Verifica duplicata pelo IMEI
+  // Verifica Firebase disponível
+  if (!FB_READY || !db) {
+    return showToast('Banco de dados não disponível. Verifique a conexão.', 'danger');
+  }
+
+  // Verifica duplicata pelo IMEI direto no Firestore
   const jaExiste = (STATE.smartphones || []).find(s => s.imei1 === imei1);
-  if (jaExiste) return showToast(`IMEI já cadastrado (${jaExiste.marca} ${jaExiste.modelo})`, 'danger');
+  if (jaExiste) return showToast(`IMEI já cadastrado: ${jaExiste.marca} ${jaExiste.modelo}`, 'danger');
 
+  // Coleta dados do empregado (campos hidden preenchidos por smSelecionarEmpregado)
+  const empId    = document.getElementById('sm-emp-id')?.value?.trim()    || '';
+  const empMat   = document.getElementById('sm-emp-mat')?.value?.trim()   || '';
+  const empNome  = document.getElementById('sm-emp-nome')?.value?.trim()  || '';
+  const empLogin = document.getElementById('sm-emp-login')?.value?.trim() || '';
+  const empSetor = document.getElementById('sm-emp-setor')?.value?.trim() || '';
   const linha    = (document.getElementById('sm-linha')?.value?.trim() || '').replace(/\D/g, '');
-  const empMat   = document.getElementById('sm-emp-mat')?.value?.trim()  || '';
-  const empNome  = document.getElementById('sm-emp-nome')?.value?.trim() || '';
-  const empLogin = document.getElementById('sm-emp-login')?.value?.trim()|| '';
-  const empSetor = document.getElementById('sm-emp-setor')?.value?.trim()|| '';
 
+  const agora = new Date();
   const novo = {
     marca,
     modelo,
-    so:           document.getElementById('sm-so')?.value || 'Android',
-    versao:       document.getElementById('sm-versao')?.value?.trim() || '',
+    so:             document.getElementById('sm-so')?.value || 'Android',
+    versao:         document.getElementById('sm-versao')?.value?.trim() || '',
     imei1,
-    imei2:        document.getElementById('sm-imei2')?.value?.trim() || '',
-    serie:        document.getElementById('sm-serie')?.value?.trim() || '',
+    imei2:          document.getElementById('sm-imei2')?.value?.trim() || '',
+    serie:          document.getElementById('sm-serie')?.value?.trim() || '',
     linha,
-    operadora:    document.getElementById('sm-operadora')?.value || '',
+    operadora:      document.getElementById('sm-operadora')?.value || '',
+    // Vínculo com empregado
+    empId,
     empMat,
     empNome,
     empLogin,
     empSetor,
-    status:       document.getElementById('sm-status')?.value || 'estoque',
-    ultimaTroca:  document.getElementById('sm-ultima-troca')?.value || null,
-    obs:          document.getElementById('sm-obs')?.value?.trim() || '',
-    mdmCompliant: false,
+    // Status
+    status:         document.getElementById('sm-status')?.value || 'estoque',
+    ultimaTroca:    document.getElementById('sm-ultima-troca')?.value || null,
+    obs:            document.getElementById('sm-obs')?.value?.trim() || '',
+    mdmCompliant:   false,
     origemCadastro: 'manual',
-    createdAt:    new Date(),
-    criadoPor:    CURRENT_USER?.nome || CURRENT_USER?.uid || '',
+    createdAt:      agora,
+    criadoPor:      CURRENT_USER?.nome || CURRENT_USER?.uid || '',
   };
 
+  // Feedback visual no botão
+  const btn = document.querySelector('#modal-novo-smartphone .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Salvando...'; }
+
   try {
-    if (FB_READY && db) {
-      const ref = await db.collection('smartphones').add(novo);
-      novo.id = ref.id;
-      if (!STATE.smartphones) STATE.smartphones = [];
-      STATE.smartphones.unshift(novo);
-      await ref.collection('historico').add({
-        evento:  'cadastro-manual',
-        data:    new Date(),
-        usuario: CURRENT_USER?.nome || 'Sistema',
-        obs:     `Cadastrado manualmente — ${marca} ${modelo} · IMEI: ${imei1}`,
-      }).catch(() => {});
-    } else {
-      novo.id = 'sm' + Date.now();
-      if (!STATE.smartphones) STATE.smartphones = [];
-      STATE.smartphones.unshift(novo);
+    // 1. Salva o smartphone no Firestore
+    const ref = await db.collection('smartphones').add(novo);
+    novo.id = ref.id;
+
+    // 2. Registra no histórico do smartphone
+    await ref.collection('historico').add({
+      evento:    'cadastro-manual',
+      data:      agora,
+      usuario:   CURRENT_USER?.nome || CURRENT_USER?.uid || 'Sistema',
+      userRole:  CURRENT_USER?.role || '',
+      obs:       `Smartphone cadastrado manualmente — ${marca} ${modelo} · IMEI: ${imei1}` +
+                 (empNome ? ` · Responsável: ${empNome} (${empMat})` : ''),
+    });
+
+    // 3. Se vinculou a um empregado, registra no histórico do empregado também
+    if (empId) {
+      await db.collection('empregados').doc(empId).collection('historico').add({
+        evento:     'smartphone-vinculado',
+        data:       agora,
+        usuario:    CURRENT_USER?.nome || 'Sistema',
+        smId:       ref.id,
+        smModelo:   `${marca} ${modelo}`,
+        smImei:     imei1,
+        obs:        `Smartphone ${marca} ${modelo} (IMEI: ${imei1}) vinculado como comodato`,
+      }).catch(() => {}); // não bloqueia se empregado não tiver subcoleção
     }
 
+    // 4. Atualiza STATE local
+    if (!STATE.smartphones) STATE.smartphones = [];
+    STATE.smartphones.unshift(novo);
+
+    // 5. Fecha modal, limpa e atualiza tela
     closeModal('modal-novo-smartphone');
     smLimparModal();
     renderMDM?.();
-    showToast(`✓ ${marca} ${modelo} cadastrado (IMEI: ${imei1})`, 'success');
+
+    showToast(`✓ ${marca} ${modelo} cadastrado no sistema! ID: ${ref.id.slice(0,8)}`, 'success', 5000);
+    console.log(`[MDM] Smartphone cadastrado — Firestore ID: ${ref.id} · IMEI: ${imei1}`);
+
   } catch(e) {
-    showToast('Erro ao cadastrar: ' + e.message, 'danger');
+    console.error('[MDM] Erro ao cadastrar smartphone:', e);
+    showToast('Erro ao salvar no banco: ' + e.message, 'danger', 6000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📱 Cadastrar Smartphone'; }
   }
 }
 
