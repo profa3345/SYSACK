@@ -23025,62 +23025,296 @@ function mapaImprimir() {
 // MDM — Cadastrar Smartphone
 // ════════════════════════════════════════════════════════════
 
-function smBuscarEmpregado(mat) {
-  if (!mat || mat.length < 3) return;
-  const emp = (STATE.empregados || []).find(e =>
-    (e.mat || '').toLowerCase() === mat.toLowerCase() ||
-    (e.matricula || '').toLowerCase() === mat.toLowerCase()
-  );
-  if (emp) {
-    const sv = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
-    sv('sm-emp-nome',  emp.nome  || '');
-    sv('sm-emp-login', emp.login || emp.empLogin || '');
-    sv('sm-emp-setor', emp.setor || emp.lotacao  || '');
+// ── Busca de empregado com dropdown (campo responsável smartphone) ────────
+let _smEmpTimer = null;
+
+function smBuscarEmpregadoLista(q) {
+  clearTimeout(_smEmpTimer);
+  const res = document.getElementById('sm-emp-resultados');
+  if (!q || q.length < 2) { if (res) res.style.display = 'none'; return; }
+  _smEmpTimer = setTimeout(() => _smExecBusca(q), 200);
+}
+
+function _smExecBusca(q) {
+  const res = document.getElementById('sm-emp-resultados');
+  if (!res) return;
+
+  const qLow = q.toLowerCase();
+  const emps = (STATE.empregados || []).filter(e =>
+    (e.nome   || '').toLowerCase().includes(qLow) ||
+    (e.mat    || '').toLowerCase().includes(qLow) ||
+    (e.login  || '').toLowerCase().includes(qLow) ||
+    (e.email  || '').toLowerCase().includes(qLow) ||
+    (e.setor  || '').toLowerCase().includes(qLow)
+  ).slice(0, 10);
+
+  if (!emps.length) {
+    res.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--g400)">Nenhum empregado encontrado</div>';
+    res.style.display = '';
+    return;
+  }
+
+  res.innerHTML = emps.map((e, i) => {
+    const iniciais = (e.nome || '?').split(' ').slice(0,2).map(p => p[0]).join('').toUpperCase();
+    return `<div data-idx="${i}"
+      onclick="smSelecionarEmpregado(${JSON.stringify(e).replace(/"/g,'&quot;')})"
+      style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;gap:10px;align-items:center"
+      onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+      <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;
+                  display:flex;align-items:center;justify-content:center;font-size:11px;
+                  font-weight:700;flex-shrink:0">${iniciais}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:12.5px;color:var(--g900)">${escapeHtml(e.nome || '—')}</div>
+        <div style="font-size:11px;color:var(--g400)">${escapeHtml(e.mat || '')} · ${escapeHtml(e.setor || e.lotacao || '')}</div>
+      </div>
+      <div style="font-size:11px;color:var(--g500);flex-shrink:0">${escapeHtml(e.login || '')}</div>
+    </div>`;
+  }).join('');
+
+  res.style.display = '';
+}
+
+function smSelecionarEmpregado(emp) {
+  // Preenche campos hidden
+  const setH = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+  setH('sm-emp-id',    emp.id    || '');
+  setH('sm-emp-mat',   emp.mat   || emp.matricula || '');
+  setH('sm-emp-nome',  emp.nome  || '');
+  setH('sm-emp-login', emp.login || emp.empLogin  || '');
+  setH('sm-emp-setor', emp.setor || emp.lotacao   || '');
+
+  // Mostra card do empregado
+  const card = document.getElementById('sm-emp-selecionado');
+  const av   = document.getElementById('sm-emp-avatar');
+  const nm   = document.getElementById('sm-emp-nome-card');
+  const inf  = document.getElementById('sm-emp-info-card');
+  if (card) card.style.display = '';
+  if (av)   av.textContent  = (emp.nome || '?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
+  if (nm)   nm.textContent  = emp.nome || '—';
+  if (inf)  inf.textContent = [emp.mat, emp.setor || emp.lotacao, emp.login].filter(Boolean).join(' · ');
+
+  // Limpa busca e fecha dropdown
+  const busca = document.getElementById('sm-emp-busca');
+  const res   = document.getElementById('sm-emp-resultados');
+  if (busca) busca.value = '';
+  if (res)   res.style.display = 'none';
+}
+
+function smLimparEmpregado() {
+  ['sm-emp-id','sm-emp-mat','sm-emp-nome','sm-emp-login','sm-emp-setor'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const card = document.getElementById('sm-emp-selecionado');
+  if (card) card.style.display = 'none';
+  const busca = document.getElementById('sm-emp-busca');
+  if (busca) { busca.value = ''; busca.focus(); }
+}
+
+function smBuscaKeyDown(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('sm-emp-resultados').style.display = 'none';
   }
 }
 
+// Fecha dropdown ao clicar fora
+document.addEventListener('click', e => {
+  if (!e.target.closest('#sm-emp-busca') && !e.target.closest('#sm-emp-resultados')) {
+    const res = document.getElementById('sm-emp-resultados');
+    if (res) res.style.display = 'none';
+  }
+});
+
+// Mantém compatibilidade com chamadas antigas
+function smBuscarEmpregado(mat) { smBuscarEmpregadoLista(mat); }
+
+// ── Câmera para capturar IMEI ─────────────────────────────────────────────
+let _smCameraStream = null;
+let _smOcrTimer     = null;
+let _smTargetField  = null;
+
+async function smAbrirCamera(targetFieldId) {
+  _smTargetField = targetFieldId;
+  const overlay = document.getElementById('sm-camera-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+
+  try {
+    _smCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const video = document.getElementById('sm-camera-video');
+    video.srcObject = _smCameraStream;
+    await video.play();
+    _smIniciarOCR();
+  } catch(e) {
+    smFecharCamera();
+    showToast('Câmera não disponível: ' + e.message, 'danger');
+  }
+}
+
+function smFecharCamera() {
+  clearInterval(_smOcrTimer);
+  if (_smCameraStream) {
+    _smCameraStream.getTracks().forEach(t => t.stop());
+    _smCameraStream = null;
+  }
+  const overlay = document.getElementById('sm-camera-overlay');
+  if (overlay) overlay.style.display = 'none';
+  const video = document.getElementById('sm-camera-video');
+  if (video) video.srcObject = null;
+}
+
+function _smIniciarOCR() {
+  clearInterval(_smOcrTimer);
+  _smOcrTimer = setInterval(async () => {
+    const video   = document.getElementById('sm-camera-video');
+    const status  = document.getElementById('sm-camera-status');
+    if (!video || video.readyState < 2) return;
+
+    // Captura frame atual
+    const canvas  = document.createElement('canvas');
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const base64  = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+    if (status) status.textContent = '🔍 Analisando...';
+
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 100,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+              { type: 'text',  text: 'Esta imagem mostra um IMEI de celular. Extraia APENAS o número do IMEI (15 dígitos). Responda SOMENTE com os 15 dígitos, sem espaços, traços ou qualquer outro texto. Se não houver IMEI visível, responda com a palavra NONE.' }
+            ]
+          }]
+        })
+      });
+
+      const data  = await resp.json();
+      const texto = (data.content?.[0]?.text || '').trim().replace(/\D/g, '');
+
+      if (texto.length === 15) {
+        clearInterval(_smOcrTimer);
+        // Vibra (se mobile)
+        navigator.vibrate?.(200);
+        if (status) status.textContent = `✓ IMEI detectado: ${texto}`;
+        // Preenche campo alvo
+        const campo = document.getElementById(_smTargetField);
+        if (campo) {
+          campo.value = texto;
+          campo.dispatchEvent(new Event('input'));
+        }
+        // Fecha câmera após 1.5s
+        setTimeout(smFecharCamera, 1500);
+      } else {
+        if (status) status.textContent = '📷 Aponte para o IMEI...';
+      }
+    } catch(e) {
+      if (status) status.textContent = '⚠ Erro OCR — tentando novamente...';
+    }
+  }, 1800); // analisa a cada 1.8s
+}
+
+function smUploadFotoImei(targetFieldId) {
+  _smTargetField = targetFieldId;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const status = document.getElementById('sm-imei1-status') || document.getElementById('sm-imei2-status');
+    if (status) status.textContent = '🤖 Extraindo IMEI da foto...';
+
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 100,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: file.type || 'image/jpeg', data: base64 } },
+              { type: 'text',  text: 'Esta imagem mostra um IMEI de celular. Extraia APENAS o número do IMEI (15 dígitos). Responda SOMENTE com os 15 dígitos, sem espaços, traços ou qualquer outro texto. Se não houver IMEI visível ou for ilegível, responda com a palavra NONE.' }
+            ]
+          }]
+        })
+      });
+      const data  = await resp.json();
+      const texto = (data.content?.[0]?.text || '').trim().replace(/\D/g, '');
+      if (texto.length === 15) {
+        const campo = document.getElementById(_smTargetField);
+        if (campo) { campo.value = texto; campo.dispatchEvent(new Event('input')); }
+        showToast(`✓ IMEI ${texto} extraído da foto!`, 'success');
+        if (status) status.textContent = `✓ ${texto}`;
+      } else {
+        showToast('IMEI não encontrado na foto. Tente com melhor iluminação.', 'warning');
+        if (status) status.textContent = '';
+      }
+    } catch(e) {
+      showToast('Erro ao processar foto: ' + e.message, 'danger');
+    }
+  };
+  input.click();
+}
+
+// ── Salvar Smartphone ─────────────────────────────────────────────────────
 async function salvarSmartphone() {
-  const pat    = document.getElementById('sm-pat')?.value?.trim();
   const marca  = document.getElementById('sm-marca')?.value;
   const modelo = document.getElementById('sm-modelo')?.value?.trim();
   const imei1  = document.getElementById('sm-imei1')?.value?.trim();
 
-  if (!pat)    return showToast('Patrimônio é obrigatório', 'danger');
   if (!marca)  return showToast('Selecione a marca', 'danger');
   if (!modelo) return showToast('Informe o modelo', 'danger');
-  if (!imei1)  return showToast('IMEI 1 é obrigatório', 'danger');
+  if (!imei1 || imei1.length !== 15) return showToast('IMEI 1 inválido — deve ter 15 dígitos', 'danger');
 
-  // Verifica duplicata
-  const jaExiste = (STATE.smartphones || []).find(s => s.pat === pat || s.imei1 === imei1);
-  if (jaExiste) return showToast(`Patrimônio ou IMEI já cadastrado (${jaExiste.pat})`, 'danger');
+  // Verifica duplicata pelo IMEI
+  const jaExiste = (STATE.smartphones || []).find(s => s.imei1 === imei1);
+  if (jaExiste) return showToast(`IMEI já cadastrado (${jaExiste.marca} ${jaExiste.modelo})`, 'danger');
 
-  const linha    = document.getElementById('sm-linha')?.value?.trim()?.replace(/\D/g,'') || '';
+  const linha    = (document.getElementById('sm-linha')?.value?.trim() || '').replace(/\D/g, '');
   const empMat   = document.getElementById('sm-emp-mat')?.value?.trim()  || '';
   const empNome  = document.getElementById('sm-emp-nome')?.value?.trim() || '';
   const empLogin = document.getElementById('sm-emp-login')?.value?.trim()|| '';
   const empSetor = document.getElementById('sm-emp-setor')?.value?.trim()|| '';
 
   const novo = {
-    pat,
     marca,
     modelo,
-    so:          document.getElementById('sm-so')?.value || 'Android',
-    versao:      document.getElementById('sm-versao')?.value?.trim() || '',
+    so:           document.getElementById('sm-so')?.value || 'Android',
+    versao:       document.getElementById('sm-versao')?.value?.trim() || '',
     imei1,
-    imei2:       document.getElementById('sm-imei2')?.value?.trim() || '',
-    serie:       document.getElementById('sm-serie')?.value?.trim() || '',
+    imei2:        document.getElementById('sm-imei2')?.value?.trim() || '',
+    serie:        document.getElementById('sm-serie')?.value?.trim() || '',
     linha,
-    operadora:   document.getElementById('sm-operadora')?.value || '',
+    operadora:    document.getElementById('sm-operadora')?.value || '',
     empMat,
     empNome,
     empLogin,
     empSetor,
-    status:      document.getElementById('sm-status')?.value || 'estoque',
-    ultimaTroca: document.getElementById('sm-ultima-troca')?.value || null,
-    obs:         document.getElementById('sm-obs')?.value?.trim() || '',
+    status:       document.getElementById('sm-status')?.value || 'estoque',
+    ultimaTroca:  document.getElementById('sm-ultima-troca')?.value || null,
+    obs:          document.getElementById('sm-obs')?.value?.trim() || '',
     mdmCompliant: false,
-    createdAt:   new Date(),
-    criadoPor:   CURRENT_USER?.nome || CURRENT_USER?.uid || '',
+    origemCadastro: 'manual',
+    createdAt:    new Date(),
+    criadoPor:    CURRENT_USER?.nome || CURRENT_USER?.uid || '',
   };
 
   try {
@@ -23089,13 +23323,11 @@ async function salvarSmartphone() {
       novo.id = ref.id;
       if (!STATE.smartphones) STATE.smartphones = [];
       STATE.smartphones.unshift(novo);
-
-      // Histórico
       await ref.collection('historico').add({
-        evento:  'cadastro',
+        evento:  'cadastro-manual',
         data:    new Date(),
         usuario: CURRENT_USER?.nome || 'Sistema',
-        obs:     `Smartphone cadastrado — ${marca} ${modelo} (${pat})`,
+        obs:     `Cadastrado manualmente — ${marca} ${modelo} · IMEI: ${imei1}`,
       }).catch(() => {});
     } else {
       novo.id = 'sm' + Date.now();
@@ -23104,23 +23336,30 @@ async function salvarSmartphone() {
     }
 
     closeModal('modal-novo-smartphone');
-    // Limpa o modal
-    ['sm-pat','sm-modelo','sm-imei1','sm-imei2','sm-serie','sm-versao',
-     'sm-linha','sm-emp-mat','sm-emp-nome','sm-emp-login','sm-emp-setor',
-     'sm-ultima-troca','sm-obs'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.value = '';
-    });
-    ['sm-marca','sm-so','sm-status','sm-operadora'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.selectedIndex = 0;
-    });
-
+    smLimparModal();
     renderMDM?.();
-    showToast(`✓ ${marca} ${modelo} (${pat}) cadastrado com sucesso!`, 'success');
+    showToast(`✓ ${marca} ${modelo} cadastrado (IMEI: ${imei1})`, 'success');
   } catch(e) {
     showToast('Erro ao cadastrar: ' + e.message, 'danger');
   }
+}
+
+function smLimparModal() {
+  ['sm-modelo','sm-imei1','sm-imei2','sm-serie','sm-versao','sm-linha',
+   'sm-emp-id','sm-emp-mat','sm-emp-nome','sm-emp-login','sm-emp-setor',
+   'sm-emp-busca','sm-ultima-troca','sm-obs'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  ['sm-marca','sm-so','sm-status','sm-operadora'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.selectedIndex = 0;
+  });
+  ['sm-imei1-status','sm-imei2-status'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = '';
+  });
+  const card = document.getElementById('sm-emp-selecionado');
+  if (card) card.style.display = 'none';
+  const res = document.getElementById('sm-emp-resultados');
+  if (res) res.style.display = 'none';
 }
 
 // ════════════════════════════════════════════════════════════════════════
