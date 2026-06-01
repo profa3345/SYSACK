@@ -28185,15 +28185,215 @@ function tcMostrarResultadoVerificacao(alertas, mes, totalFatura) {
     </div>
   </div>`;
 
+  // Salva dados para uso pelos botões
+  window._tcUltimaVerificacao = { alertas, mes, totalFatura };
   document.body.insertAdjacentHTML('beforeend', html);
 }
 
-function tcAbrirContestacao(mes, diferenca) {
-  showToast(`Funcionalidade de contestação em desenvolvimento. Diferença: R$ ${Math.abs(diferenca).toFixed(2)}`, 'info', 5000);
+// ── Exportar relatório de verificação (CSV) ───────────────────────────────
+function tcExportarRelatorioVerificacao(mes) {
+  const dados = window._tcUltimaVerificacao;
+  if (!dados?.alertas?.length) {
+    showToast('Nenhuma ocorrência para exportar', 'info'); return;
+  }
+  const { alertas, totalFatura } = dados;
+
+  const C = CONTRATO_VIVO_CESAN;
+  const linhas = [
+    ['RELATÓRIO DE VERIFICAÇÃO DE FATURA — SYSACK'],
+    ['Contrato', `Pregão Eletrônico ${C.pregao}`],
+    ['Operadora', C.operadora],
+    ['CNPJ', C.cnpj],
+    ['Competência', mes],
+    ['Total da fatura', `R$ ${(totalFatura||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}`],
+    ['Total de alertas', alertas.length],
+    ['Alertas críticos', alertas.reduce((s,l)=>s+l.alertas.filter(a=>a.gravidade==='alta').length,0)],
+    ['Total cobrado a mais', `R$ ${alertas.reduce((s,l)=>s+l.alertas.reduce((s2,a)=>s2+(a.diferenca||0),0),0).toFixed(2)}`],
+    ['Gerado em', new Date().toLocaleString('pt-BR')],
+    [],
+    ['LINHA','TIPO DE ALERTA','GRAVIDADE','DESCRIÇÃO','DIFERENÇA R$'],
+  ];
+
+  alertas.forEach(l => {
+    l.alertas.forEach(a => {
+      linhas.push([
+        l.numero || '',
+        a.tipo || '',
+        a.gravidade || '',
+        (a.msg || '').replace(/;/g,' '),
+        a.diferenca != null ? a.diferenca.toFixed(2) : '',
+      ]);
+    });
+  });
+
+  const csv = linhas.map(row =>
+    row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(';')
+  ).join('\r\n');
+
+  const bom  = '﻿'; // BOM para Excel reconhecer UTF-8
+  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `SYSACK_Verificacao_Fatura_${mes}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✅ Relatório exportado! Abra no Excel para visualizar.', 'success', 4000);
 }
 
-function tcExportarRelatorioVerificacao(mes) {
-  showToast('Exportando relatório...', 'info');
+// ── Contestação formal de fatura ──────────────────────────────────────────
+function tcAbrirContestacao(mes, diferenca) {
+  const dados = window._tcUltimaVerificacao;
+  if (!dados) return showToast('Dados da verificação não encontrados', 'danger');
+
+  const { alertas, totalFatura } = dados;
+  const C = CONTRATO_VIVO_CESAN;
+
+  // Agrupa ocorrências por tipo para a carta
+  const porTipo = {};
+  alertas.forEach(l => {
+    l.alertas.forEach(a => {
+      if (!porTipo[a.tipo]) porTipo[a.tipo] = [];
+      porTipo[a.tipo].push({ numero: l.numero, ...a });
+    });
+  });
+
+  const totalDif = Math.abs(parseFloat(diferenca) || 0);
+  const hoje = new Date().toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+
+  // Monta linhas de ocorrência para a carta
+  let ocorrencias = '';
+  if (porTipo['valor_incorreto']?.length) {
+    ocorrencias += `\n• MENSALIDADE DIVERGENTE (${porTipo['valor_incorreto'].length} linhas): Cobrado valor superior ao previsto no contrato. `;
+    ocorrencias += porTipo['valor_incorreto'].slice(0,3).map(o=>`Linha ${o.numero}: ${o.msg}`).join('; ') + '.';
+  }
+  if (porTipo['plano_nao_contratado']?.length) {
+    ocorrencias += `\n• PLANO NÃO CONTRATADO (${porTipo['plano_nao_contratado'].length} linhas): Cobranças de planos não previstos no Pregão ${C.pregao}. `;
+    ocorrencias += porTipo['plano_nao_contratado'].slice(0,3).map(o=>`Linha ${o.numero}: ${o.msg}`).join('; ') + '.';
+  }
+  if (porTipo['cobranca_indevida']?.length) {
+    ocorrencias += `\n• COBRANÇAS INDEVIDAS (${porTipo['cobranca_indevida'].length} itens): Tarifas isentas pelo contrato cobradas indevidamente. `;
+    ocorrencias += porTipo['cobranca_indevida'].slice(0,3).map(o=>`Linha ${o.numero}: ${o.msg}`).join('; ') + '.';
+  }
+
+  const carta = `COMPANHIA ESPÍRITO SANTENSE DE SANEAMENTO — CESAN
+Gerência de Tecnologia da Informação
+
+Vitória/ES, ${hoje}
+
+À
+Telefônica Brasil S.A. (VIVO)
+CNPJ: ${C.cnpj}
+
+Ref.: CONTESTAÇÃO DE FATURA — Pregão Eletrônico ${C.pregao}
+Competência: ${mes}
+Conta: 0120692821
+
+Prezados Senhores,
+
+A CESAN — Companhia Espírito Santense de Saneamento, por meio de sua Gerência de Tecnologia da Informação, vem, respeitosamente, apresentar CONTESTAÇÃO FORMAL à fatura de competência ${mes}, referente ao contrato de Serviço de Comunicação Móvel de Voz e Dados firmado mediante Pregão Eletrônico nº ${C.pregao}, vigente desde 15/02/2022.
+
+Após análise sistemática realizada pelo sistema SYSACK — Gestão Inteligente de Ativos, foram identificadas as seguintes irregularidades em relação às condições pactuadas:
+${ocorrencias}
+
+RESUMO FINANCEIRO:
+- Total da fatura: R$ ${(totalFatura||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}
+- Total contratado (planos 158/2021): R$ ${(101475.93).toLocaleString('pt-BR',{minimumFractionDigits:2})}
+- Diferença cobrada indevidamente: R$ ${totalDif.toLocaleString('pt-BR',{minimumFractionDigits:2})}
+- Linhas com irregularidade: ${alertas.length}
+
+Pelo exposto, solicitamos:
+1. A CORREÇÃO imediata dos valores cobrados em desacordo com o contrato;
+2. O CREDITAMENTO em fatura subsequente do valor de R$ ${totalDif.toLocaleString('pt-BR',{minimumFractionDigits:2})} cobrado a maior;
+3. O envio de NOTA DE CRÉDITO referente às cobranças indevidas identificadas.
+
+O relatório detalhado com todas as ocorrências por linha encontra-se anexo (arquivo CSV gerado pelo sistema SYSACK).
+
+Prazo para resposta: 5 (cinco) dias úteis.
+
+Atenciosamente,
+
+_________________________________
+Gerência de Tecnologia da Informação
+CESAN — Companhia Espírito Santense de Saneamento
+CNPJ: 28.150.196/0001-09
+
+Base legal: Lei 8.666/93 art. 66 e 67; Cláusulas contratuais do Pregão ${C.pregao}.`;
+
+  document.getElementById('modal-contestacao')?.remove();
+  const html = `
+  <div class="modal-overlay open" id="modal-contestacao" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:780px">
+      <div class="modal-header" style="background:#1E293B;color:#fff;border-radius:10px 10px 0 0">
+        <div>
+          <h3 style="color:#fff">⚠️ Contestação de Fatura — ${mes}</h3>
+          <div style="font-size:12px;color:#94A3B8">Diferença identificada: R$ ${totalDif.toLocaleString('pt-BR',{minimumFractionDigits:2})} · ${alertas.length} linhas com ocorrência</div>
+        </div>
+        <button class="close-btn" style="color:rgba(255,255,255,.5)" onclick="document.getElementById('modal-contestacao').remove()">✕</button>
+      </div>
+      <div class="modal-body" style="padding:0">
+        <!-- Resumo de ocorrências -->
+        <div style="padding:14px 18px;background:#FEF2F2;border-bottom:1px solid #FECACA">
+          <div style="font-size:12px;font-weight:700;color:#991B1B;margin-bottom:8px">📋 Ocorrências identificadas pelo SYSACK</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            ${porTipo['valor_incorreto']?.length ? `
+            <div style="background:#fff;border:1px solid #FECACA;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#DC2626">${porTipo['valor_incorreto'].length}</div>
+              <div style="font-size:11px;color:#991B1B">Valor incorreto</div>
+            </div>` : ''}
+            ${porTipo['plano_nao_contratado']?.length ? `
+            <div style="background:#fff;border:1px solid #FECACA;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#DC2626">${porTipo['plano_nao_contratado'].length}</div>
+              <div style="font-size:11px;color:#991B1B">Plano não contratado</div>
+            </div>` : ''}
+            ${porTipo['cobranca_indevida']?.length ? `
+            <div style="background:#fff;border:1px solid #FECACA;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#DC2626">${porTipo['cobranca_indevida'].length}</div>
+              <div style="font-size:11px;color:#991B1B">Cobrança indevida</div>
+            </div>` : ''}
+          </div>
+        </div>
+        <!-- Carta -->
+        <div style="padding:14px 18px">
+          <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:8px">
+            📄 Carta de contestação (edite se necessário antes de exportar)
+          </div>
+          <textarea id="tc-carta-contestacao" style="width:100%;height:380px;font-family:monospace;font-size:11.5px;
+            border:1px solid var(--g200);border-radius:8px;padding:14px;resize:vertical;
+            line-height:1.6;color:var(--g700)">${carta}</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-contestacao').remove()">Fechar</button>
+        <button class="btn btn-secondary" onclick="tcExportarRelatorioVerificacao('${mes}')">📊 Exportar CSV (provas)</button>
+        <button class="btn btn-primary" onclick="tcExportarCarta('${mes}')">📄 Exportar carta (.txt)</button>
+        <button class="btn btn-danger" onclick="tcCopiarCarta()">📋 Copiar carta</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function tcExportarCarta(mes) {
+  const carta = document.getElementById('tc-carta-contestacao')?.value;
+  if (!carta) return;
+  const blob = new Blob([carta], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `CESAN_Contestacao_Fatura_Vivo_${mes}_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✅ Carta exportada!', 'success');
+}
+
+function tcCopiarCarta() {
+  const carta = document.getElementById('tc-carta-contestacao')?.value;
+  if (!carta) return;
+  navigator.clipboard.writeText(carta)
+    .then(() => showToast('✅ Carta copiada para a área de transferência!', 'success'))
+    .catch(() => showToast('Erro ao copiar — selecione o texto manualmente', 'danger'));
 }
 
 
