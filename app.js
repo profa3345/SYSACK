@@ -24570,6 +24570,217 @@ if (!STATE.planosTelecom)  STATE.planosTelecom  = [];
 if (!STATE.faturasTelecom) STATE.faturasTelecom = [];
 
 // ── Inicializa listeners Firestore para telecom ──────────────────────────
+
+// ════════════════════════════════════════════════════════════════════════
+// CONTRATO VIVO — CESAN — Pregão Eletrônico 158/2021
+// Vigência: 36 meses a partir de 15/02/2022
+// Valor total contrato: R$ 3.653.133,48
+// ════════════════════════════════════════════════════════════════════════
+const CONTRATO_VIVO_CESAN = {
+  pregao:       '158/2021',
+  contratante:  'CESAN',
+  operadora:    'Telefônica Brasil S.A. (Vivo)',
+  cnpj:         '02.558.157/0001-62',
+  dataInicio:   '2022-02-15',
+  vigenciaMeses: 36,
+  valorMensal:   101475.93,
+  valorTotal:    3653133.48,
+
+  // Planos contratados
+  planos: {
+    'smartphone-a': {
+      nome:           'Smartphone A',
+      descricao:      'Linha executiva — 30.000 min + 20GB + 2.000 SMS',
+      qtdContratada:  4,
+      valorUnitario:  236.47,
+      franquiaVozMin: 30000,    // minutos/mês individuais VC1+VC2+VC3
+      franquiaDadosGB:20,
+      franquiaSMS:    2000,
+      roamingNacional: true,    // isento AD1, AD2, D1, D2, assinatura
+    },
+    'smartphone-b': {
+      nome:           'Smartphone B',
+      descricao:      'Linha corporativa — 30.000 min + 20GB + 2.000 SMS',
+      qtdContratada:  105,
+      valorUnitario:  154.40,
+      franquiaVozMin: 30000,
+      franquiaDadosGB:20,
+      franquiaSMS:    2000,
+      roamingNacional: true,
+    },
+    'smartphone-c': {
+      nome:           'Smartphone C',
+      descricao:      'Linha operacional — 30.000 min + 10GB + 2.000 SMS',
+      qtdContratada:  830,
+      valorUnitario:  96.00,
+      franquiaVozMin: 30000,
+      franquiaDadosGB:10,
+      franquiaSMS:    2000,
+      roamingNacional: true,
+    },
+    'sim-pabx': {
+      nome:           'Cartão SIM PABX',
+      descricao:      'Interface PABX — 30.000 min, sem dados',
+      qtdContratada:  37,
+      valorUnitario:  15.00,
+      franquiaVozMin: 30000,
+      franquiaDadosGB:0,
+      franquiaSMS:    0,
+      roamingNacional: true,
+    },
+    'sim-modem': {
+      nome:           'Cartão SIM Modem GSM',
+      descricao:      'Modem de dados — 20GB sem voz',
+      qtdContratada:  12,
+      valorUnitario:  25.00,
+      franquiaVozMin: 0,
+      franquiaDadosGB:20,
+      franquiaSMS:    0,
+      roamingNacional: false,
+    },
+  },
+
+  // Tarifas avulsas (cobradas somente se não houver franquia)
+  tarifas: {
+    roamingIntlFixo:        4.49,   // MRIF — por minuto
+    roamingIntlMovel:       4.49,   // MRIM — por minuto
+    roamingIntlRecebido:    4.49,   // CRRI — por minuto
+    roamingIntlDadosAmerEu: 195.00, // pacote internet Américas/Europa
+    roamingIntlDadosAsAfOc: 238.33, // pacote internet Ásia/África/Oceania
+  },
+
+  // Cobranças que NÃO devem aparecer na fatura (estão isentas pelo contrato)
+  cobranças_indevidas: [
+    'AD1', 'AD2',              // Tarifas adicionais
+    'D1', 'D2',                // Deslocamento
+    'Assinatura básica',       // Assinatura mensal
+    'ASSINATURA',
+  ],
+};
+
+// ── Motor de verificação de cobrança ─────────────────────────────────────
+function tcVerificarFatura(fatura) {
+  const alertas = [];
+  const linhas  = fatura.linhas || [];
+  const mes     = fatura.competencia;
+
+  linhas.forEach(linha => {
+    const planoId = linha.tipoPlano || _tcInferirPlano(linha);
+    const plano   = CONTRATO_VIVO_CESAN.planos[planoId];
+    const alertasLinha = [];
+
+    // 1. Verifica valor da mensalidade
+    if (plano && linha.valorMensalidade) {
+      const esperado = plano.valorUnitario;
+      const cobrado  = parseFloat(linha.valorMensalidade);
+      if (cobrado > esperado * 1.001) { // tolerância 0.1%
+        alertasLinha.push({
+          tipo:     'valor_incorreto',
+          gravidade:'alta',
+          msg:      `Mensalidade cobrada R$ ${cobrado.toFixed(2)} — contrato prevê R$ ${esperado.toFixed(2)}`,
+          diferenca: cobrado - esperado,
+        });
+      }
+    }
+
+    // 2. Verifica cobranças indevidas
+    (linha.itens || []).forEach(item => {
+      const descUpper = (item.descricao || '').toUpperCase();
+      const indevido  = CONTRATO_VIVO_CESAN.cobranças_indevidas.some(c =>
+        descUpper.includes(c.toUpperCase())
+      );
+      if (indevido && parseFloat(item.valor || 0) > 0) {
+        alertasLinha.push({
+          tipo:     'cobranca_indevida',
+          gravidade:'alta',
+          msg:      `Cobrança indevida pelo contrato: "${item.descricao}" — R$ ${parseFloat(item.valor).toFixed(2)}`,
+          diferenca: parseFloat(item.valor),
+          item,
+        });
+      }
+    });
+
+    // 3. Verifica excedente de dados
+    if (plano && linha.dadosUsadosGB != null) {
+      const franquia = plano.franquiaDadosGB;
+      const usado    = parseFloat(linha.dadosUsadosGB);
+      if (usado > franquia) {
+        const exc = (usado - franquia).toFixed(2);
+        alertasLinha.push({
+          tipo:     'excedente_dados',
+          gravidade:'media',
+          msg:      `Dados: ${usado}GB usados, franquia ${franquia}GB — excedente ${exc}GB`,
+          excedente: exc,
+        });
+      }
+    }
+
+    // 4. Verifica excedente de voz
+    if (plano && linha.vozUsadoMin != null) {
+      const franquia = plano.franquiaVozMin;
+      const usado    = parseInt(linha.vozUsadoMin);
+      if (usado > franquia) {
+        const exc = usado - franquia;
+        alertasLinha.push({
+          tipo:     'excedente_voz',
+          gravidade:'media',
+          msg:      `Voz: ${usado.toLocaleString('pt-BR')} min usados, franquia ${franquia.toLocaleString('pt-BR')} min — excedente ${exc.toLocaleString('pt-BR')} min`,
+          excedente: exc,
+        });
+      }
+    }
+
+    // 5. Verifica roaming internacional sem pacote
+    (linha.itens || []).forEach(item => {
+      const desc = (item.descricao || '').toUpperCase();
+      const val  = parseFloat(item.valor || 0);
+      if (val > 0 && (desc.includes('ROAMING') || desc.includes('INTERNACIONAL'))) {
+        // Verifica se a tarifa está dentro do previsto
+        const tarifa = desc.includes('MRIF') || desc.includes('FIXO') ? CONTRATO_VIVO_CESAN.tarifas.roamingIntlFixo
+                     : desc.includes('MRIM') || desc.includes('MÓVEL') ? CONTRATO_VIVO_CESAN.tarifas.roamingIntlMovel
+                     : desc.includes('CRRI') || desc.includes('RECEBIDA') ? CONTRATO_VIVO_CESAN.tarifas.roamingIntlRecebido
+                     : null;
+        if (tarifa) {
+          const minutos = parseFloat(item.quantidade || 0);
+          const esperado = tarifa * minutos;
+          if (val > esperado * 1.01) {
+            alertasLinha.push({
+              tipo:     'tarifa_roaming_incorreta',
+              gravidade:'alta',
+              msg:      `Roaming: tarifa cobrada R$ ${(val/minutos).toFixed(2)}/min, contrato prevê R$ ${tarifa.toFixed(2)}/min`,
+              diferenca: val - esperado,
+            });
+          }
+        }
+      }
+    });
+
+    // 6. Linha sem uso
+    if (linha.dadosUsadosGB === 0 && linha.vozUsadoMin === 0) {
+      alertasLinha.push({
+        tipo:     'sem_uso',
+        gravidade:'baixa',
+        msg:      'Linha sem nenhum uso no período — avaliar suspensão ou cancelamento',
+      });
+    }
+
+    if (alertasLinha.length) {
+      alertas.push({ numero: linha.numero, empNome: linha.empNome, planoId, alertas: alertasLinha });
+    }
+  });
+
+  return alertas;
+}
+
+function _tcInferirPlano(linha) {
+  const val = parseFloat(linha.valorMensalidade || 0);
+  if (val >= 230) return 'smartphone-a';
+  if (val >= 150) return 'smartphone-b';
+  if (val >= 90)  return 'smartphone-c';
+  if (val >= 20)  return 'sim-modem';
+  return 'sim-pabx';
+}
+
 function initTelecomListeners() {
   if (!FB_READY || !db || STATE._telecomInit) return;
   STATE._telecomInit = true;
@@ -24814,15 +25025,35 @@ function abrirCadastrarPlano(smId, linha) {
     .map(s => `<option value="${escapeHtml(s.linha)}" ${s.linha===linha?'selected':''}>${escapeHtml(s.linha)} — ${escapeHtml(s.empNome||s.pat||'')}</option>`)
     .join('');
 
+  // Opções de tipo de plano do contrato Vivo
+  const tiposContrato = Object.entries(CONTRATO_VIVO_CESAN.planos).map(([k,p]) =>
+    `<option value="${k}" ${plano?.tipoPlano===k?'selected':''}>
+      ${p.nome} — R$ ${p.valorUnitario.toFixed(2)}/mês (${p.franquiaDadosGB}GB + ${p.franquiaVozMin.toLocaleString('pt-BR')} min)
+    </option>`
+  ).join('');
+
   const html = `
   <div class="modal-overlay active" id="modal-plano-telecom" onclick="if(event.target===this)document.getElementById('modal-plano-telecom').remove()">
-    <div class="modal" style="max-width:560px">
+    <div class="modal" style="max-width:600px">
       <div class="modal-header">
-        <h3>${plano ? '✏️ Editar Plano' : '+ Cadastrar Plano'}</h3>
+        <div>
+          <h3>${plano ? '✏️ Editar Plano' : '+ Cadastrar Plano'}</h3>
+          <div style="font-size:11px;color:var(--g400);margin-top:2px">Contrato Vivo — Pregão 158/2021 · R$ 101.475,93/mês</div>
+        </div>
         <button class="close-btn" onclick="document.getElementById('modal-plano-telecom').remove()">✕</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="tc-plano-id" value="${plano?.id || ''}">
+
+        <!-- Tipo do contrato (auto-preenche campos) -->
+        <div class="form-group">
+          <label class="form-label req">Tipo de plano contratado (Pregão 158/2021)</label>
+          <select class="form-control" id="tc-plano-tipo" onchange="tcAutoPreencherPlano(this.value)">
+            <option value="">— Selecione o tipo conforme contrato —</option>
+            ${tiposContrato}
+            <option value="custom" ${plano?.tipoPlano==='custom'?'selected':''}>Outro / Personalizado</option>
+          </select>
+        </div>
 
         <div class="form-row c2">
           <div class="form-group">
@@ -24835,7 +25066,7 @@ function abrirCadastrarPlano(smId, linha) {
           </div>
           <div class="form-group">
             <label class="form-label req">Nome do plano</label>
-            <input class="form-control" id="tc-plano-nome" placeholder="Ex: Vivo Controle 15GB" value="${escapeHtml(plano?.nomePlano||'')}">
+            <input class="form-control" id="tc-plano-nome" placeholder="Ex: Smartphone C — Vivo" value="${escapeHtml(plano?.nomePlano||'')}">
           </div>
         </div>
 
@@ -24913,16 +25144,27 @@ async function salvarPlanoTelecom() {
   if (!nome)  return showToast('Informe o nome do plano', 'danger');
   if (!valor) return showToast('Informe o valor mensal', 'danger');
 
+  const tipoPlano = document.getElementById('tc-plano-tipo')?.value || '';
+  const contratoRef = CONTRATO_VIVO_CESAN.planos[tipoPlano];
+
   const dados = {
     linha,
     nomePlano:    nome,
+    tipoPlano,
+    contratoPreg: '158/2021',
     valor,
-    franquiaDados: parseFloat(document.getElementById('tc-plano-dados')?.value || '0') || null,
-    franquiaVoz:   parseInt(document.getElementById('tc-plano-voz')?.value || '0')    || null,
+    // Franquias do contrato (ou customizadas)
+    franquiaDados: contratoRef?.franquiaDadosGB || parseFloat(document.getElementById('tc-plano-dados')?.value || '0') || null,
+    franquiaVoz:   contratoRef?.franquiaVozMin  || parseInt(document.getElementById('tc-plano-voz')?.value || '0')    || null,
+    franquiaSMS:   contratoRef?.franquiaSMS     || 0,
+    valorContrato: contratoRef?.valorUnitario   || valor,
     smsIncluso:    document.getElementById('tc-plano-sms')?.value !== 'nao',
-    descricao:     document.getElementById('tc-plano-desc')?.value?.trim() || '',
+    descricao:     document.getElementById('tc-plano-desc')?.value?.trim() || (contratoRef?.descricao || ''),
     diaVencimento: parseInt(document.getElementById('tc-plano-venc')?.value || '0') || null,
     dataInicio:    document.getElementById('tc-plano-inicio')?.value || null,
+    roamingNacional: contratoRef?.roamingNacional ?? true,
+    coberturaAD:   true, // isenção AD1/AD2 prevista em contrato
+    coberturaD:    true, // isenção D1/D2 prevista em contrato
     atualizadoEm:  new Date(),
     atualizadoPor: CURRENT_USER?.nome || CURRENT_USER?.uid || '',
   };
@@ -24996,51 +25238,238 @@ function tcPreviewArquivo(input) {
 }
 
 async function tcProcessarFatura() {
-  const file = document.getElementById('tc-imp-file')?.files[0];
-  const mes  = document.getElementById('tc-imp-mes')?.value;
-  if (!file || !mes) return showToast('Selecione arquivo e competência', 'danger');
+  const fileInput = document.getElementById('tc-imp-file');
+  const mes       = document.getElementById('tc-imp-mes')?.value;
+  const statusEl  = document.getElementById('tc-imp-status');
+  const file      = fileInput?.files?.[0];
 
-  const btn    = document.getElementById('tc-imp-btn');
-  const status = document.getElementById('tc-imp-status');
-  btn.disabled = true;
-  btn.textContent = '⏳ Processando...';
-  status.style.display = '';
+  if (!file) return showToast('Selecione um arquivo', 'danger');
+  if (!mes)  return showToast('Selecione a competência', 'danger');
 
   const ext = file.name.split('.').pop().toLowerCase();
+  statusEl.style.display = '';
+  statusEl.innerHTML = '<div style="color:var(--accent)">⏳ Processando arquivo...</div>';
 
   try {
-    let linhas = [];
-
-    if (ext === 'csv') {
-      status.innerHTML = '<span style="color:var(--accent)">📊 Lendo CSV...</span>';
-      linhas = await _tcParseCsv(file);
-    } else if (ext === 'pdf') {
-      status.innerHTML = '<span style="color:var(--accent)">🤖 Enviando para Gemini extrair dados...</span>';
-      linhas = await _tcParsePdfGemini(file, mes);
+    if (ext === 'txt') {
+      await _tcParseTXTVivo(file, mes);
+    } else if (ext === 'csv') {
+      await _tcParseCSV(file, mes);
+    } else {
+      // PDF via Gemini IA
+      await _tcParsePDFGemini(file, mes);
     }
-
-    if (!linhas.length) {
-      throw new Error('Nenhuma linha encontrada no arquivo. Verifique o formato.');
-    }
-
-    status.innerHTML = `<span style="color:var(--accent)">⚙️ Analisando ${linhas.length} linhas...</span>`;
-    const resultado = await _tcAnalisarEPersistir(linhas, mes);
-
-    status.innerHTML = `<span style="color:var(--success)">✓ ${resultado.total} linhas importadas · ${resultado.alertas} alertas detectados</span>`;
-    showToast(`✓ Fatura ${mes} importada com sucesso!`, 'success');
-
-    setTimeout(() => {
-      document.getElementById('modal-importar-fatura')?.remove();
-      renderTelecom();
-      tcTab('faturas');
-    }, 1800);
-
   } catch(e) {
-    status.innerHTML = `<span style="color:var(--danger)">❌ ${escapeHtml(e.message)}</span>`;
-    btn.disabled = false;
-    btn.textContent = '📥 Importar';
+    statusEl.innerHTML = '<div style="color:var(--danger)">❌ Erro: ' + escapeHtml(e.message) + '</div>';
   }
 }
+
+// ── Parser TXT Vivo (formato proprietário fixo) ───────────────────────────
+// Formato: arquivo posicional ISO-8859-1 com registros de largura fixa
+// Campos-chave:
+//   110D = índice de assinantes (telefone + plano + valor)
+//   200D = dados do assinante por linha
+//   215D = valores de cobrança
+//   225B = franquias detalhadas
+//   225D = itens do plano
+//   150C = registros de uso (chamadas, dados)
+async function _tcParseTXTVivo(file, mes) {
+  const statusEl = document.getElementById('tc-imp-status');
+
+  // Lê como binary para converter latin1
+  const buffer = await file.arrayBuffer();
+  const bytes  = new Uint8Array(buffer);
+
+  // Decodifica latin-1 → string
+  let txt = '';
+  for (let i = 0; i < bytes.length; i++) {
+    txt += String.fromCharCode(bytes[i]);
+  }
+  const linhas = txt.split('\r\n');
+
+  statusEl.innerHTML = `<div style="color:var(--accent)">⏳ ${linhas.length.toLocaleString('pt-BR')} linhas detectadas — extraindo dados...</div>`;
+  await new Promise(r => setTimeout(r, 50));
+
+  // ── Extrai cabeçalho da fatura ────────────────────────────────────────
+  const headerLine = linhas[0] || '';
+  const conta      = headerLine.substring(0, 10).trim();
+  const totalVals  = [...(headerLine.match(/(\d{1,9}\.\d{2})/g)||[])];
+  const totalFatura = totalVals.length ? parseFloat(totalVals[0]) : 0;
+
+  // ── Extrai assinantes (registros 110D) ────────────────────────────────
+  const assinantes = {};
+
+  for (const linha of linhas) {
+    if (!linha.includes('0120692821')) continue;
+    if (linha.length < 100) continue;
+
+    // Extrai telefone do assinante (pos 29-39)
+    const phoneRaw = linha.substring(29, 40).trim();
+    const phoneM   = phoneRaw.match(/(27\d{9,10})/);
+    if (!phoneM) continue;
+    const phone = phoneM[1];
+
+    if (!assinantes[phone]) {
+      assinantes[phone] = {
+        telefone:  phone,
+        telefoneFmt: phone.replace(/(27)(\d{5})(\d{4})/, '$1-$2-$3'),
+        plano:     '',
+        tipoPlano: '',
+        valor:     0,
+        itens:     [],
+        franquias: {},
+        aparelho:  '',
+        servicos:  [],
+      };
+    }
+
+    const a = assinantes[phone];
+    const recType = linha.substring(100, 106).trim();
+
+    switch(recType) {
+      case '200D': {
+        // Dados do assinante: plano, empresa, período
+        const planoPart = linha.substring(195, 240).trim();
+        if (planoPart) a.plano = planoPart;
+        break;
+      }
+      case '201Z': {
+        // Aparelho: marca e modelo
+        const aparelho = linha.substring(350, 420).trim().replace(/\s+/g, ' ');
+        if (aparelho) a.aparelho = aparelho;
+        break;
+      }
+      case '215D': {
+        // Valores: mensalidade principal
+        const valsStr = linha.substring(150);
+        const vals = [...(valsStr.match(/(\d+\.\d{2})/g)||[])];
+        if (vals.length && parseFloat(vals[0]) > 0) {
+          a.valor = parseFloat(vals[0]);
+        }
+        break;
+      }
+      case '225D': {
+        // Itens do plano (serviços cobrados)
+        const desc  = linha.substring(200, 250).trim();
+        const vStr  = linha.substring(150, 200);
+        const vals  = [...(vStr.match(/(\d+\.\d{2})/g)||[])];
+        if (desc) {
+          a.itens.push({
+            descricao: desc,
+            valor:     vals.length ? parseFloat(vals[0]) : 0,
+          });
+        }
+        break;
+      }
+      case '225B': {
+        // Franquias detalhadas (VOZ, INTERNET, SMS)
+        const fname = linha.substring(200, 250).trim();
+        const fqtd  = linha.substring(472, 485).trim();
+        if (fname) a.franquias[fname] = fqtd;
+        break;
+      }
+    }
+
+    // Índice geral 110D (tem telefone formatado e valor ao final)
+    if (linha.includes('110D')) {
+      const phoneFmtM = linha.match(/(27-\d{5}-\d{4})/);
+      const valM      = linha.match(/(\d+\.\d{2})A?\s*$/);
+      if (phoneFmtM && valM) {
+        const ph = phoneFmtM[1].replace(/-/g,'');
+        if (assinantes[ph] && parseFloat(valM[1]) > 0) {
+          assinantes[ph].valor = parseFloat(valM[1]);
+        }
+        // Get plan name from this line
+        const afterPhone = linha.substring(linha.indexOf(phoneFmtM[1]) + 12);
+        const planoM = afterPhone.match(/(SMART EMPRESAS \w+|PLANO BASE [\w ]+)/);
+        if (planoM && assinantes[ph] && !assinantes[ph].plano) {
+          assinantes[ph].plano = planoM[1];
+        }
+      }
+    }
+  }
+
+  // ── Classifica tipo de plano pelo contrato ────────────────────────────
+  const listaFinal = Object.values(assinantes).filter(a => a.valor > 0 || a.plano);
+
+  listaFinal.forEach(a => {
+    const v = a.valor;
+    if (v >= 230 && v <= 240) {
+      a.tipoPlano = 'smartphone-a';
+    } else if (v >= 150 && v <= 165) {
+      a.tipoPlano = 'smartphone-b';
+    } else if (v >= 90 && v <= 100) {
+      a.tipoPlano = 'smartphone-c';
+    } else if (v >= 20 && v <= 30) {
+      a.tipoPlano = 'sim-modem';
+    } else if (v > 0 && v <= 20) {
+      a.tipoPlano = 'sim-pabx';
+    } else {
+      a.tipoPlano = 'custom';
+    }
+
+    // Verifica cobranças indevidas nos itens
+    a.itens.forEach(item => {
+      const desc = (item.descricao || '').toUpperCase();
+      const isIndevido = ['AD1','AD2','D1','D2','ASSINATURA BASICA','ASSINATURA BÁSICA'].some(c => desc.includes(c));
+      if (isIndevido && item.valor > 0) item._indevido = true;
+    });
+  });
+
+  // ── Monta objeto fatura e persiste ───────────────────────────────────
+  const faturaObj = {
+    competencia:    mes,
+    conta,
+    totalHeader:    totalFatura,
+    totalLinhas:    listaFinal.length,
+    linhas: listaFinal.map(a => ({
+      numero:           a.telefoneFmt || a.telefone,
+      empNome:          '',
+      tipoPlano:        a.tipoPlano,
+      valorMensalidade: a.valor,
+      plano:            a.plano,
+      aparelho:         a.aparelho,
+      dadosUsadosGB:    null,
+      vozUsadoMin:      null,
+      itens:            a.itens,
+      franquias:        a.franquias,
+    })),
+  };
+
+  statusEl.innerHTML = `<div style="color:#059669">✅ ${listaFinal.length} linhas extraídas — verificando contrato...</div>`;
+  await new Promise(r => setTimeout(r, 100));
+
+  // ── Verifica contrato ─────────────────────────────────────────────────
+  const alertasContrato = tcVerificarFatura(faturaObj);
+
+  // ── Persiste no Firestore ──────────────────────────────────────────────
+  const totalCalc = listaFinal.reduce((s,a) => s + (a.valor||0), 0);
+
+  if (FB_READY && db) {
+    await db.collection('faturas_telecom').add({
+      competencia:    mes,
+      conta,
+      totalHeader:    totalFatura,
+      totalCalculado: +totalCalc.toFixed(2),
+      totalLinhas:    listaFinal.length,
+      alertas:        alertasContrato.reduce((s,l) => s + l.alertas.length, 0),
+      alertasCriticos:alertasContrato.reduce((s,l) => s + l.alertas.filter(a=>a.gravidade==='alta').length, 0),
+      importadaEm:    new Date(),
+      importadaPor:   CURRENT_USER?.nome || '',
+      formato:        'txt-vivo',
+      linhas:         faturaObj.linhas.slice(0, 50), // salva primeiras 50 no doc (Firestore 1MB limit)
+    });
+  }
+
+  // Fecha modal de importação
+  document.getElementById('modal-importar-fatura')?.remove();
+
+  // Mostra resultado
+  tcMostrarResultadoVerificacao(alertasContrato, mes, totalCalc);
+
+  showToast(`✅ Fatura ${mes} importada — ${listaFinal.length} linhas · R$ ${totalCalc.toLocaleString('pt-BR',{minimumFractionDigits:2})}`, 'success', 6000);
+}
+
 
 // ── Parser CSV Vivo ───────────────────────────────────────────────────────
 async function _tcParseCsv(file) {
@@ -25206,7 +25635,32 @@ async function _tcAnalisarEPersistir(linhas, mes) {
     await Promise.allSettled(batch);
   }
 
-  return { total: linhas.length, alertas: alertas.length };
+  // ── Verificação contratual (Pregão 158/2021) ──────────────────────────
+  const faturaObj = {
+    competencia: mes,
+    linhas: linhas.map(l => ({
+      numero:           l.linha,
+      empNome:          l.empNome || '',
+      tipoPlano:        (planos.find(p => p.linha === l.linha))?.tipoPlano || '',
+      valorMensalidade: l.total || 0,
+      dadosUsadosGB:    l.dados ?? null,
+      vozUsadoMin:      l.voz   ?? null,
+      foraExpediente:   l.foraExpediente || false,
+      itens:            l.itens || [],
+    })),
+  };
+  const alertasContrato = tcVerificarFatura(faturaObj);
+
+  // Mostra resultado da verificação contratual
+  if (alertasContrato.length > 0 || alertas.length > 0) {
+    setTimeout(() => {
+      tcMostrarResultadoVerificacao(alertasContrato, mes, +totalGeral.toFixed(2));
+    }, 500);
+  } else {
+    showToast(`✅ Fatura ${mes} verificada — sem irregularidades em relação ao contrato Pregão 158/2021`, 'success', 7000);
+  }
+
+  return { total: linhas.length, alertas: alertas.length, alertasContrato: alertasContrato.length };
 }
 
 // ── Ver detalhe de uma linha ──────────────────────────────────────────────
@@ -27556,5 +28010,246 @@ function mdmEnviarMensagem(smId) {
 
 function isTecnico() {
   return ['admin','gestor','tecnico','mdm_admin'].includes(CURRENT_USER?.role || '');
+}
+
+
+// ── Auto-preenche campos do plano conforme tipo do contrato ───────────────
+function tcAutoPreencherPlano(tipoPlano) {
+  const p = CONTRATO_VIVO_CESAN.planos[tipoPlano];
+  if (!p) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set('tc-plano-nome',   p.nome + ' — Vivo Pregão 158/2021');
+  set('tc-plano-valor',  p.valorUnitario.toFixed(2));
+  set('tc-plano-dados',  p.franquiaDadosGB);
+  set('tc-plano-voz',    p.franquiaVozMin);
+  set('tc-plano-desc',   p.descricao);
+  const smsEl = document.getElementById('tc-plano-sms');
+  if (smsEl) smsEl.value = p.franquiaSMS > 0 ? 'sim' : 'nao';
+
+  // Destaca o card informativo do contrato
+  let infoEl = document.getElementById('tc-plano-contrato-info');
+  if (!infoEl) {
+    const desc = document.getElementById('tc-plano-desc');
+    desc?.parentElement?.insertAdjacentHTML('afterend', `
+      <div id="tc-plano-contrato-info" style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;
+           padding:10px 14px;font-size:12px;color:#1E40AF;margin-top:-8px">
+        <div style="font-weight:700;margin-bottom:4px">📋 Dados do Contrato (Pregão 158/2021)</div>
+        <div id="tc-contrato-detalhe"></div>
+      </div>`);
+    infoEl = document.getElementById('tc-plano-contrato-info');
+  }
+  const det = document.getElementById('tc-contrato-detalhe');
+  if (det && p) {
+    det.innerHTML = `
+      Qtd. contratada: <strong>${p.qtdContratada} linhas</strong> ·
+      Valor unit.: <strong>R$ ${p.valorUnitario.toFixed(2)}/mês</strong> ·
+      Dados: <strong>${p.franquiaDadosGB}GB</strong> ·
+      Voz: <strong>${p.franquiaVozMin.toLocaleString('pt-BR')} min</strong> ·
+      SMS: <strong>${p.franquiaSMS > 0 ? p.franquiaSMS.toLocaleString('pt-BR') : 'Não incluso'}</strong><br>
+      <span style="color:#1D4ED8">✓ Isento: AD1, AD2, D1, D2, assinatura básica em todo território nacional</span>`;
+  }
+}
+
+// ── Painel de verificação de fatura ──────────────────────────────────────
+function tcMostrarResultadoVerificacao(alertas, mes, totalFatura) {
+  document.getElementById('modal-verificacao-fatura')?.remove();
+
+  const totalAltas  = alertas.reduce((s,l) => s + l.alertas.filter(a=>a.gravidade==='alta').length, 0);
+  const totalMedias = alertas.reduce((s,l) => s + l.alertas.filter(a=>a.gravidade==='media').length, 0);
+  const totalDiferenca = alertas.reduce((s,l) =>
+    s + l.alertas.reduce((s2,a) => s2 + (a.diferenca||0), 0), 0);
+
+  const COR = { alta:'#EF4444', media:'#F59E0B', baixa:'#64748B' };
+  const BG  = { alta:'#FEF2F2', media:'#FFFBEB', baixa:'#F8FAFC' };
+  const ICON= { alta:'🔴', media:'🟡', baixa:'⚪' };
+
+  const html = `
+  <div class="modal-overlay active" id="modal-verificacao-fatura" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:720px">
+      <div class="modal-header">
+        <div>
+          <h3>🔍 Resultado da Verificação — ${mes}</h3>
+          <div style="font-size:12px;color:var(--g400)">Contrato Vivo · Pregão 158/2021</div>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-verificacao-fatura').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Resumo -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+          <div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:20px;font-weight:800;color:#16A34A">R$ ${totalFatura?.toLocaleString('pt-BR',{minimumFractionDigits:2})||'—'}</div>
+            <div style="font-size:11px;color:#15803D">Total da fatura</div>
+          </div>
+          <div style="background:#EFF6FF;border:1px solid #93C5FD;border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:20px;font-weight:800;color:#2563EB">${alertas.length}</div>
+            <div style="font-size:11px;color:#1D4ED8">Linhas com ocorrência</div>
+          </div>
+          <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:20px;font-weight:800;color:#DC2626">${totalAltas}</div>
+            <div style="font-size:11px;color:#B91C1C">Alertas críticos</div>
+          </div>
+          <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:20px;font-weight:800;color:#DC2626">R$ ${Math.abs(totalDiferenca).toLocaleString('pt-BR',{minimumFractionDigits:2})}</div>
+            <div style="font-size:11px;color:#B91C1C">${totalDiferenca > 0 ? 'Cobrado a mais' : 'Diferença total'}</div>
+          </div>
+        </div>
+
+        ${!alertas.length ? `
+        <div style="text-align:center;padding:32px;background:#F0FDF4;border-radius:12px;border:1px solid #86EFAC">
+          <div style="font-size:48px;margin-bottom:8px">✅</div>
+          <div style="font-size:16px;font-weight:700;color:#16A34A">Fatura aprovada!</div>
+          <div style="font-size:13px;color:#15803D;margin-top:4px">Todas as cobranças estão de acordo com o contrato Pregão 158/2021</div>
+        </div>` : `
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:10px">
+          Ocorrências por linha:
+        </div>
+        <div style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:10px">
+          ${alertas.map(l => `
+          <div style="border:1px solid var(--g200);border-radius:10px;overflow:hidden">
+            <div style="background:var(--g50);padding:8px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--g200)">
+              <span style="font-family:monospace;font-weight:700;color:var(--accent)">${escapeHtml(l.numero||'—')}</span>
+              <span style="font-size:12px;color:var(--g600)">${escapeHtml(l.empNome||'')}</span>
+              <span style="font-size:11px;background:var(--g200);padding:2px 8px;border-radius:12px;margin-left:auto">
+                ${l.alertas.length} ocorrência${l.alertas.length>1?'s':''}
+              </span>
+            </div>
+            <div style="padding:8px 14px">
+              ${l.alertas.map(a => `
+              <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--g50)">
+                <span>${ICON[a.gravidade]}</span>
+                <span style="flex:1;font-size:12.5px;color:var(--g700)">${escapeHtml(a.msg)}</span>
+                ${a.diferenca ? `<span style="font-size:12px;font-weight:700;color:${COR[a.gravidade]};flex-shrink:0">
+                  ${a.diferenca > 0 ? '+' : ''}R$ ${Math.abs(a.diferenca).toFixed(2)}
+                </span>` : ''}
+              </div>`).join('')}
+            </div>
+          </div>`).join('')}
+        </div>`}
+
+        <!-- Referência contratual -->
+        <div style="margin-top:14px;background:#F8FAFC;border-radius:8px;padding:10px 14px;font-size:11.5px;color:var(--g500)">
+          📋 <strong>Base contratual:</strong> Pregão Eletrônico 158/2021 · Telefônica Brasil S.A. (Vivo) ·
+          Vigência 36 meses a partir de 15/02/2022 · Valor mensal: R$ 101.475,93
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-verificacao-fatura').remove()">Fechar</button>
+        <button class="btn btn-secondary btn-sm" onclick="tcExportarRelatorioVerificacao('${mes}')">📊 Exportar relatório</button>
+        ${totalAltas > 0 ? `<button class="btn btn-danger btn-sm" onclick="tcAbrirContestacao('${mes}',${totalDiferenca.toFixed(2)})">⚠️ Contestar fatura</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function tcAbrirContestacao(mes, diferenca) {
+  showToast(`Funcionalidade de contestação em desenvolvimento. Diferença: R$ ${Math.abs(diferenca).toFixed(2)}`, 'info', 5000);
+}
+
+function tcExportarRelatorioVerificacao(mes) {
+  showToast('Exportando relatório...', 'info');
+}
+
+
+// ── Modal: Visualizar dados do contrato ───────────────────────────────────
+function tcVerContrato() {
+  document.getElementById('modal-contrato-vivo')?.remove();
+
+  const c = CONTRATO_VIVO_CESAN;
+  const planosRows = Object.entries(c.planos).map(([k,p]) => `
+    <tr>
+      <td style="font-weight:600">${escapeHtml(p.nome)}</td>
+      <td style="text-align:center">${p.qtdContratada}</td>
+      <td style="font-family:monospace;text-align:right">R$ ${p.valorUnitario.toFixed(2)}</td>
+      <td style="font-family:monospace;text-align:right">R$ ${(p.valorUnitario*p.qtdContratada).toFixed(2)}</td>
+      <td style="text-align:center">${p.franquiaDadosGB ? p.franquiaDadosGB+'GB' : '—'}</td>
+      <td style="text-align:center">${p.franquiaVozMin ? p.franquiaVozMin.toLocaleString('pt-BR')+' min' : '—'}</td>
+      <td style="text-align:center">${p.franquiaSMS ? p.franquiaSMS.toLocaleString('pt-BR') : '—'}</td>
+    </tr>`).join('');
+
+  const html = `
+  <div class="modal-overlay active" id="modal-contrato-vivo" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:780px">
+      <div class="modal-header">
+        <div>
+          <h3>📋 Contrato Vivo — Pregão Eletrônico 158/2021</h3>
+          <div style="font-size:12px;color:var(--g400)">Telefônica Brasil S.A. · CNPJ 02.558.157/0001-62</div>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-contrato-vivo').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Dados gerais -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+          <div style="background:var(--g50);border-radius:10px;padding:12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:4px">Vigência</div>
+            <div style="font-weight:700">36 meses</div>
+            <div style="font-size:11.5px;color:var(--g400)">A partir de 15/02/2022</div>
+          </div>
+          <div style="background:var(--g50);border-radius:10px;padding:12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:4px">Valor mensal</div>
+            <div style="font-weight:700;font-size:16px;color:var(--accent)">R$ 101.475,93</div>
+          </div>
+          <div style="background:var(--g50);border-radius:10px;padding:12px">
+            <div style="font-size:10.5px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:4px">Valor total contrato</div>
+            <div style="font-weight:700">R$ 3.653.133,48</div>
+            <div style="font-size:11.5px;color:var(--g400)">36 parcelas mensais</div>
+          </div>
+        </div>
+
+        <!-- Tabela de planos -->
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:8px">Planos contratados</div>
+        <div class="table-container" style="margin-bottom:14px">
+          <table class="data-table" style="font-size:12px">
+            <thead><tr>
+              <th>Plano</th><th>Qtd.</th><th>Valor unit.</th><th>Valor total</th>
+              <th>Dados</th><th>Voz</th><th>SMS</th>
+            </tr></thead>
+            <tbody>${planosRows}</tbody>
+          </table>
+        </div>
+
+        <!-- Tarifas avulsas -->
+        <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:8px">Tarifas avulsas</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px">
+          <div style="background:var(--g50);border-radius:8px;padding:10px 12px">
+            <span style="color:var(--g500)">Roaming Intl. fixo (MRIF):</span>
+            <strong style="float:right">R$ 4,49/min</strong>
+          </div>
+          <div style="background:var(--g50);border-radius:8px;padding:10px 12px">
+            <span style="color:var(--g500)">Roaming Intl. móvel (MRIM):</span>
+            <strong style="float:right">R$ 4,49/min</strong>
+          </div>
+          <div style="background:var(--g50);border-radius:8px;padding:10px 12px">
+            <span style="color:var(--g500)">Chamada recebida roaming (CRRI):</span>
+            <strong style="float:right">R$ 4,49/min</strong>
+          </div>
+          <div style="background:var(--g50);border-radius:8px;padding:10px 12px">
+            <span style="color:var(--g500)">Dados roaming Américas/Europa:</span>
+            <strong style="float:right">R$ 195,00/pacote</strong>
+          </div>
+          <div style="background:var(--g50);border-radius:8px;padding:10px 12px">
+            <span style="color:var(--g500)">Dados roaming Ásia/África/Oceania:</span>
+            <strong style="float:right">R$ 238,33/pacote</strong>
+          </div>
+        </div>
+
+        <!-- Isenções -->
+        <div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#15803D">
+          <strong>✓ Cobranças isentas pelo contrato</strong> — qualquer cobrança abaixo é indevida e deve ser contestada:<br>
+          <span style="margin-top:4px;display:block">
+            AD1 (Adicional) · AD2 (Adicional) · D1 (Deslocamento) · D2 (Deslocamento) · Assinatura Básica
+          </span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-contrato-vivo').remove()">Fechar</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
 }
 
