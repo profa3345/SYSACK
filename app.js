@@ -15706,7 +15706,14 @@ function getImpressoras(){
 
 function renderImpressoras() {
   const imps = getImpressoras();
-  const _impIsOnline = i => i.reachable === true || i.status === 'online' || i.status === 'ok';
+  // "Online" = reachable OU status ok/online E teve check recente (mesma lógica dos cards)
+  const _agora2h = Date.now();
+  const _impIsOnline = i => {
+    const ult = i.ultimoSnmp || i.ultimoCheck || i.coletadoEm;
+    const recente = ult && (_agora2h - new Date(ult).getTime()) < 2 * 60 * 60 * 1000;
+    const statusOk = i.status === 'online' || i.status === 'ok' || i.reachable === true;
+    return statusOk && (recente || i.reachable === true);
+  };
   sv('imp-total',       imps.length);
   sv('imp-online',      imps.filter(_impIsOnline).length);
   sv('imp-critico',     imps.filter(i => i.status === 'critico' || i.status === 'alerta' || i.status === 'atolamento' || i.status === 'sem-toner').length);
@@ -15741,10 +15748,51 @@ function impTab(tab) {
 }
 
 // ── CARDS DO PAINEL ───────────────────────────────────────────
+// Filtro ativo nos cards
+let _impFiltroStatus = '';
+
+function impFiltrarStatus(filtro) {
+  _impFiltroStatus = filtro;
+  // Destaca card KPI selecionado
+  document.querySelectorAll('#page-impressoras .stat-card').forEach(c => c.style.outline = '');
+  impRenderCards();
+}
+
 function impRenderCards() {
   const grid = document.getElementById('imp-cards-grid');
   if (!grid) return;
-  const imps = getImpressoras();
+  let imps = getImpressoras();
+
+  // Aplica filtro do KPI clicado
+  if (_impFiltroStatus === 'online') {
+    const agora = Date.now();
+    imps = imps.filter(i => {
+      const ult = i.ultimoSnmp || i.ultimoCheck || i.coletadoEm;
+      const recente = ult && (agora - new Date(ult).getTime()) < 2 * 60 * 60 * 1000;
+      return (i.status === 'online' || i.status === 'ok' || i.reachable === true) && (recente || i.reachable === true);
+    });
+  } else if (_impFiltroStatus === 'offline') {
+    imps = imps.filter(i => i.status === 'offline' || (!i.reachable && i.status !== 'online'));
+  } else if (_impFiltroStatus === 'critico') {
+    imps = imps.filter(i => ['critico','alerta','sem-toner','atolamento'].includes(i.status));
+  } else if (_impFiltroStatus === 'toner') {
+    imps = imps.filter(i => (i.tonerMinPct ?? i.tonerMin ?? 100) < 20);
+  }
+
+  // Aviso de filtro ativo
+  const avisoId = 'imp-filtro-aviso';
+  document.getElementById(avisoId)?.remove();
+  if (_impFiltroStatus) {
+    const LABELS = { online:'Online', offline:'Offline', critico:'Crítico/Alerta', toner:'Toner < 20%' };
+    grid.insertAdjacentHTML('beforebegin', `
+      <div id="${avisoId}" style="background:var(--accent-l);border:1px solid var(--accent);border-radius:8px;
+           padding:8px 14px;margin-bottom:12px;font-size:12.5px;color:var(--accent);
+           display:flex;align-items:center;justify-content:space-between">
+        <span>🔍 Filtrando: <strong>${LABELS[_impFiltroStatus]||_impFiltroStatus}</strong> — ${imps.length} impressora(s)</span>
+        <button onclick="_impFiltroStatus='';document.getElementById('${avisoId}')?.remove();impRenderCards()"
+                style="background:none;border:none;cursor:pointer;color:var(--accent);font-weight:700;font-size:14px">✕ Limpar</button>
+      </div>`);
+  }
 
   if (!imps.length) {
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--g400)"><div style="font-size:48px;margin-bottom:16px">🖨️</div><div style="font-weight:600">Nenhuma impressora detectada</div><div style="font-size:13px;margin-top:6px">Cadastre impressoras no Monitor de Rede com tipo "Impressora"</div></div>';
@@ -15761,7 +15809,10 @@ function impRenderCards() {
     const ultimoCheck = imp.ultimoSnmp || imp.ultimoCheck || imp.coletadoEm;
     const checkRecente = ultimoCheck && (_agora - new Date(ultimoCheck).getTime()) < 2 * 60 * 60 * 1000; // 2h
     const temDados = checkRecente || imp.reachable === true || imp.fonte === 'agente-wmi';
-    const _stRaw = imp.status || (imp.reachable ? 'online' : 'offline');
+    // Se reachable=true (ping ok), mostra online mesmo que status='offline' no Firestore
+    // Isso resolve a inconsistência entre KPI e cards
+    let _stRaw = imp.status || (imp.reachable ? 'online' : 'offline');
+    if (imp.reachable === true && _stRaw === 'offline') _stRaw = 'online';
     const _st = temDados ? _stRaw : 'sem-dados';
     const _stOffline = _st === 'offline';
     const statusCor = _st==='critico'||_st==='sem-toner'||_st==='atolamento' ? '#EF4444'
@@ -23706,157 +23757,214 @@ function _renderMapaGrafico(todosAll, container) {
     todos = todos.filter(function(d){ return (d.tipo||'').toLowerCase() === _mapaFiltros.tipo; });
   }
 
+  // ── Tipos e cores ────────────────────────────────────────────────
   var SW_TIPOS = ['switch','switch-core','switch-distribuicao','switch-acesso','router','firewall','ap'];
   var switches = todos.filter(function(d){ return SW_TIPOS.includes((d.tipo||'').toLowerCase()); });
   var hosts    = todos.filter(function(d){ return !SW_TIPOS.includes((d.tipo||'').toLowerCase()); });
 
-  function getSubnet(ip) { var p=(ip||'').split('.'); return p.length>=3?p.slice(0,3).join('.'):''; }
+  function getSubnet(ip)  { var p=(ip||'').split('.'); return p.length>=3?p.slice(0,3).join('.'):''; }
+  function get24(ip)      { var p=(ip||'').split('.'); return p.length>=4?p.slice(0,3).join('.'):''; }
 
-  var tipoClr = {'switch':'#1E40AF','switch-core':'#0F172A','switch-distribuicao':'#1D4ED8','switch-acesso':'#2563EB','router':'#EA580C','firewall':'#7C3AED','ap':'#0891B2'};
+  // Ícone e cor por tipo de equipamento
+  function tipoIcon(tipo) {
+    var t = (tipo||'').toLowerCase();
+    if (t==='switch'||t==='switch-core'||t==='switch-distribuicao'||t==='switch-acesso') return {icon:'⇌', cor:'#1E40AF', bg:'#1E3A8A', label:'SWITCH'};
+    if (t==='router'||t==='roteador')   return {icon:'🌐', cor:'#EA580C', bg:'#7C2D12', label:'ROUTER'};
+    if (t==='firewall')                 return {icon:'🛡', cor:'#7C3AED', bg:'#4C1D95', label:'FIREWALL'};
+    if (t==='ap'||t==='access-point')   return {icon:'📡', cor:'#0891B2', bg:'#164E63', label:'AP'};
+    if (t==='servidor'||t==='server')   return {icon:'🖳', cor:'#059669', bg:'#064E3B', label:'SERVIDOR'};
+    if (t==='impressora'||t==='printer')return {icon:'🖨', cor:'#D97706', bg:'#78350F', label:'IMPRESSORA'};
+    if (t==='notebook'||t==='laptop')   return {icon:'💻', cor:'#0284C7', bg:'#0C4A6E', label:'NOTEBOOK'};
+    if (t==='computador'||t==='desktop'||t==='workstation') return {icon:'🖥', cor:'#475569', bg:'#1E293B', label:'PC'};
+    if (t==='telefone'||t==='voip')     return {icon:'📞', cor:'#BE185D', bg:'#831843', label:'VOIP'};
+    if (t==='camera'||t==='câmera')     return {icon:'📷', cor:'#92400E', bg:'#451A03', label:'CÂMERA'};
+    if (t==='ups'||t==='nobreak')       return {icon:'🔋', cor:'#15803D', bg:'#14532D', label:'UPS'};
+    return {icon:'📦', cor:'#64748B', bg:'#334155', label:(tipo||'DISPOSITIVO').toUpperCase().slice(0,12)};
+  }
+
   var statusClr = function(d){
     var s=(d.status||'').toLowerCase();
-    if(d.reachable||s==='ok'||s==='ativo'||s==='online') return '#10B981';
+    if(d.reachable===true||s==='ok'||s==='ativo'||s==='online') return '#10B981';
     if(s==='offline') return '#EF4444';
     if(s==='alerta')  return '#F59E0B';
     return '#94A3B8';
   };
 
-  // ── Agrupa hosts por switch (match por subnet) ──────────────────
-  var groups = []; // [{sw, hosts}]
+  // ── Agrupamento inteligente: subnet /24 + fallback por localidade ─
+  var groups = [];
   var usedHosts = new Set();
+
+  switches.sort(function(a,b){ return (a.ip||'').localeCompare(b.ip||''); });
 
   switches.forEach(function(sw) {
     var snSw = getSubnet(sw.ip);
     var swHosts = hosts.filter(function(h){
-      return getSubnet(h.ip) === snSw && snSw !== '';
+      // Match por /24 subnet
+      if (snSw && getSubnet(h.ip) === snSw) return true;
+      // Match por localidade/hostname prefix
+      var swLoc = (sw.sysName||sw.hostname||'').replace(/-SW\d+$/i,'').toLowerCase();
+      var hLoc  = (h.hostname||'').toLowerCase();
+      if (swLoc.length > 3 && hLoc.includes(swLoc)) return true;
+      return false;
     });
-    swHosts.forEach(function(h){ usedHosts.add(h.id); });
+    swHosts.forEach(function(h){ usedHosts.add(h.id||h.ip); });
     groups.push({ sw: sw, hosts: swHosts });
   });
 
-  // Hosts sem switch
-  var orphanHosts = hosts.filter(function(h){ return !usedHosts.has(h.id); });
-  if (orphanHosts.length) groups.push({ sw: null, hosts: orphanHosts });
+  // Hosts sem switch (realmente órfãos)
+  var orphans = hosts.filter(function(h){ return !usedHosts.has(h.id||h.ip); });
 
-  // ── Dimensões ──────────────────────────────────────────────────
-  var COL_W    = 180;
-  var COL_GAP  = 24;
-  var SW_H     = 54;
-  var HOST_H   = 26;
-  var HOST_GAP = 5;
-  var TOP_PAD  = 30;
-  var SW_PAD   = 24; // espaço entre switch e hosts
-
-  var maxHosts = Math.max.apply(null, groups.map(function(g){ return g.hosts.length; })) || 0;
-  var totalH   = TOP_PAD + SW_H + SW_PAD + maxHosts * (HOST_H + HOST_GAP) + 60;
-  var totalW   = Math.max(groups.length * (COL_W + COL_GAP) + 24, 800);
-
-  var html = '';
-
-  // Breadcrumb
-  if (_mapaAreaSel) {
-    html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#EFF6FF;border-bottom:1px solid #BFDBFE;font-size:12px;flex-shrink:0">'
-      +'<button onclick="_mapaAreaSel=null;renderMapaRede()" style="border:none;background:#2563EB;color:#fff;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">← Voltar</button>'
-      +'<span style="color:#1E40AF;font-weight:700">'+escapeHtml(_mapaAreaSel)+'</span>'
-      +'<span style="color:#60A5FA">· '+todos.length+' dispositivos</span>'
-    +'</div>';
+  // Agrupa órfãos por /24 subnet
+  if (orphans.length) {
+    var orphanSubnets = {};
+    orphans.forEach(function(h){
+      var sn = getSubnet(h.ip) || 'sem-ip';
+      if (!orphanSubnets[sn]) orphanSubnets[sn] = [];
+      orphanSubnets[sn].push(h);
+    });
+    Object.keys(orphanSubnets).sort().forEach(function(sn){
+      groups.push({ sw: null, subnet: sn, hosts: orphanSubnets[sn] });
+    });
   }
 
-  // Filter bar
-  html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 12px;background:var(--g50);border-bottom:0.5px solid var(--g100)">'
-    + _mapaFiltBtn('status','ok',     '🟢 Online',   '#059669')
-    + _mapaFiltBtn('status','offline','🔴 Offline',   '#DC2626')
-    + _mapaFiltBtn('status','alerta', '🟡 Alerta',   '#D97706')
-    + '<div style="width:1px;height:16px;background:var(--g200)"></div>'
-    + _mapaFiltBtn('tipo','switch',   '⇌ Switches',  '#2563EB')
-    + _mapaFiltBtn('tipo','router',   '🌐 Routers',   '#EA580C')
-    + _mapaFiltBtn('tipo','firewall', '🔥 Firewalls', '#7C3AED')
-    + _mapaFiltBtn('tipo','ap',       '📡 APs',       '#0891B2')
-    + '<span style="font-size:11px;color:var(--g400);margin-left:auto">'+todos.length+' dispositivos · '+switches.length+' switches</span>'
-    + ((_mapaFiltros.status||_mapaFiltros.tipo)
-        ? '<button onclick="_mapaFiltros={status:\'\',tipo:\'\',local:\'\'};renderMapaRede()" style="border:none;background:var(--g200);color:var(--g600);padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px">✕ Limpar</button>'
-        : '')
-  +'</div>';
+  // ── Layout ────────────────────────────────────────────────────────
+  var COL_W   = 200;
+  var COL_GAP = 20;
+  var SW_H    = 64;
+  var HOST_H  = 30;
+  var HOST_GAP= 4;
+  var TOP_PAD = 20;
+  var SW_PAD  = 28;
 
-  // SVG hierárquico — scroll horizontal, não corta
-  html += '<div style="overflow-x:auto;overflow-y:auto;position:relative;max-height:70vh"><svg xmlns="http://www.w3.org/2000/svg" width="'+(totalW+40)+'" height="'+totalH+'" style="display:block;padding:12px;min-width:'+(totalW+40)+'px">';
+  var maxHosts = Math.max.apply(null, groups.map(function(g){ return g.hosts.length; })) || 0;
+  var totalH   = TOP_PAD + SW_H + SW_PAD + maxHosts * (HOST_H + HOST_GAP) + 80;
+  var totalW   = Math.max(groups.length * (COL_W + COL_GAP) + 24, 900);
+
+  // ── HTML/SVG ──────────────────────────────────────────────────────
+  var html = '';
+
+  // Legenda de ícones
+  html += '<div style="display:flex;gap:12px;flex-wrap:wrap;padding:8px 14px;background:var(--g50);'
+        + 'border-bottom:1px solid var(--g100);font-size:11px;color:var(--g500);align-items:center">'
+        + '<span style="font-weight:700;color:var(--g700)">Legenda:</span>'
+        + '<span>⇌ Switch</span><span>🌐 Router</span><span>🛡 Firewall</span><span>📡 AP</span>'
+        + '<span>🖳 Servidor</span><span>🖨 Impressora</span><span>🖥 PC/Desktop</span>'
+        + '<span>💻 Notebook</span><span>📞 VoIP</span><span>📦 Outro</span>'
+        + '<span style="margin-left:auto;display:flex;gap:8px">'
+        + '<span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:50%;background:#10B981;display:inline-block"></span>Online</span>'
+        + '<span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:50%;background:#EF4444;display:inline-block"></span>Offline</span>'
+        + '<span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:50%;background:#F59E0B;display:inline-block"></span>Alerta</span>'
+        + '<span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:50%;background:#94A3B8;display:inline-block"></span>Sem dados</span>'
+        + '</span></div>';
+
+  html += '<div style="overflow-x:auto;overflow-y:auto;position:relative;max-height:calc(70vh - 40px)">'
+        + '<svg xmlns="http://www.w3.org/2000/svg" width="'+(totalW+40)+'" height="'+totalH
+        + '" style="display:block;padding:12px;min-width:'+(totalW+40)+'px">';
 
   groups.forEach(function(g, gi) {
     var x   = gi * (COL_W + COL_GAP) + 12;
     var sw  = g.sw;
     var swY = TOP_PAD;
 
-    // ── Switch node ──────────────────────────────────────────
+    // ── Switch / Gateway node ─────────────────────────────────
     if (sw) {
-      var swC = tipoClr[(sw.tipo||'').toLowerCase()] || '#2563EB';
-      var swLabel  = (sw.hostname || sw.sysName || sw.ip || '?').slice(0,18);
-      var swStatus = statusClr(sw);
+      var ti      = tipoIcon(sw.tipo);
+      var swSt    = statusClr(sw);
+      var swLabel = (sw.sysName || sw.hostname || sw.ip || '?').slice(0,20);
+      var latMs   = sw.latencyMs != null ? sw.latencyMs+'ms' : '';
 
-      // Fundo
-      html += '<rect x="'+x+'" y="'+swY+'" width="'+COL_W+'" height="'+SW_H+'" rx="8" fill="'+swC+'"/>';
+      // Background gradient rect
+      html += '<defs><linearGradient id="swg'+gi+'" x1="0" y1="0" x2="0" y2="1">'
+            + '<stop offset="0%" stop-color="'+ti.bg+'"/>'
+            + '<stop offset="100%" stop-color="'+ti.cor+'" stop-opacity="0.85"/>'
+            + '</linearGradient></defs>';
+      html += '<rect x="'+x+'" y="'+swY+'" width="'+COL_W+'" height="'+SW_H+'" rx="10" fill="url(#swg'+gi+')"/>';
+      // Borda status
+      html += '<rect x="'+x+'" y="'+swY+'" width="'+COL_W+'" height="'+SW_H+'" rx="10" fill="none" stroke="'+swSt+'" stroke-width="2" stroke-opacity="0.6"/>';
       // Status dot
-      html += '<circle cx="'+(x+COL_W-10)+'" cy="'+(swY+10)+'" r="5" fill="'+swStatus+'"/>';
+      html += '<circle cx="'+(x+COL_W-12)+'" cy="'+(swY+12)+'" r="5" fill="'+swSt+'"/>';
+      // Ícone tipo
+      html += '<text x="'+(x+12)+'" y="'+(swY+38)+'" font-size="20">'+ti.icon+'</text>';
+      // Label tipo
+      html += '<text x="'+(x+38)+'" y="'+(swY+16)+'" font-size="8" font-weight="700" fill="rgba(255,255,255,.55)" letter-spacing="0.5">'+ti.label+'</text>';
       // Hostname
-      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+18)+'" text-anchor="middle" font-size="10" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml(swLabel)+'</text>';
+      html += '<text x="'+(x+38)+'" y="'+(swY+30)+'" font-size="10" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml(swLabel)+'</text>';
       // IP
-      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+30)+'" text-anchor="middle" font-size="8.5" fill="rgba(255,255,255,.75)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
-      // Tipo
-      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+42)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.6)">'+escapeHtml((sw.tipo||'switch').toUpperCase())+'</text>';
-      // Latency
-      if (sw.latencyMs != null) html += '<text x="'+(x+8)+'" y="'+(swY+42)+'" font-size="8" fill="rgba(255,255,255,.5)">'+sw.latencyMs+'ms</text>';
+      html += '<text x="'+(x+38)+'" y="'+(swY+44)+'" font-size="8.5" fill="rgba(255,255,255,.65)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
+      // Latência
+      if (latMs) html += '<text x="'+(x+12)+'" y="'+(swY+58)+'" font-size="8" fill="rgba(255,255,255,.5)">'+escapeHtml(latMs)+'</text>';
+      // Nº de hosts
+      html += '<text x="'+(x+COL_W-12)+'" y="'+(swY+54)+'" font-size="8" fill="rgba(255,255,255,.5)" text-anchor="end">'+g.hosts.length+' hosts</text>';
 
-      // Linha vertical do switch para os hosts
+      // Linha vertical do switch → hosts
       if (g.hosts.length) {
-        var lineX = x + COL_W/2;
-        var lineY1 = swY + SW_H;
-        var lineY2 = TOP_PAD + SW_H + SW_PAD + (g.hosts.length-1)*(HOST_H+HOST_GAP) + HOST_H/2;
-        // Linha vertical principal
-        html += '<line x1="'+lineX+'" y1="'+lineY1+'" x2="'+lineX+'" y2="'+lineY2+'" stroke="#CBD5E1" stroke-width="1.5"/>';
-        // Linhas horizontais para cada host
+        var lx  = x + COL_W/2;
+        var ly1 = swY + SW_H;
+        var ly2 = TOP_PAD + SW_H + SW_PAD + (g.hosts.length-1)*(HOST_H+HOST_GAP) + HOST_H/2;
+        html += '<line x1="'+lx+'" y1="'+ly1+'" x2="'+lx+'" y2="'+ly2+'" stroke="#CBD5E1" stroke-width="1.5" stroke-dasharray="4 3"/>';
         g.hosts.forEach(function(h,hi){
           var hy2 = TOP_PAD + SW_H + SW_PAD + hi*(HOST_H+HOST_GAP) + HOST_H/2;
-          html += '<line x1="'+lineX+'" y1="'+hy2+'" x2="'+(x+8)+'" y2="'+hy2+'" stroke="#CBD5E1" stroke-width="1"/>';
+          html += '<line x1="'+lx+'" y1="'+hy2+'" x2="'+(x+6)+'" y2="'+hy2+'" stroke="#CBD5E1" stroke-width="1"/>';
+        });
+      }
+    } else {
+      // Grupo sem switch — cabeçalho de subnet
+      var subnet = g.subnet || 'Sem rede';
+      html += '<rect x="'+x+'" y="'+swY+'" width="'+COL_W+'" height="'+SW_H+'" rx="10" fill="#334155" stroke="#475569" stroke-width="1.5"/>';
+      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+22)+'" text-anchor="middle" font-size="9" font-weight="700" fill="rgba(255,255,255,.4)" letter-spacing="0.5">SEM SWITCH</text>';
+      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+38)+'" text-anchor="middle" font-size="11" fill="rgba(255,255,255,.7)" font-family="monospace">'+escapeHtml(subnet)+'.*</text>';
+      html += '<text x="'+(x+COL_W/2)+'" y="'+(swY+54)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.4)">'+g.hosts.length+' dispositivos</text>';
+      // Linha tracejada para hosts
+      if (g.hosts.length) {
+        var lx  = x + COL_W/2;
+        var ly1 = swY + SW_H;
+        var ly2 = TOP_PAD + SW_H + SW_PAD + (g.hosts.length-1)*(HOST_H+HOST_GAP) + HOST_H/2;
+        html += '<line x1="'+lx+'" y1="'+ly1+'" x2="'+lx+'" y2="'+ly2+'" stroke="#475569" stroke-width="1.5" stroke-dasharray="3 4"/>';
+        g.hosts.forEach(function(h,hi){
+          var hy2 = TOP_PAD + SW_H + SW_PAD + hi*(HOST_H+HOST_GAP) + HOST_H/2;
+          html += '<line x1="'+lx+'" y1="'+hy2+'" x2="'+(x+6)+'" y2="'+hy2+'" stroke="#475569" stroke-width="1"/>';
         });
       }
     }
 
-    // ── Hosts ────────────────────────────────────────────────
+    // ── Hosts ─────────────────────────────────────────────────
     var hostStartY = TOP_PAD + SW_H + SW_PAD;
     g.hosts.forEach(function(h, hi) {
-      var hy      = hostStartY + hi * (HOST_H + HOST_GAP);
-      var hStatus = statusClr(h);
-      var hLabel  = (h.hostname || h.sysName || h.ip || '?').slice(0,20);
-      var hTipo   = (h.tipo||'').toLowerCase();
-      var hIcon   = hTipo==='impressora'||hTipo==='printer' ? '🖨' : hTipo==='ap' ? '📡' : '💻';
+      var hy     = hostStartY + hi * (HOST_H + HOST_GAP);
+      var hSt    = statusClr(h);
+      var hTi    = tipoIcon(h.tipo);
+      var hLabel = (h.hostname || h.sysName || h.ip || '?').slice(0,22);
+      var hIp    = h.ip || '';
 
-      // Host bg
-      var hBg = hStatus==='#10B981'?'#F0FDF4':hStatus==='#EF4444'?'#FEF2F2':'#FFFBEB';
-      html += '<rect x="'+x+'" y="'+hy+'" width="'+COL_W+'" height="'+HOST_H+'" rx="4" fill="'+hBg+'" stroke="'+hStatus+'" stroke-width="0.8" stroke-opacity="0.4"/>';
+      // Cor de fundo baseada em status
+      var hBg     = hSt==='#10B981'?'#F0FDF4' : hSt==='#EF4444'?'#FEF2F2' : hSt==='#F59E0B'?'#FFFBEB' : '#F8FAFC';
+      var hBorder = hSt;
+
+      html += '<rect x="'+x+'" y="'+hy+'" width="'+COL_W+'" height="'+HOST_H+'" rx="6" fill="'+hBg+'" stroke="'+hBorder+'" stroke-width="0.8" stroke-opacity="0.5"/>';
+
+      // Faixa colorida à esquerda indicando tipo
+      html += '<rect x="'+x+'" y="'+hy+'" width="4" height="'+HOST_H+'" rx="3" fill="'+hTi.cor+'"/>';
+
       // Status dot
-      html += '<circle cx="'+(x+8)+'" cy="'+(hy+HOST_H/2)+'" r="3.5" fill="'+hStatus+'"/>';
-      // Tipo icon
-      var tipoIcon = hTipo==='impressora'||hTipo==='printer'?'🖨'
-        :hTipo==='ap'?'📡'
-        :hTipo==='servidor'||hTipo==='server'?'🖳'
-        :hTipo==='notebook'||hTipo==='laptop'?'💻'
-        :hTipo==='workstation'||hTipo==='computador'||hTipo==='desktop'?'🖥'
-        :hTipo==='firewall'?'🔥'
-        :hTipo==='router'||hTipo==='roteador'?'🌐'
-        :hTipo==='telefone'||hTipo==='voip'?'📞'
-        :'📦';
-      html += '<text x="'+(x+17)+'" y="'+(hy+HOST_H/2+4)+'" font-size="9">'+tipoIcon+'</text>';
-      // Label
-      html += '<text x="'+(x+28)+'" y="'+(hy+HOST_H/2+4)+'" font-size="8.5" fill="#334155" font-family="monospace">'+escapeHtml(hLabel)+'</text>';
-      // IP pequeno
-      if (h.ip) html += '<text x="'+(x+COL_W-4)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="#94A3B8" text-anchor="end">'+escapeHtml(h.ip)+'</text>';
+      html += '<circle cx="'+(x+14)+'" cy="'+(hy+HOST_H/2)+'" r="4" fill="'+hSt+'"/>';
 
-      // Linhas já desenhadas no bloco do switch
+      // Ícone tipo
+      html += '<text x="'+(x+25)+'" y="'+(hy+HOST_H/2+4)+'" font-size="11">'+hTi.icon+'</text>';
+
+      // Label hostname
+      html += '<text x="'+(x+40)+'" y="'+(hy+HOST_H/2-2)+'" font-size="8.5" fill="#1E293B" font-family="monospace" font-weight="600">'+escapeHtml(hLabel)+'</text>';
+
+      // IP menor embaixo
+      if (hIp && hIp !== hLabel) {
+        html += '<text x="'+(x+40)+'" y="'+(hy+HOST_H/2+9)+'" font-size="7.5" fill="#94A3B8" font-family="monospace">'+escapeHtml(hIp)+'</text>';
+      }
+
+      // Latência (se disponível)
+      if (h.latencyMs != null) {
+        var latCor = h.latencyMs < 5 ? '#10B981' : h.latencyMs < 30 ? '#F59E0B' : '#EF4444';
+        html += '<text x="'+(x+COL_W-5)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="'+latCor+'" text-anchor="end">'+h.latencyMs+'ms</text>';
+      }
     });
-
-    // Label "sem switch" se grupo sem switch
-    if (!sw && g.hosts.length) {
-      html += '<text x="'+(x+COL_W/2)+'" y="'+(TOP_PAD+14)+'" text-anchor="middle" font-size="9" fill="#94A3B8">Sem switch</text>';
-    }
   });
 
   html += '</svg></div>';
