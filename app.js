@@ -25265,193 +25265,204 @@ async function tcProcessarFatura() {
   }
 }
 
-// ── Parser TXT Vivo (formato proprietário fixo) ───────────────────────────
-// Formato: arquivo posicional ISO-8859-1 com registros de largura fixa
-// Campos-chave:
-//   110D = índice de assinantes (telefone + plano + valor)
-//   200D = dados do assinante por linha
-//   215D = valores de cobrança
-//   225B = franquias detalhadas
-//   225D = itens do plano
-//   150C = registros de uso (chamadas, dados)
+// ── Parser TXT Vivo (formato proprietário fixo) ─────────────────────────
+// Formato: arquivo posicional ISO-8859-1, registros de largura fixa
+// Conta: 0120692821 (CESAN)
+// Registros-chave:
+//   110D = índice de assinantes (telefone formatado + plano + valor/linha)
+//   200D = dados do assinante (plano, datas vigência)
+//   201Z = dados do aparelho (marca/modelo)
+//   215D = valores cobrados
+//   225D = itens do plano com valores
 async function _tcParseTXTVivo(file, mes) {
   const statusEl = document.getElementById('tc-imp-status');
 
-  // Lê como binary para converter latin1
+  // ── Leitura como latin-1 ──────────────────────────────────────────────
   const buffer = await file.arrayBuffer();
   const bytes  = new Uint8Array(buffer);
-
-  // Decodifica latin-1 → string
   let txt = '';
-  for (let i = 0; i < bytes.length; i++) {
-    txt += String.fromCharCode(bytes[i]);
-  }
+  for (let i = 0; i < bytes.length; i++) txt += String.fromCharCode(bytes[i]);
   const linhas = txt.split('\r\n');
 
-  statusEl.innerHTML = `<div style="color:var(--accent)">⏳ ${linhas.length.toLocaleString('pt-BR')} linhas detectadas — extraindo dados...</div>`;
+  statusEl.style.display = '';
+  statusEl.innerHTML = `<div style="color:var(--accent)">⏳ ${linhas.length.toLocaleString('pt-BR')} linhas — extraindo assinantes...</div>`;
   await new Promise(r => setTimeout(r, 50));
 
-  // ── Extrai cabeçalho da fatura ────────────────────────────────────────
-  const headerLine = linhas[0] || '';
-  const conta      = headerLine.substring(0, 10).trim();
-  const totalVals  = [...(headerLine.match(/(\d{1,9}\.\d{2})/g)||[])];
-  const totalFatura = totalVals.length ? parseFloat(totalVals[0]) : 0;
-
-  // ── Extrai assinantes (registros 110D) ────────────────────────────────
-  const assinantes = {};
+  // ── PASSO 1: Monta índice de assinantes via registros 110D ─────────────
+  // Estes registros têm telefone formatado (27-XXXXX-XXXX) e valor ao final
+  const phoneIndex = {};
 
   for (const linha of linhas) {
+    if (!linha.includes('110D')) continue;
     if (!linha.includes('0120692821')) continue;
-    if (linha.length < 100) continue;
 
-    // Extrai telefone do assinante (pos 29-39)
-    const phoneRaw = linha.substring(29, 40).trim();
-    const phoneM   = phoneRaw.match(/(27\d{9,10})/);
+    const phoneM = linha.match(/(27-\d{5}-\d{4})/);
+    const valM   = linha.match(/(\d+\.\d{2})A?\s*$/);
     if (!phoneM) continue;
-    const phone = phoneM[1];
 
-    if (!assinantes[phone]) {
-      assinantes[phone] = {
-        telefone:  phone,
-        telefoneFmt: phone.replace(/(27)(\d{5})(\d{4})/, '$1-$2-$3'),
-        plano:     '',
-        tipoPlano: '',
-        valor:     0,
-        itens:     [],
-        franquias: {},
-        aparelho:  '',
-        servicos:  [],
+    const phoneFmt = phoneM[1];
+    const phoneNum = phoneFmt.replace(/-/g, '');
+    const valor    = valM ? parseFloat(valM[1]) : 0;
+
+    // Nome do plano — texto após o telefone
+    let plano = '';
+    const afterPhone = linha.substring(linha.indexOf(phoneFmt) + 12);
+    if      (afterPhone.includes('SMART EMPRESAS 20GB')) plano = 'SMART EMPRESAS 20GB';
+    else if (afterPhone.includes('SMART EMPRESAS 10GB')) plano = 'SMART EMPRESAS 10GB';
+    else if (afterPhone.includes('SMART EMPRESAS 3GB'))  plano = 'SMART EMPRESAS 3GB';
+    else if (afterPhone.includes('PLANO BASE INTERNET')) plano = 'PLANO BASE INTERNET PJ';
+    else {
+      const planoM = afterPhone.match(/([A-Z][A-Z0-9 ]{5,30}[A-Z0-9])/);
+      if (planoM) plano = planoM[1].trim();
+    }
+
+    if (!phoneIndex[phoneNum]) {
+      phoneIndex[phoneNum] = {
+        telefone:    phoneNum,
+        telefoneFmt: phoneFmt,
+        plano,
+        valor,
+        aparelho:    '',
+        itens:       [],
       };
     }
+  }
 
-    const a = assinantes[phone];
-    const recType = linha.substring(100, 106).trim();
+  statusEl.innerHTML = `<div style="color:var(--accent)">⏳ ${Object.keys(phoneIndex).length} assinantes encontrados — enriquecendo dados...</div>`;
+  await new Promise(r => setTimeout(r, 50));
 
-    switch(recType) {
-      case '200D': {
-        // Dados do assinante: plano, empresa, período
-        const planoPart = linha.substring(195, 240).trim();
-        if (planoPart) a.plano = planoPart;
-        break;
-      }
-      case '201Z': {
-        // Aparelho: marca e modelo
-        const aparelho = linha.substring(350, 420).trim().replace(/\s+/g, ' ');
-        if (aparelho) a.aparelho = aparelho;
-        break;
-      }
-      case '215D': {
-        // Valores: mensalidade principal
-        const valsStr = linha.substring(150);
-        const vals = [...(valsStr.match(/(\d+\.\d{2})/g)||[])];
-        if (vals.length && parseFloat(vals[0]) > 0) {
-          a.valor = parseFloat(vals[0]);
-        }
-        break;
-      }
-      case '225D': {
-        // Itens do plano (serviços cobrados)
-        const desc  = linha.substring(200, 250).trim();
-        const vStr  = linha.substring(150, 200);
-        const vals  = [...(vStr.match(/(\d+\.\d{2})/g)||[])];
-        if (desc) {
-          a.itens.push({
-            descricao: desc,
-            valor:     vals.length ? parseFloat(vals[0]) : 0,
-          });
-        }
-        break;
-      }
-      case '225B': {
-        // Franquias detalhadas (VOZ, INTERNET, SMS)
-        const fname = linha.substring(200, 250).trim();
-        const fqtd  = linha.substring(472, 485).trim();
-        if (fname) a.franquias[fname] = fqtd;
-        break;
+  // ── PASSO 2: Enriquece com registros de detalhe por assinante ─────────
+  let currentPhone = null;
+
+  for (const linha of linhas) {
+    if (linha.length < 50) continue;
+    if (!linha.includes('0120692821')) continue;
+
+    // Telefone na posição 29-41 (com possível espaço antes)
+    const chunkPhone = linha.substring(28, 42).trim();
+    const phoneM2 = chunkPhone.match(/^(27\d{9,10})/);
+    if (phoneM2) currentPhone = phoneM2[1];
+
+    if (!currentPhone || !phoneIndex[currentPhone]) continue;
+    const a = phoneIndex[currentPhone];
+
+    // Identifica tipo de registro pelo conteúdo
+    const seg = linha.substring(95, 125);
+
+    // 201Z = aparelho (Samsung, Motorola etc.) — pos 350+
+    if (seg.includes('201') && linha.length > 400) {
+      const ap = linha.substring(350, 430).trim().replace(/\s+/g, ' ');
+      if (ap && !a.aparelho) a.aparelho = ap.substring(0, 40);
+    }
+
+    // 215D = valores de mensalidade — pos 155+
+    else if (seg.includes('215') && linha.length > 170) {
+      const valsStr = linha.substring(150, 210);
+      const vals = valsStr.match(/(\d+\.\d{2})/g);
+      if (vals && parseFloat(vals[0]) > 0 && a.valor === 0) {
+        a.valor = parseFloat(vals[0]);
       }
     }
 
-    // Índice geral 110D (tem telefone formatado e valor ao final)
-    if (linha.includes('110D')) {
-      const phoneFmtM = linha.match(/(27-\d{5}-\d{4})/);
-      const valM      = linha.match(/(\d+\.\d{2})A?\s*$/);
-      if (phoneFmtM && valM) {
-        const ph = phoneFmtM[1].replace(/-/g,'');
-        if (assinantes[ph] && parseFloat(valM[1]) > 0) {
-          assinantes[ph].valor = parseFloat(valM[1]);
-        }
-        // Get plan name from this line
-        const afterPhone = linha.substring(linha.indexOf(phoneFmtM[1]) + 12);
-        const planoM = afterPhone.match(/(SMART EMPRESAS \w+|PLANO BASE [\w ]+)/);
-        if (planoM && assinantes[ph] && !assinantes[ph].plano) {
-          assinantes[ph].plano = planoM[1];
-        }
+    // 225D = itens do plano — verifica cobranças indevidas
+    else if (seg.includes('225') && linha.length > 200) {
+      const desc    = linha.substring(190, 260).trim();
+      const valPart = linha.substring(140, 200);
+      const vals    = valPart.match(/(\d+\.\d{2})/g);
+      if (desc && desc.length > 3) {
+        const v = vals ? parseFloat(vals[0]) : 0;
+        const dU = desc.toUpperCase();
+        const indevido = ['AD1','AD2',' D1 ',' D2 ','ASSINATURA BASICA','ASSINATURA BÁSICA']
+          .some(x => dU.includes(x));
+        a.itens.push({ descricao: desc.substring(0, 50), valor: v, _indevido: indevido });
       }
     }
   }
 
-  // ── Classifica tipo de plano pelo contrato ────────────────────────────
-  const listaFinal = Object.values(assinantes).filter(a => a.valor > 0 || a.plano);
+  // ── PASSO 3: Classifica plano pelo contrato e detecta irregularidades ─
+  const PLANOS_CONTRATO = CONTRATO_VIVO_CESAN.planos;
 
-  listaFinal.forEach(a => {
+  const listaFinal = Object.values(phoneIndex).map(a => {
     const v = a.valor;
-    if (v >= 230 && v <= 240) {
-      a.tipoPlano = 'smartphone-a';
-    } else if (v >= 150 && v <= 165) {
-      a.tipoPlano = 'smartphone-b';
-    } else if (v >= 90 && v <= 100) {
-      a.tipoPlano = 'smartphone-c';
-    } else if (v >= 20 && v <= 30) {
-      a.tipoPlano = 'sim-modem';
-    } else if (v > 0 && v <= 20) {
-      a.tipoPlano = 'sim-pabx';
-    } else {
-      a.tipoPlano = 'custom';
+
+    // Classifica tipo do contrato pelo valor
+    let tipoPlano = 'custom';
+    let valorContrato = 0;
+    if      (v >= 230 && v <= 240)  { tipoPlano = 'smartphone-a'; valorContrato = 236.47; }
+    else if (v >= 150 && v <= 165)  { tipoPlano = 'smartphone-b'; valorContrato = 154.40; }
+    else if (v >= 90  && v <= 100)  { tipoPlano = 'smartphone-c'; valorContrato = 96.00;  }
+    else if (v >= 20  && v <= 30)   { tipoPlano = 'sim-modem';    valorContrato = 25.00;  }
+    else if (v >  0   && v <= 20)   { tipoPlano = 'sim-pabx';     valorContrato = 15.00;  }
+
+    // Detecta valor divergente do contrato
+    const alertasLinha = [];
+    if (valorContrato > 0 && Math.abs(v - valorContrato) > 0.01) {
+      alertasLinha.push({
+        tipo:      'valor_incorreto',
+        gravidade: 'alta',
+        msg:       `Mensalidade cobrada R$ ${v.toFixed(2)} — contrato prevê R$ ${valorContrato.toFixed(2)}`,
+        diferenca:  +(v - valorContrato).toFixed(2),
+      });
     }
 
-    // Verifica cobranças indevidas nos itens
-    a.itens.forEach(item => {
-      const desc = (item.descricao || '').toUpperCase();
-      const isIndevido = ['AD1','AD2','D1','D2','ASSINATURA BASICA','ASSINATURA BÁSICA'].some(c => desc.includes(c));
-      if (isIndevido && item.valor > 0) item._indevido = true;
-    });
-  });
+    // Plano não reconhecido pelo contrato
+    if (tipoPlano === 'custom' && v > 0) {
+      alertasLinha.push({
+        tipo:      'plano_nao_contratado',
+        gravidade: 'alta',
+        msg:       `Plano "${a.plano}" com valor R$ ${v.toFixed(2)} não consta no Pregão 158/2021`,
+        diferenca:  v,
+      });
+    }
 
-  // ── Monta objeto fatura e persiste ───────────────────────────────────
-  const faturaObj = {
-    competencia:    mes,
-    conta,
-    totalHeader:    totalFatura,
-    totalLinhas:    listaFinal.length,
-    linhas: listaFinal.map(a => ({
-      numero:           a.telefoneFmt || a.telefone,
+    // Cobranças indevidas (AD1, AD2, D1, D2, assinatura)
+    a.itens.forEach(item => {
+      if (item._indevido && item.valor > 0) {
+        alertasLinha.push({
+          tipo:      'cobranca_indevida',
+          gravidade: 'alta',
+          msg:       `Cobrança indevida pelo contrato: "${item.descricao}" — R$ ${item.valor.toFixed(2)}`,
+          diferenca:  item.valor,
+          item,
+        });
+      }
+    });
+
+    return {
+      numero:           a.telefoneFmt,
       empNome:          '',
-      tipoPlano:        a.tipoPlano,
-      valorMensalidade: a.valor,
+      tipoPlano,
+      valorMensalidade: v,
+      valorContrato,
       plano:            a.plano,
       aparelho:         a.aparelho,
       dadosUsadosGB:    null,
       vozUsadoMin:      null,
       itens:            a.itens,
-      franquias:        a.franquias,
-    })),
-  };
+      alertasLinha,
+    };
+  });
 
-  statusEl.innerHTML = `<div style="color:#059669">✅ ${listaFinal.length} linhas extraídas — verificando contrato...</div>`;
-  await new Promise(r => setTimeout(r, 100));
+  // ── PASSO 4: Verificação contratual ───────────────────────────────────
+  statusEl.innerHTML = `<div style="color:var(--accent)">✅ ${listaFinal.length} linhas extraídas — verificando contrato...</div>`;
+  await new Promise(r => setTimeout(r, 80));
 
-  // ── Verifica contrato ─────────────────────────────────────────────────
-  const alertasContrato = tcVerificarFatura(faturaObj);
+  // Monta alertas no formato esperado por tcMostrarResultadoVerificacao
+  const alertasContrato = listaFinal
+    .filter(l => l.alertasLinha.length > 0)
+    .map(l => ({ numero: l.numero, empNome: l.empNome, planoId: l.tipoPlano, alertas: l.alertasLinha }));
 
-  // ── Persiste no Firestore ──────────────────────────────────────────────
-  const totalCalc = listaFinal.reduce((s,a) => s + (a.valor||0), 0);
+  const totalCalc = listaFinal.reduce((s, l) => s + (l.valorMensalidade || 0), 0);
 
+  // ── PASSO 5: Grava no Firestore ───────────────────────────────────────
   if (FB_READY && db) {
-    // 1. Documento principal da fatura (sem as linhas — evita limite 1MB)
+    statusEl.innerHTML = `<div style="color:var(--accent)">💾 Gravando fatura no banco...</div>`;
+    await new Promise(r => setTimeout(r, 30));
+
+    // Documento principal
     const faturaRef = await db.collection('faturas_telecom').add({
       competencia:     mes,
-      conta,
-      totalHeader:     totalFatura,
+      conta:           '0120692821',
       totalCalculado:  +totalCalc.toFixed(2),
       totalLinhas:     listaFinal.length,
       alertas:         alertasContrato.reduce((s,l) => s + l.alertas.length, 0),
@@ -25459,67 +25470,49 @@ async function _tcParseTXTVivo(file, mes) {
       importadaEm:     new Date(),
       importadaPor:    CURRENT_USER?.nome || '',
       formato:         'txt-vivo',
-      // Resumo por tipo de plano
-      resumoPlanos: faturaObj.linhas.reduce((acc, l) => {
+      resumoPlanos: listaFinal.reduce((acc, l) => {
         const tp = l.tipoPlano || 'outros';
         if (!acc[tp]) acc[tp] = { qtd: 0, total: 0 };
         acc[tp].qtd++;
-        acc[tp].total = +(acc[tp].total + (l.valorMensalidade||0)).toFixed(2);
+        acc[tp].total = +(acc[tp].total + l.valorMensalidade).toFixed(2);
         return acc;
       }, {}),
-      // Alertas consolidados por tipo
       resumoAlertas: alertasContrato.reduce((acc, l) => {
-        l.alertas.forEach(a => {
-          acc[a.tipo] = (acc[a.tipo]||0) + 1;
-        });
+        l.alertas.forEach(a => { acc[a.tipo] = (acc[a.tipo]||0) + 1; });
         return acc;
       }, {}),
     });
 
-    // 2. Subcoleção faturas_telecom/{id}/linhas/{numero} — 1 doc por assinante
-    // Usa batches de 500 (limite do Firestore batch)
-    const BATCH_SIZE = 490;
-    for (let i = 0; i < faturaObj.linhas.length; i += BATCH_SIZE) {
+    // Subcoleção: 1 doc por assinante (batches de 490)
+    const BATCH = 490;
+    for (let i = 0; i < listaFinal.length; i += BATCH) {
       const batch = db.batch();
-      const chunk = faturaObj.linhas.slice(i, i + BATCH_SIZE);
-      chunk.forEach(linha => {
-        // ID do doc = número do telefone sem formatação
-        const docId  = (linha.numero || '').replace(/\D/g, '') || `linha_${i}`;
-        const linhaRef = faturaRef.collection('linhas').doc(docId);
-        // Alertas desta linha (se houver)
-        const alertasLinha = alertasContrato.find(a => 
-          a.numero === linha.numero || 
-          a.numero?.replace(/\D/g,'') === docId
+      listaFinal.slice(i, i + BATCH).forEach(l => {
+        const docId   = l.numero.replace(/\D/g, '') || `linha_${i}`;
+        const alerLinha = alertasContrato.find(a =>
+          a.numero === l.numero || a.numero?.replace(/\D/g,'') === docId
         );
-        batch.set(linhaRef, {
-          ...linha,
-          alertas:         alertasLinha?.alertas || [],
-          temAlerta:       !!(alertasLinha?.alertas?.length),
-          alertasCriticos: alertasLinha?.alertas?.filter(a=>a.gravidade==='alta').length || 0,
+        batch.set(faturaRef.collection('linhas').doc(docId), {
+          ...l,
+          alertas:         alerLinha?.alertas || l.alertasLinha || [],
+          temAlerta:       (alerLinha?.alertas?.length || l.alertasLinha?.length || 0) > 0,
+          alertasCriticos: (alerLinha?.alertas || l.alertasLinha || []).filter(a=>a.gravidade==='alta').length,
           faturaId:        faturaRef.id,
           competencia:     mes,
           gravadoEm:       new Date(),
         });
       });
       await batch.commit();
-      // Progress update
-      const pct = Math.min(100, Math.round((i + BATCH_SIZE) / faturaObj.linhas.length * 100));
-      const statusEl2 = document.getElementById('tc-imp-status');
-      if (statusEl2) statusEl2.innerHTML = 
-        `<div style="color:var(--accent)">💾 Gravando no banco... ${pct}% (${Math.min(i+BATCH_SIZE, faturaObj.linhas.length)}/${faturaObj.linhas.length})</div>`;
+      const pct = Math.min(100, Math.round((i + BATCH) / listaFinal.length * 100));
+      statusEl.innerHTML = `<div style="color:var(--accent)">💾 Gravando... ${pct}% (${Math.min(i+BATCH, listaFinal.length)}/${listaFinal.length} linhas)</div>`;
       await new Promise(r => setTimeout(r, 10));
     }
   }
 
-  // Fecha modal de importação
   document.getElementById('modal-importar-fatura')?.remove();
-
-  // Mostra resultado
   tcMostrarResultadoVerificacao(alertasContrato, mes, totalCalc);
-
-  showToast(`✅ Fatura ${mes} importada — ${listaFinal.length} linhas · R$ ${totalCalc.toLocaleString('pt-BR',{minimumFractionDigits:2})}`, 'success', 6000);
+  showToast(`✅ Fatura ${mes} — ${listaFinal.length} linhas · R$ ${totalCalc.toLocaleString('pt-BR',{minimumFractionDigits:2})} · ${alertasContrato.length} alertas`, 'success', 7000);
 }
-
 
 // ── Parser CSV Vivo ───────────────────────────────────────────────────────
 async function _tcParseCsv(file) {
