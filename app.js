@@ -25204,13 +25204,14 @@ function abrirImportarFatura() {
         <div style="border:2px dashed var(--g300);border-radius:10px;padding:28px;text-align:center;margin-bottom:16px">
           <div style="font-size:32px;margin-bottom:8px">📁</div>
           <div style="font-size:13px;font-weight:600;margin-bottom:6px">Selecione o arquivo da fatura</div>
-          <div style="font-size:11.5px;color:var(--g400);margin-bottom:14px">PDF ou CSV exportado do portal Vivo Empresas</div>
-          <input type="file" id="tc-imp-file" accept=".csv,.pdf" style="display:none" onchange="tcPreviewArquivo(this)">
+          <div style="font-size:11.5px;color:var(--g400);margin-bottom:14px">Arquivo TXT, CSV ou PDF da Vivo Empresas</div>
+          <input type="file" id="tc-imp-file" accept=".txt,.csv,.pdf" style="display:none" onchange="tcPreviewArquivo(this)">
           <button class="btn btn-secondary btn-sm" onclick="document.getElementById('tc-imp-file').click()">Escolher arquivo</button>
           <div id="tc-imp-preview" style="margin-top:12px;font-size:12px;color:var(--g600)"></div>
         </div>
 
         <div style="background:var(--accent-l);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--accent)">
+          <strong>Para TXT:</strong> arquivo de fatura eletrônica Vivo (formato proprietário) — processado automaticamente.<br>
           <strong>Para CSV:</strong> exporte do portal Vivo Empresas → Relatórios → Detalhamento por linha.<br>
           <strong>Para PDF:</strong> a IA (Gemini) extrai os dados automaticamente — pode levar alguns segundos.
         </div>
