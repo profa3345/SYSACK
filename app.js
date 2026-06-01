@@ -11904,7 +11904,7 @@ function swInvVerMaquinasSoftware(nomeSw) {
   }
 
   const html = `
-  <div class="modal-overlay active" id="modal-swinv-maq" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-swinv-maq" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:680px">
       <div class="modal-header">
         <div>
@@ -12039,7 +12039,7 @@ function swInvVerSoftwaresMaquina(agentId) {
   })).filter(s => s.nome).sort((a,b) => a.nome.localeCompare(b.nome));
 
   const html = `
-  <div class="modal-overlay active" id="modal-swinv-maqsw" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-swinv-maqsw" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:700px">
       <div class="modal-header">
         <div>
@@ -24933,6 +24933,7 @@ function renderTelecomFaturas() {
       <td style="font-size:11px;color:var(--g400)">${f.importadaEm ? new Date(f.importadaEm.seconds ? f.importadaEm.seconds*1000 : f.importadaEm).toLocaleDateString('pt-BR') : '—'}</td>
       <td>
         <div class="flex gap-4">
+          <button class="btn btn-ghost btn-xs" onclick="tcAbrirDetalhesFatura('${escapeHtml(f.id)}','${escapeHtml(f.competencia||'')}')" title="Ver todas as linhas">📋 Linhas</button>
           <button class="btn btn-ghost btn-xs" onclick="tcVerRelatorioFatura('${escapeHtml(f.id)}')">📊 Ver</button>
           <button class="btn btn-ghost btn-xs" onclick="tcExcluirFatura('${escapeHtml(f.id)}')" style="color:var(--danger)">🗑</button>
         </div>
@@ -25033,7 +25034,7 @@ function abrirCadastrarPlano(smId, linha) {
   ).join('');
 
   const html = `
-  <div class="modal-overlay active" id="modal-plano-telecom" onclick="if(event.target===this)document.getElementById('modal-plano-telecom').remove()">
+  <div class="modal-overlay open" id="modal-plano-telecom" onclick="if(event.target===this)document.getElementById('modal-plano-telecom').remove()">
     <div class="modal" style="max-width:600px">
       <div class="modal-header">
         <div>
@@ -25188,7 +25189,7 @@ async function salvarPlanoTelecom() {
 function abrirImportarFatura() {
   document.getElementById('modal-importar-fatura')?.remove();
   const html = `
-  <div class="modal-overlay active" id="modal-importar-fatura" onclick="if(event.target===this)document.getElementById('modal-importar-fatura').remove()">
+  <div class="modal-overlay open" id="modal-importar-fatura" onclick="if(event.target===this)document.getElementById('modal-importar-fatura').remove()">
     <div class="modal" style="max-width:520px">
       <div class="modal-header">
         <h3>📄 Importar Fatura Vivo</h3>
@@ -25446,19 +25447,68 @@ async function _tcParseTXTVivo(file, mes) {
   const totalCalc = listaFinal.reduce((s,a) => s + (a.valor||0), 0);
 
   if (FB_READY && db) {
-    await db.collection('faturas_telecom').add({
-      competencia:    mes,
+    // 1. Documento principal da fatura (sem as linhas — evita limite 1MB)
+    const faturaRef = await db.collection('faturas_telecom').add({
+      competencia:     mes,
       conta,
-      totalHeader:    totalFatura,
-      totalCalculado: +totalCalc.toFixed(2),
-      totalLinhas:    listaFinal.length,
-      alertas:        alertasContrato.reduce((s,l) => s + l.alertas.length, 0),
-      alertasCriticos:alertasContrato.reduce((s,l) => s + l.alertas.filter(a=>a.gravidade==='alta').length, 0),
-      importadaEm:    new Date(),
-      importadaPor:   CURRENT_USER?.nome || '',
-      formato:        'txt-vivo',
-      linhas:         faturaObj.linhas.slice(0, 50), // salva primeiras 50 no doc (Firestore 1MB limit)
+      totalHeader:     totalFatura,
+      totalCalculado:  +totalCalc.toFixed(2),
+      totalLinhas:     listaFinal.length,
+      alertas:         alertasContrato.reduce((s,l) => s + l.alertas.length, 0),
+      alertasCriticos: alertasContrato.reduce((s,l) => s + l.alertas.filter(a=>a.gravidade==='alta').length, 0),
+      importadaEm:     new Date(),
+      importadaPor:    CURRENT_USER?.nome || '',
+      formato:         'txt-vivo',
+      // Resumo por tipo de plano
+      resumoPlanos: faturaObj.linhas.reduce((acc, l) => {
+        const tp = l.tipoPlano || 'outros';
+        if (!acc[tp]) acc[tp] = { qtd: 0, total: 0 };
+        acc[tp].qtd++;
+        acc[tp].total = +(acc[tp].total + (l.valorMensalidade||0)).toFixed(2);
+        return acc;
+      }, {}),
+      // Alertas consolidados por tipo
+      resumoAlertas: alertasContrato.reduce((acc, l) => {
+        l.alertas.forEach(a => {
+          acc[a.tipo] = (acc[a.tipo]||0) + 1;
+        });
+        return acc;
+      }, {}),
     });
+
+    // 2. Subcoleção faturas_telecom/{id}/linhas/{numero} — 1 doc por assinante
+    // Usa batches de 500 (limite do Firestore batch)
+    const BATCH_SIZE = 490;
+    for (let i = 0; i < faturaObj.linhas.length; i += BATCH_SIZE) {
+      const batch = db.batch();
+      const chunk = faturaObj.linhas.slice(i, i + BATCH_SIZE);
+      chunk.forEach(linha => {
+        // ID do doc = número do telefone sem formatação
+        const docId  = (linha.numero || '').replace(/\D/g, '') || `linha_${i}`;
+        const linhaRef = faturaRef.collection('linhas').doc(docId);
+        // Alertas desta linha (se houver)
+        const alertasLinha = alertasContrato.find(a => 
+          a.numero === linha.numero || 
+          a.numero?.replace(/\D/g,'') === docId
+        );
+        batch.set(linhaRef, {
+          ...linha,
+          alertas:         alertasLinha?.alertas || [],
+          temAlerta:       !!(alertasLinha?.alertas?.length),
+          alertasCriticos: alertasLinha?.alertas?.filter(a=>a.gravidade==='alta').length || 0,
+          faturaId:        faturaRef.id,
+          competencia:     mes,
+          gravadoEm:       new Date(),
+        });
+      });
+      await batch.commit();
+      // Progress update
+      const pct = Math.min(100, Math.round((i + BATCH_SIZE) / faturaObj.linhas.length * 100));
+      const statusEl2 = document.getElementById('tc-imp-status');
+      if (statusEl2) statusEl2.innerHTML = 
+        `<div style="color:var(--accent)">💾 Gravando no banco... ${pct}% (${Math.min(i+BATCH_SIZE, faturaObj.linhas.length)}/${faturaObj.linhas.length})</div>`;
+      await new Promise(r => setTimeout(r, 10));
+    }
   }
 
   // Fecha modal de importação
@@ -25671,11 +25721,11 @@ function tcVerDetalhe(smId) {
 
   const alertas = _tcAlertasLinha(sm.linha, plano);
   const html = `
-  <div class="modal-overlay active" id="modal-tc-detalhe" onclick="if(event.target===this)closeModal('modal-tc-detalhe')">
+  <div class="modal-overlay open" id="modal-tc-detalhe" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:480px">
       <div class="modal-header">
         <h3>📊 ${escapeHtml(sm.linha || sm.pat)}</h3>
-        <button class="close-btn" onclick="closeModal('modal-tc-detalhe')">✕</button>
+        <button class="close-btn" onclick="document.getElementById('modal-tc-detalhe')?.remove()">✕</button>
       </div>
       <div class="modal-body">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
@@ -25724,7 +25774,7 @@ function tcVerDetalhe(smId) {
         </div>` : ''}
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="closeModal('modal-tc-detalhe')">Fechar</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-tc-detalhe')?.remove()">Fechar</button>
         <button class="btn btn-secondary" onclick="document.getElementById('modal-tc-detalhe')?.remove();abrirCadastrarPlano('${escapeHtml(smId)}','${escapeHtml(sm.linha||'')}')">✏️ Editar plano</button>
       </div>
     </div>
@@ -26105,7 +26155,7 @@ function abrirPainelAlertasOffline() {
   };
 
   const html = `
-  <div class="modal-overlay active" id="modal-alertas-offline" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-alertas-offline" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:620px">
       <div class="modal-header">
         <h3>⚠️ Máquinas Offline (${ativos.length} ativo${ativos.length!==1?'s':''})</h3>
@@ -26145,7 +26195,7 @@ function abrirJustificativaOffline(alertaId) {
   if (!alerta) return;
 
   const html = `
-  <div class="modal-overlay active" id="modal-justif-offline" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-justif-offline" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:460px">
       <div class="modal-header">
         <h3>✏️ Justificativa — ${escapeHtml(alerta.hostname)}</h3>
@@ -26226,7 +26276,7 @@ function abrirImportarAtivos() {
   document.getElementById('modal-importar-ativos')?.remove();
 
   const html = `
-  <div class="modal-overlay active" id="modal-importar-ativos"
+  <div class="modal-overlay open" id="modal-importar-ativos"
        onclick="if(event.target===this)this.remove()">
     <div class="modal modal-xl" style="max-height:92vh;display:flex;flex-direction:column">
       <div class="modal-header">
@@ -26848,7 +26898,7 @@ function locAbrirDetalhe(nome) {
     : '';
 
   const html = `
-  <div class="modal-overlay active" id="modal-loc-detalhe" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-loc-detalhe" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:640px">
       <div style="height:5px;background:${cor};border-radius:10px 10px 0 0"></div>
       <div class="modal-header">
@@ -26983,7 +27033,7 @@ function abrirDownloadMobile() {
   const qrUrl    = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(agentUrl)}&bgcolor=0F172A&color=F1F5F9&format=png`;
 
   const html = `
-  <div class="modal-overlay active" id="modal-mobile-agent" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-mobile-agent" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:480px">
       <div style="background:#0F172A;border-radius:10px 10px 0 0;padding:20px 24px">
         <div style="display:flex;align-items:center;justify-content:space-between">
@@ -27199,7 +27249,7 @@ function abrirNovoUsuario(uid = null) {
   document.getElementById('modal-novo-usuario')?.remove();
 
   const html = `
-  <div class="modal-overlay active" id="modal-novo-usuario" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-novo-usuario" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:480px">
       <div class="modal-header">
         <h3>${uid ? '✏️ Editar Usuário' : '+ Novo Usuário'}</h3>
@@ -27461,7 +27511,7 @@ function abrirCadastrarComodato(comodatoId = null) {
   ).join('');
 
   const html = `
-  <div class="modal-overlay active" id="modal-comodato-telecom"
+  <div class="modal-overlay open" id="modal-comodato-telecom"
        onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:600px">
       <div class="modal-header">
@@ -27779,7 +27829,7 @@ async function abrirAcessoRemotoMobile(smId) {
   };
 
   const html = `
-  <div class="modal-overlay active" id="modal-remoto-mobile" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-remoto-mobile" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:560px">
       <!-- Header dark -->
       <div style="background:#0F172A;border-radius:10px 10px 0 0;padding:20px 24px">
@@ -27973,7 +28023,7 @@ async function mdmEnviarComando(smId, tipo, dados = {}, motivo = '') {
 function mdmEnviarMensagem(smId) {
   document.getElementById('modal-mdm-msg')?.remove();
   const html = `
-  <div class="modal-overlay active" id="modal-mdm-msg" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-mdm-msg" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:420px">
       <div class="modal-header">
         <h3>💬 Enviar Mensagem ao Dispositivo</h3>
@@ -28064,7 +28114,7 @@ function tcMostrarResultadoVerificacao(alertas, mes, totalFatura) {
   const ICON= { alta:'🔴', media:'🟡', baixa:'⚪' };
 
   const html = `
-  <div class="modal-overlay active" id="modal-verificacao-fatura" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-verificacao-fatura" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:720px">
       <div class="modal-header">
         <div>
@@ -28170,7 +28220,7 @@ function tcVerContrato() {
     </tr>`).join('');
 
   const html = `
-  <div class="modal-overlay active" id="modal-contrato-vivo" onclick="if(event.target===this)this.remove()">
+  <div class="modal-overlay open" id="modal-contrato-vivo" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:780px">
       <div class="modal-header">
         <div>
@@ -28251,5 +28301,167 @@ function tcVerContrato() {
   </div>`;
 
   document.body.insertAdjacentHTML('beforeend', html);
+}
+
+
+// ── Busca linhas de uma fatura específica da subcoleção ───────────────────
+async function tcCarregarLinhasFatura(faturaId, filtros = {}) {
+  if (!FB_READY || !db) return [];
+  try {
+    let ref = db.collection('faturas_telecom').doc(faturaId).collection('linhas');
+
+    // Filtros opcionais
+    if (filtros.temAlerta)    ref = ref.where('temAlerta', '==', true);
+    if (filtros.tipoPlano)    ref = ref.where('tipoPlano', '==', filtros.tipoPlano);
+    if (filtros.alertaCritico)ref = ref.where('alertasCriticos', '>', 0);
+
+    const snap = await ref.orderBy('valorMensalidade', 'desc').get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch(e) {
+    console.warn('[Telecom] carregar linhas:', e.message);
+    return [];
+  }
+}
+
+// ── Renderiza detalhe de uma fatura com todas as linhas ───────────────────
+async function tcAbrirDetalhesFatura(faturaId, competencia) {
+  showToast('Carregando linhas da fatura...', 'info');
+  const linhas = await tcCarregarLinhasFatura(faturaId);
+
+  document.getElementById('modal-detalhe-fatura')?.remove();
+
+  const totalVal    = linhas.reduce((s,l) => s + (l.valorMensalidade||0), 0);
+  const comAlerta   = linhas.filter(l => l.temAlerta).length;
+  const criticos    = linhas.filter(l => l.alertasCriticos > 0).length;
+
+  const STATUS_PLANO = {
+    'smartphone-a': 'Smartphone A',
+    'smartphone-b': 'Smartphone B',
+    'smartphone-c': 'Smartphone C',
+    'sim-pabx':     'SIM PABX',
+    'sim-modem':    'SIM Modem',
+    'custom':       'Outro',
+  };
+
+  const html = `
+  <div class="modal-overlay open" id="modal-detalhe-fatura" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:900px">
+      <div class="modal-header">
+        <div>
+          <h3>📊 Fatura ${escapeHtml(competencia)} — ${linhas.length} linhas</h3>
+          <div style="font-size:12px;color:var(--g400)">Total: R$ ${totalVal.toLocaleString('pt-BR',{minimumFractionDigits:2})} · ${comAlerta} com alerta · ${criticos} críticos</div>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-detalhe-fatura').remove()">✕</button>
+      </div>
+      <div class="modal-body" style="padding:0">
+        <!-- Filtros -->
+        <div style="padding:12px 16px;background:var(--g50);border-bottom:1px solid var(--g100);display:flex;gap:8px;flex-wrap:wrap">
+          <input id="tc-det-busca" class="form-control" style="max-width:260px"
+                 placeholder="🔍 Buscar por telefone ou plano..."
+                 oninput="tcFiltrarLinhasFatura()" value="">
+          <select id="tc-det-filtro" class="form-control" style="max-width:180px" onchange="tcFiltrarLinhasFatura()">
+            <option value="">Todas as linhas</option>
+            <option value="alerta">Com alertas</option>
+            <option value="critico">Críticos</option>
+            <option value="smartphone-c">Smartphone C (R$96)</option>
+            <option value="smartphone-b">Smartphone B (R$154)</option>
+            <option value="smartphone-a">Smartphone A (R$236)</option>
+            <option value="sim-pabx">SIM PABX (R$15)</option>
+            <option value="sim-modem">SIM Modem (R$25)</option>
+          </select>
+          <span style="font-size:12px;color:var(--g400);align-self:center" id="tc-det-count">${linhas.length} linhas</span>
+        </div>
+        <!-- Tabela -->
+        <div style="overflow-y:auto;max-height:55vh">
+          <table class="data-table" style="font-size:12px">
+            <thead><tr>
+              <th>Telefone</th>
+              <th>Plano contratado</th>
+              <th>Plano fatura</th>
+              <th>Aparelho</th>
+              <th style="text-align:right">Valor R$</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody id="tc-det-tbody">
+              ${linhas.map(l => {
+                const alCrit = l.alertasCriticos > 0;
+                const alAny  = l.temAlerta;
+                const rowBg  = alCrit ? 'background:#FEF2F2' : alAny ? 'background:#FFFBEB' : '';
+                const alertTag = alCrit
+                  ? `<span style="font-size:10px;background:#FEE2E2;color:#DC2626;padding:2px 7px;border-radius:10px;font-weight:700">🔴 ${l.alertasCriticos} crítico${l.alertasCriticos>1?'s':''}</span>`
+                  : alAny
+                  ? `<span style="font-size:10px;background:#FEF3C7;color:#D97706;padding:2px 7px;border-radius:10px;font-weight:700">🟡 Alerta</span>`
+                  : `<span style="font-size:10px;background:#F0FDF4;color:#16A34A;padding:2px 7px;border-radius:10px;font-weight:700">✅ OK</span>`;
+                return `<tr style="${rowBg}">
+                  <td style="font-family:monospace;font-weight:700">${escapeHtml(l.numero||'—')}</td>
+                  <td>${escapeHtml(STATUS_PLANO[l.tipoPlano]||l.tipoPlano||'—')}</td>
+                  <td style="font-size:11px;color:var(--g500)">${escapeHtml((l.plano||'').slice(0,25))}</td>
+                  <td style="font-size:11px;color:var(--g400)">${escapeHtml((l.aparelho||'').slice(0,25))}</td>
+                  <td style="text-align:right;font-weight:700;font-family:monospace">R$ ${(l.valorMensalidade||0).toFixed(2)}</td>
+                  <td>${alertTag}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-detalhe-fatura').remove()">Fechar</button>
+        <button class="btn btn-secondary btn-sm" onclick="tcFiltrarLinhasFatura('alerta')">Ver apenas alertas</button>
+      </div>
+    </div>
+  </div>`;
+
+  // Store linhas for filtering
+  window._tcLinhasFaturaCache = linhas;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function tcFiltrarLinhasFatura(forceFiltro) {
+  const linhas = window._tcLinhasFaturaCache || [];
+  const q      = document.getElementById('tc-det-busca')?.value?.toLowerCase() || '';
+  const filtro = forceFiltro || document.getElementById('tc-det-filtro')?.value || '';
+  if (forceFiltro && document.getElementById('tc-det-filtro')) {
+    document.getElementById('tc-det-filtro').value = forceFiltro;
+  }
+
+  let lista = linhas;
+  if (q)              lista = lista.filter(l => (l.numero||'').includes(q) || (l.plano||'').toLowerCase().includes(q));
+  if (filtro === 'alerta')  lista = lista.filter(l => l.temAlerta);
+  if (filtro === 'critico') lista = lista.filter(l => l.alertasCriticos > 0);
+  else if (filtro && filtro.startsWith('smartphone') || filtro === 'sim-pabx' || filtro === 'sim-modem') {
+    lista = lista.filter(l => l.tipoPlano === filtro);
+  }
+
+  const cnt = document.getElementById('tc-det-count');
+  if (cnt) cnt.textContent = `${lista.length} linha${lista.length!==1?'s':''}`;
+
+  const tbody = document.getElementById('tc-det-tbody');
+  if (!tbody) return;
+
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--g400)">Nenhuma linha encontrada</td></tr>';
+    return;
+  }
+
+  const STATUS_PLANO = {'smartphone-a':'Smartphone A','smartphone-b':'Smartphone B','smartphone-c':'Smartphone C','sim-pabx':'SIM PABX','sim-modem':'SIM Modem','custom':'Outro'};
+  tbody.innerHTML = lista.map(l => {
+    const alCrit = l.alertasCriticos > 0;
+    const alAny  = l.temAlerta;
+    const rowBg  = alCrit ? 'background:#FEF2F2' : alAny ? 'background:#FFFBEB' : '';
+    const alertTag = alCrit
+      ? `<span style="font-size:10px;background:#FEE2E2;color:#DC2626;padding:2px 7px;border-radius:10px;font-weight:700">🔴 ${l.alertasCriticos} crítico${l.alertasCriticos>1?'s':''}</span>`
+      : alAny
+      ? `<span style="font-size:10px;background:#FEF3C7;color:#D97706;padding:2px 7px;border-radius:10px;font-weight:700">🟡 Alerta</span>`
+      : `<span style="font-size:10px;background:#F0FDF4;color:#16A34A;padding:2px 7px;border-radius:10px;font-weight:700">✅ OK</span>`;
+    return `<tr style="${rowBg}">
+      <td style="font-family:monospace;font-weight:700">${escapeHtml(l.numero||'—')}</td>
+      <td>${escapeHtml(STATUS_PLANO[l.tipoPlano]||l.tipoPlano||'—')}</td>
+      <td style="font-size:11px;color:var(--g500)">${escapeHtml((l.plano||'').slice(0,25))}</td>
+      <td style="font-size:11px;color:var(--g400)">${escapeHtml((l.aparelho||'').slice(0,25))}</td>
+      <td style="text-align:right;font-weight:700;font-family:monospace">R$ ${(l.valorMensalidade||0).toFixed(2)}</td>
+      <td>${alertTag}</td>
+    </tr>`;
+  }).join('');
 }
 
