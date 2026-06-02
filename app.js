@@ -2621,6 +2621,104 @@ function _sha256(str) {
     .then(b => Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join(''));
 }
 
+// ── Autenticação AD (Active Directory CESAN via vservho091) ──────────────
+// Endpoint do servidor auth-ad.js rodando no vservho091
+// Configure o IP/DNS externo (ou VPN) do servidor
+const AD_AUTH_URL     = 'http://vservho091:3080/auth/ad';
+const AD_AUTH_ENABLED = false; // ← mude para true quando vservho091 tiver porta exposta
+// Duração do token JWT (primeira autenticação)
+const AD_TOKEN_DAYS   = 30;    // token válido 30 dias para suportar uso offline
+
+async function _autenticarAD(login, senha) {
+  if (!AD_AUTH_ENABLED) return null;
+  const loginNorm = login.toLowerCase().replace('@cesan.com.br','').trim();
+
+  try {
+    // 1. Valida credenciais no AD
+    const resp = await Promise.race([
+      fetch(AD_AUTH_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ login: loginNorm, senha }),
+      }),
+      new Promise((_,r) => setTimeout(() => r(new Error('ad/timeout')), 10000)),
+    ]);
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(()=>({}));
+      if (resp.status === 401) throw new Error('auth/wrong-password');
+      throw new Error(err.error || 'ad/error');
+    }
+
+    const adData = await resp.json();
+    const u = adData.usuario;
+
+    // 2. Verifica se o usuário tem permissão no SYSACK
+    // Busca em /users pelo login ou email
+    let sysackUser = null;
+    try {
+      if (FB_READY && db) {
+        const snapLogin = await db.collection('users')
+          .where('login', '==', loginNorm).limit(1).get();
+        if (!snapLogin.empty) sysackUser = { id: snapLogin.docs[0].id, ...snapLogin.docs[0].data() };
+
+        if (!sysackUser) {
+          const snapEmail = await db.collection('users')
+            .where('email', '==', u.email || loginNorm + '@cesan.com.br').limit(1).get();
+          if (!snapEmail.empty) sysackUser = { id: snapEmail.docs[0].id, ...snapEmail.docs[0].data() };
+        }
+      }
+    } catch(dbErr) {
+      console.warn('[AD] Erro ao buscar permissão SYSACK:', dbErr.message);
+    }
+
+    // 3. Usuário não liberado no SYSACK
+    if (!sysackUser) {
+      throw new Error('ad/sem-permissao');
+    }
+
+    // 4. Usuário bloqueado
+    if (sysackUser.bloqueado === true) {
+      throw new Error('ad/bloqueado');
+    }
+
+    // 5. Monta perfil final: dados do AD + perfil/permissões do SYSACK
+    // O role vem do SYSACK (não do AD), garantindo controle centralizado
+    const resultado = {
+      token:   adData.token,
+      usuario: {
+        uid:         sysackUser.id,
+        login:       loginNorm,
+        email:       u.email    || sysackUser.email || loginNorm + '@cesan.com.br',
+        nome:        u.nome     || sysackUser.nome  || loginNorm,
+        mat:         u.mat      || sysackUser.mat   || '',
+        setor:       u.setor    || sysackUser.setor || '',
+        cargo:       u.cargo    || sysackUser.cargo || '',
+        // Role e permissões VÊM DO SYSACK (não do AD)
+        role:        sysackUser.role        || 'viewer',
+        permissions: sysackUser.permissions || permissionsForRole(sysackUser.role || 'viewer'),
+        fonte:       'ad',
+        adToken:     adData.token,
+        sysackId:    sysackUser.id,
+      }
+    };
+
+    // 6. Atualiza último acesso no Firestore
+    db?.collection('users').doc(sysackUser.id).update({
+      lastLogin:    new Date(),
+      lastLoginAD:  new Date(),
+      ultimoLogin:  new Date().toISOString(),
+    }).catch(() => {});
+
+    return resultado;
+
+  } catch(e) {
+    if (['auth/wrong-password','ad/sem-permissao','ad/bloqueado'].includes(e.message)) throw e;
+    console.warn('[AD Auth]', e.message);
+    return null; // AD indisponível → fallback Firebase/local
+  }
+}
+
 const LOCAL_USERS = {
   // ── Usuários CESAN (fallback quando Firebase Auth não acessível) ──
   'ana.penha': {
@@ -2735,11 +2833,59 @@ async function fazerLogin() {
 }
 
 async function _fazerLoginInterno() {
-  // emailRaw = o que o usuário digitou (ex: 'admin')
-  // emailNorm = normalizado com @ (ex: 'admin@adsi.com.br')
+  // emailRaw = o que o usuário digitou (ex: 'admin' ou 'ana.penha')
+  // emailNorm = normalizado com @ (ex: 'ana.penha@cesan.com.br')
   const emailRaw  = (document.getElementById('login-email')?.value || '').trim();
   const senha     = document.getElementById('login-senha')?.value || '';
-  const emailNorm = emailRaw.includes('@') ? emailRaw : emailRaw + '@adsi.com.br';
+  const emailNorm = emailRaw.includes('@') ? emailRaw : emailRaw + '@cesan.com.br';
+
+  // ── Tenta AD primeiro (se configurado e acessível) ────────────────────
+  if (AD_AUTH_ENABLED) {
+    try {
+      const loginAD  = emailNorm.replace('@cesan.com.br','');
+      const adResult = await _autenticarAD(loginAD, senha);
+      if (adResult) {
+        const u = adResult.usuario;
+        const user = {
+          uid:         u.login,
+          email:       u.email || emailNorm,
+          nome:        u.nome  || loginAD,
+          avatar:      (u.nome||loginAD).split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase(),
+          role:        _roleParaAD(u.grupos || []),
+          permissions: permissionsForRole(_roleParaAD(u.grupos || [])),
+          mat:         u.mat   || '',
+          setor:       u.setor || '',
+          fonte:       'ad',
+          adToken:     adResult.token,
+        };
+        loginSuccess(user, false);
+        console.log('[Auth] ✓ Autenticado via AD:', u.nome);
+        return;
+      }
+    } catch(e) {
+      if (e.message === 'auth/wrong-password') {
+        showToast('Login ou senha incorretos. Verifique suas credenciais de rede.', 'danger', 5000);
+        const btn = document.getElementById('btn-login');
+        if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+        return;
+      }
+      if (e.message === 'ad/sem-permissao') {
+        // Mostra modal de "aguardando liberação"
+        _mostrarModalSemPermissao(emailNorm);
+        const btn = document.getElementById('btn-login');
+        if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+        return;
+      }
+      if (e.message === 'ad/bloqueado') {
+        showToast('Seu acesso ao SYSACK está bloqueado. Contate o TI.', 'danger', 7000);
+        const btn = document.getElementById('btn-login');
+        if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+        return;
+      }
+      // AD indisponível — continua para Firebase/local
+      console.warn('[Auth] AD indisponível, usando Firebase/local');
+    }
+  }
 
   clearLoginError();
   if (!emailRaw || !senha) return showLoginError('Preencha o e-mail e a senha.');
@@ -15812,6 +15958,8 @@ function impRenderCards() {
     // Se reachable=true (ping ok), mostra online mesmo que status='offline' no Firestore
     // Isso resolve a inconsistência entre KPI e cards
     let _stRaw = imp.status || (imp.reachable ? 'online' : 'offline');
+    // Normaliza status gravados pelo Discovery ('ativo', 'descoberta') para 'online'
+    if (_stRaw === 'ativo' || _stRaw === 'descoberta') _stRaw = 'online';
     if (imp.reachable === true && _stRaw === 'offline') _stRaw = 'online';
     const _st = temDados ? _stRaw : 'sem-dados';
     const _stOffline = _st === 'offline';
@@ -25464,6 +25612,7 @@ async function _tcParseTXTVivo(file, mes) {
     const faturaRef = await db.collection('faturas_telecom').add({
       competencia:     mes,
       conta:           '0120692821',
+      totalGeral:      +totalCalc.toFixed(2),   // campo lido por renderTelecomKpis() e renderTelecomFaturas()
       totalCalculado:  +totalCalc.toFixed(2),
       totalLinhas:     listaFinal.length,
       alertas:         alertasContrato.reduce((s,l) => s + l.alertas.length, 0),
@@ -25770,6 +25919,7 @@ function tcVerDetalhe(smId) {
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="document.getElementById('modal-tc-detalhe')?.remove()">Fechar</button>
         <button class="btn btn-secondary" onclick="document.getElementById('modal-tc-detalhe')?.remove();abrirCadastrarPlano('${escapeHtml(smId)}','${escapeHtml(sm.linha||'')}')">✏️ Editar plano</button>
+        <button class="btn btn-primary" onclick="document.getElementById('modal-tc-detalhe')?.remove();abrirAcessoRemotoWebRTC('${escapeHtml(smId)}','${escapeHtml(sm.empNome||sm.modelo||'')}')">📺 Acesso Remoto</button>
       </div>
     </div>
   </div>`;
@@ -27198,8 +27348,14 @@ async function renderUsuarios() {
     const ultimo = u.lastLogin
       ? new Date(u.lastLogin?.seconds ? u.lastLogin.seconds*1000 : u.lastLogin).toLocaleDateString('pt-BR')
       : '—';
+    const adBadge = u.lastLoginAD
+      ? `<span style="font-size:9px;background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;
+           padding:1px 6px;border-radius:8px;font-weight:700">AD</span>` : '';
+    const bloqBadge = u.bloqueado
+      ? `<span style="font-size:9px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;
+           padding:1px 6px;border-radius:8px;font-weight:700">BLOQUEADO</span>` : '';
 
-    return `<tr>
+    return `<tr style="${u.bloqueado ? 'opacity:.6' : ''}">
       <td>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:36px;height:36px;border-radius:50%;background:${rl.cor}22;color:${rl.cor};
@@ -27207,14 +27363,17 @@ async function renderUsuarios() {
             ${escapeHtml(ini)}
           </div>
           <div>
-            <div style="font-weight:700;font-size:13px">${escapeHtml(u.nome||'—')}</div>
+            <div style="display:flex;align-items:center;gap:5px">
+              <span style="font-weight:700;font-size:13px">${escapeHtml(u.nome||'—')}</span>
+              ${adBadge} ${bloqBadge}
+            </div>
             ${u._local ? '<div style="font-size:10px;color:var(--g400)">⚡ Fallback local</div>' : ''}
           </div>
         </div>
       </td>
       <td>
         <div style="font-size:12px">${escapeHtml(u.email||'—')}</div>
-        ${u.login ? `<div style="font-size:10.5px;color:var(--g400);font-family:monospace">${escapeHtml(u.login)}</div>` : ''}
+        ${u.login ? `<div style="font-size:10.5px;color:var(--accent);font-family:monospace;font-weight:600">${escapeHtml(u.login)}</div>` : ''}
       </td>
       <td>
         <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;
@@ -27228,6 +27387,11 @@ async function renderUsuarios() {
         <div style="display:flex;gap:6px">
           <button class="btn btn-ghost btn-xs" onclick="editarUsuario('${escapeHtml(u.id||u.uid||'')}')">✏️ Editar</button>
           ${u.id !== (CURRENT_USER?.uid||'') ? `
+          <button class="btn btn-ghost btn-xs" style="color:${u.bloqueado?'#16A34A':'var(--danger)'}"
+                  onclick="toggleBloquearUsuario('${escapeHtml(u.id||u.uid||'')}','${escapeHtml(u.nome||'')}',${!!u.bloqueado})"
+                  title="${u.bloqueado?'Desbloquear':'Bloquear'} acesso">
+            ${u.bloqueado ? '🔓' : '🔒'}
+          </button>
           <button class="btn btn-ghost btn-xs" style="color:var(--danger)"
                   onclick="excluirUsuario('${escapeHtml(u.id||u.uid||'')}','${escapeHtml(u.nome||'')}')">🗑️</button>` : ''}
         </div>
@@ -28657,5 +28821,348 @@ function tcFiltrarLinhasFatura(forceFiltro) {
       <td>${alertTag}</td>
     </tr>`;
   }).join('');
+}
+
+function _roleParaAD(grupos) {
+  // Mapeia grupos do AD para roles do SYSACK
+  // Ajuste os nomes dos grupos conforme o AD da CESAN
+  const g = grupos.join(' ').toLowerCase();
+  if (g.includes('ti_admin') || g.includes('sysack_admin') || g.includes('domain admins'))
+    return 'admin';
+  if (g.includes('ti_gestor') || g.includes('sysack_gestor') || g.includes('gerencia_ti'))
+    return 'gestor';
+  if (g.includes('ti_tecnico') || g.includes('sysack_tecnico') || g.includes('suporte'))
+    return 'tecnico';
+  if (g.includes('mdm') || g.includes('mobile'))
+    return 'mdm_admin';
+  return 'viewer'; // padrão para usuários sem grupo específico
+}
+
+
+
+// ── Modal: usuário AD sem permissão no SYSACK ─────────────────────────────
+function _mostrarModalSemPermissao(email) {
+  document.getElementById('modal-sem-permissao-ad')?.remove();
+
+  const html = `
+  <div class="modal-overlay open" id="modal-sem-permissao-ad">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header" style="background:#1E293B;border-radius:10px 10px 0 0">
+        <h3 style="color:#F1F5F9">🔐 Acesso pendente de liberação</h3>
+      </div>
+      <div class="modal-body" style="text-align:center;padding:32px 24px">
+        <div style="font-size:56px;margin-bottom:16px">⏳</div>
+        <div style="font-weight:700;font-size:16px;color:var(--g900);margin-bottom:10px">
+          Credenciais de rede válidas!
+        </div>
+        <div style="font-size:13px;color:var(--g600);line-height:1.6;margin-bottom:20px">
+          Seu login e senha do AD foram autenticados com sucesso.<br>
+          Porém, <strong>${escapeHtml(email)}</strong> ainda não tem
+          permissão de acesso ao SYSACK.
+        </div>
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;
+                    padding:14px;font-size:12.5px;color:#1E40AF;text-align:left;margin-bottom:20px">
+          <strong>Para liberar o acesso:</strong><br>
+          Solicite ao administrador do SYSACK que cadastre seu usuário
+          na página <strong>Gestão de Contas</strong> com o perfil adequado.
+        </div>
+        <button class="btn btn-primary" onclick="document.getElementById('modal-sem-permissao-ad').remove()">
+          Entendido
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+
+// ── Bloquear / Desbloquear usuário ────────────────────────────────────────
+async function toggleBloquearUsuario(uid, nome, bloqueadoAtual) {
+  const acao = bloqueadoAtual ? 'desbloquear' : 'bloquear';
+  if (!confirm(`${bloqueadoAtual?'Desbloquear':'Bloquear'} o acesso de "${nome}"?`)) return;
+  try {
+    if (FB_READY && db) {
+      await db.collection('users').doc(uid).update({ bloqueado: !bloqueadoAtual });
+      showToast(`✓ ${nome} ${bloqueadoAtual?'desbloqueado':'bloqueado'}`, 'success');
+      renderUsuarios();
+    }
+  } catch(e) { showToast('Erro: ' + e.message, 'danger'); }
+}
+
+
+// ── Acesso Remoto WebRTC ──────────────────────────────────────────────────
+// URL do servidor de sinalização no vservho091
+const WEBRTC_SIGNAL_URL = 'ws://vservho091:3090'; // ajustar para IP/DNS externo
+
+const WEBRTC_ICE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:vservho091:3478', username: 'sysack', credential: 'sysack_turn_2024' },
+  ],
+};
+
+function abrirAcessoRemotoWebRTC(smId, nome) {
+  document.getElementById('modal-acesso-remoto')?.remove();
+
+  const html = `
+  <div class="modal-overlay open" id="modal-acesso-remoto" style="align-items:stretch;padding:0">
+    <div style="display:flex;flex-direction:column;width:100%;max-width:440px;
+                margin:auto;background:#0F172A;border-radius:16px;overflow:hidden;
+                box-shadow:0 25px 60px rgba(0,0,0,.6)">
+
+      <!-- Header -->
+      <div style="padding:12px 16px;background:#1E293B;display:flex;
+                  align-items:center;justify-content:space-between;
+                  border-bottom:2px solid #334155">
+        <div>
+          <div style="font-weight:700;color:#F1F5F9;font-size:14px">📺 Acesso Remoto</div>
+          <div style="font-size:11px;color:#64748B">${escapeHtml(nome)} · WebRTC</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div id="rtc-latencia" style="font-size:10px;color:#64748B"></div>
+          <button onclick="if(window._sysackViewer)window._sysackViewer.encerrar();document.getElementById('modal-acesso-remoto').remove()"
+                  style="background:#EF4444;color:#fff;border:none;padding:5px 12px;
+                         border-radius:7px;cursor:pointer;font-size:12px;font-weight:700">
+            ✕ Encerrar
+          </button>
+        </div>
+      </div>
+
+      <!-- Status bar -->
+      <div id="rtc-status-bar" style="padding:6px 14px;background:#0F172A;
+           font-size:11.5px;color:#64748B;border-bottom:2px solid #1E293B;
+           display:flex;align-items:center;gap:8px">
+        <div id="rtc-status-dot" style="width:8px;height:8px;border-radius:50%;background:#64748B;flex-shrink:0"></div>
+        <span id="rtc-status-text">Conectando...</span>
+      </div>
+
+      <!-- Vídeo -->
+      <div style="position:relative;background:#000;flex:1;aspect-ratio:9/19">
+        <video id="rtc-video" autoplay playsinline muted
+               style="width:100%;height:100%;object-fit:contain;cursor:crosshair;display:block"></video>
+        <div id="rtc-overlay" style="position:absolute;inset:0;display:flex;
+             flex-direction:column;align-items:center;justify-content:center;
+             background:rgba(15,23,42,.85);color:#94A3B8">
+          <div style="font-size:48px;margin-bottom:12px">📱</div>
+          <div id="rtc-overlay-text" style="font-size:13px;font-weight:600">Aguardando dispositivo...</div>
+          <div style="font-size:11px;margin-top:6px;color:#475569">
+            O APK SYSACK precisa estar rodando no celular
+          </div>
+        </div>
+      </div>
+
+      <!-- Controles -->
+      <div style="padding:10px;background:#1E293B;display:flex;gap:6px;justify-content:center">
+        <button id="rtc-btn-back" onclick="window._sysackViewer?.enviarBotao('back')"
+                style="flex:1;background:#334155;color:#E2E8F0;border:none;
+                       padding:10px;border-radius:9px;cursor:pointer;font-size:13px">
+          ← Voltar
+        </button>
+        <button id="rtc-btn-home" onclick="window._sysackViewer?.enviarBotao('home')"
+                style="flex:1;background:#334155;color:#E2E8F0;border:none;
+                       padding:10px;border-radius:9px;cursor:pointer;font-size:13px">
+          ⬤ Home
+        </button>
+        <button id="rtc-btn-rec" onclick="window._sysackViewer?.enviarBotao('recents')"
+                style="flex:1;background:#334155;color:#E2E8F0;border:none;
+                       padding:10px;border-radius:9px;cursor:pointer;font-size:13px">
+          ⧉ Apps
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Inicia viewer WebRTC
+  const viewer = new SysackWebRTCViewer(smId, CURRENT_USER?.nome || 'tecnico');
+  viewer.conectar();
+}
+
+// ── Classe WebRTC Viewer ──────────────────────────────────────────────────
+class SysackWebRTCViewer {
+  constructor(deviceId, tecnicoId) {
+    this.deviceId  = deviceId;
+    this.tecnicoId = tecnicoId;
+    this.ws        = null;
+    this.pc        = null;
+    this.deviceW   = 1280;
+    this.deviceH   = 720;
+    this._touchStart = null;
+  }
+
+  async conectar() {
+    this._setStatus('Conectando ao servidor de sinalização...', '#3B82F6');
+
+    try {
+      this.ws = new WebSocket(WEBRTC_SIGNAL_URL);
+    } catch(e) {
+      this._setStatus('Servidor WebRTC inacessível — verifique vservho091:3090', '#EF4444');
+      return;
+    }
+
+    this.ws.onopen = () => {
+      this.ws.send(JSON.stringify({
+        type: 'tecnico-connect', deviceId: this.deviceId, tecnicoId: this.tecnicoId,
+      }));
+      this._setStatus('Aguardando dispositivo...', '#F59E0B');
+    };
+
+    this.ws.onmessage = async (e) => {
+      const msg = JSON.parse(e.data);
+      await this._handleSignal(msg);
+    };
+
+    this.ws.onerror  = () => this._setStatus('Erro WebSocket', '#EF4444');
+    this.ws.onclose  = () => { if(this.pc) this._setStatus('Desconectado', '#EF4444'); };
+
+    this._configurarVideo();
+    window._sysackViewer = this;
+  }
+
+  async _handleSignal(msg) {
+    switch(msg.type) {
+
+      case 'connecting':
+        this._setStatus('Dispositivo respondeu. Negociando WebRTC...', '#F59E0B');
+        await this._criarPC();
+        break;
+
+      case 'device-offline':
+        this._setStatus('Dispositivo offline — APK não está conectado', '#EF4444');
+        document.getElementById('rtc-overlay-text').textContent = 'Dispositivo offline';
+        break;
+
+      case 'device-disconnected':
+        this._setStatus('Dispositivo desconectou', '#EF4444');
+        break;
+
+      case 'offer': {
+        if (!this.pc) await this._criarPC();
+        await this.pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+        const answer = await this.pc.createAnswer();
+        await this.pc.setLocalDescription(answer);
+        this.ws.send(JSON.stringify({
+          type: 'answer', deviceId: this.deviceId, sdp: answer.sdp,
+        }));
+        this._setStatus('WebRTC conectado — transmitindo tela...', '#10B981');
+        break;
+      }
+
+      case 'ice-candidate':
+        if (msg.candidate) await this.pc?.addIceCandidate(msg.candidate).catch(()=>{});
+        break;
+    }
+  }
+
+  async _criarPC() {
+    this.pc = new RTCPeerConnection(WEBRTC_ICE);
+
+    this.pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        this.ws?.send(JSON.stringify({
+          type: 'ice-candidate', deviceId: this.deviceId, candidate: e.candidate,
+        }));
+      }
+    };
+
+    this.pc.onconnectionstatechange = () => {
+      const s = this.pc.connectionState;
+      const c = {connected:'#10B981', failed:'#EF4444', disconnected:'#EF4444'};
+      this._setStatus({
+        connected:'Tela ao vivo ✓', failed:'Falha WebRTC', disconnected:'Desconectado',
+        connecting:'Conectando WebRTC...', new:'Iniciando...',
+      }[s] || s, c[s]||'#F59E0B');
+    };
+
+    this.pc.ontrack = (e) => {
+      if (e.track.kind !== 'video') return;
+      const video = document.getElementById('rtc-video');
+      video.srcObject = e.streams[0];
+      video.play().catch(()=>{});
+      document.getElementById('rtc-overlay').style.display = 'none';
+      video.onloadedmetadata = () => {
+        this.deviceW = video.videoWidth  || 1280;
+        this.deviceH = video.videoHeight || 720;
+      };
+      // Mede latência via stats
+      setInterval(() => this._medirLatencia(), 3000);
+    };
+  }
+
+  _configurarVideo() {
+    const video   = document.getElementById('rtc-video');
+    let touchStart= null;
+
+    video.addEventListener('click', (e) => {
+      const { x, y } = this._relParaDev(e.clientX, e.clientY);
+      this._enviar({ type:'remote-touch', deviceId:this.deviceId, x, y });
+    });
+
+    video.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }, { passive:false });
+
+    video.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (!touchStart) return;
+      const ex = e.changedTouches[0].clientX, ey = e.changedTouches[0].clientY;
+      const dx = ex - touchStart.x, dy = ey - touchStart.y;
+      if (Math.abs(dx) > 15 || Math.abs(dy) > 15) {
+        const p1 = this._relParaDev(touchStart.x, touchStart.y);
+        const p2 = this._relParaDev(ex, ey);
+        this._enviar({ type:'remote-swipe', deviceId:this.deviceId, ...p1, x2:p2.x, y2:p2.y });
+      } else {
+        const { x, y } = this._relParaDev(ex, ey);
+        this._enviar({ type:'remote-touch', deviceId:this.deviceId, x, y });
+      }
+      touchStart = null;
+    }, { passive:false });
+  }
+
+  _relParaDev(clientX, clientY) {
+    const rect = document.getElementById('rtc-video').getBoundingClientRect();
+    return {
+      x: ((clientX - rect.left) / rect.width)  * this.deviceW,
+      y: ((clientY - rect.top)  / rect.height) * this.deviceH,
+    };
+  }
+
+  _enviar(msg) { this.ws?.send(JSON.stringify(msg)); }
+
+  enviarBotao(tipo) { this._enviar({ type:`remote-${tipo}`, deviceId:this.deviceId }); }
+
+  async _medirLatencia() {
+    if (!this.pc) return;
+    const stats = await this.pc.getStats();
+    stats.forEach(s => {
+      if (s.type === 'candidate-pair' && s.state === 'succeeded' && s.currentRoundTripTime) {
+        const ms = Math.round(s.currentRoundTripTime * 1000);
+        const el = document.getElementById('rtc-latencia');
+        const cor = ms < 100 ? '#10B981' : ms < 300 ? '#F59E0B' : '#EF4444';
+        if (el) el.innerHTML = `<span style="color:${cor}">${ms}ms</span>`;
+      }
+    });
+  }
+
+  encerrar() {
+    this.ws?.send(JSON.stringify({ type:'stop-session', deviceId:this.deviceId }));
+    this.pc?.close();
+    this.ws?.close(1000, 'encerrado');
+    this.pc = null; this.ws = null;
+    window._sysackViewer = null;
+  }
+
+  _setStatus(text, cor = '#64748B') {
+    const t = document.getElementById('rtc-status-text');
+    const d = document.getElementById('rtc-status-dot');
+    const b = document.getElementById('rtc-status-bar');
+    if (t) t.textContent = text;
+    if (d) d.style.background = cor;
+    if (b) b.style.borderBottomColor = cor;
+  }
 }
 
