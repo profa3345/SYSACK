@@ -1052,10 +1052,12 @@ const _origAuditLog = window.auditLog;
 window.auditLog = function(action, module, resourceId, resourceType, details = {}) {
   const entry = typeof auditLog_local === 'function'
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
-  if (FB_READY && db && window._fs) {
+  // Só grava se tiver UID Firebase real (não local_* do fallback local)
+  const _uid = CURRENT_USER?.uid || '';
+  if (FB_READY && db && window._fs && _uid && !_uid.startsWith('local_')) {
     const { collection, addDoc, serverTimestamp } = window._fs;
     addDoc(collection('audit_logs'), {
-      userId: CURRENT_USER.uid, userName: CURRENT_USER.nome,
+      userId: _uid, userName: CURRENT_USER.nome,
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
       createdAt: serverTimestamp(),
@@ -1277,33 +1279,31 @@ function filtrarAtivosPorTipo(tipos, el) {
 }
 
 
-// ── Lookup de sigla/nome por IP usando REDES_PREFIX e STATE_REDES ──────────
-// Usa os mesmos dados do card "Faixas de Rede" — nunca duplica informação
+// ── _ipParaRede: traduz IP → {sigla, nome} usando REDES_PREFIX/STATE_REDES ──
+// REDES_PREFIX já tem todas as siglas cadastradas (coc, iun, vit, etc.)
+// STATE_REDES são os overrides salvos no card "Faixas de Rede" do Firestore
 function _ipParaRede(ip) {
   if (!ip) return null;
   const pts = ip.split('.');
   if (pts.length !== 4) return null;
 
-  // 1. Tenta primeiro nos overrides do Firestore (STATE_REDES) — /24 e /16
+  // 1. Overrides Firestore (STATE_REDES — card Faixas de Rede)
   if (window.STATE_REDES && STATE_REDES.length) {
     for (const r of STATE_REDES) {
       if (!r.prefix) continue;
-      if (ip.startsWith(r.prefix + '.') || ip.startsWith(r.prefix)) {
+      if (ip.startsWith(r.prefix + '.') || ip.startsWith(r.prefix))
         return { sigla: r.sigla, nome: r.nome || r.desc || r.sigla };
-      }
     }
   }
 
-  // 2. Tenta prefixo /24 (xxx.xxx.xxx) em REDES_PREFIX
+  // 2. REDES_PREFIX /24 (ex: '172.22.100' → {sigla:'acb', nome:'Águia Branca'})
   const p24 = pts.slice(0, 3).join('.');
-  if (window.REDES_PREFIX && REDES_PREFIX[p24]) {
-    const r = REDES_PREFIX[p24];
-    return { sigla: r.sigla, nome: r.nome };
-  }
+  if (window.REDES_PREFIX && REDES_PREFIX[p24])
+    return { sigla: REDES_PREFIX[p24].sigla, nome: REDES_PREFIX[p24].nome };
 
-  // 3. Tenta prefixo /16 (xxx.xxx)
-  const p16 = pts.slice(0, 2).join('.');
+  // 3. Fallback /16 — percorre prefixos com mesmos dois primeiros octetos
   if (window.REDES_PREFIX) {
+    const p16 = pts.slice(0, 2).join('.');
     const match = Object.entries(REDES_PREFIX).find(([k]) => k.startsWith(p16 + '.'));
     if (match) return { sigla: match[1].sigla, nome: match[1].nome };
   }
@@ -1352,7 +1352,7 @@ function renderAtivos() {
     return true;
   });
 
-  const colspan = isComp ? '14' : '10'; // Sigla + IP + Localidade no lugar de Responsável
+  const colspan = isComp ? '14' : '10';
   document.getElementById('ativos-body').innerHTML = lista.map(a => `
     <tr>
       ${isComp ? (()=>{
@@ -1377,38 +1377,46 @@ function renderAtivos() {
       <td><span class="tag">${a.tipo||'—'}</span></td>`}
       <td>${a.area||'—'}</td>
       ${(()=>{
-        // ── Sigla + IP + Localidade usando REDES_PREFIX / STATE_REDES ──
-        const _rede = _ipParaRede(a.ip);
+        // ── Sigla: via REDES_PREFIX (mesmas siglas do card Faixas de Rede) ──
+        const _r = _ipParaRede(a.ip);
 
-        // Sigla
-        const _sigla = _rede?.sigla || null;
-        const _siglaDisp = _sigla
-          ? '<span style="font-family:monospace;font-size:11px;font-weight:700;color:var(--accent);background:#EFF6FF;padding:2px 6px;border-radius:4px">' + escapeHtml(_sigla.toUpperCase()) + '</span>'
+        const _siglaHtml = _r?.sigla
+          ? '<span style="font-family:monospace;font-size:11px;font-weight:700;' +
+            'color:var(--accent);background:#EFF6FF;padding:2px 7px;border-radius:4px">' +
+            escapeHtml(_r.sigla.toUpperCase()) + '</span>'
           : '<span style="color:var(--g300)">—</span>';
 
-        // IP
-        const _ipDisp = a.ip
-          ? '<span style="font-family:monospace;font-size:11px;color:var(--g600)">' + escapeHtml(a.ip) + '</span>'
+        // ── IP ────────────────────────────────────────────────────────
+        const _ipHtml = a.ip
+          ? '<span style="font-family:monospace;font-size:11px;color:var(--g600)">' +
+            escapeHtml(a.ip) + '</span>'
           : '<span style="color:var(--g300)">—</span>';
 
-        // Localidade — nome da rede + botão 📍 para card Localidades + 🗺️ Maps
-        const _nomeRede = _rede?.nome || null;
-        // Busca coords na LOCALIDADES_CESAN pelo nome da área
-        const _locObj = window.LOCALIDADES_CESAN
-          ? LOCALIDADES_CESAN.find(l => l.nome === _nomeRede || l.nome === a.area || (a.area && l.nome && l.nome.toLowerCase().includes((a.area||'').toLowerCase())))
+        // ── Localidade: nome da rede + botão 📍 card + 🗺️ Maps ─────────
+        const _locNome = _r?.nome || null;
+        const _locObj  = _locNome && window.LOCALIDADES_CESAN
+          ? LOCALIDADES_CESAN.find(l => l.nome === _locNome || l.nome === a.area)
           : null;
-        const _temGeo  = _locObj?.lat && _locObj?.lng;
-        const _mapsUrl = _locObj?.mapsUrl || (_locObj?.lat ? 'https://www.google.com/maps?q='+_locObj.lat+','+_locObj.lng : '');
-        const _locLabel = _nomeRede || a.area || null;
-        const _locDisp = _locLabel
-          ? '<span style="display:inline-flex;align-items:center;gap:3px">'
-              + '<span style="font-size:11.5px;color:var(--g700);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(_locLabel) + '">' + escapeHtml(_locLabel) + '</span>'
-              + '<button class="btn btn-ghost btn-xs" title="Ver card localidade" style="padding:0 3px;font-size:10px;line-height:1.4" onclick="event.stopPropagation();goPage(&apos;localidades&apos;);setTimeout(()=>locAbrirDetalhe(' + JSON.stringify(_locLabel).replace(/"/g, '&quot;') + '),420)">📍</button>'
-              + (_temGeo ? '<a href="' + escapeHtml(_mapsUrl) + '" target="_blank" rel="noopener" title="Google Maps" onclick="event.stopPropagation()" style="font-size:11px;color:var(--g400);text-decoration:none">🗺️</a>' : '')
-              + '</span>'
+        const _mapsUrl = _locObj?.mapsUrl || (_locObj?.lat ? 'https://www.google.com/maps?q=' + _locObj.lat + ',' + _locObj.lng : '');
+        const _locLabel = _locNome || a.area || null;
+
+        const _locHtml = _locLabel
+          ? '<span style="display:inline-flex;align-items:center;gap:3px">' +
+              '<span style="font-size:11.5px;color:var(--g700);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(_locLabel) + '">' +
+              escapeHtml(_locLabel) + '</span>' +
+              '<button class="btn btn-ghost btn-xs" title="Ver card localidade" ' +
+              'style="padding:0 3px;font-size:10px;line-height:1.4" ' +
+              'onclick="event.stopPropagation();goPage(&apos;localidades&apos;);' +
+              'setTimeout(()=>locAbrirDetalhe(' + JSON.stringify(_locLabel) + '),420)">📍</button>' +
+              (_mapsUrl ? '<a href="' + escapeHtml(_mapsUrl) + '" target="_blank" rel="noopener" ' +
+              'title="Google Maps" onclick="event.stopPropagation()" ' +
+              'style="font-size:11px;color:var(--g400);text-decoration:none">🗺️</a>' : '') +
+            '</span>'
           : '<span style="color:var(--g300)">—</span>';
 
-        return '<td>' + _siglaDisp + '</td><td>' + _ipDisp + '</td><td style="white-space:nowrap">' + _locDisp + '</td>';
+        return '<td>' + _siglaHtml + '</td>' +
+               '<td>' + _ipHtml   + '</td>' +
+               '<td style="white-space:nowrap">' + _locHtml + '</td>';
       })()}
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="text-align:center">${(()=>{
