@@ -239,35 +239,6 @@ async function initBanco() {
     const deleteDoc       = (ref)          => ref.delete();
     const serverTimestamp = ()             => firebase.firestore.FieldValue.serverTimestamp();
     const onSnapshot      = (ref, cb, err) => ref.onSnapshot(cb, err);
-  // ── Cache local para coleções grandes ─────────────────────────────────────
-  // Substitui onSnapshot (que gera 1 Read por documento na abertura) por
-  // getDocs com TTL de 5 minutos. Reduz drasticamente as leituras do Firestore.
-  const _localCache = new Map(); // col → { data, ts }
-  const CACHE_TTL   = 5 * 60 * 1000; // 5 minutos
-
-  async function cachedGet(ref, colKey) {
-    const hit = _localCache.get(colKey);
-    if (hit && (Date.now() - hit.ts) < CACHE_TTL) return hit.data;
-    const snap = await ref.get();
-    const data = snap2arr(snap);
-    _localCache.set(colKey, { data, ts: Date.now() });
-    return data;
-  }
-
-  function scheduleRefresh(ref, colKey, onData, intervalMs = CACHE_TTL) {
-    const run = async () => {
-      try {
-        const snap = await ref.get();
-        const data = snap2arr(snap);
-        _localCache.set(colKey, { data, ts: Date.now() });
-        onData(data, snap);
-      } catch(e) { console.warn('[Cache] Erro refresh', colKey, e.message); }
-    };
-    run(); // primeiro fetch imediato
-    return setInterval(run, intervalMs);
-  }
-
-
     const query           = (ref)          => ref;
     const where           = (f, op, v)     => ({ _where: [f, op, v] });
     const orderBy         = (f, d)         => ({ _orderBy: [f, d] });
@@ -849,9 +820,28 @@ function startFirestoreListeners() {
     };
   }
 
+  // ── Cache local com refresh periódico ────────────────────────────────────
+  // Substitui onSnapshot permanente nas coleções grandes por getDocs com TTL
+  // Reduz drasticamente reads do Firestore (1 read/doc na abertura do listener)
+  const _localCache = new Map();
+  const CACHE_TTL   = 5 * 60 * 1000; // 5 minutos
+
+  function scheduleRefresh(ref, colKey, onData, intervalMs) {
+    intervalMs = intervalMs || CACHE_TTL;
+    var run = function() {
+      ref.get().then(function(snap) {
+        var data = snap2arr(snap);
+        _localCache.set(colKey, { data: data, ts: Date.now() });
+        onData(data, snap);
+      }).catch(function(e) { console.warn('[Cache] Erro refresh', colKey, e.message); });
+    };
+    run();
+    return setInterval(run, intervalMs);
+  }
+
   // ativos
-  scheduleRefresh(db.collection('ativos'), 'ativos', (data, snap) => {
-    STATE._assetsDisc = data.map(norm);
+  db.collection('ativos').onSnapshot(function(snap) {
+    STATE._assetsDisc = snap2arr(snap).map(norm);
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     nbUpdate('nb-ativos', STATE.ativos.length);
     _debounce('ativos-render', function(){ requestAnimationFrame(renderDashboard); }, 800);
@@ -859,9 +849,9 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
-  scheduleRefresh(db.collection('impressoras'), 'impressoras', (data) => {
-    STATE.impressorasDisc = data.map(norm);
-    console.log('[Cache] impressoras:', STATE.impressorasDisc.length);
+  db.collection('impressoras').onSnapshot(function(snap){
+    STATE.impressorasDisc = snap2arr(snap).map(norm);
+    console.log('[Banco] impressoras:', STATE.impressorasDisc.length);
     _debounce('impressoras-render', function(){
       if(isPageActive('impressoras')) renderImpressoras();
     }, 600);
@@ -888,8 +878,8 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] switches erro:', e.message); });
 
   // empregados
-  scheduleRefresh(db.collection('empregados').orderBy('nome').limit(2000), 'empregados', (data, snap) => {
-    STATE.empregados = data;
+  db.collection('empregados').orderBy('nome').limit(2000).onSnapshot(function(snap) {
+    STATE.empregados = snap2arr(snap);
     // Calcula data do último sync (campo gravado pelo agente)
     const primeiro = STATE.empregados[0];
     STATE.empregadosSyncAt = primeiro?.syncAt ? new Date(primeiro.syncAt)
@@ -1081,7 +1071,10 @@ const _origAuditLog = window.auditLog;
 window.auditLog = function(action, module, resourceId, resourceType, details = {}) {
   const entry = typeof auditLog_local === 'function'
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
-  if (FB_READY && db && window._fs) {
+  // Só grava no Firestore se o usuário tiver UID Firebase real (não local)
+  // Evita erro "Missing or insufficient permissions" durante login local
+  const _hasFirebaseUid = CURRENT_USER?.uid && !CURRENT_USER.uid.startsWith('local_');
+  if (FB_READY && db && window._fs && _hasFirebaseUid) {
     const { collection, addDoc, serverTimestamp } = window._fs;
     addDoc(collection('audit_logs'), {
       userId: CURRENT_USER.uid, userName: CURRENT_USER.nome,
@@ -20403,12 +20396,12 @@ window.salvarMovSAP = function(){
 // ── Firebase listener para patrimonios (coleção dedicada) ────────
 (function initPatrimoniosListener() {
   if (!FB_READY || !db) return;
-  scheduleRefresh(db.collection('patrimonios'), 'patrimonios', (data) => {
-    STATE.patrimonios = data;
+  db.collection('patrimonios').onSnapshot(function(snap) {
+    STATE.patrimonios = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     // Alertas automáticos: SAP sem vínculo + ativos sem patrimônio
     patVerificarAlertas();
     renderPatrimonio && renderPatrimonio();
-  }); // scheduleRefresh — erros logados internamente
+  }, function(e) { console.warn('[Banco] patrimonios:', e.message); });
 
   // Alertas de patrimônio: disparados pelo listener principal de ativos
 })();
