@@ -239,6 +239,35 @@ async function initBanco() {
     const deleteDoc       = (ref)          => ref.delete();
     const serverTimestamp = ()             => firebase.firestore.FieldValue.serverTimestamp();
     const onSnapshot      = (ref, cb, err) => ref.onSnapshot(cb, err);
+  // ── Cache local para coleções grandes ─────────────────────────────────────
+  // Substitui onSnapshot (que gera 1 Read por documento na abertura) por
+  // getDocs com TTL de 5 minutos. Reduz drasticamente as leituras do Firestore.
+  const _localCache = new Map(); // col → { data, ts }
+  const CACHE_TTL   = 5 * 60 * 1000; // 5 minutos
+
+  async function cachedGet(ref, colKey) {
+    const hit = _localCache.get(colKey);
+    if (hit && (Date.now() - hit.ts) < CACHE_TTL) return hit.data;
+    const snap = await ref.get();
+    const data = snap2arr(snap);
+    _localCache.set(colKey, { data, ts: Date.now() });
+    return data;
+  }
+
+  function scheduleRefresh(ref, colKey, onData, intervalMs = CACHE_TTL) {
+    const run = async () => {
+      try {
+        const snap = await ref.get();
+        const data = snap2arr(snap);
+        _localCache.set(colKey, { data, ts: Date.now() });
+        onData(data, snap);
+      } catch(e) { console.warn('[Cache] Erro refresh', colKey, e.message); }
+    };
+    run(); // primeiro fetch imediato
+    return setInterval(run, intervalMs);
+  }
+
+
     const query           = (ref)          => ref;
     const where           = (f, op, v)     => ({ _where: [f, op, v] });
     const orderBy         = (f, d)         => ({ _orderBy: [f, d] });
@@ -821,8 +850,8 @@ function startFirestoreListeners() {
   }
 
   // ativos
-  db.collection('ativos').onSnapshot(function(snap) {
-    STATE._assetsDisc = snap2arr(snap).map(norm);
+  scheduleRefresh(db.collection('ativos'), 'ativos', (data, snap) => {
+    STATE._assetsDisc = data.map(norm);
     STATE.ativos = (STATE._assetsDisc||[]).concat(STATE._assetsSw||[]);
     nbUpdate('nb-ativos', STATE.ativos.length);
     _debounce('ativos-render', function(){ requestAnimationFrame(renderDashboard); }, 800);
@@ -830,9 +859,9 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] ativos erro:', e.message); });
 
   // switches
-  db.collection('impressoras').onSnapshot(function(snap){
-    STATE.impressorasDisc = snap2arr(snap).map(norm);
-    console.log('[Banco] impressoras:', STATE.impressorasDisc.length);
+  scheduleRefresh(db.collection('impressoras'), 'impressoras', (data) => {
+    STATE.impressorasDisc = data.map(norm);
+    console.log('[Cache] impressoras:', STATE.impressorasDisc.length);
     _debounce('impressoras-render', function(){
       if(isPageActive('impressoras')) renderImpressoras();
     }, 600);
@@ -859,8 +888,8 @@ function startFirestoreListeners() {
   }, function(e){ console.error('[Banco] switches erro:', e.message); });
 
   // empregados
-  db.collection('empregados').orderBy('nome').limit(2000).onSnapshot(function(snap) {
-    STATE.empregados = snap2arr(snap);
+  scheduleRefresh(db.collection('empregados').orderBy('nome').limit(2000), 'empregados', (data, snap) => {
+    STATE.empregados = data;
     // Calcula data do último sync (campo gravado pelo agente)
     const primeiro = STATE.empregados[0];
     STATE.empregadosSyncAt = primeiro?.syncAt ? new Date(primeiro.syncAt)
@@ -20374,12 +20403,12 @@ window.salvarMovSAP = function(){
 // ── Firebase listener para patrimonios (coleção dedicada) ────────
 (function initPatrimoniosListener() {
   if (!FB_READY || !db) return;
-  db.collection('patrimonios').onSnapshot(function(snap) {
-    STATE.patrimonios = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  scheduleRefresh(db.collection('patrimonios'), 'patrimonios', (data) => {
+    STATE.patrimonios = data;
     // Alertas automáticos: SAP sem vínculo + ativos sem patrimônio
     patVerificarAlertas();
     renderPatrimonio && renderPatrimonio();
-  }, function(e) { console.warn('[Banco] patrimonios:', e.message); });
+  }); // scheduleRefresh — erros logados internamente
 
   // Alertas de patrimônio: disparados pelo listener principal de ativos
 })();
@@ -25050,7 +25079,6 @@ function renderTelecomLinhas() {
             ${plano ? '✏️ Plano' : '+ Plano'}
           </button>
           <button class="btn btn-ghost btn-xs" onclick="tcVerDetalhe('${escapeHtml(s.id)}')">📊</button>
-          <button class="btn btn-primary btn-xs" onclick="abrirPainelUnificado('${escapeHtml(s.id)}')" title="Painel Unificado SYSACK + Intune">🔗 Unificado</button>
         </div>
       </td>
     </tr>`).join('');
@@ -27400,282 +27428,64 @@ async function renderUsuarios() {
 
 // ── Modal: Novo / Editar usuário ──────────────────────────────────────────
 function abrirNovoUsuario(uid = null) {
-  // Se editando usuário existente, abre modal de edição diretamente
-  if (uid) { _abrirEditarUsuario(uid); return; }
-  // Se novo, abre busca de empregado
-  _abrirLiberarAcesso();
-}
+  const u = uid ? [...Object.values(LOCAL_USERS)].find(x => x.uid === uid) : null;
 
-// ── Liberar acesso: pesquisa empregado e define perfil ────────────────────
-function _abrirLiberarAcesso() {
   document.getElementById('modal-novo-usuario')?.remove();
 
   const html = `
   <div class="modal-overlay open" id="modal-novo-usuario" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:520px">
+    <div class="modal" style="max-width:480px">
       <div class="modal-header">
-        <div>
-          <h3>🔓 Liberar acesso ao SYSACK</h3>
-          <div style="font-size:12px;color:var(--g400);margin-top:2px">
-            Pesquise o empregado e defina o perfil de acesso
-          </div>
-        </div>
+        <h3>${uid ? '✏️ Editar Usuário' : '+ Novo Usuário'}</h3>
         <button class="close-btn" onclick="document.getElementById('modal-novo-usuario').remove()">✕</button>
       </div>
       <div class="modal-body">
-
-        <!-- Busca de empregado -->
         <div class="form-group">
-          <label class="form-label req">Pesquisar empregado</label>
-          <div style="position:relative">
-            <input class="form-control" id="gu-busca-emp"
-                   placeholder="Nome, matrícula ou e-mail..."
-                   oninput="guPesquisarEmpregado(this.value)"
-                   autocomplete="off">
-            <div id="gu-emp-lista" style="position:absolute;top:100%;left:0;right:0;z-index:999;
-                 background:var(--bg2);border:1px solid var(--g200);border-radius:8px;
-                 max-height:220px;overflow-y:auto;display:none;
-                 box-shadow:0 4px 12px rgba(0,0,0,.1)"></div>
-          </div>
+          <label class="form-label req">Nome completo</label>
+          <input class="form-control" id="gu-nome" value="${escapeHtml(u?.nome||'')}" placeholder="Nome do usuário">
         </div>
-
-        <!-- Card do empregado selecionado -->
-        <div id="gu-emp-selecionado" style="display:none;background:var(--g50);
-             border:1px solid var(--accent);border-radius:10px;padding:14px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;gap:12px">
-            <div id="gu-emp-avatar" style="width:44px;height:44px;border-radius:50%;
-                 background:var(--accent);color:#fff;display:flex;align-items:center;
-                 justify-content:center;font-weight:700;font-size:16px;flex-shrink:0"></div>
-            <div style="flex:1">
-              <div id="gu-emp-nome" style="font-weight:700;font-size:14px"></div>
-              <div id="gu-emp-info" style="font-size:12px;color:var(--g500)"></div>
-            </div>
-            <button onclick="guLimparEmpregado()"
-                    style="background:none;border:none;cursor:pointer;color:var(--g400);font-size:16px">✕</button>
-          </div>
+        <div class="form-group">
+          <label class="form-label req">E-mail</label>
+          <input class="form-control" id="gu-email" type="email" value="${escapeHtml(u?.email||'')}"
+                 placeholder="usuario@cesan.com.br" ${uid ? 'readonly style="opacity:.6"' : ''}>
         </div>
-
-        <!-- Perfil de acesso -->
+        <div class="form-group">
+          <label class="form-label">Login de rede (opcional)</label>
+          <input class="form-control" id="gu-login" value="${escapeHtml(u?.login||'')}" placeholder="nome.sobrenome">
+        </div>
         <div class="form-group">
           <label class="form-label req">Perfil de acesso</label>
           <select class="form-control" id="gu-role">
             ${Object.entries(ROLE_LABEL).map(([v,r]) =>
-              `<option value="${v}">${r.label}</option>`
+              `<option value="${v}" ${u?.role===v?'selected':''}>${r.label}</option>`
             ).join('')}
           </select>
-          <div style="font-size:11px;color:var(--g400);margin-top:4px" id="gu-role-desc"></div>
         </div>
-
-        <!-- Permissões especiais -->
+        ${!uid ? `
         <div class="form-group">
-          <label class="form-label" style="font-size:12px;font-weight:700;margin-bottom:8px">
-            Permissões especiais (opcional)
-          </label>
+          <label class="form-label req">Senha inicial</label>
+          <input class="form-control" id="gu-senha" type="password" placeholder="Mínimo 8 caracteres">
+        </div>` : ''}
+        <div class="form-group">
+          <label class="form-label" style="font-size:12px;font-weight:700;margin-bottom:8px">Permissões especiais</label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             ${Object.entries(PERM_LABEL).map(([k,l]) => `
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
-              <input type="checkbox" id="gu-perm-${k}" style="accent-color:var(--accent)">
+              <input type="checkbox" id="gu-perm-${k}" ${u?.permissions?.[k]?'checked':''}
+                     style="accent-color:var(--accent)">
               ${escapeHtml(l.replace('✓ ',''))}
             </label>`).join('')}
           </div>
         </div>
-
-        <!-- Info AD -->
-        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;
-                    padding:10px 14px;font-size:12px;color:#1E40AF">
-          🔐 O usuário fará login com as <strong>credenciais de rede CESAN</strong> (Active Directory).
-          Nenhuma senha adicional é necessária.
-        </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="document.getElementById('modal-novo-usuario').remove()">
-          Cancelar
-        </button>
-        <button class="btn btn-primary" onclick="guSalvarLiberacao()">
-          🔓 Liberar acesso
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-novo-usuario').remove()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarUsuario('${uid||''}')">
+          💾 ${uid ? 'Salvar Alterações' : 'Criar Usuário'}
         </button>
       </div>
     </div>
   </div>`;
-
-  document.getElementById('modal-novo-usuario')?.remove();
-  document.body.insertAdjacentHTML('beforeend', html);
-
-  // Atualiza descrição do role ao mudar
-  const roleEl = document.getElementById('gu-role');
-  if (roleEl) {
-    const ROLE_DESC = {
-      admin:     'Acesso total — gerencia usuários, ativos, relatórios e configurações',
-      gestor:    'Aprova movimentações, acessa relatórios e dashboards executivos',
-      tecnico:   'Abre e resolve chamados, cadastra e movimenta ativos',
-      viewer:    'Somente visualização — sem permissão para editar',
-      mdm_admin: 'Gestão de smartphones e dispositivos móveis',
-    };
-    const updateDesc = () => {
-      const desc = document.getElementById('gu-role-desc');
-      if (desc) desc.textContent = ROLE_DESC[roleEl.value] || '';
-    };
-    roleEl.addEventListener('change', updateDesc);
-    updateDesc();
-  }
-}
-
-// Empregado selecionado para liberação
-let _guEmpSelecionado = null;
-
-async function guPesquisarEmpregado(q) {
-  const lista = document.getElementById('gu-emp-lista');
-  if (!lista) return;
-  if (!q || q.length < 2) { lista.style.display = 'none'; return; }
-
-  const qLow = q.toLowerCase();
-
-  // Busca em STATE.empregados
-  const emps = (STATE.empregados || STATE.orgEmpregados || []).filter(e =>
-    (e.nome  ||'').toLowerCase().includes(qLow) ||
-    (e.mat   ||'').toLowerCase().includes(qLow) ||
-    (e.email ||'').toLowerCase().includes(qLow) ||
-    (e.login ||'').toLowerCase().includes(qLow)
-  ).slice(0, 8);
-
-  // Também busca no Firestore
-  if (FB_READY && db && emps.length < 3) {
-    try {
-      const snap = await db.collection('empregados')
-        .orderBy('nome').startAt(q).endAt(q + '').limit(5).get();
-      snap.docs.forEach(d => {
-        const e = { id: d.id, ...d.data() };
-        if (!emps.some(x => x.mat === e.mat || x.email === e.email)) emps.push(e);
-      });
-    } catch(_) {}
-  }
-
-  if (!emps.length) {
-    lista.innerHTML = '<div style="padding:12px;font-size:12.5px;color:var(--g400)">Nenhum empregado encontrado</div>';
-    lista.style.display = '';
-    return;
-  }
-
-  lista.innerHTML = emps.map(e => `
-    <div onclick="guSelecionarEmpregado(${JSON.stringify(JSON.stringify(e))})"
-         style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--g100);
-                display:flex;align-items:center;gap:10px"
-         onmouseover="this.style.background='var(--g50)'"
-         onmouseout="this.style.background=''">
-      <div style="width:34px;height:34px;border-radius:50%;background:var(--accent);
-                  color:#fff;display:flex;align-items:center;justify-content:center;
-                  font-weight:700;font-size:13px;flex-shrink:0">
-        ${(e.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase()}
-      </div>
-      <div>
-        <div style="font-weight:600;font-size:13px">${escapeHtml(e.nome||'—')}</div>
-        <div style="font-size:11.5px;color:var(--g400)">
-          Mat. ${escapeHtml(e.mat||'—')} · ${escapeHtml(e.setor||e.lotacao||'—')}
-          ${e.email ? ' · ' + escapeHtml(e.email) : ''}
-        </div>
-      </div>
-    </div>`).join('');
-  lista.style.display = '';
-}
-
-function guSelecionarEmpregado(empJson) {
-  const emp = JSON.parse(empJson);
-  _guEmpSelecionado = emp;
-
-  const lista = document.getElementById('gu-emp-lista');
-  if (lista) lista.style.display = 'none';
-
-  const busca = document.getElementById('gu-busca-emp');
-  if (busca) busca.value = emp.nome || '';
-
-  // Mostra card do empregado
-  const card = document.getElementById('gu-emp-selecionado');
-  if (card) {
-    card.style.display = '';
-    const av = document.getElementById('gu-emp-avatar');
-    const nm = document.getElementById('gu-emp-nome');
-    const info = document.getElementById('gu-emp-info');
-    const ini = (emp.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
-    if (av) av.textContent = ini;
-    if (nm) nm.textContent = emp.nome || '—';
-    if (info) info.textContent = `Mat. ${emp.mat||'—'} · ${emp.setor||emp.lotacao||'—'}${emp.email?' · '+emp.email:''}`;
-  }
-}
-
-function guLimparEmpregado() {
-  _guEmpSelecionado = null;
-  const busca = document.getElementById('gu-busca-emp');
-  if (busca) busca.value = '';
-  const card = document.getElementById('gu-emp-selecionado');
-  if (card) card.style.display = 'none';
-}
-
-async function guSalvarLiberacao() {
-  const emp  = _guEmpSelecionado;
-  const role = document.getElementById('gu-role')?.value;
-
-  if (!emp) return showToast('Pesquise e selecione um empregado', 'danger');
-  if (!role) return showToast('Selecione o perfil de acesso', 'danger');
-
-  // Monta email a partir dos dados do empregado
-  const email = emp.email ||
-    (emp.login ? emp.login + '@cesan.com.br' : '') ||
-    (emp.nome?.toLowerCase().replace(/\s+/g,'.') + '@cesan.com.br');
-
-  const login = emp.login || email.split('@')[0];
-
-  // Permissões especiais
-  const permissions = {};
-  Object.keys(PERM_LABEL).forEach(k => {
-    permissions[k] = document.getElementById(`gu-perm-${k}`)?.checked || false;
-  });
-  // Permissões padrão do role
-  Object.assign(permissions, permissionsForRole(role));
-  // Sobrescreve com especiais marcadas
-  Object.keys(PERM_LABEL).forEach(k => {
-    if (document.getElementById(`gu-perm-${k}`)?.checked) permissions[k] = true;
-  });
-
-  const dados = {
-    nome:        emp.nome || '',
-    email,
-    login,
-    mat:         emp.mat   || '',
-    setor:       emp.setor || emp.lotacao || '',
-    cargo:       emp.cargo || emp.funcao  || '',
-    role,
-    permissions,
-    bloqueado:   false,
-    criadoEm:    new Date(),
-    criadoPor:   CURRENT_USER?.nome || '',
-    fonte:       'ad', // login via AD
-  };
-
-  try {
-    if (FB_READY && db) {
-      // Verifica se já existe
-      const existe = await db.collection('users')
-        .where('email','==', email).limit(1).get();
-      if (!existe.empty) {
-        showToast('Este empregado já tem acesso ao SYSACK', 'warning');
-        document.getElementById('modal-novo-usuario')?.remove();
-        return;
-      }
-      await db.collection('users').add(dados);
-    }
-    showToast(`✅ Acesso liberado para ${emp.nome} — perfil ${ROLE_LABEL[role]?.label}`, 'success', 5000);
-    document.getElementById('modal-novo-usuario')?.remove();
-    _guEmpSelecionado = null;
-    renderUsuarios();
-  } catch(e) {
-    showToast('Erro ao salvar: ' + e.message, 'danger');
-  }
-}
-
-// ── Editar usuário existente ──────────────────────────────────────────────
-function _abrirEditarUsuario(uid) {
-  document.getElementById('modal-novo-usuario')?.remove();
-  const u = null; // será buscado do Firestore abaixo
 
   document.body.insertAdjacentHTML('beforeend', html);
   setTimeout(() => document.getElementById('gu-nome')?.focus(), 100);
@@ -29109,20 +28919,13 @@ async function toggleBloquearUsuario(uid, nome, bloqueadoAtual) {
 
 // ── Acesso Remoto WebRTC ──────────────────────────────────────────────────
 // URL do servidor de sinalização no vservho091
-const WEBRTC_SIGNAL_URL = 'ws://189.84.209.226:3090'; // vservho091 CESAN
+const WEBRTC_SIGNAL_URL = 'ws://vservho091:3090'; // ajustar para IP/DNS externo
 
-// TURN gratuito via Metered.ca (50GB/mês grátis)
-// Cadastro em: https://www.metered.ca/tools/openrelay/
-// Substitua as credenciais pelas geradas no painel Metered
 const WEBRTC_ICE = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    // Metered.ca — TURN gratuito (funciona em 4G com CGNAT)
-    { urls: 'turn:a.relay.metered.ca:80',               username: '2d0defd39b9f9b690a8ae74f', credential: 'sDk0tuZz9mTU9X2' },
-    { urls: 'turn:a.relay.metered.ca:80?transport=tcp', username: '2d0defd39b9f9b690a8ae74f', credential: 'sDk0tuZz9mTU9X2' },
-    { urls: 'turn:a.relay.metered.ca:443',               username: '2d0defd39b9f9b690a8ae74f', credential: 'sDk0tuZz9mTU9X2' },
-    { urls: 'turns:a.relay.metered.ca:443?transport=tcp',username: '2d0defd39b9f9b690a8ae74f', credential: 'sDk0tuZz9mTU9X2' },
+    { urls: 'turn:vservho091:3478', username: 'sysack', credential: 'sysack_turn_2024' },
   ],
 };
 
@@ -29387,514 +29190,5 @@ class SysackWebRTCViewer {
     if (d) d.style.background = cor;
     if (b) b.style.borderBottomColor = cor;
   }
-}
-
-
-// ════════════════════════════════════════════════════════════════════════
-// SYSACK × Microsoft Intune — Integração via Graph API
-// ════════════════════════════════════════════════════════════════════════
-
-// ── Configuração (preencher com dados do Azure AD após registro) ──────────
-const INTUNE_CONFIG = {
-  tenantId:     'TENANT_ID',      // Directory (tenant) ID do Azure AD
-  clientId:     'CLIENT_ID',      // Application (client) ID
-  clientSecret: 'CLIENT_SECRET',  // Client Secret gerado no Azure AD
-  // Após configurar, mude para true
-  enabled: false,
-};
-
-// Cache do token Graph API
-let _intuneToken    = null;
-let _intuneTokenExp = 0;
-
-// Cache dos dados do Intune (evita chamadas repetidas)
-let _intuneDevices  = null;
-let _intuneLastSync = 0;
-const INTUNE_CACHE_MS = 5 * 60 * 1000; // 5 minutos
-
-// ── Obter token OAuth2 do Azure AD ────────────────────────────────────────
-async function intuneGetToken() {
-  if (_intuneToken && Date.now() < _intuneTokenExp) return _intuneToken;
-
-  if (!INTUNE_CONFIG.enabled) {
-    // Modo simulação — retorna token fake para desenvolvimento
-    _intuneToken   = 'SIMULATED_TOKEN';
-    _intuneTokenExp= Date.now() + 3600000;
-    return _intuneToken;
-  }
-
-  try {
-    const resp = await fetch(
-      `https://login.microsoftonline.com/${INTUNE_CONFIG.tenantId}/oauth2/v2.0/token`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type:    'client_credentials',
-          client_id:     INTUNE_CONFIG.clientId,
-          client_secret: INTUNE_CONFIG.clientSecret,
-          scope:         'https://graph.microsoft.com/.default',
-        }),
-      }
-    );
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error_description || 'Token error');
-    _intuneToken    = data.access_token;
-    _intuneTokenExp = Date.now() + (data.expires_in - 60) * 1000;
-    return _intuneToken;
-  } catch(e) {
-    console.error('[Intune] Token error:', e.message);
-    return null;
-  }
-}
-
-// ── Chamada autenticada à Graph API ───────────────────────────────────────
-async function intuneGraph(endpoint, method = 'GET', body = null) {
-  const token = await intuneGetToken();
-  if (!token) throw new Error('Sem token Intune');
-
-  if (!INTUNE_CONFIG.enabled) {
-    // Modo simulação — retorna dados mockados
-    return _intuneMockData(endpoint);
-  }
-
-  const opts = {
-    method,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type':  'application/json',
-    },
-  };
-  if (body) opts.body = JSON.stringify(body);
-
-  const resp = await fetch(`https://graph.microsoft.com/v1.0${endpoint}`, opts);
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error?.message || `HTTP ${resp.status}`);
-  }
-  return resp.json();
-}
-
-// ── Dados simulados para desenvolvimento (antes das credenciais) ──────────
-function _intuneMockData(endpoint) {
-  if (endpoint.includes('/deviceManagement/managedDevices')) {
-    if (endpoint.includes('(')) {
-      // Dispositivo específico
-      const id = endpoint.match(/\('([^']+)'\)/)?.[1] || 'mock-1';
-      return _intuneMockDevice(id);
-    }
-    // Lista de dispositivos
-    return {
-      value: [
-        _intuneMockDevice('mock-1', '27995002162', 'Samsung', 'Galaxy A13', 'Compliant'),
-        _intuneMockDevice('mock-2', '27995004772', 'Samsung', 'Galaxy A13', 'Compliant'),
-        _intuneMockDevice('mock-3', '27995007222', 'Samsung', 'Galaxy A13', 'NonCompliant'),
-        _intuneMockDevice('mock-4', '27995008309', 'Samsung', 'Galaxy A13', 'Compliant'),
-        _intuneMockDevice('mock-5', '27995009965', 'Motorola', 'Moto G54', 'Unknown'),
-      ]
-    };
-  }
-  return {};
-}
-
-function _intuneMockDevice(id, phone = '', brand = 'Samsung', model = 'Galaxy A13', compliance = 'Compliant') {
-  const compliances = { Compliant: 'Compliant', NonCompliant: 'NonCompliant', Unknown: 'Unknown' };
-  return {
-    id,
-    deviceName:              `${brand}-${id.slice(-4)}`,
-    managedDeviceOwnerType:  'company',
-    operatingSystem:         'Android',
-    osVersion:               '14.0',
-    complianceState:         compliance,
-    lastSyncDateTime:        new Date(Date.now() - Math.random() * 7200000).toISOString(),
-    enrolledDateTime:        '2026-01-15T08:00:00Z',
-    manufacturer:            brand,
-    model,
-    serialNumber:            `RX8T${Math.random().toString(36).slice(2,10).toUpperCase()}`,
-    imei:                    `3576517136${Math.floor(Math.random()*99999).toString().padStart(5,'0')}`,
-    phoneNumber:             phone || `2799${Math.floor(Math.random()*9999999).toString().padStart(7,'0')}`,
-    userDisplayName:         'Empregado CESAN',
-    userPrincipalName:       'empregado@cesan.com.br',
-    batteryHealthPercentage: Math.floor(70 + Math.random() * 30),
-    totalStorageSpaceInBytes: 64 * 1024 * 1024 * 1024,
-    freeStorageSpaceInBytes:  Math.floor(10 + Math.random() * 30) * 1024 * 1024 * 1024,
-    isEncrypted:             true,
-    isSupervised:            false,
-    jailBroken:              'Unknown',
-    androidSecurityPatchLevel: '2026-02-01',
-  };
-}
-
-// ── Busca todos os dispositivos do Intune ─────────────────────────────────
-async function intuneListarDispositivos() {
-  // Usa cache
-  if (_intuneDevices && Date.now() - _intuneLastSync < INTUNE_CACHE_MS) {
-    return _intuneDevices;
-  }
-  try {
-    const data = await intuneGraph(
-      '/deviceManagement/managedDevices?$select=id,deviceName,operatingSystem,osVersion,' +
-      'complianceState,lastSyncDateTime,manufacturer,model,serialNumber,imei,phoneNumber,' +
-      'userDisplayName,batteryHealthPercentage,totalStorageSpaceInBytes,freeStorageSpaceInBytes,' +
-      'isEncrypted,jailBroken,androidSecurityPatchLevel,enrolledDateTime,managedDeviceOwnerType'
-    );
-    _intuneDevices  = data.value || [];
-    _intuneLastSync = Date.now();
-    console.log(`[Intune] ${_intuneDevices.length} dispositivos sincronizados`);
-    return _intuneDevices;
-  } catch(e) {
-    console.warn('[Intune] Erro ao listar:', e.message);
-    return [];
-  }
-}
-
-// ── Busca dados de um dispositivo pelo IMEI ou telefone ───────────────────
-async function intuneDispositivoPorIMEI(imei) {
-  try {
-    const data = await intuneGraph(
-      `/deviceManagement/managedDevices?$filter=imei eq '${imei}'`
-    );
-    return data.value?.[0] || null;
-  } catch { return null; }
-}
-
-// ── Ações remotas via Intune ──────────────────────────────────────────────
-async function intuneAcao(deviceId, acao, params = {}) {
-  const ACOES = {
-    wipe:            { endpoint: '/wipe',             body: { keepEnrollmentData: false, keepUserData: false } },
-    lock:            { endpoint: '/remoteLock',       body: {} },
-    sync:            { endpoint: '/syncDevice',       body: {} },
-    reboot:          { endpoint: '/rebootNow',        body: {} },
-    localize:        { endpoint: '/locateDevice',     body: {} },
-    resetSenha:      { endpoint: '/resetPasscode',    body: {} },
-    retirarIntune:   { endpoint: '/retire',           body: {} },
-  };
-
-  const cfg = ACOES[acao];
-  if (!cfg) throw new Error(`Ação desconhecida: ${acao}`);
-
-  if (!INTUNE_CONFIG.enabled) {
-    showToast(`[SIMULAÇÃO] Ação "${acao}" enviada ao dispositivo`, 'info', 3000);
-    return { status: 'simulated' };
-  }
-
-  await intuneGraph(
-    `/deviceManagement/managedDevices('${deviceId}')${cfg.endpoint}`,
-    'POST',
-    { ...cfg.body, ...params }
-  );
-  showToast(`✅ Ação "${acao}" enviada com sucesso via Intune`, 'success');
-}
-
-// ── Painel unificado: SYSACK + Intune ─────────────────────────────────────
-async function abrirPainelUnificado(smId) {
-  const sm = (STATE.smartphones || []).find(s => s.id === smId);
-  if (!sm) return;
-
-  document.getElementById('modal-painel-unificado')?.remove();
-
-  // Mostra modal com loading
-  const loadingHtml = `
-  <div class="modal-overlay open" id="modal-painel-unificado" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:860px">
-      <div class="modal-header" style="background:#0F172A;border-radius:10px 10px 0 0">
-        <div>
-          <h3 style="color:#F1F5F9">📱 ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'')} — Painel Unificado</h3>
-          <div style="font-size:11px;color:#64748B">Patrimônio ${escapeHtml(sm.pat||'—')} · SYSACK + Microsoft Intune</div>
-        </div>
-        <button class="close-btn" style="color:rgba(255,255,255,.5)" onclick="document.getElementById('modal-painel-unificado').remove()">✕</button>
-      </div>
-      <div class="modal-body" id="painel-unificado-body" style="padding:24px;text-align:center">
-        <div style="font-size:32px;margin-bottom:12px">⏳</div>
-        <div style="color:var(--g500)">Buscando dados do Intune...</div>
-      </div>
-    </div>
-  </div>`;
-
-  document.body.insertAdjacentHTML('beforeend', loadingHtml);
-
-  // Busca dados do Intune em paralelo
-  const [intuneDevice, faturas, chamados] = await Promise.all([
-    intuneDispositivoPorIMEI(sm.imei1 || sm.imei2 || '').catch(() => null),
-    _buscarFaturasDispositivo(sm.linha || '').catch(() => []),
-    _buscarChamadosDispositivo(smId).catch(() => []),
-  ]);
-
-  const body = document.getElementById('painel-unificado-body');
-  if (!body) return;
-
-  // Compliance badge
-  const compBadge = intuneDevice ? {
-    Compliant:    '<span style="background:#DCFCE7;color:#15803D;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">✅ Compliant</span>',
-    NonCompliant: '<span style="background:#FEE2E2;color:#DC2626;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">❌ Não conforme</span>',
-    Unknown:      '<span style="background:#F1F5F9;color:#64748B;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">⚪ Desconhecido</span>',
-  }[intuneDevice.complianceState] || '' : '<span style="background:#FEF3C7;color:#D97706;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">⚠️ Não no Intune</span>';
-
-  // Storage
-  const storPct = intuneDevice ? Math.round((1 - intuneDevice.freeStorageSpaceInBytes/intuneDevice.totalStorageSpaceInBytes)*100) : null;
-  const storGB  = intuneDevice ? (intuneDevice.freeStorageSpaceInBytes/1024/1024/1024).toFixed(1) : null;
-  const storTot = intuneDevice ? (intuneDevice.totalStorageSpaceInBytes/1024/1024/1024).toFixed(0) : null;
-
-  // Última sync
-  const lastSync = intuneDevice?.lastSyncDateTime
-    ? _tempoAtras(new Date(intuneDevice.lastSyncDateTime))
-    : '—';
-
-  // Total fatura mês atual
-  const totalFatura = faturas.reduce((s,f) => s + (f.valor||0), 0);
-
-  body.innerHTML = `
-    <!-- TABS -->
-    <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--g100);padding-bottom:0">
-      ${['📋 Patrimônio','📱 Intune','📞 Telecom','🎫 Chamados','📜 Histórico'].map((t,i) =>
-        `<button onclick="painelTab(${i})" id="ptab-${i}"
-          style="padding:8px 14px;border:none;background:${i===0?'var(--accent)':'transparent'};
-                 color:${i===0?'#fff':'var(--g500)'};border-radius:8px 8px 0 0;cursor:pointer;
-                 font-size:12.5px;font-weight:${i===0?'700':'400'}">${t}</button>`
-      ).join('')}
-    </div>
-
-    <!-- TAB 0: PATRIMÔNIO -->
-    <div id="ptab-content-0">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <div>
-          <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:12px">Dados patrimoniais</div>
-          ${[
-            ['Patrimônio', sm.pat||'—'],
-            ['Marca/Modelo', `${sm.marca||''} ${sm.modelo||''}`],
-            ['IMEI 1', sm.imei1||'—'],
-            ['IMEI 2', sm.imei2||'—'],
-            ['Número de série', sm.serialNumber||intuneDevice?.serialNumber||'—'],
-            ['Status', sm.status||'—'],
-            ['Data cadastro', sm.dataCadastro ? new Date(sm.dataCadastro?.seconds?sm.dataCadastro.seconds*1000:sm.dataCadastro).toLocaleDateString('pt-BR') : '—'],
-          ].map(([k,v]) => `
-            <div style="display:flex;justify-content:space-between;padding:6px 0;
-                        border-bottom:1px solid var(--g50);font-size:12.5px">
-              <span style="color:var(--g500)">${escapeHtml(k)}</span>
-              <span style="font-weight:600;font-family:monospace">${escapeHtml(String(v))}</span>
-            </div>`).join('')}
-        </div>
-        <div>
-          <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:12px">Responsável atual</div>
-          ${[
-            ['Empregado', sm.empNome||'—'],
-            ['Matrícula', sm.empMat||'—'],
-            ['Setor', sm.setor||'—'],
-            ['Data entrega', sm.dataEntrega ? new Date(sm.dataEntrega?.seconds?sm.dataEntrega.seconds*1000:sm.dataEntrega).toLocaleDateString('pt-BR') : '—'],
-            ['Linha Vivo', sm.linha||'—'],
-            ['Plano', sm.tipoPlano||'—'],
-          ].map(([k,v]) => `
-            <div style="display:flex;justify-content:space-between;padding:6px 0;
-                        border-bottom:1px solid var(--g50);font-size:12.5px">
-              <span style="color:var(--g500)">${escapeHtml(k)}</span>
-              <span style="font-weight:600">${escapeHtml(String(v))}</span>
-            </div>`).join('')}
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 1: INTUNE -->
-    <div id="ptab-content-1" style="display:none">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-        ${compBadge}
-        ${intuneDevice ? `<span style="font-size:12px;color:var(--g400)">Última sync: ${lastSync}</span>` : ''}
-        ${!INTUNE_CONFIG.enabled ? '<span style="font-size:11px;background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:8px">Modo simulação — configure as credenciais Azure AD</span>' : ''}
-      </div>
-
-      ${intuneDevice ? `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-        <!-- Dispositivo -->
-        <div>
-          <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:12px">Dispositivo</div>
-          ${[
-            ['Sistema', `${intuneDevice.operatingSystem} ${intuneDevice.osVersion}`],
-            ['Patch segurança', intuneDevice.androidSecurityPatchLevel||'—'],
-            ['Criptografado', intuneDevice.isEncrypted ? '✅ Sim' : '❌ Não'],
-            ['Jailbreak/Root', intuneDevice.jailBroken === 'Unknown' ? '⚪ Desconhecido' : intuneDevice.jailBroken === 'True' ? '❌ Detectado' : '✅ Não'],
-            ['Inscrito em', new Date(intuneDevice.enrolledDateTime).toLocaleDateString('pt-BR')],
-          ].map(([k,v]) => `
-            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--g50);font-size:12.5px">
-              <span style="color:var(--g500)">${k}</span>
-              <span style="font-weight:600">${v}</span>
-            </div>`).join('')}
-        </div>
-        <!-- Hardware -->
-        <div>
-          <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:12px">Hardware</div>
-          <!-- Bateria -->
-          <div style="margin-bottom:12px">
-            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-              <span style="color:var(--g500)">Bateria</span>
-              <span style="font-weight:700;color:${(intuneDevice.batteryHealthPercentage||0)<20?'#DC2626':(intuneDevice.batteryHealthPercentage||0)<50?'#D97706':'#16A34A'}">${intuneDevice.batteryHealthPercentage||0}%</span>
-            </div>
-            <div style="background:var(--g100);border-radius:4px;height:6px">
-              <div style="background:${(intuneDevice.batteryHealthPercentage||0)<20?'#DC2626':(intuneDevice.batteryHealthPercentage||0)<50?'#D97706':'#16A34A'};height:6px;border-radius:4px;width:${intuneDevice.batteryHealthPercentage||0}%"></div>
-            </div>
-          </div>
-          <!-- Armazenamento -->
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-              <span style="color:var(--g500)">Armazenamento</span>
-              <span style="font-weight:700;color:${storPct>85?'#DC2626':storPct>70?'#D97706':'#16A34A'}">${storGB}GB livre / ${storTot}GB</span>
-            </div>
-            <div style="background:var(--g100);border-radius:4px;height:6px">
-              <div style="background:${storPct>85?'#DC2626':storPct>70?'#D97706':'#16A34A'};height:6px;border-radius:4px;width:${storPct}%"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Ações remotas -->
-      <div style="background:var(--g50);border-radius:10px;padding:14px">
-        <div style="font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;margin-bottom:10px">Ações remotas via Intune</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button onclick="intuneAcaoConfirmar('${escapeHtml(intuneDevice.id)}','sync','${escapeHtml(sm.modelo||'')}','Sincronizar agora')"
-                  style="background:#2563EB;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px">
-            🔄 Sincronizar
-          </button>
-          <button onclick="intuneAcaoConfirmar('${escapeHtml(intuneDevice.id)}','lock','${escapeHtml(sm.modelo||'')}','Bloquear tela remotamente')"
-                  style="background:#7C3AED;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px">
-            🔒 Bloquear tela
-          </button>
-          <button onclick="intuneAcaoConfirmar('${escapeHtml(intuneDevice.id)}','resetSenha','${escapeHtml(sm.modelo||'')}','Resetar senha/PIN')"
-                  style="background:#0891B2;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px">
-            🔑 Resetar senha
-          </button>
-          <button onclick="intuneAcaoConfirmar('${escapeHtml(intuneDevice.id)}','reboot','${escapeHtml(sm.modelo||'')}','Reiniciar dispositivo')"
-                  style="background:#D97706;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px">
-            🔁 Reiniciar
-          </button>
-          <button onclick="intuneAcaoConfirmar('${escapeHtml(intuneDevice.id)}','wipe','${escapeHtml(sm.modelo||'')}','APAGAR TODOS OS DADOS — irreversível!')"
-                  style="background:#EF4444;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px">
-            🗑️ Wipe
-          </button>
-        </div>
-      </div>` : `
-      <div style="text-align:center;padding:32px;background:var(--g50);border-radius:12px">
-        <div style="font-size:48px;margin-bottom:12px">📵</div>
-        <div style="font-weight:700;color:var(--g700)">Dispositivo não encontrado no Intune</div>
-        <div style="font-size:13px;color:var(--g400);margin-top:6px">
-          IMEI ${escapeHtml(sm.imei1||'—')} não está inscrito no Microsoft Intune.<br>
-          Após julho, realize a inscrição via Empresa Portal.
-        </div>
-      </div>`}
-    </div>
-
-    <!-- TAB 2: TELECOM -->
-    <div id="ptab-content-2" style="display:none">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-        <div style="background:var(--g50);border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:22px;font-weight:800;color:var(--accent)">R$ ${totalFatura.toLocaleString('pt-BR',{minimumFractionDigits:2})}</div>
-          <div style="font-size:11px;color:var(--g400)">Total faturado (últimos meses)</div>
-        </div>
-        <div style="background:var(--g50);border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:22px;font-weight:800;color:var(--g700)">${escapeHtml(sm.linha||'—')}</div>
-          <div style="font-size:11px;color:var(--g400)">Linha Vivo</div>
-        </div>
-      </div>
-      ${faturas.length ? `
-      <table class="data-table" style="font-size:12px">
-        <thead><tr><th>Competência</th><th>Plano</th><th style="text-align:right">Valor</th><th>Status</th></tr></thead>
-        <tbody>
-          ${faturas.map(f => `<tr>
-            <td>${escapeHtml(f.competencia||'—')}</td>
-            <td>${escapeHtml(f.plano||'—')}</td>
-            <td style="text-align:right;font-family:monospace;font-weight:700">R$ ${(f.valor||0).toFixed(2)}</td>
-            <td>${f.alerta ? '<span style="color:#DC2626;font-weight:700">⚠️ Alerta</span>' : '<span style="color:#16A34A">✅ OK</span>'}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>` : `<div style="text-align:center;padding:24px;color:var(--g400)">Nenhuma fatura importada para esta linha</div>`}
-    </div>
-
-    <!-- TAB 3: CHAMADOS -->
-    <div id="ptab-content-3" style="display:none">
-      ${chamados.length ? `
-      <table class="data-table" style="font-size:12px">
-        <thead><tr><th>#</th><th>Título</th><th>Status</th><th>Aberto em</th></tr></thead>
-        <tbody>
-          ${chamados.slice(0,10).map(c => `<tr>
-            <td style="font-family:monospace;color:var(--accent)">${c.id?.slice(-6)||'—'}</td>
-            <td>${escapeHtml(c.titulo||c.descricao||'—')}</td>
-            <td><span style="font-size:11px;background:${c.status==='aberto'?'#DBEAFE':c.status==='resolvido'?'#DCFCE7':'#F1F5F9'};
-                color:${c.status==='aberto'?'#1E40AF':c.status==='resolvido'?'#15803D':'#475569'};
-                padding:2px 8px;border-radius:10px">${c.status||'—'}</span></td>
-            <td style="font-size:11px;color:var(--g400)">${c.criadoEm ? new Date(c.criadoEm?.seconds?c.criadoEm.seconds*1000:c.criadoEm).toLocaleDateString('pt-BR') : '—'}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>` : `<div style="text-align:center;padding:24px;color:var(--g400)">Nenhum chamado vinculado a este dispositivo</div>`}
-    </div>
-
-    <!-- TAB 4: HISTÓRICO -->
-    <div id="ptab-content-4" style="display:none">
-      <div style="text-align:center;padding:24px;color:var(--g400)">
-        Histórico de movimentações e eventos do dispositivo será exibido aqui.<br>
-        <span style="font-size:11px">Trocas de empregado, manutenções, incidentes, wipes.</span>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="document.getElementById('modal-painel-unificado').remove()">Fechar</button>
-      <button class="btn btn-secondary btn-sm" onclick="editarSmartphone('${escapeHtml(smId)}')">✏️ Editar</button>
-    </div>`;
-
-  // Ativa tab 0
-  painelTab(0);
-}
-
-// ── Troca de aba no painel ────────────────────────────────────────────────
-function painelTab(idx) {
-  for (let i = 0; i < 5; i++) {
-    const content = document.getElementById(`ptab-content-${i}`);
-    const btn     = document.getElementById(`ptab-${i}`);
-    if (content) content.style.display = i === idx ? '' : 'none';
-    if (btn) {
-      btn.style.background = i === idx ? 'var(--accent)' : 'transparent';
-      btn.style.color      = i === idx ? '#fff' : 'var(--g500)';
-      btn.style.fontWeight = i === idx ? '700' : '400';
-    }
-  }
-}
-
-// ── Confirmação de ação remota ────────────────────────────────────────────
-async function intuneAcaoConfirmar(deviceId, acao, modelo, descricao) {
-  const critico = acao === 'wipe';
-  const msg = critico
-    ? `⚠️ ATENÇÃO: "${descricao}"\n\nEsta ação é IRREVERSÍVEL. Todos os dados do ${modelo} serão apagados.\n\nConfirma?`
-    : `Confirma: "${descricao}" no dispositivo ${modelo}?`;
-  if (!confirm(msg)) return;
-  try {
-    await intuneAcao(deviceId, acao);
-  } catch(e) {
-    showToast('Erro: ' + e.message, 'danger');
-  }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-function _tempoAtras(date) {
-  const diff = Date.now() - date.getTime();
-  const min  = Math.floor(diff / 60000);
-  if (min < 60) return `há ${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `há ${h}h`;
-  return `há ${Math.floor(h/24)} dias`;
-}
-
-async function _buscarFaturasDispositivo(linha) {
-  if (!linha || !FB_READY || !db) return [];
-  try {
-    const snaps = await db.collectionGroup('linhas')
-      .where('numero', '==', linha).limit(10).get();
-    return snaps.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch { return []; }
-}
-
-async function _buscarChamadosDispositivo(smId) {
-  if (!smId || !FB_READY || !db) return [];
-  try {
-    const snap = await db.collection('chamados')
-      .where('ativoId', '==', smId).orderBy('criadoEm', 'desc').limit(10).get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch { return []; }
 }
 
