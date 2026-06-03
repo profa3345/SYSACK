@@ -5504,12 +5504,20 @@ function gerarTermoSm(id) {
               ✍️ Assine aqui
             </div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:space-between;align-items:center">
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:space-between;align-items:center;flex-wrap:wrap">
             <div style="font-size:11px;color:var(--g400)">Use o dedo (touch) ou o mouse para assinar</div>
-            <div style="display:flex;gap:8px">
+            <div style="display:flex;gap:8px;align-items:center">
+              <button id="termo-btn-travar" class="btn btn-ghost btn-sm" onclick="_termoTravarCanvas()"
+                title="Trava a tela para não rolar enquanto assina — útil no celular"
+                style="background:#FEF3C7;color:#92400E;border:1px solid #FCD34D">
+                🔒 Travar tela
+              </button>
               <button class="btn btn-ghost btn-sm" onclick="_termoLimparCanvas()">🗑 Limpar</button>
               <button class="btn btn-primary btn-sm" onclick="_termoSalvarAssinatura('${sm.id}')">💾 Salvar Assinatura</button>
             </div>
+          </div>
+          <div id="termo-trava-aviso" style="display:none;margin-top:6px;padding:6px 12px;background:#FEF3C7;border-radius:6px;font-size:11.5px;color:#92400E;text-align:center">
+            🔒 Tela travada — scroll e zoom desativados. Toque em <strong>Destravar</strong> para sair.
           </div>
 
           <!-- Upload de assinatura como imagem -->
@@ -5647,6 +5655,63 @@ function _termoLimparCanvas() {
   const hint = document.getElementById('termo-canvas-hint');
   if (hint) hint.style.display = '';
 }
+
+// Trava/Destrava scroll e zoom da página para facilitar assinatura no celular
+let _termoTravado = false;
+function _termoTravarCanvas() {
+  _termoTravado = !_termoTravado;
+  const btn    = document.getElementById('termo-btn-travar');
+  const aviso  = document.getElementById('termo-trava-aviso');
+  const canvas = document.getElementById('termo-canvas');
+
+  if (_termoTravado) {
+    // Desativa scroll e zoom do viewport
+    document.body.style.overflow    = 'hidden';
+    document.body.style.touchAction = 'none';
+    // Meta viewport — impede pinch-to-zoom
+    let metaVp = document.querySelector('meta[name="viewport"]');
+    if (metaVp) {
+      metaVp._backupContent = metaVp.content;
+      metaVp.content = 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no';
+    }
+    if (btn) {
+      btn.textContent = '🔓 Destravar';
+      btn.style.background     = '#FEE2E2';
+      btn.style.color          = '#991B1B';
+      btn.style.borderColor    = '#FCA5A5';
+    }
+    if (aviso)  aviso.style.display  = '';
+    if (canvas) canvas.style.border  = '3px solid #F59E0B';
+  } else {
+    // Restaura scroll normal
+    document.body.style.overflow    = '';
+    document.body.style.touchAction = '';
+    let metaVp = document.querySelector('meta[name="viewport"]');
+    if (metaVp && metaVp._backupContent) {
+      metaVp.content = metaVp._backupContent;
+    }
+    if (btn) {
+      btn.textContent          = '🔒 Travar tela';
+      btn.style.background     = '#FEF3C7';
+      btn.style.color          = '#92400E';
+      btn.style.borderColor    = '#FCD34D';
+    }
+    if (aviso)  aviso.style.display  = 'none';
+    if (canvas) canvas.style.border  = '';
+  }
+}
+
+// Garante destravar ao fechar o modal
+(function() {
+  const _origRemove = Element.prototype.remove;
+  // Destravar quando o modal-termo-sm for removido
+  document.addEventListener('click', function(e) {
+    if (e.target?.classList?.contains('close-btn') && _termoTravado) {
+      _termoTravado = true; // força destravar
+      _termoTravarCanvas();
+    }
+  }, true);
+})();
 
 function _termoCanvasVazio() {
   const canvas = document.getElementById('termo-canvas');
