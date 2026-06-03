@@ -1048,6 +1048,19 @@ function startProtectedListeners(snap2arr, norm) {
 
 // ── FIRESTORE WRITE HELPERS ───────────────────────────────────
 // ── FIRESTORE AUDIT LOG PERSIST (modular) ────────────────────
+// ── Filtra erros permission-denied do Firestore (login local sem UID real) ──
+(function() {
+  var _ce = console.error.bind(console);
+  var _cw = console.warn.bind(console);
+  function _isPerm(args) {
+    return Array.from(args).some(function(a){
+      return typeof a === 'string' && (a.includes('permission-denied') || a.includes('Missing or insufficient permissions'));
+    });
+  }
+  console.error = function() { if (!_isPerm(arguments)) _ce.apply(console, arguments); };
+  console.warn  = function() { if (!_isPerm(arguments)) _cw.apply(console, arguments); };
+})();
+
 const _origAuditLog = window.auditLog;
 window.auditLog = function(action, module, resourceId, resourceType, details = {}) {
   const entry = typeof auditLog_local === 'function'
@@ -1060,7 +1073,7 @@ window.auditLog = function(action, module, resourceId, resourceType, details = {
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
       createdAt: serverTimestamp(),
-    }).catch(e => console.warn('[Banco] audit_log:', e.message));
+    }).catch(e => { if((e.code||'')!=='permission-denied') console.warn('[Banco] audit_log:', e.message); });
   }
   return entry;
 };
@@ -1289,7 +1302,7 @@ function renderAtivos() {
   if (thead) {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
-      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Responsável</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
+      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
       ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
@@ -1299,13 +1312,19 @@ function renderAtivos() {
   const isImpressoraTab = tipos.length > 0 && tipos.some(t =>
     ['impressora','printer'].includes(t.toLowerCase())
   );
+  const _TIPOS_IMP = ['impressora','printer','print','jetdirect','laserjet','inkjet'];
   const fonteDados = isImpressoraTab
     ? [...(STATE.impressorasDisc || []).map(imp => ({
         ...imp,
         tipo: imp.tipo || 'Impressora',
         desc: imp.desc || imp.modelo || imp.nome || imp.ip || '',
         area: imp.area || imp.setor || '',
-      }))]
+      }))].filter(imp => {
+          const t = (imp.tipo||'').toLowerCase();
+          const d = (imp.desc||'').toLowerCase();
+          return _TIPOS_IMP.some(k => t.includes(k)) ||
+                 d.includes('jetdirect') || d.includes('eeprom') || d.includes('cidate');
+        })
     : (STATE.ativos || []);
 
   const lista = fonteDados.filter(a => {
@@ -1342,15 +1361,7 @@ function renderAtivos() {
       }</td>
       <td><span class="tag">${a.tipo||'—'}</span></td>`}
       <td>${a.area||'—'}</td>
-      <td>${(()=>{
-        if (a.resp) return a.resp;
-        // Tenta pegar usuário logado do agente
-        const ag = (STATE_AGENTS?.list||[]).find(x =>
-          (a.ip && x.ip === a.ip) ||
-          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
-        );
-        return ag?.usuarioLogado ? '<span style="color:var(--g500);font-size:11px">'+escapeHtml(ag.usuarioLogado)+'</span>' : '—';
-      })()}</td>
+
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="text-align:center">${(()=>{
         const _ag = (STATE_AGENTS?.list||[]).find(x =>
@@ -21590,6 +21601,49 @@ var _origOnLogin = typeof onLogin === 'function' ? onLogin : null;
 // ── Mapa de redes da CESAN ───────────────────────────────────────
 const REDES_PREFIX = {
   '172.22.10': {sigla:'coc',nome:'Centro Operativo de Carapina'},
+  '172.22.22': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.22.23': {sigla:'vit',nome:'Escritório Central (Bemge)'},
+  '172.22.26': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.22.28': {sigla:'agu',nome:'Muquiçaba Atendimento'},
+  '172.22.30': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.22.32': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.22.34': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.22.36': {sigla:'pbv',nome:'Polo Boa Vista'},
+  '172.22.44': {sigla:'ves',nome:'Vale Esperança'},
+  '172.22.46': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.22.48': {sigla:'gua',nome:'Guarapari'},
+  '172.22.50': {sigla:'cas',nome:'Castelo'},
+  '172.22.52': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.22.54': {sigla:'nve',nome:'Nova Venécia'},
+  '172.22.56': {sigla:'ste',nome:'Santa Teresa'},
+  '172.22.58': {sigla:'cba',nome:'Conceição da Barra'},
+  '172.22.60': {sigla:'pma',nome:'Piúma'},
+  '172.22.62': {sigla:'atv',nome:'Pólo Atílio Vivácqua'},
+  '172.22.64': {sigla:'nve',nome:'Escritório Nova Venécia (atendimento)'},
+  '172.22.66': {sigla:'drp',nome:'Escritório Dores do Rio Preto'},
+  '172.22.68': {sigla:'mfl',nome:'Marechal Floriano'},
+  '172.22.70': {sigla:'mfl',nome:'Escritório Marechal Floriano'},
+  '172.22.72': {sigla:'dmt',nome:'Domingos Martins'},
+  '172.22.73': {sigla:'src',nome:'Escritório São Roque do Canaã'},
+  '172.22.74': {sigla:'fun',nome:'Fundão'},
+  '172.22.76': {sigla:'dsl',nome:'Escritório Divino São Lourenço'},
+  '172.22.78': {sigla:'anc',nome:'ETA Ubú'},
+  '172.22.79': {sigla:'anc',nome:'ETE Ubú'},
+  '172.22.80': {sigla:'afc',nome:'Afonso Claudio'},
+  '172.22.82': {sigla:'vnv',nome:'Venda Nova do Imigrante'},
+  '172.22.84': {sigla:'sgp',nome:'São Gabriel da Palha'},
+  '172.22.86': {sigla:'eco',nome:'Ecoporanga'},
+  '172.22.87': {sigla:'pcn',nome:'Escritório de Pedro Canário'},
+  '172.22.88': {sigla:'pcn',nome:'Pedro Canário'},
+  '172.22.89': {sigla:'mtn',nome:'Escritório de Montanha'},
+  '172.22.90': {sigla:'mtn',nome:'Montanha'},
+  '172.22.91': {sigla:'pnh',nome:'Escritório Pinheiros'},
+  '172.22.92': {sigla:'pnh',nome:'Pinheiros'},
+  '172.22.93': {sigla:'pnh',nome:'ETA Pinheiros'},
+  '172.22.94': {sigla:'bjn',nome:'Bom Jesus do Norte'},
+  '172.22.95': {sigla:'bjn',nome:'Escritório de Bom Jesus do Norte'},
+  '172.22.96': {sigla:'pma',nome:'Piúma'},
+  '172.22.98': {sigla:'scl',nome:'Santa Clara'},
   '172.22.100': {sigla:'acb',nome:'Águia Branca'},
   '172.22.101': {sigla:'pnc',nome:'Pancas'},
   '172.22.102': {sigla:'pnc',nome:'ETA Pancas'},
@@ -21667,14 +21721,12 @@ const REDES_PREFIX = {
   '172.22.214': {sigla:'tmb',nome:'ETA Timbuí'},
   '172.22.216': {sigla:'vni',nome:'ETA Venda Nova do Imigrante'},
   '172.22.218': {sigla:'smj',nome:'ETA Santa Maria de Jetiba'},
-  '172.22.22': {sigla:'vit',nome:'Escritório Central (Bemge)'},
   '172.22.220': {sigla:'irp',nome:'Escritório Irupi'},
   '172.22.222': {sigla:'adn',nome:'Água Doce do Norte'},
   '172.22.223': {sigla:'adn',nome:'ETA Água Doce do Norte'},
   '172.22.224': {sigla:'erm',nome:'ETA Reis Magos'},
   '172.22.226': {sigla:'vpv',nome:'Escritório Vila Pavão'},
   '172.22.228': {sigla:'src',nome:'ETE Manguinhos'},
-  '172.22.23': {sigla:'vit',nome:'Escritório Central (Bemge)'},
   '172.22.230': {sigla:'ara',nome:'ETE Araças'},
   '172.22.232': {sigla:'brj',nome:'Escritório Brejetuba'},
   '172.22.234': {sigla:'ljt',nome:'Escritório Laranja da Terra'},
@@ -21689,101 +21741,13 @@ const REDES_PREFIX = {
   '172.22.250': {sigla:'sgp',nome:'ETA São Gabriel da Palha'},
   '172.22.252': {sigla:'vlv',nome:'Vila Valério'},
   '172.22.253': {sigla:'vlv',nome:'ETA Vila Valério'},
-  '172.22.26': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.22.28': {sigla:'agu',nome:'Muquiçaba Atendimento'},
-  '172.22.30': {sigla:'alj',nome:'Atendimento Laranjeiras'},
-  '172.22.32': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.22.34': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.22.36': {sigla:'pbv',nome:'Polo Boa Vista'},
-  '172.22.44': {sigla:'ves',nome:'Vale Esperança'},
-  '172.22.46': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.22.48': {sigla:'gua',nome:'Guarapari'},
-  '172.22.50': {sigla:'cas',nome:'Castelo'},
-  '172.22.52': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.22.54': {sigla:'nve',nome:'Nova Venécia'},
-  '172.22.56': {sigla:'ste',nome:'Santa Teresa'},
-  '172.22.58': {sigla:'cba',nome:'Conceição da Barra'},
-  '172.22.60': {sigla:'pma',nome:'Piúma'},
-  '172.22.62': {sigla:'atv',nome:'Pólo Atílio Vivácqua'},
-  '172.22.64': {sigla:'nve',nome:'Escritório Nova Venécia (atendimento)'},
-  '172.22.66': {sigla:'drp',nome:'Escritório Dores do Rio Preto'},
-  '172.22.68': {sigla:'mfl',nome:'Marechal Floriano'},
-  '172.22.70': {sigla:'mfl',nome:'Escritório Marechal Floriano'},
-  '172.22.72': {sigla:'dmt',nome:'Domingos Martins'},
-  '172.22.73': {sigla:'src',nome:'Escritório São Roque do Canaã'},
-  '172.22.74': {sigla:'fun',nome:'Fundão'},
-  '172.22.76': {sigla:'dsl',nome:'Escritório Divino São Lourenço'},
-  '172.22.78': {sigla:'anc',nome:'ETA Ubú'},
-  '172.22.79': {sigla:'anc',nome:'ETE Ubú'},
-  '172.22.80': {sigla:'afc',nome:'Afonso Claudio'},
-  '172.22.82': {sigla:'vnv',nome:'Venda Nova do Imigrante'},
-  '172.22.84': {sigla:'sgp',nome:'São Gabriel da Palha'},
-  '172.22.86': {sigla:'eco',nome:'Ecoporanga'},
-  '172.22.87': {sigla:'pcn',nome:'Escritório de Pedro Canário'},
-  '172.22.88': {sigla:'pcn',nome:'Pedro Canário'},
-  '172.22.89': {sigla:'mtn',nome:'Escritório de Montanha'},
-  '172.22.90': {sigla:'mtn',nome:'Montanha'},
-  '172.22.91': {sigla:'pnh',nome:'Escritório Pinheiros'},
-  '172.22.92': {sigla:'pnh',nome:'Pinheiros'},
-  '172.22.93': {sigla:'pnh',nome:'ETA Pinheiros'},
-  '172.22.94': {sigla:'bjn',nome:'Bom Jesus do Norte'},
-  '172.22.95': {sigla:'bjn',nome:'Escritório de Bom Jesus do Norte'},
-  '172.22.96': {sigla:'pma',nome:'Piúma'},
-  '172.22.98': {sigla:'scl',nome:'Santa Clara'},
   '172.23.10': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.104': {sigla:'alj',nome:'Atendimento Laranjeiras'},
-  '172.23.105': {sigla:'alj',nome:'Atendimento Laranjeiras'},
-  '172.23.106': {sigla:'alj',nome:'Atendimento Laranjeiras'},
   '172.23.11': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.112': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.23.113': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.23.114': {sigla:'avv',nome:'Atendimento Vila Velha'},
-  '172.23.116': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.23.117': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.23.118': {sigla:'slu',nome:'Santa Lúcia'},
-  '172.23.119': {sigla:'slu',nome:'Santa Lúcia'},
   '172.23.12': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.120': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.121': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.122': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.123': {sigla:'ejc',nome:'ETE Camburi'},
-  '172.23.124': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.125': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.126': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.127': {sigla:'ecb',nome:'ETA Cobi'},
-  '172.23.128': {sigla:'pbv',nome:'Pólo Boa Vista'},
-  '172.23.129': {sigla:'pbv',nome:'Pólo Boa Vista'},
   '172.23.13': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.130': {sigla:'pbv',nome:'Pólo Boa Vista'},
-  '172.23.131': {sigla:'pbv',nome:'Pólo Boa Vista'},
-  '172.23.132': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.133': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.134': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.135': {sigla:'ves',nome:'Vale Esperança'},
-  '172.23.136': {sigla:'gua',nome:'Guarapari'},
-  '172.23.137': {sigla:'gua',nome:'Guarapari'},
-  '172.23.138': {sigla:'gua',nome:'Guarapari'},
-  '172.23.139': {sigla:'gua',nome:'Guarapari'},
   '172.23.14': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.140': {sigla:'agu',nome:'Escritório Guarapari'},
-  '172.23.141': {sigla:'agu',nome:'Escritório Guarapari'},
-  '172.23.142': {sigla:'agu',nome:'Escritório Guarapari'},
-  '172.23.143': {sigla:'agu',nome:'Escritório Guarapari'},
   '172.23.15': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.153': {sigla:'scl',nome:'Santa Clara'},
-  '172.23.154': {sigla:'smr',nome:'ETA e Elevatória Santa Maria'},
-  '172.23.155': {sigla:'erm',nome:'ETA Reis Magos'},
-  '172.23.156': {sigla:'ara',nome:'ETE Araçás'},
-  '172.23.157': {sigla:'cac',nome:'ETA Caçaroca / Elevatória Baixo Recalque'},
-  '172.23.158': {sigla:'cob',nome:'Elevatória Alto Recalque'},
-  '172.23.159': {sigla:'dbc',nome:'ETA Duas Bocas'},
   '172.23.16': {sigla:'coc',nome:'Centro Operativo de Carapina'},
-  '172.23.160': {sigla:'egu',nome:'ETA Guarapari'},
-  '172.23.161': {sigla:'mqc',nome:'Polo de Esgoto - Muquiçaba'},
-  '172.23.162': {sigla:'via',nome:'Escritório Viana'},
-  '172.23.163': {sigla:'via',nome:'ETA Viana'},
-  '172.23.164': {sigla:'juc',nome:'ETA Jucu / Antártica'},
-  '172.23.165': {sigla:'juc',nome:'ETA Jucu Nova'},
   '172.23.17': {sigla:'coc',nome:'Centro Operativo de Carapina'},
   '172.23.18': {sigla:'coc',nome:'Centro Operativo de Carapina'},
   '172.23.19': {sigla:'coc',nome:'Centro Operativo de Carapina'},
@@ -21816,6 +21780,61 @@ const REDES_PREFIX = {
   '172.23.96': {sigla:'avt',nome:'Atendimento Vitória'},
   '172.23.97': {sigla:'avt',nome:'Atendimento Vitória'},
   '172.23.98': {sigla:'avt',nome:'Atendimento Vitória'},
+  '172.23.104': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.23.105': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.23.106': {sigla:'alj',nome:'Atendimento Laranjeiras'},
+  '172.23.112': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.23.113': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.23.114': {sigla:'avv',nome:'Atendimento Vila Velha'},
+  '172.23.116': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.117': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.118': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.119': {sigla:'slu',nome:'Santa Lúcia'},
+  '172.23.120': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.121': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.122': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.123': {sigla:'ejc',nome:'ETE Camburi'},
+  '172.23.124': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.125': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.126': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.127': {sigla:'ecb',nome:'ETA Cobi'},
+  '172.23.128': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.129': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.130': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.131': {sigla:'pbv',nome:'Pólo Boa Vista'},
+  '172.23.132': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.133': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.134': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.135': {sigla:'ves',nome:'Vale Esperança'},
+  '172.23.136': {sigla:'gua',nome:'Guarapari'},
+  '172.23.137': {sigla:'gua',nome:'Guarapari'},
+  '172.23.138': {sigla:'gua',nome:'Guarapari'},
+  '172.23.139': {sigla:'gua',nome:'Guarapari'},
+  '172.23.140': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.141': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.142': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.143': {sigla:'agu',nome:'Escritório Guarapari'},
+  '172.23.153': {sigla:'scl',nome:'Santa Clara'},
+  '172.23.154': {sigla:'smr',nome:'ETA e Elevatória Santa Maria'},
+  '172.23.155': {sigla:'erm',nome:'ETA Reis Magos'},
+  '172.23.156': {sigla:'ara',nome:'ETE Araçás'},
+  '172.23.157': {sigla:'cac',nome:'ETA Caçaroca / Elevatória Baixo Recalque'},
+  '172.23.158': {sigla:'cob',nome:'Elevatória Alto Recalque'},
+  '172.23.159': {sigla:'dbc',nome:'ETA Duas Bocas'},
+  '172.23.160': {sigla:'egu',nome:'ETA Guarapari'},
+  '172.23.161': {sigla:'mqc',nome:'Polo de Esgoto - Muquiçaba'},
+  '172.23.162': {sigla:'via',nome:'Escritório Viana'},
+  '172.23.163': {sigla:'via',nome:'ETA Viana'},
+  '172.23.164': {sigla:'juc',nome:'ETA Jucu / Antártica'},
+  '172.23.165': {sigla:'juc',nome:'ETA Jucu Nova'},
+  '172.24.2': {sigla:'cba',nome:'Conceição da Barra'},
+  '172.24.3': {sigla:'cba',nome:'Escritório Conceição da Barra'},
+  '172.24.4': {sigla:'bri',nome:'Escritório Braço do Rio'},
+  '172.24.5': {sigla:'cba',nome:'ETA Conceição da Barra'},
+  '172.24.6': {sigla:'bri',nome:'ETA Braço do Rio'},
+  '172.24.7': {sigla:'ita',nome:'ETA Itaúnas'},
+  '172.24.8': {sigla:'ita',nome:'ETE Itaúnas'},
+  '172.24.9': {sigla:'pcn',nome:'Escritório Pedro Canário'},
   '172.24.10': {sigla:'pcn',nome:'ETA Pedro Canário'},
   '172.24.11': {sigla:'pcn',nome:'ETA Floresta do Sul'},
   '172.24.12': {sigla:'crn',nome:'ETA Cristal do Norte'},
@@ -21826,16 +21845,7 @@ const REDES_PREFIX = {
   '172.24.17': {sigla:'muc',nome:'ETA Mucurici'},
   '172.24.18': {sigla:'muc',nome:'ETA Itabaiana'},
   '172.24.19': {sigla:'muc',nome:'ETE Mucurici'},
-  '172.24.2': {sigla:'cba',nome:'Conceição da Barra'},
   '172.24.20': {sigla:'eco',nome:'Escritório Ecoporanga'},
-  '172.24.200': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.201': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.202': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.203': {sigla:'nve',nome:'Nova Venécia'},
-  '172.24.204': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.24.205': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.24.206': {sigla:'bsf',nome:'Barra de São Francisco'},
-  '172.24.207': {sigla:'bsf',nome:'Barra de São Francisco'},
   '172.24.21': {sigla:'eco',nome:'ETA Ecoporanga'},
   '172.24.22': {sigla:'eco',nome:'ETE Ecoporanga'},
   '172.24.23': {sigla:'eco',nome:'ETA Cotaxé'},
@@ -21845,7 +21855,6 @@ const REDES_PREFIX = {
   '172.24.27': {sigla:'pbl',nome:'ETA Ponto Belo'},
   '172.24.28': {sigla:'pbl',nome:'ETA Itamira'},
   '172.24.29': {sigla:'pnh',nome:'Pinheiros'},
-  '172.24.3': {sigla:'cba',nome:'Escritório Conceição da Barra'},
   '172.24.30': {sigla:'pnh',nome:'Escritório Pinheiros'},
   '172.24.31': {sigla:'pnh',nome:'ETA Pinheiros'},
   '172.24.32': {sigla:'pnh',nome:'ETE Pinheiros'},
@@ -21855,7 +21864,6 @@ const REDES_PREFIX = {
   '172.24.37': {sigla:'nve',nome:'ETA Nova Venécia'},
   '172.24.38': {sigla:'nve',nome:'ETE Nova Venécia'},
   '172.24.39': {sigla:'vpv',nome:'Escritório Vila Pavão'},
-  '172.24.4': {sigla:'bri',nome:'Escritório Braço do Rio'},
   '172.24.40': {sigla:'vpv',nome:'ETA Vila Pavão'},
   '172.24.42': {sigla:'bsf',nome:'Almoxarifado / ETA Barra de São Francisco'},
   '172.24.43': {sigla:'bsf',nome:'ETE Barra de São Francisco'},
@@ -21865,7 +21873,6 @@ const REDES_PREFIX = {
   '172.24.47': {sigla:'adn',nome:'ETA Gov. Lacerda de Aguiar'},
   '172.24.48': {sigla:'adn',nome:'ETA Santo Agostinho'},
   '172.24.49': {sigla:'mtp',nome:'Mantenópolis'},
-  '172.24.5': {sigla:'cba',nome:'ETA Conceição da Barra'},
   '172.24.50': {sigla:'mtp',nome:'ETA Mantenópolis'},
   '172.24.51': {sigla:'mtp',nome:'ETE Mantenópolis'},
   '172.24.52': {sigla:'mtp',nome:'ETA Santa Luzia de Mantenópolis'},
@@ -21876,7 +21883,6 @@ const REDES_PREFIX = {
   '172.24.57': {sigla:'abc',nome:'ETA Águia Branca'},
   '172.24.58': {sigla:'sgp',nome:'São Gabriel da Palha'},
   '172.24.59': {sigla:'sgp',nome:'ETA São Gabriel da Palha'},
-  '172.24.6': {sigla:'bri',nome:'ETA Braço do Rio'},
   '172.24.60': {sigla:'sgp',nome:'ETE São Gabriel da Palha'},
   '172.24.61': {sigla:'vlv',nome:'Escritório Vila Valério'},
   '172.24.62': {sigla:'vlv',nome:'ETA Vila Valério'},
@@ -21884,9 +21890,22 @@ const REDES_PREFIX = {
   '172.24.64': {sigla:'pnc',nome:'Escritório Pancas'},
   '172.24.65': {sigla:'pnc',nome:'ETA Pancas'},
   '172.24.66': {sigla:'pnc',nome:'ETA Vila Verde'},
-  '172.24.7': {sigla:'ita',nome:'ETA Itaúnas'},
-  '172.24.8': {sigla:'ita',nome:'ETE Itaúnas'},
-  '172.24.9': {sigla:'pcn',nome:'Escritório Pedro Canário'},
+  '172.24.200': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.201': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.202': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.203': {sigla:'nve',nome:'Nova Venécia'},
+  '172.24.204': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.24.205': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.24.206': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.24.207': {sigla:'bsf',nome:'Barra de São Francisco'},
+  '172.25.2': {sigla:'anc',nome:'Escritório Anchieta'},
+  '172.25.3': {sigla:'iri',nome:'ETA Iriri'},
+  '172.25.4': {sigla:'anc',nome:'ETA Ubú'},
+  '172.25.5': {sigla:'arz',nome:'ETA Barra do Sahy'},
+  '172.25.6': {sigla:'pma',nome:'Escritório Piúma'},
+  '172.25.7': {sigla:'pma',nome:'Pólo Piúma'},
+  '172.25.8': {sigla:'pma',nome:'ETA Piúma'},
+  '172.25.9': {sigla:'rns',nome:'Escritório Rio Novo do Sul'},
   '172.25.10': {sigla:'rns',nome:'ETA Rio Novo do Sul'},
   '172.25.11': {sigla:'prk',nome:'Escritório Presidente Kennedy'},
   '172.25.12': {sigla:'prk',nome:'ETA Presidente Kennedy'},
@@ -21897,16 +21916,7 @@ const REDES_PREFIX = {
   '172.25.17': {sigla:'muq',nome:'Escritório Muqui'},
   '172.25.18': {sigla:'muq',nome:'ETA Muqui'},
   '172.25.19': {sigla:'bjn',nome:'Bom Jesus do Norte'},
-  '172.25.2': {sigla:'anc',nome:'Escritório Anchieta'},
   '172.25.20': {sigla:'bjn',nome:'Escritório Bom Jesus do Norte'},
-  '172.25.200': {sigla:'cas',nome:'Castelo'},
-  '172.25.201': {sigla:'cas',nome:'Castelo'},
-  '172.25.202': {sigla:'cas',nome:'Castelo'},
-  '172.25.203': {sigla:'cas',nome:'Castelo'},
-  '172.25.204': {sigla:'ste',nome:'Santa Teresa'},
-  '172.25.205': {sigla:'ste',nome:'Santa Teresa'},
-  '172.25.206': {sigla:'ste',nome:'Santa Teresa'},
-  '172.25.207': {sigla:'ste',nome:'Santa Teresa'},
   '172.25.21': {sigla:'bjn',nome:'ETA Bom Jesus do Norte'},
   '172.25.22': {sigla:'bjn',nome:'ETE Bom Jesus do Norte'},
   '172.25.23': {sigla:'api',nome:'Escritório Apiacá'},
@@ -21916,7 +21926,6 @@ const REDES_PREFIX = {
   '172.25.27': {sigla:'sjc',nome:'ETA São José do Calçado'},
   '172.25.28': {sigla:'drp',nome:'Escritório Dores do Rio Preto'},
   '172.25.29': {sigla:'drp',nome:'ETA Dores do Rio Preto'},
-  '172.25.3': {sigla:'iri',nome:'ETA Iriri'},
   '172.25.30': {sigla:'drp',nome:'ETA Pedra Menina'},
   '172.25.31': {sigla:'dsl',nome:'Escritório Divino São Lourenço'},
   '172.25.32': {sigla:'dsl',nome:'ETA Divino São Lourenço'},
@@ -21927,7 +21936,6 @@ const REDES_PREFIX = {
   '172.25.37': {sigla:'iun',nome:'ETA Pequiá'},
   '172.25.38': {sigla:'ibt',nome:'Ibatiba'},
   '172.25.39': {sigla:'ibt',nome:'ETA Ibatiba'},
-  '172.25.4': {sigla:'anc',nome:'ETA Ubú'},
   '172.25.40': {sigla:'mfr',nome:'Escritório Muniz Freire'},
   '172.25.41': {sigla:'mfr',nome:'ETA Muniz Freire'},
   '172.25.42': {sigla:'arz',nome:'ETA Coqueiral'},
@@ -21937,7 +21945,6 @@ const REDES_PREFIX = {
   '172.25.47': {sigla:'cas',nome:'ETA / Almoxarifado Castelo'},
   '172.25.48': {sigla:'cas',nome:'ETE Castelo'},
   '172.25.49': {sigla:'cca',nome:'Escritório Conceição de Castelo'},
-  '172.25.5': {sigla:'arz',nome:'ETA Barra do Sahy'},
   '172.25.50': {sigla:'cca',nome:'ETA Conceição do Castelo'},
   '172.25.51': {sigla:'brj',nome:'Escritório Brejetuba'},
   '172.25.52': {sigla:'brj',nome:'ETA Brejetuba'},
@@ -21948,7 +21955,6 @@ const REDES_PREFIX = {
   '172.25.57': {sigla:'afc',nome:'Afonso Cláudio'},
   '172.25.58': {sigla:'afc',nome:'Escritório Afonso Cláudio'},
   '172.25.59': {sigla:'afc',nome:'ETA Afonso Cláudio'},
-  '172.25.6': {sigla:'pma',nome:'Escritório Piúma'},
   '172.25.60': {sigla:'afc',nome:'ETE Afonso Cláudio'},
   '172.25.61': {sigla:'spl',nome:'ETA Serra Pelada'},
   '172.25.62': {sigla:'vnv',nome:'Venda Nova do Imigrante'},
@@ -21959,7 +21965,6 @@ const REDES_PREFIX = {
   '172.25.67': {sigla:'dmt',nome:'ETE Domingos Martins'},
   '172.25.68': {sigla:'arc',nome:'ETA Aracê'},
   '172.25.69': {sigla:'dmt',nome:'ETE Vila Pedra Azul'},
-  '172.25.7': {sigla:'pma',nome:'Pólo Piúma'},
   '172.25.70': {sigla:'dmt',nome:'ETE Vivendas de Pedra Azul'},
   '172.25.71': {sigla:'poa',nome:'ETA Ponto Alto'},
   '172.25.72': {sigla:'mfl',nome:'Escritório Marechal Floriano'},
@@ -21970,7 +21975,6 @@ const REDES_PREFIX = {
   '172.25.77': {sigla:'smj',nome:'ETA Garrafão'},
   '172.25.78': {sigla:'smj',nome:'ETA Alto Rio Possmouser'},
   '172.25.79': {sigla:'smj',nome:'ETE Santa Maria de Jetibá'},
-  '172.25.8': {sigla:'pma',nome:'ETA Piúma'},
   '172.25.81': {sigla:'ste',nome:'Escritório Santa Teresa'},
   '172.25.82': {sigla:'ste',nome:'ETA Santa Teresa'},
   '172.25.83': {sigla:'sac',nome:'ETA Santo Antônio do Canaã'},
@@ -21980,13 +21984,21 @@ const REDES_PREFIX = {
   '172.25.87': {sigla:'src',nome:'ETA São Roque do Canaã'},
   '172.25.88': {sigla:'slp',nome:'Escritório Santa Leopoldina'},
   '172.25.89': {sigla:'slp',nome:'ETA Santa Leopoldina'},
-  '172.25.9': {sigla:'rns',nome:'Escritório Rio Novo do Sul'},
   '172.25.90': {sigla:'fun',nome:'Escritório Fundão'},
   '172.25.91': {sigla:'fun',nome:'ETA Fundão'},
   '172.25.92': {sigla:'tmb',nome:'ETA Timbuí'},
   '172.25.93': {sigla:'fun',nome:'Escritório Praia Grande'},
   '172.25.94': {sigla:'arz',nome:'Escritório Coqueiral (Aracruz)'},
+  '172.25.200': {sigla:'cas',nome:'Castelo'},
+  '172.25.201': {sigla:'cas',nome:'Castelo'},
+  '172.25.202': {sigla:'cas',nome:'Castelo'},
+  '172.25.203': {sigla:'cas',nome:'Castelo'},
+  '172.25.204': {sigla:'ste',nome:'Santa Teresa'},
+  '172.25.205': {sigla:'ste',nome:'Santa Teresa'},
+  '172.25.206': {sigla:'ste',nome:'Santa Teresa'},
+  '172.25.207': {sigla:'ste',nome:'Santa Teresa'},
 };
+
 
 const REDES_SIGLA = {
   'abc': 'Escritório Águia Branca',
@@ -23977,8 +23989,8 @@ function _renderMapaGrafico(todosAll, container) {
   // ── Layout ────────────────────────────────────────────────────────
   var COL_W   = 200;
   var COL_GAP = 20;
-  var SW_H    = 76; // aumentado para caber sigla + localidade
-  var HOST_H  = 38; // aumentado para caber: badge tipo + hostname + IP
+  var SW_H    = 76;
+  var HOST_H  = 38;
   var HOST_GAP= 4;
   var TOP_PAD = 20;
   var SW_PAD  = 28;
@@ -24038,25 +24050,19 @@ function _renderMapaGrafico(todosAll, container) {
       html += '<text x="'+(x+38)+'" y="'+(swY+30)+'" font-size="10" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml(swLabel)+'</text>';
       // IP
       html += '<text x="'+(x+38)+'" y="'+(swY+44)+'" font-size="8.5" fill="rgba(255,255,255,.65)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
-      // Sigla + Localidade (via REDES_PREFIX)
-      var swP24 = (sw.ip||'').split('.').slice(0,3).join('.');
-      var swRede = (window.REDES_PREFIX && REDES_PREFIX[swP24]) ? REDES_PREFIX[swP24] : null;
-      if (!swRede && window.STATE_REDES) {
+      var swP24   = (sw.ip||'').split('.').slice(0,3).join('.');
+      var swRede  = (window.REDES_PREFIX && REDES_PREFIX[swP24]) ? REDES_PREFIX[swP24] : null;
+      if (!swRede && window.STATE_REDES)
         swRede = (STATE_REDES||[]).find(function(r){ return r.prefix && sw.ip && sw.ip.startsWith(r.prefix+'.'); }) || null;
-      }
-      var swSigla = swRede ? (swRede.sigla||'').toUpperCase() : '';
+      var swSigla   = swRede ? (swRede.sigla||'').toUpperCase() : '';
       var swNomeLoc = swRede ? (swRede.nome||'') : resolverLocal(sw);
       if (swSigla || swNomeLoc) {
-        // Fundo pill para sigla+local
-        var siglaLabel = swSigla ? '['+swSigla+'] ' : '';
-        var locLabel   = (siglaLabel + (swNomeLoc||'')).slice(0,26);
-        html += '<rect x="'+(x+6)+'" y="'+(swY+SW_H-18)+'" width="'+(COL_W-12)+'" height="14" rx="3" fill="rgba(0,0,0,.30)"/>';
-        html += '<text x="'+(x+10)+'" y="'+(swY+SW_H-7)+'" font-size="7.5" fill="rgba(255,255,255,.85)" font-weight="700">'+escapeHtml(locLabel)+'</text>';
+        var locLabel = (swSigla ? '['+swSigla+'] ' : '') + (swNomeLoc||'');
+        html += '<rect x="'+(x+4)+'" y="'+(swY+SW_H-17)+'" width="'+(COL_W-8)+'" height="13" rx="3" fill="rgba(0,0,0,.35)"/>';
+        html += '<text x="'+(x+8)+'" y="'+(swY+SW_H-7)+'" font-size="7.5" fill="rgba(255,255,255,.9)" font-weight="700">'+escapeHtml(locLabel.slice(0,26))+'</text>';
       }
-      // Latência
-      if (latMs) html += '<text x="'+(x+12)+'" y="'+(swY+58)+'" font-size="8" fill="rgba(255,255,255,.5)">'+escapeHtml(latMs)+'</text>';
-      // Nº de hosts
-      html += '<text x="'+(x+COL_W-12)+'" y="'+(swY+54)+'" font-size="8" fill="rgba(255,255,255,.5)" text-anchor="end">'+g.hosts.length+' hosts</text>';
+      if (latMs) html += '<text x="'+(x+12)+'" y="'+(swY+56)+'" font-size="7.5" fill="rgba(255,255,255,.45)">'+escapeHtml(latMs)+'</text>';
+      html += '<text x="'+(x+COL_W-10)+'" y="'+(swY+56)+'" font-size="7.5" fill="rgba(255,255,255,.45)" text-anchor="end">'+g.hosts.length+' hosts</text>';
 
       // Linha vertical do switch → hosts
       if (g.hosts.length) {
@@ -24111,25 +24117,17 @@ function _renderMapaGrafico(todosAll, container) {
       html += '<circle cx="'+(x+14)+'" cy="'+(hy+HOST_H/2)+'" r="4" fill="'+hSt+'"/>';
 
       // Ícone tipo
-      html += '<text x="'+(x+25)+'" y="'+(hy+HOST_H/2+4)+'" font-size="11">'+hTi.icon+'</text>';
-
-      // Badge tipo (label curto) — ex: PC, NOTEBOOK, IMPRESSORA
+      html += '<text x="'+(x+25)+'" y="'+(hy+HOST_H/2+4)+'" font-size="12">'+hTi.icon+'</text>';
       var tipoLabel = hTi.label || (h.tipo||'?').toUpperCase().slice(0,10);
-      html += '<rect x="'+(x+38)+'" y="'+(hy+2)+'" width="'+(Math.min(tipoLabel.length*5.5,54)+4)+'" height="10" rx="2" fill="'+hTi.cor+'22"/>';
-      html += '<text x="'+(x+40)+'" y="'+(hy+10)+'" font-size="6.5" fill="'+hTi.cor+'" font-weight="700" letter-spacing="0.3">'+escapeHtml(tipoLabel)+'</text>';
-
-      // Label hostname — linha abaixo do badge tipo
-      html += '<text x="'+(x+40)+'" y="'+(hy+21)+'" font-size="8.5" fill="#1E293B" font-family="monospace" font-weight="600">'+escapeHtml(hLabel)+'</text>';
-
-      // IP menor embaixo do hostname
-      if (hIp && hIp !== hLabel) {
-        html += '<text x="'+(x+40)+'" y="'+(hy+30)+'" font-size="7.5" fill="#94A3B8" font-family="monospace">'+escapeHtml(hIp)+'</text>';
-      }
-
-      // Latência (canto direito)
+      var badgeW = Math.min(tipoLabel.length*5.4+6,58);
+      html += '<rect x="'+(x+38)+'" y="'+(hy+3)+'" width="'+badgeW+'" height="10" rx="2" fill="'+hTi.cor+'33"/>';
+      html += '<text x="'+(x+40)+'" y="'+(hy+11)+'" font-size="6.5" fill="'+hTi.cor+'" font-weight="800" letter-spacing="0.4">'+escapeHtml(tipoLabel)+'</text>';
+      html += '<text x="'+(x+40)+'" y="'+(hy+22)+'" font-size="8.5" fill="#1E293B" font-family="monospace" font-weight="600">'+escapeHtml(hLabel)+'</text>';
+      if (hIp && hIp !== hLabel)
+        html += '<text x="'+(x+40)+'" y="'+(hy+31)+'" font-size="7.5" fill="#94A3B8" font-family="monospace">'+escapeHtml(hIp)+'</text>';
       if (h.latencyMs != null) {
         var latCor = h.latencyMs < 5 ? '#10B981' : h.latencyMs < 30 ? '#F59E0B' : '#EF4444';
-        html += '<text x="'+(x+COL_W-5)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="'+latCor+'" text-anchor="end">'+h.latencyMs+'ms</text>';
+        html += '<text x="'+(x+COL_W-4)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="'+latCor+'" text-anchor="end">'+h.latencyMs+'ms</text>';
       }
     });
   });
