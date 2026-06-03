@@ -1052,7 +1052,6 @@ const _origAuditLog = window.auditLog;
 window.auditLog = function(action, module, resourceId, resourceType, details = {}) {
   const entry = typeof auditLog_local === 'function'
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
-  // Só grava se tiver UID Firebase real (não local_* do fallback local)
   const _uid = CURRENT_USER?.uid || '';
   if (FB_READY && db && window._fs && _uid && !_uid.startsWith('local_')) {
     const { collection, addDoc, serverTimestamp } = window._fs;
@@ -1278,39 +1277,6 @@ function filtrarAtivosPorTipo(tipos, el) {
   renderAtivos();
 }
 
-
-// ── _ipParaRede: traduz IP → {sigla, nome} usando REDES_PREFIX/STATE_REDES ──
-// REDES_PREFIX já tem todas as siglas cadastradas (coc, iun, vit, etc.)
-// STATE_REDES são os overrides salvos no card "Faixas de Rede" do Firestore
-function _ipParaRede(ip) {
-  if (!ip) return null;
-  const pts = ip.split('.');
-  if (pts.length !== 4) return null;
-
-  // 1. Overrides Firestore (STATE_REDES — card Faixas de Rede)
-  if (window.STATE_REDES && STATE_REDES.length) {
-    for (const r of STATE_REDES) {
-      if (!r.prefix) continue;
-      if (ip.startsWith(r.prefix + '.') || ip.startsWith(r.prefix))
-        return { sigla: r.sigla, nome: r.nome || r.desc || r.sigla };
-    }
-  }
-
-  // 2. REDES_PREFIX /24 (ex: '172.22.100' → {sigla:'acb', nome:'Águia Branca'})
-  const p24 = pts.slice(0, 3).join('.');
-  if (window.REDES_PREFIX && REDES_PREFIX[p24])
-    return { sigla: REDES_PREFIX[p24].sigla, nome: REDES_PREFIX[p24].nome };
-
-  // 3. Fallback /16 — percorre prefixos com mesmos dois primeiros octetos
-  if (window.REDES_PREFIX) {
-    const p16 = pts.slice(0, 2).join('.');
-    const match = Object.entries(REDES_PREFIX).find(([k]) => k.startsWith(p16 + '.'));
-    if (match) return { sigla: match[1].sigla, nome: match[1].nome };
-  }
-
-  return null;
-}
-
 function renderAtivos() {
   const q      = (document.getElementById('pat-search')?.value || '').toLowerCase();
   const fSt    = document.getElementById('pat-filter-status')?.value || '';
@@ -1323,8 +1289,8 @@ function renderAtivos() {
   if (thead) {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
-      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th style="font-size:11px">Sigla</th><th style="font-size:11px">IP</th><th style="font-size:11px">Localidade</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
-      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
+      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Responsável</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
+      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
   }
@@ -1352,7 +1318,7 @@ function renderAtivos() {
     return true;
   });
 
-  const colspan = isComp ? '14' : '10';
+  const colspan = isComp ? '14' : '8';
   document.getElementById('ativos-body').innerHTML = lista.map(a => `
     <tr>
       ${isComp ? (()=>{
@@ -1376,48 +1342,15 @@ function renderAtivos() {
       }</td>
       <td><span class="tag">${a.tipo||'—'}</span></td>`}
       <td>${a.area||'—'}</td>
-      ${(()=>{
-        // ── Sigla: via REDES_PREFIX (mesmas siglas do card Faixas de Rede) ──
-        const _r = _ipParaRede(a.ip);
-
-        const _siglaHtml = _r?.sigla
-          ? '<span style="font-family:monospace;font-size:11px;font-weight:700;' +
-            'color:var(--accent);background:#EFF6FF;padding:2px 7px;border-radius:4px">' +
-            escapeHtml(_r.sigla.toUpperCase()) + '</span>'
-          : '<span style="color:var(--g300)">—</span>';
-
-        // ── IP ────────────────────────────────────────────────────────
-        const _ipHtml = a.ip
-          ? '<span style="font-family:monospace;font-size:11px;color:var(--g600)">' +
-            escapeHtml(a.ip) + '</span>'
-          : '<span style="color:var(--g300)">—</span>';
-
-        // ── Localidade: nome da rede + botão 📍 card + 🗺️ Maps ─────────
-        const _locNome = _r?.nome || null;
-        const _locObj  = _locNome && window.LOCALIDADES_CESAN
-          ? LOCALIDADES_CESAN.find(l => l.nome === _locNome || l.nome === a.area)
-          : null;
-        const _mapsUrl = _locObj?.mapsUrl || (_locObj?.lat ? 'https://www.google.com/maps?q=' + _locObj.lat + ',' + _locObj.lng : '');
-        const _locLabel = _locNome || a.area || null;
-
-        const _locHtml = _locLabel
-          ? '<span style="display:inline-flex;align-items:center;gap:3px">' +
-              '<span style="font-size:11.5px;color:var(--g700);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(_locLabel) + '">' +
-              escapeHtml(_locLabel) + '</span>' +
-              '<button class="btn btn-ghost btn-xs" title="Ver card localidade" ' +
-              'style="padding:0 3px;font-size:10px;line-height:1.4" ' +
-              'onclick="event.stopPropagation();goPage(&apos;localidades&apos;);' +
-              'setTimeout(()=>locAbrirDetalhe(' + JSON.stringify(_locLabel) + '),420)">📍</button>' +
-              (_mapsUrl ? '<a href="' + escapeHtml(_mapsUrl) + '" target="_blank" rel="noopener" ' +
-              'title="Google Maps" onclick="event.stopPropagation()" ' +
-              'style="font-size:11px;color:var(--g400);text-decoration:none">🗺️</a>' : '') +
-            '</span>'
-          : '<span style="color:var(--g300)">—</span>';
-
-        return '<td>' + _siglaHtml + '</td>' +
-               '<td>' + _ipHtml   + '</td>' +
-               '<td style="white-space:nowrap">' + _locHtml + '</td>';
-      })()}
+      <td>${(()=>{
+        if (a.resp) return a.resp;
+        // Tenta pegar usuário logado do agente
+        const ag = (STATE_AGENTS?.list||[]).find(x =>
+          (a.ip && x.ip === a.ip) ||
+          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
+        );
+        return ag?.usuarioLogado ? '<span style="color:var(--g500);font-size:11px">'+escapeHtml(ag.usuarioLogado)+'</span>' : '—';
+      })()}</td>
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="text-align:center">${(()=>{
         const _ag = (STATE_AGENTS?.list||[]).find(x =>
@@ -1443,7 +1376,8 @@ function renderAtivos() {
         const so = escapeHtml(_soRaw ? _soRaw.replace('Microsoft Windows ','Win ').replace('Windows ','Win ') : '—');
         const ip = a.ip ? `<span style="font-family:monospace;font-size:11px">${escapeHtml(a.ip)}</span>` : '—';
         return `<td style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${monitores}">${monitores}</td>
-        <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${so}">${so}</td>`;
+        <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${so}">${so}</td>
+        <td>${ip}</td>`;
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
       <td><div class="flex gap-6">
@@ -24043,8 +23977,8 @@ function _renderMapaGrafico(todosAll, container) {
   // ── Layout ────────────────────────────────────────────────────────
   var COL_W   = 200;
   var COL_GAP = 20;
-  var SW_H    = 64;
-  var HOST_H  = 30;
+  var SW_H    = 76; // aumentado para caber sigla + localidade
+  var HOST_H  = 38; // aumentado para caber: badge tipo + hostname + IP
   var HOST_GAP= 4;
   var TOP_PAD = 20;
   var SW_PAD  = 28;
@@ -24104,6 +24038,21 @@ function _renderMapaGrafico(todosAll, container) {
       html += '<text x="'+(x+38)+'" y="'+(swY+30)+'" font-size="10" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml(swLabel)+'</text>';
       // IP
       html += '<text x="'+(x+38)+'" y="'+(swY+44)+'" font-size="8.5" fill="rgba(255,255,255,.65)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
+      // Sigla + Localidade (via REDES_PREFIX)
+      var swP24 = (sw.ip||'').split('.').slice(0,3).join('.');
+      var swRede = (window.REDES_PREFIX && REDES_PREFIX[swP24]) ? REDES_PREFIX[swP24] : null;
+      if (!swRede && window.STATE_REDES) {
+        swRede = (STATE_REDES||[]).find(function(r){ return r.prefix && sw.ip && sw.ip.startsWith(r.prefix+'.'); }) || null;
+      }
+      var swSigla = swRede ? (swRede.sigla||'').toUpperCase() : '';
+      var swNomeLoc = swRede ? (swRede.nome||'') : resolverLocal(sw);
+      if (swSigla || swNomeLoc) {
+        // Fundo pill para sigla+local
+        var siglaLabel = swSigla ? '['+swSigla+'] ' : '';
+        var locLabel   = (siglaLabel + (swNomeLoc||'')).slice(0,26);
+        html += '<rect x="'+(x+6)+'" y="'+(swY+SW_H-18)+'" width="'+(COL_W-12)+'" height="14" rx="3" fill="rgba(0,0,0,.30)"/>';
+        html += '<text x="'+(x+10)+'" y="'+(swY+SW_H-7)+'" font-size="7.5" fill="rgba(255,255,255,.85)" font-weight="700">'+escapeHtml(locLabel)+'</text>';
+      }
       // Latência
       if (latMs) html += '<text x="'+(x+12)+'" y="'+(swY+58)+'" font-size="8" fill="rgba(255,255,255,.5)">'+escapeHtml(latMs)+'</text>';
       // Nº de hosts
@@ -24164,15 +24113,20 @@ function _renderMapaGrafico(todosAll, container) {
       // Ícone tipo
       html += '<text x="'+(x+25)+'" y="'+(hy+HOST_H/2+4)+'" font-size="11">'+hTi.icon+'</text>';
 
-      // Label hostname
-      html += '<text x="'+(x+40)+'" y="'+(hy+HOST_H/2-2)+'" font-size="8.5" fill="#1E293B" font-family="monospace" font-weight="600">'+escapeHtml(hLabel)+'</text>';
+      // Badge tipo (label curto) — ex: PC, NOTEBOOK, IMPRESSORA
+      var tipoLabel = hTi.label || (h.tipo||'?').toUpperCase().slice(0,10);
+      html += '<rect x="'+(x+38)+'" y="'+(hy+2)+'" width="'+(Math.min(tipoLabel.length*5.5,54)+4)+'" height="10" rx="2" fill="'+hTi.cor+'22"/>';
+      html += '<text x="'+(x+40)+'" y="'+(hy+10)+'" font-size="6.5" fill="'+hTi.cor+'" font-weight="700" letter-spacing="0.3">'+escapeHtml(tipoLabel)+'</text>';
 
-      // IP menor embaixo
+      // Label hostname — linha abaixo do badge tipo
+      html += '<text x="'+(x+40)+'" y="'+(hy+21)+'" font-size="8.5" fill="#1E293B" font-family="monospace" font-weight="600">'+escapeHtml(hLabel)+'</text>';
+
+      // IP menor embaixo do hostname
       if (hIp && hIp !== hLabel) {
-        html += '<text x="'+(x+40)+'" y="'+(hy+HOST_H/2+9)+'" font-size="7.5" fill="#94A3B8" font-family="monospace">'+escapeHtml(hIp)+'</text>';
+        html += '<text x="'+(x+40)+'" y="'+(hy+30)+'" font-size="7.5" fill="#94A3B8" font-family="monospace">'+escapeHtml(hIp)+'</text>';
       }
 
-      // Latência (se disponível)
+      // Latência (canto direito)
       if (h.latencyMs != null) {
         var latCor = h.latencyMs < 5 ? '#10B981' : h.latencyMs < 30 ? '#F59E0B' : '#EF4444';
         html += '<text x="'+(x+COL_W-5)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="'+latCor+'" text-anchor="end">'+h.latencyMs+'ms</text>';
