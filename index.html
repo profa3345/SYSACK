@@ -602,7 +602,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <div class="stat-sub" id="exec-open-sub">—% vencidos do SLA</div>
         </div>
         <div class="stat-card violet">
-          <div class="stat-label">Smartphones em Uso</div>
+          <div class="stat-label">MDM Compliance</div>
           <div class="stat-value" id="exec-mdm-comp" style="font-size:32px">—%</div>
           <div class="stat-sub">Dispositivos em conformidade</div>
           <div style="background:var(--g200);border-radius:4px;height:5px;margin-top:8px;overflow:hidden"><div id="exec-mdm-bar" style="background:var(--violet);height:100%;border-radius:4px;transition:width .6s"></div></div>
@@ -768,7 +768,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       <p class="text-muted" style="margin-top:4px">Comodato de celulares · planos individuais · análise de faturas</p>
     </div>
     <div class="flex gap-8">
-      <button class="btn btn-ghost btn-sm" onclick="goPage('mdm')">← Smartphones</button>
+      <button class="btn btn-ghost btn-sm" onclick="goPage('mdm')">← MDM</button>
       <button class="btn btn-ghost btn-sm" onclick="tcVerContrato()" title="Ver dados do contrato Vivo">📋 Contrato 158/2021</button>
       <button class="btn btn-secondary btn-sm" onclick="abrirImportarFatura()">📄 Importar Fatura</button>
       <button class="btn btn-primary btn-sm" onclick="abrirCadastrarPlano()">+ Cadastrar Plano</button>
@@ -1063,7 +1063,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       <option value="admin">Admin</option>
       <option value="gestor">Gestor</option>
       <option value="tecnico">Técnico</option>
-      <option value="mdm_admin">Admin Smartphones</option>
+      <option value="mdm_admin">MDM Admin</option>
       <option value="viewer">Visualizador</option>
     </select>
   </div>
@@ -2165,11 +2165,11 @@ window.dispatchEvent(new Event('firebase-ready'));
           </div>
         </div>
 
-        <!-- Smartphones -->
+        <!-- Smartphones/MDM -->
         <div class="rel-card" onclick="loadRel('smartphones')" style="background:var(--panel);border:0.5px solid var(--line);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
           <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#7C3AED,#A78BFA)"></div>
           <div style="font-size:32px;margin-bottom:10px">📱</div>
-          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Smartphones</div>
+          <div style="font-size:15px;font-weight:800;color:var(--g900);margin-bottom:4px">Smartphones / MDM</div>
           <div style="font-size:12px;color:var(--g500);margin-bottom:12px">Dispositivos móveis gerenciados</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <span id="rel-card-mdm-total" style="font-size:11px;background:#F5F3FF;color:#7C3AED;padding:3px 10px;border-radius:8px;font-weight:700">— dispositivos</span>
@@ -2459,12 +2459,12 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="grid-3" id="kb-areas-grid"></div>
     </div>
 
-    <!-- SMARTPHONES -->
+    <!-- MDM / SMARTPHONES -->
     <div class="page" id="page-mdm">
       <div class="flex items-center justify-between mb-20">
         <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Smartphones</h2>
-          <p class="text-sm text-muted mt-8">Cadastro e gestão de dispositivos móveis corporativos</p>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">📱 Smartphones</h2>
+          <p class="text-sm text-muted mt-8">Gestão de dispositivos móveis corporativos · Termos e responsabilidade</p>
         </div>
         <div class="flex gap-8">
           <span class="fb-badge">🗄️ Banco de Dados</span>
@@ -2508,7 +2508,11 @@ window.dispatchEvent(new Event('firebase-ready'));
             <option value="bloqueado">Bloqueado</option>
             <option value="baixado">Baixado</option>
           </select>
-          
+          <select class="form-control" style="width:140px;margin:0" id="mdm-filter-perfil" onchange="renderMDM()">
+            <option value="">Todos os perfis</option>
+            <option value="com-mdm">📱 Com MDM</option>
+            <option value="sem-mdm">🔔 Sem MDM</option>
+          </select>
           <select class="form-control" style="width:140px;margin:0" id="mdm-filter-marca" onchange="renderMDM()">
             <option value="">Todas as marcas</option>
             <option>Samsung</option><option>Apple</option><option>Motorola</option><option>Xiaomi</option>
@@ -2533,7 +2537,6 @@ window.dispatchEvent(new Event('firebase-ready'));
                   <th>Setor</th>
                   <th>Última Troca</th>
                   <th>S.O.</th>
-                  <th>Perfil</th>
                   <th>Status</th>
                   <th>Ações</th>
                 </tr>
@@ -2672,7 +2675,7 @@ window.dispatchEvent(new Event('firebase-ready'));
               <option>Software / Aplicação</option>
               <option>Banco de Dados</option>
               <option>Segurança</option>
-              <option>Smartphones / Dispositivos</option>
+              <option>MDM / Dispositivos</option>
               <option>Active Directory</option>
               <option>Backup e Restore</option>
               <option>Outros</option>
@@ -5296,7 +5299,7 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div class="ai-quick-chip" onclick="aiQuickAction('qual é o SLA atual?')">🎯 SLA atual</div>
     <div class="ai-quick-chip" onclick="aiQuickAction('há algum ativo em manutenção?')">🔧 Ativos em manutenção</div>
     <div class="ai-quick-chip" onclick="aiQuickAction('mostre os alertas críticos')">🚨 Alertas críticos</div>
-    <div class="ai-quick-chip" onclick="aiQuickAction('quais smartphones estão offline?')">📱 Smartphones</div>
+    <div class="ai-quick-chip" onclick="aiQuickAction('quais smartphones estão offline?')">📱 MDM status</div>
     <div class="ai-quick-chip" onclick="aiQuickAction('gere um resumo executivo do dia')">📋 Resumo do dia</div>
   </div>
 

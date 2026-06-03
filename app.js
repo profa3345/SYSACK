@@ -1048,19 +1048,6 @@ function startProtectedListeners(snap2arr, norm) {
 
 // ── FIRESTORE WRITE HELPERS ───────────────────────────────────
 // ── FIRESTORE AUDIT LOG PERSIST (modular) ────────────────────
-// ── Filtra erros permission-denied do Firestore (login local sem UID real) ──
-(function() {
-  var _ce = console.error.bind(console);
-  var _cw = console.warn.bind(console);
-  function _isPerm(args) {
-    return Array.from(args).some(function(a){
-      return typeof a === 'string' && (a.includes('permission-denied') || a.includes('Missing or insufficient permissions'));
-    });
-  }
-  console.error = function() { if (!_isPerm(arguments)) _ce.apply(console, arguments); };
-  console.warn  = function() { if (!_isPerm(arguments)) _cw.apply(console, arguments); };
-})();
-
 const _origAuditLog = window.auditLog;
 window.auditLog = function(action, module, resourceId, resourceType, details = {}) {
   const entry = typeof auditLog_local === 'function'
@@ -1073,7 +1060,7 @@ window.auditLog = function(action, module, resourceId, resourceType, details = {
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
       createdAt: serverTimestamp(),
-    }).catch(e => { if((e.code||'')!=='permission-denied') console.warn('[Banco] audit_log:', e.message); });
+    }).catch(e => console.warn('[Banco] audit_log:', e.message));
   }
   return entry;
 };
@@ -1114,7 +1101,7 @@ const PAGE_LABELS = {
   movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
-  mdm:'Smartphones / MDM', telecom:'Gestão Telecom', localidades:'Localidades', switches:'Switches & Roteadores', apps:'Inventário de Software',
+  mdm:'Smartphones', telecom:'Gestão Telecom', localidades:'Localidades', switches:'Switches & Roteadores', apps:'Inventário de Software',
   documentos:'Documentos', lembretes:'Lembretes',
   pesquisas:'Pesquisas Salvas', alertas:'Alertas'
 };
@@ -5033,7 +5020,7 @@ let currentChamadoSm = null;
 // ============================================================
 // RENDER MDM
 // ============================================================
-const PAGE_LABELS_EXT = { mdm: 'Smartphones / MDM' };
+const PAGE_LABELS_EXT = { mdm: 'Smartphones' };
 
 function renderMDM() {
   const sms = STATE.smartphones || [];
@@ -5087,7 +5074,7 @@ function renderMDM() {
             <button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSm('${s.id}')">⚙️ Gerenciar</button>
             <button class="mdm-action-btn mab-success" onclick="abrirChamadoSm('${s.id}')">🎫 Chamado</button>
             <button class="mdm-action-btn mab-violet" onclick="gerarTermoSm('${s.id}')">📄 Termo</button>
-            <button class="mdm-action-btn" style="background:#7C3AED;color:#fff" onclick="abrirAcessoRemotoMobile('${s.id}')">📡 Remoto</button>
+            
           </div>
         </td>
       </tr>`).join('') || '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--g400)">Nenhum smartphone encontrado</td></tr>';
@@ -5420,28 +5407,345 @@ function salvarChamadoSm() {
 function gerarTermoSm(id) {
   const sm = (STATE.smartphones||[]).find(s=>s.id===id);
   if (!sm) return;
-  document.getElementById('termo-preview-content').innerHTML = `
-    <div style="font-size:12px;line-height:1.8;color:var(--g800)">
-      <div style="text-align:center;font-weight:800;font-size:14px;margin-bottom:12px">TERMO DE RESPONSABILIDADE — DISPOSITIVO MÓVEL CORPORATIVO</div>
-      <div style="text-align:center;color:var(--g500);margin-bottom:16px;font-size:11.5px">SYSACK · ${new Date().toLocaleDateString('pt-BR')}</div>
-      <p>Eu, <strong>${sm.empNome||'_______________'}</strong>, matrícula <strong>${sm.empMat||'_______'}</strong>, lotado no setor de <strong>${sm.empSetor||'_______________'}</strong>, declaro ter recebido em perfeito estado de funcionamento o seguinte dispositivo móvel:</p>
-      <div style="background:var(--g100);border-radius:6px;padding:10px 14px;margin:12px 0;font-size:11.5px">
-        <div><strong>Patrimônio:</strong> ${sm.pat}</div>
-        <div><strong>Marca / Modelo:</strong> ${esc(sm.marca)} ${esc(sm.modelo)}</div>
-        <div><strong>IMEI 1:</strong> <span class="imei-field">${sm.imei1}</span></div>
-        ${sm.imei2?`<div><strong>IMEI 2:</strong> <span class="imei-field">${sm.imei2}</span></div>`:''}
-        <div><strong>Linha / Chip:</strong> ${sm.linha||'—'} (${sm.operadora||'—'})</div>
-        <div><strong>S.O.:</strong> ${sm.so} ${sm.versao}</div>
+  document.getElementById('modal-termo-sm')?.remove();
+
+  const jaAssinado = !!(sm.termoAssinadoEm || sm.termoArquivoUrl || sm.termoAssinaturaB64);
+  const dataHoje   = new Date().toLocaleDateString('pt-BR');
+
+  const html = `
+  <div class="modal-overlay open" id="modal-termo-sm" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:760px;width:95%;max-height:92vh;display:flex;flex-direction:column">
+      <div class="modal-header" style="flex-shrink:0">
+        <div>
+          <h3>📄 Termo de Responsabilidade</h3>
+          <div style="font-size:11px;color:var(--g400);margin-top:2px">
+            ${escapeHtml(sm.empNome||'—')} · ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'')} · PAT: ${escapeHtml(sm.pat||'—')}
+            ${jaAssinado ? '<span style="background:#eaf3de;color:#3b6d11;font-size:10px;padding:1px 8px;border-radius:10px;margin-left:8px;font-weight:700">✓ Assinado</span>' : ''}
+          </div>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-termo-sm').remove()">✕</button>
       </div>
-      <p>Comprometo-me a zelar pelo bom uso, conservação e segurança do dispositivo, utilizando-o exclusivamente para fins corporativos, e a comunicar imediatamente ao setor de TI qualquer ocorrência de perda, roubo, dano ou mau funcionamento.</p>
-      <p>Declaro ainda estar ciente de que o dispositivo poderá ser monitorado e gerenciado remotamente, conforme as políticas de uso da empresa e em conformidade com a LGPD.</p>
-      <div style="margin-top:20px;display:flex;gap:24px">
-        <div style="flex:1;border-top:1px solid var(--g400);padding-top:6px;text-align:center;font-size:11px">Assinatura do Empregado</div>
-        <div style="flex:1;border-top:1px solid var(--g400);padding-top:6px;text-align:center;font-size:11px">Assinatura Responsável TI / SYSACK</div>
+
+      <div class="modal-body" style="overflow-y:auto;flex:1;padding:20px">
+
+        <!-- Abas -->
+        <div style="display:flex;border-bottom:2px solid var(--g100);margin-bottom:20px;gap:0">
+          ${['📋 Termo','✍️ Assinar','📎 Upload Arquivo','📁 Histórico'].map((tab,i)=>`
+            <button onclick="_termoTab(${i})" id="termo-tab-btn-${i}"
+              style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:${i===0?'700':'500'};
+              color:${i===0?'var(--accent)':'var(--g500)'};border-bottom:${i===0?'2px solid var(--accent)':'2px solid transparent'};margin-bottom:-2px">
+              ${tab}
+            </button>`).join('')}
+        </div>
+
+        <!-- Aba 0: Visualização do Termo -->
+        <div id="termo-pane-0">
+          <div style="border:1px solid var(--g200);border-radius:8px;padding:24px;font-size:12px;line-height:1.9;color:var(--g800);background:#fff">
+            <div style="text-align:center;font-weight:800;font-size:15px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.03em">
+              Termo de Responsabilidade<br>Dispositivo Móvel Corporativo
+            </div>
+            <div style="text-align:center;color:var(--g400);font-size:11px;margin-bottom:20px">CESAN · SYSACK · ${dataHoje}</div>
+
+            <p>Eu, <strong>${escapeHtml(sm.empNome||'_______________')}</strong>, matrícula <strong>${escapeHtml(sm.empMat||'_______')}</strong>,
+            lotado no setor de <strong>${escapeHtml(sm.empSetor||'_______________')}</strong>, declaro ter recebido em perfeito estado de
+            funcionamento o seguinte dispositivo móvel corporativo:</p>
+
+            <div style="background:var(--g50);border:1px solid var(--g200);border-radius:6px;padding:12px 16px;margin:16px 0;font-size:11.5px">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+                <div><strong>Patrimônio:</strong> ${escapeHtml(sm.pat||'—')}</div>
+                <div><strong>Marca / Modelo:</strong> ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'')}</div>
+                <div><strong>IMEI 1:</strong> <span style="font-family:monospace">${escapeHtml(sm.imei1||'—')}</span></div>
+                ${sm.imei2?`<div><strong>IMEI 2:</strong> <span style="font-family:monospace">${escapeHtml(sm.imei2)}</span></div>`:'<div></div>'}
+                <div><strong>Linha / Chip:</strong> ${escapeHtml(sm.linha||'—')}</div>
+                <div><strong>Operadora:</strong> ${escapeHtml(sm.operadora||'—')}</div>
+                <div><strong>S.O.:</strong> ${escapeHtml(sm.so||'—')} ${escapeHtml(sm.versao||'')}</div>
+                <div><strong>Data entrega:</strong> ${dataHoje}</div>
+              </div>
+            </div>
+
+            <p>Comprometo-me a:</p>
+            <ul style="margin:8px 0 16px 20px;font-size:11.5px">
+              <li>Zelar pelo bom uso, conservação e segurança do dispositivo;</li>
+              <li>Utilizar o dispositivo exclusivamente para fins corporativos;</li>
+              <li>Comunicar imediatamente ao setor de TI qualquer ocorrência de perda, roubo, dano ou mau funcionamento;</li>
+              <li>Não instalar aplicativos não autorizados pela CESAN;</li>
+              <li>Devolver o aparelho em perfeito estado ao término do vínculo ou quando solicitado pela empresa.</li>
+            </ul>
+            <p style="font-size:11.5px">Declaro ainda estar ciente das políticas de uso de dispositivos móveis da CESAN e da legislação LGPD (Lei 13.709/2018).</p>
+
+            ${jaAssinado && sm.termoAssinaturaB64 ? `
+            <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--g200)">
+              <div style="font-size:11px;color:var(--g400);margin-bottom:8px">Assinatura digital do empregado:</div>
+              <img src="${sm.termoAssinaturaB64}" style="max-height:80px;border:1px solid var(--g200);border-radius:4px;padding:4px">
+              <div style="font-size:10.5px;color:var(--g400);margin-top:4px">Assinado em: ${sm.termoAssinadoEm ? new Date(sm.termoAssinadoEm?.seconds?sm.termoAssinadoEm.seconds*1000:sm.termoAssinadoEm).toLocaleString('pt-BR') : '—'}</div>
+            </div>` : `
+            <div style="margin-top:24px;display:flex;gap:32px">
+              <div style="flex:1;border-top:1px solid var(--g600);padding-top:6px;text-align:center;font-size:10.5px;color:var(--g500)">Assinatura do Empregado</div>
+              <div style="flex:1;border-top:1px solid var(--g600);padding-top:6px;text-align:center;font-size:10.5px;color:var(--g500)">Responsável TI / CESAN</div>
+            </div>`}
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick="_termoPrint()">🖨️ Imprimir</button>
+            <button class="btn btn-primary btn-sm" onclick="_termoTab(1)">✍️ Assinar digitalmente →</button>
+          </div>
+        </div>
+
+        <!-- Aba 1: Assinatura digital com canvas -->
+        <div id="termo-pane-1" style="display:none">
+          <div style="text-align:center;margin-bottom:16px;color:var(--g600);font-size:13px">
+            Assine com o dedo ou mouse no campo abaixo
+          </div>
+          <div style="position:relative;border:2px dashed var(--g300);border-radius:10px;overflow:hidden;background:#fafafa;cursor:crosshair">
+            <canvas id="termo-canvas" width="700" height="220"
+              style="width:100%;height:220px;touch-action:none;display:block"></canvas>
+            <div id="termo-canvas-hint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+              pointer-events:none;color:var(--g300);font-size:14px;font-weight:500;text-align:center">
+              ✍️ Assine aqui
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:space-between;align-items:center">
+            <div style="font-size:11px;color:var(--g400)">Use o dedo (touch) ou o mouse para assinar</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="_termoLimparCanvas()">🗑 Limpar</button>
+              <button class="btn btn-primary btn-sm" onclick="_termoSalvarAssinatura('${sm.id}')">💾 Salvar Assinatura</button>
+            </div>
+          </div>
+
+          <!-- Upload de assinatura como imagem -->
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--g100)">
+            <div style="font-size:12px;font-weight:600;color:var(--g600);margin-bottom:8px">Ou envie uma imagem da assinatura:</div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <label style="cursor:pointer">
+                <input type="file" id="termo-assinatura-file" accept="image/*"
+                  style="display:none" onchange="_termoPreviewAssinaturaUpload(this)">
+                <span class="btn btn-ghost btn-sm">📎 Escolher imagem</span>
+              </label>
+              <span id="termo-assinatura-file-nome" style="font-size:11.5px;color:var(--g400)">Nenhum arquivo selecionado</span>
+            </div>
+            <div id="termo-assinatura-upload-preview" style="margin-top:10px;display:none">
+              <img id="termo-assinatura-upload-img" style="max-height:80px;border:1px solid var(--g200);border-radius:4px;padding:4px">
+              <div style="margin-top:6px;display:flex;gap:8px">
+                <button class="btn btn-primary btn-sm" onclick="_termoSalvarAssinaturaUpload('${sm.id}')">💾 Salvar imagem como assinatura</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Aba 2: Upload de arquivo do termo -->
+        <div id="termo-pane-2" style="display:none">
+          <div style="background:var(--g50);border-radius:10px;padding:20px;text-align:center;border:2px dashed var(--g200)">
+            <div style="font-size:32px;margin-bottom:12px">📎</div>
+            <div style="font-size:14px;font-weight:600;color:var(--g700);margin-bottom:6px">Upload do Termo Assinado</div>
+            <div style="font-size:12px;color:var(--g400);margin-bottom:16px">Envie o PDF ou imagem do termo físico assinado pelo empregado</div>
+            <label style="cursor:pointer">
+              <input type="file" id="termo-arquivo-upload" accept=".pdf,.png,.jpg,.jpeg"
+                style="display:none" onchange="_termoPreviewArquivo(this)">
+              <span class="btn btn-primary">📁 Selecionar arquivo</span>
+            </label>
+            <div id="termo-arquivo-preview" style="margin-top:16px;display:none">
+              <div id="termo-arquivo-nome" style="font-size:12px;color:var(--g600);margin-bottom:10px"></div>
+              <button class="btn btn-primary" onclick="_termoEnviarArquivo('${sm.id}')">⬆️ Enviar e vincular ao smartphone</button>
+            </div>
+          </div>
+          ${sm.termoArquivoUrl ? `
+          <div style="margin-top:16px;padding:12px;background:#eaf3de;border-radius:8px;display:flex;align-items:center;gap:10px">
+            <span style="font-size:20px">✅</span>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#3b6d11">Termo já anexado</div>
+              <div style="font-size:11px;color:#5a9a30;margin-top:2px">Enviado em: ${sm.termoAnexadoEm ? new Date(sm.termoAnexadoEm?.seconds?sm.termoAnexadoEm.seconds*1000:sm.termoAnexadoEm).toLocaleString('pt-BR') : '—'}</div>
+            </div>
+            <a href="${sm.termoArquivoUrl}" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:auto">👁 Ver arquivo</a>
+          </div>` : ''}
+        </div>
+
+        <!-- Aba 3: Histórico -->
+        <div id="termo-pane-3" style="display:none">
+          <div style="font-size:12px;color:var(--g600)">
+            ${jaAssinado ? `
+            <div style="padding:12px;background:#eaf3de;border-radius:8px;margin-bottom:12px;display:flex;gap:10px">
+              <span style="font-size:20px">✅</span>
+              <div>
+                <div style="font-weight:600;color:#3b6d11">Termo assinado digitalmente</div>
+                <div style="color:#5a9a30;font-size:11px;margin-top:2px">
+                  ${sm.termoAssinadoEm ? 'Em: '+new Date(sm.termoAssinadoEm?.seconds?sm.termoAssinadoEm.seconds*1000:sm.termoAssinadoEm).toLocaleString('pt-BR') : '—'}
+                </div>
+              </div>
+            </div>` : '<div style="padding:16px;text-align:center;color:var(--g400)">Nenhum termo assinado ainda.</div>'}
+            ${sm.termoArquivoUrl ? `
+            <div style="padding:12px;background:#EFF6FF;border-radius:8px;display:flex;gap:10px;align-items:center">
+              <span style="font-size:20px">📎</span>
+              <div>
+                <div style="font-weight:600;color:#1D4ED8">Arquivo físico anexado</div>
+                <div style="color:#2563EB;font-size:11px;margin-top:2px">Enviado em: ${sm.termoAnexadoEm ? new Date(sm.termoAnexadoEm?.seconds?sm.termoAnexadoEm.seconds*1000:sm.termoAnexadoEm).toLocaleString('pt-BR') : '—'}</div>
+              </div>
+              <a href="${sm.termoArquivoUrl}" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:auto">👁 Ver</a>
+            </div>` : ''}
+          </div>
+        </div>
+
       </div>
-    </div>`;
-  openModal('modal-gerar-termo');
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Init canvas drawing
+  setTimeout(() => {
+    const canvas = document.getElementById('termo-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let drawing = false, lastX = 0, lastY = 0;
+
+    function getPos(e) {
+      const r = canvas.getBoundingClientRect();
+      const t = e.touches ? e.touches[0] : e;
+      return { x: (t.clientX - r.left) * (canvas.width / r.width),
+               y: (t.clientY - r.top)  * (canvas.height / r.height) };
+    }
+    function startDraw(e) {
+      e.preventDefault(); drawing = true;
+      const p = getPos(e); lastX = p.x; lastY = p.y;
+      document.getElementById('termo-canvas-hint').style.display = 'none';
+    }
+    function draw(e) {
+      if (!drawing) return; e.preventDefault();
+      const p = getPos(e);
+      ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y);
+      ctx.strokeStyle = '#1a1a2e'; ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+      lastX = p.x; lastY = p.y;
+    }
+    function stopDraw() { drawing = false; }
+
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', stopDraw);
+    canvas.addEventListener('touchstart', startDraw, { passive:false });
+    canvas.addEventListener('touchmove',  draw,      { passive:false });
+    canvas.addEventListener('touchend',   stopDraw);
+  }, 150);
 }
+
+function _termoTab(i) {
+  [0,1,2,3].forEach(j => {
+    const pane = document.getElementById('termo-pane-'+j);
+    const btn  = document.getElementById('termo-tab-btn-'+j);
+    if (pane) pane.style.display = j===i ? '' : 'none';
+    if (btn) {
+      btn.style.fontWeight  = j===i ? '700' : '500';
+      btn.style.color       = j===i ? 'var(--accent)' : 'var(--g500)';
+      btn.style.borderBottom= j===i ? '2px solid var(--accent)' : '2px solid transparent';
+    }
+  });
+}
+
+function _termoLimparCanvas() {
+  const canvas = document.getElementById('termo-canvas');
+  if (!canvas) return;
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  const hint = document.getElementById('termo-canvas-hint');
+  if (hint) hint.style.display = '';
+}
+
+function _termoCanvasVazio() {
+  const canvas = document.getElementById('termo-canvas');
+  if (!canvas) return true;
+  const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+  return !data.some(v => v !== 0);
+}
+
+async function _termoSalvarAssinatura(smId) {
+  if (_termoCanvasVazio()) return showToast('Desenhe a assinatura antes de salvar', 'warning');
+  const canvas = document.getElementById('termo-canvas');
+  const b64    = canvas.toDataURL('image/png');
+  await _termoGravar(smId, { termoAssinaturaB64: b64, termoAssinadoEm: new Date(), termoStatus: 'assinado' });
+  showToast('✓ Assinatura salva com sucesso!', 'success');
+  document.getElementById('modal-termo-sm')?.remove();
+}
+
+function _termoPreviewAssinaturaUpload(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  document.getElementById('termo-assinatura-file-nome').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const preview = document.getElementById('termo-assinatura-upload-preview');
+    const img     = document.getElementById('termo-assinatura-upload-img');
+    if (img) img.src = e.target.result;
+    if (preview) preview.style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function _termoSalvarAssinaturaUpload(smId) {
+  const img = document.getElementById('termo-assinatura-upload-img');
+  if (!img?.src) return showToast('Selecione uma imagem primeiro', 'warning');
+  await _termoGravar(smId, { termoAssinaturaB64: img.src, termoAssinadoEm: new Date(), termoStatus: 'assinado_upload' });
+  showToast('✓ Imagem de assinatura salva!', 'success');
+  document.getElementById('modal-termo-sm')?.remove();
+}
+
+function _termoPreviewArquivo(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const preview = document.getElementById('termo-arquivo-preview');
+  const nome    = document.getElementById('termo-arquivo-nome');
+  if (nome) nome.textContent = '📎 ' + file.name + ' (' + (file.size/1024).toFixed(0) + ' KB)';
+  if (preview) preview.style.display = '';
+}
+
+async function _termoEnviarArquivo(smId) {
+  const input = document.getElementById('termo-arquivo-upload');
+  const file  = input?.files?.[0];
+  if (!file) return showToast('Selecione um arquivo primeiro', 'warning');
+
+  // Para versão sem Storage: salva em base64 no Firestore (limite ~900KB)
+  // Em produção com Firebase Storage, fazer upload e salvar a URL
+  if (file.size > 900000) {
+    showToast('Arquivo muito grande. Máximo: 900KB. Comprima o PDF antes de enviar.', 'warning', 5000);
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async e => {
+    await _termoGravar(smId, {
+      termoArquivoUrl: e.target.result,   // base64 — trocar por URL do Storage em produção
+      termoArquivoNome: file.name,
+      termoAnexadoEm: new Date(),
+      termoStatus: 'arquivo_anexado',
+    });
+    showToast('✓ Arquivo vinculado ao smartphone!', 'success');
+    document.getElementById('modal-termo-sm')?.remove();
+  };
+  reader.readAsDataURL(file);
+}
+
+async function _termoGravar(smId, dados) {
+  // Atualiza STATE local
+  const sm = (STATE.smartphones||[]).find(s => s.id === smId);
+  if (sm) Object.assign(sm, dados);
+  // Grava no Firestore
+  try {
+    if (FB_READY && db) {
+      await db.collection('smartphones').doc(smId).update({
+        ...dados,
+        updatedAt: new Date(),
+      });
+    }
+  } catch(e) {
+    console.warn('[Termo] Erro ao gravar:', e.message);
+    showToast('Salvo localmente — sincronização pendente', 'warning');
+  }
+}
+
+function _termoPrint() {
+  const content = document.getElementById('termo-pane-0')?.innerHTML || '';
+  const w = window.open('', '_blank', 'width=800,height=900');
+  w.document.write('<html><head><title>Termo de Responsabilidade</title><style>body{font-family:Arial,sans-serif;padding:32px;font-size:13px;line-height:1.8}h1{font-size:16px}</style></head><body>' + content + '</body></html>');
+  w.document.close();
+  w.print();
+}
+
 
 // ============================================================
 // AUTO-FILL EMPREGADO (helper)
@@ -24050,19 +24354,10 @@ function _renderMapaGrafico(todosAll, container) {
       html += '<text x="'+(x+38)+'" y="'+(swY+30)+'" font-size="10" font-weight="700" fill="#fff" font-family="monospace">'+escapeHtml(swLabel)+'</text>';
       // IP
       html += '<text x="'+(x+38)+'" y="'+(swY+44)+'" font-size="8.5" fill="rgba(255,255,255,.65)" font-family="monospace">'+escapeHtml(sw.ip||'')+'</text>';
-      var swP24   = (sw.ip||'').split('.').slice(0,3).join('.');
-      var swRede  = (window.REDES_PREFIX && REDES_PREFIX[swP24]) ? REDES_PREFIX[swP24] : null;
-      if (!swRede && window.STATE_REDES)
-        swRede = (STATE_REDES||[]).find(function(r){ return r.prefix && sw.ip && sw.ip.startsWith(r.prefix+'.'); }) || null;
-      var swSigla   = swRede ? (swRede.sigla||'').toUpperCase() : '';
-      var swNomeLoc = swRede ? (swRede.nome||'') : resolverLocal(sw);
-      if (swSigla || swNomeLoc) {
-        var locLabel = (swSigla ? '['+swSigla+'] ' : '') + (swNomeLoc||'');
-        html += '<rect x="'+(x+4)+'" y="'+(swY+SW_H-17)+'" width="'+(COL_W-8)+'" height="13" rx="3" fill="rgba(0,0,0,.35)"/>';
-        html += '<text x="'+(x+8)+'" y="'+(swY+SW_H-7)+'" font-size="7.5" fill="rgba(255,255,255,.9)" font-weight="700">'+escapeHtml(locLabel.slice(0,26))+'</text>';
-      }
-      if (latMs) html += '<text x="'+(x+12)+'" y="'+(swY+56)+'" font-size="7.5" fill="rgba(255,255,255,.45)">'+escapeHtml(latMs)+'</text>';
-      html += '<text x="'+(x+COL_W-10)+'" y="'+(swY+56)+'" font-size="7.5" fill="rgba(255,255,255,.45)" text-anchor="end">'+g.hosts.length+' hosts</text>';
+      // Latência
+      if (latMs) html += '<text x="'+(x+12)+'" y="'+(swY+58)+'" font-size="8" fill="rgba(255,255,255,.5)">'+escapeHtml(latMs)+'</text>';
+      // Nº de hosts
+      html += '<text x="'+(x+COL_W-12)+'" y="'+(swY+54)+'" font-size="8" fill="rgba(255,255,255,.5)" text-anchor="end">'+g.hosts.length+' hosts</text>';
 
       // Linha vertical do switch → hosts
       if (g.hosts.length) {
@@ -24117,17 +24412,20 @@ function _renderMapaGrafico(todosAll, container) {
       html += '<circle cx="'+(x+14)+'" cy="'+(hy+HOST_H/2)+'" r="4" fill="'+hSt+'"/>';
 
       // Ícone tipo
-      html += '<text x="'+(x+25)+'" y="'+(hy+HOST_H/2+4)+'" font-size="12">'+hTi.icon+'</text>';
-      var tipoLabel = hTi.label || (h.tipo||'?').toUpperCase().slice(0,10);
-      var badgeW = Math.min(tipoLabel.length*5.4+6,58);
-      html += '<rect x="'+(x+38)+'" y="'+(hy+3)+'" width="'+badgeW+'" height="10" rx="2" fill="'+hTi.cor+'33"/>';
-      html += '<text x="'+(x+40)+'" y="'+(hy+11)+'" font-size="6.5" fill="'+hTi.cor+'" font-weight="800" letter-spacing="0.4">'+escapeHtml(tipoLabel)+'</text>';
-      html += '<text x="'+(x+40)+'" y="'+(hy+22)+'" font-size="8.5" fill="#1E293B" font-family="monospace" font-weight="600">'+escapeHtml(hLabel)+'</text>';
-      if (hIp && hIp !== hLabel)
-        html += '<text x="'+(x+40)+'" y="'+(hy+31)+'" font-size="7.5" fill="#94A3B8" font-family="monospace">'+escapeHtml(hIp)+'</text>';
+      html += '<text x="'+(x+25)+'" y="'+(hy+HOST_H/2+4)+'" font-size="11">'+hTi.icon+'</text>';
+
+      // Label hostname
+      html += '<text x="'+(x+40)+'" y="'+(hy+HOST_H/2-2)+'" font-size="8.5" fill="#1E293B" font-family="monospace" font-weight="600">'+escapeHtml(hLabel)+'</text>';
+
+      // IP menor embaixo
+      if (hIp && hIp !== hLabel) {
+        html += '<text x="'+(x+40)+'" y="'+(hy+HOST_H/2+9)+'" font-size="7.5" fill="#94A3B8" font-family="monospace">'+escapeHtml(hIp)+'</text>';
+      }
+
+      // Latência (se disponível)
       if (h.latencyMs != null) {
         var latCor = h.latencyMs < 5 ? '#10B981' : h.latencyMs < 30 ? '#F59E0B' : '#EF4444';
-        html += '<text x="'+(x+COL_W-4)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="'+latCor+'" text-anchor="end">'+h.latencyMs+'ms</text>';
+        html += '<text x="'+(x+COL_W-5)+'" y="'+(hy+HOST_H/2+4)+'" font-size="7.5" fill="'+latCor+'" text-anchor="end">'+h.latencyMs+'ms</text>';
       }
     });
   });
