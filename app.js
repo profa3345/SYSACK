@@ -201,6 +201,16 @@ const FIREBASE_CONFIG = {
 
 // ── Banco SDK carregado via CDN (compat mode para HTML puro) ──
 let db = null, auth = null, analytics = null;
+
+(function() {
+  var _ce = console.error.bind(console);
+  console.error = function() {
+    var msg = Array.from(arguments).join(' ');
+    if (msg.indexOf('permission-denied') !== -1 || msg.indexOf('Missing or insufficient permissions') !== -1) return;
+    _ce.apply(console, arguments);
+  };
+})();
+
 let FB_READY = false;
 
 function showOfflineBar(msg) {
@@ -1060,7 +1070,7 @@ window.auditLog = function(action, module, resourceId, resourceType, details = {
       action, module, resourceId, resourceType,
       details: JSON.stringify(details).slice(0, 2000),
       createdAt: serverTimestamp(),
-    }).catch(e => console.warn('[Banco] audit_log:', e.message));
+    }).catch(e => { if(!e.message?.includes('permission')) console.warn('[Banco] audit_log:', e.message); });
   }
   return entry;
 };
@@ -1101,7 +1111,7 @@ const PAGE_LABELS = {
   movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
-  mdm:'Smartphones', telecom:'Gestão Telecom', localidades:'Localidades', switches:'Switches & Roteadores', apps:'Inventário de Software',
+  mdm:'Smartphones / MDM', telecom:'Gestão Telecom', localidades:'Localidades', switches:'Switches & Roteadores', apps:'Inventário de Software',
   documentos:'Documentos', lembretes:'Lembretes',
   pesquisas:'Pesquisas Salvas', alertas:'Alertas'
 };
@@ -2815,10 +2825,19 @@ function _tentarFirebaseAuthBackground(email, senha, tentativa = 1) {
       }, 1000);
     })
     .catch(err => {
-      const maxTentativas = 20; // ~10 minutos
+      const naoExiste = err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' ||
+                        err.code === 'auth/invalid-credential' || (err.message||'').includes('400');
+      if (naoExiste) {
+        if (auth && !auth.currentUser) {
+          auth.signInAnonymously()
+            .then(() => { if (!window._protectedListenersAtivos) startProtectedListeners(); })
+            .catch(e => console.warn('[Auth] signInAnonymously falhou:', e.message));
+        }
+        return;
+      }
+      const maxTentativas = 20;
       if (tentativa < maxTentativas) {
-        const delay = Math.min(30000, tentativa * 5000); // 5s, 10s, 15s... max 30s
-        console.log(`[Auth] Firebase Auth bloqueado (tentativa ${tentativa}) — retry em ${delay/1000}s`);
+        const delay = Math.min(30000, tentativa * 5000);
         setTimeout(() => _tentarFirebaseAuthBackground(email, senha, tentativa + 1), delay);
       }
     });
@@ -3018,8 +3037,14 @@ async function _fazerLoginInterno() {
           }
         }
       } catch(e) {
-        console.warn('[Auth] Custom Token indisponível:', e.message, '— usando poll para Firestore');
-        // Fallback: listeners via arPollAgentes() já cobre leitura de agentes
+        console.warn('[Auth] Custom Token indisponível:', e.message, '— tentando signInAnonymously');
+        try {
+          if (auth && !auth.currentUser) {
+            await auth.signInAnonymously();
+            console.log('[Auth] signInAnonymously OK — Firestore listeners liberados');
+            if (!window._protectedListenersAtivos) startProtectedListeners();
+          }
+        } catch(e2) { console.warn('[Auth] signInAnonymously falhou:', e2.message); }
       }
     }
 
@@ -5020,7 +5045,7 @@ let currentChamadoSm = null;
 // ============================================================
 // RENDER MDM
 // ============================================================
-const PAGE_LABELS_EXT = { mdm: 'Smartphones' };
+const PAGE_LABELS_EXT = { mdm: 'Smartphones / MDM' };
 
 function renderMDM() {
   const sms = STATE.smartphones || [];
@@ -5074,7 +5099,7 @@ function renderMDM() {
             <button class="mdm-action-btn mab-gray" onclick="abrirGerenciarSm('${s.id}')">⚙️ Gerenciar</button>
             <button class="mdm-action-btn mab-success" onclick="abrirChamadoSm('${s.id}')">🎫 Chamado</button>
             <button class="mdm-action-btn mab-violet" onclick="gerarTermoSm('${s.id}')">📄 Termo</button>
-            
+            <button class="mdm-action-btn" style="background:#7C3AED;color:#fff" onclick="abrirAcessoRemotoMobile('${s.id}')">📡 Remoto</button>
           </div>
         </td>
       </tr>`).join('') || '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--g400)">Nenhum smartphone encontrado</td></tr>';
@@ -5407,410 +5432,28 @@ function salvarChamadoSm() {
 function gerarTermoSm(id) {
   const sm = (STATE.smartphones||[]).find(s=>s.id===id);
   if (!sm) return;
-  document.getElementById('modal-termo-sm')?.remove();
-
-  const jaAssinado = !!(sm.termoAssinadoEm || sm.termoArquivoUrl || sm.termoAssinaturaB64);
-  const dataHoje   = new Date().toLocaleDateString('pt-BR');
-
-  const html = `
-  <div class="modal-overlay open" id="modal-termo-sm" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:760px;width:95%;max-height:92vh;display:flex;flex-direction:column">
-      <div class="modal-header" style="flex-shrink:0">
-        <div>
-          <h3>📄 Termo de Responsabilidade</h3>
-          <div style="font-size:11px;color:var(--g400);margin-top:2px">
-            ${escapeHtml(sm.empNome||'—')} · ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'')} · PAT: ${escapeHtml(sm.pat||'—')}
-            ${jaAssinado ? '<span style="background:#eaf3de;color:#3b6d11;font-size:10px;padding:1px 8px;border-radius:10px;margin-left:8px;font-weight:700">✓ Assinado</span>' : ''}
-          </div>
-        </div>
-        <button class="close-btn" onclick="document.getElementById('modal-termo-sm').remove()">✕</button>
+  document.getElementById('termo-preview-content').innerHTML = `
+    <div style="font-size:12px;line-height:1.8;color:var(--g800)">
+      <div style="text-align:center;font-weight:800;font-size:14px;margin-bottom:12px">TERMO DE RESPONSABILIDADE — DISPOSITIVO MÓVEL CORPORATIVO</div>
+      <div style="text-align:center;color:var(--g500);margin-bottom:16px;font-size:11.5px">SYSACK · ${new Date().toLocaleDateString('pt-BR')}</div>
+      <p>Eu, <strong>${sm.empNome||'_______________'}</strong>, matrícula <strong>${sm.empMat||'_______'}</strong>, lotado no setor de <strong>${sm.empSetor||'_______________'}</strong>, declaro ter recebido em perfeito estado de funcionamento o seguinte dispositivo móvel:</p>
+      <div style="background:var(--g100);border-radius:6px;padding:10px 14px;margin:12px 0;font-size:11.5px">
+        <div><strong>Patrimônio:</strong> ${sm.pat}</div>
+        <div><strong>Marca / Modelo:</strong> ${esc(sm.marca)} ${esc(sm.modelo)}</div>
+        <div><strong>IMEI 1:</strong> <span class="imei-field">${sm.imei1}</span></div>
+        ${sm.imei2?`<div><strong>IMEI 2:</strong> <span class="imei-field">${sm.imei2}</span></div>`:''}
+        <div><strong>Linha / Chip:</strong> ${sm.linha||'—'} (${sm.operadora||'—'})</div>
+        <div><strong>S.O.:</strong> ${sm.so} ${sm.versao}</div>
       </div>
-
-      <div class="modal-body" style="overflow-y:auto;flex:1;padding:20px">
-
-        <!-- Abas -->
-        <div style="display:flex;border-bottom:2px solid var(--g100);margin-bottom:20px;gap:0">
-          ${['📋 Termo','✍️ Assinar','📎 Upload Arquivo','📁 Histórico'].map((tab,i)=>`
-            <button onclick="_termoTab(${i})" id="termo-tab-btn-${i}"
-              style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:${i===0?'700':'500'};
-              color:${i===0?'var(--accent)':'var(--g500)'};border-bottom:${i===0?'2px solid var(--accent)':'2px solid transparent'};margin-bottom:-2px">
-              ${tab}
-            </button>`).join('')}
-        </div>
-
-        <!-- Aba 0: Visualização do Termo -->
-        <div id="termo-pane-0">
-          <div style="border:1px solid var(--g200);border-radius:8px;padding:24px;font-size:12px;line-height:1.9;color:var(--g800);background:#fff">
-            <div style="text-align:center;font-weight:800;font-size:15px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.03em">
-              Termo de Responsabilidade<br>Dispositivo Móvel Corporativo
-            </div>
-            <div style="text-align:center;color:var(--g400);font-size:11px;margin-bottom:20px">CESAN · SYSACK · ${dataHoje}</div>
-
-            <p>Eu, <strong>${escapeHtml(sm.empNome||'_______________')}</strong>, matrícula <strong>${escapeHtml(sm.empMat||'_______')}</strong>,
-            lotado no setor de <strong>${escapeHtml(sm.empSetor||'_______________')}</strong>, declaro ter recebido em perfeito estado de
-            funcionamento o seguinte dispositivo móvel corporativo:</p>
-
-            <div style="background:var(--g50);border:1px solid var(--g200);border-radius:6px;padding:12px 16px;margin:16px 0;font-size:11.5px">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
-                <div><strong>Patrimônio:</strong> ${escapeHtml(sm.pat||'—')}</div>
-                <div><strong>Marca / Modelo:</strong> ${escapeHtml(sm.marca||'')} ${escapeHtml(sm.modelo||'')}</div>
-                <div><strong>IMEI 1:</strong> <span style="font-family:monospace">${escapeHtml(sm.imei1||'—')}</span></div>
-                ${sm.imei2?`<div><strong>IMEI 2:</strong> <span style="font-family:monospace">${escapeHtml(sm.imei2)}</span></div>`:'<div></div>'}
-                <div><strong>Linha / Chip:</strong> ${escapeHtml(sm.linha||'—')}</div>
-                <div><strong>Operadora:</strong> ${escapeHtml(sm.operadora||'—')}</div>
-                <div><strong>S.O.:</strong> ${escapeHtml(sm.so||'—')} ${escapeHtml(sm.versao||'')}</div>
-                <div><strong>Data entrega:</strong> ${dataHoje}</div>
-              </div>
-            </div>
-
-            <p>Comprometo-me a:</p>
-            <ul style="margin:8px 0 16px 20px;font-size:11.5px">
-              <li>Zelar pelo bom uso, conservação e segurança do dispositivo;</li>
-              <li>Utilizar o dispositivo exclusivamente para fins corporativos;</li>
-              <li>Comunicar imediatamente ao setor de TI qualquer ocorrência de perda, roubo, dano ou mau funcionamento;</li>
-              <li>Não instalar aplicativos não autorizados pela CESAN;</li>
-              <li>Devolver o aparelho em perfeito estado ao término do vínculo ou quando solicitado pela empresa.</li>
-            </ul>
-            <p style="font-size:11.5px">Declaro ainda estar ciente das políticas de uso de dispositivos móveis da CESAN e da legislação LGPD (Lei 13.709/2018).</p>
-
-            ${jaAssinado && sm.termoAssinaturaB64 ? `
-            <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--g200)">
-              <div style="font-size:11px;color:var(--g400);margin-bottom:8px">Assinatura digital do empregado:</div>
-              <img src="${sm.termoAssinaturaB64}" style="max-height:80px;border:1px solid var(--g200);border-radius:4px;padding:4px">
-              <div style="font-size:10.5px;color:var(--g400);margin-top:4px">Assinado em: ${sm.termoAssinadoEm ? new Date(sm.termoAssinadoEm?.seconds?sm.termoAssinadoEm.seconds*1000:sm.termoAssinadoEm).toLocaleString('pt-BR') : '—'}</div>
-            </div>` : `
-            <div style="margin-top:24px;display:flex;gap:32px">
-              <div style="flex:1;border-top:1px solid var(--g600);padding-top:6px;text-align:center;font-size:10.5px;color:var(--g500)">Assinatura do Empregado</div>
-              <div style="flex:1;border-top:1px solid var(--g600);padding-top:6px;text-align:center;font-size:10.5px;color:var(--g500)">Responsável TI / CESAN</div>
-            </div>`}
-          </div>
-
-          <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
-            <button class="btn btn-ghost btn-sm" onclick="_termoPrint()">🖨️ Imprimir</button>
-            <button class="btn btn-primary btn-sm" onclick="_termoTab(1)">✍️ Assinar digitalmente →</button>
-          </div>
-        </div>
-
-        <!-- Aba 1: Assinatura digital com canvas -->
-        <div id="termo-pane-1" style="display:none">
-          <div style="text-align:center;margin-bottom:16px;color:var(--g600);font-size:13px">
-            Assine com o dedo ou mouse no campo abaixo
-          </div>
-          <div style="position:relative;border:2px dashed var(--g300);border-radius:10px;overflow:hidden;background:#fafafa;cursor:crosshair">
-            <canvas id="termo-canvas" width="700" height="220"
-              style="width:100%;height:220px;touch-action:none;display:block"></canvas>
-            <div id="termo-canvas-hint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-              pointer-events:none;color:var(--g300);font-size:14px;font-weight:500;text-align:center">
-              ✍️ Assine aqui
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:space-between;align-items:center;flex-wrap:wrap">
-            <div style="font-size:11px;color:var(--g400)">Use o dedo (touch) ou o mouse para assinar</div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button id="termo-btn-travar" class="btn btn-ghost btn-sm" onclick="_termoTravarCanvas()"
-                title="Trava a tela para não rolar enquanto assina — útil no celular"
-                style="background:#FEF3C7;color:#92400E;border:1px solid #FCD34D">
-                🔒 Travar tela
-              </button>
-              <button class="btn btn-ghost btn-sm" onclick="_termoLimparCanvas()">🗑 Limpar</button>
-              <button class="btn btn-primary btn-sm" onclick="_termoSalvarAssinatura('${sm.id}')">💾 Salvar Assinatura</button>
-            </div>
-          </div>
-          <div id="termo-trava-aviso" style="display:none;margin-top:6px;padding:6px 12px;background:#FEF3C7;border-radius:6px;font-size:11.5px;color:#92400E;text-align:center">
-            🔒 Tela travada — scroll e zoom desativados. Toque em <strong>Destravar</strong> para sair.
-          </div>
-
-          <!-- Upload de assinatura como imagem -->
-          <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--g100)">
-            <div style="font-size:12px;font-weight:600;color:var(--g600);margin-bottom:8px">Ou envie uma imagem da assinatura:</div>
-            <div style="display:flex;gap:10px;align-items:center">
-              <label style="cursor:pointer">
-                <input type="file" id="termo-assinatura-file" accept="image/*"
-                  style="display:none" onchange="_termoPreviewAssinaturaUpload(this)">
-                <span class="btn btn-ghost btn-sm">📎 Escolher imagem</span>
-              </label>
-              <span id="termo-assinatura-file-nome" style="font-size:11.5px;color:var(--g400)">Nenhum arquivo selecionado</span>
-            </div>
-            <div id="termo-assinatura-upload-preview" style="margin-top:10px;display:none">
-              <img id="termo-assinatura-upload-img" style="max-height:80px;border:1px solid var(--g200);border-radius:4px;padding:4px">
-              <div style="margin-top:6px;display:flex;gap:8px">
-                <button class="btn btn-primary btn-sm" onclick="_termoSalvarAssinaturaUpload('${sm.id}')">💾 Salvar imagem como assinatura</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Aba 2: Upload de arquivo do termo -->
-        <div id="termo-pane-2" style="display:none">
-          <div style="background:var(--g50);border-radius:10px;padding:20px;text-align:center;border:2px dashed var(--g200)">
-            <div style="font-size:32px;margin-bottom:12px">📎</div>
-            <div style="font-size:14px;font-weight:600;color:var(--g700);margin-bottom:6px">Upload do Termo Assinado</div>
-            <div style="font-size:12px;color:var(--g400);margin-bottom:16px">Envie o PDF ou imagem do termo físico assinado pelo empregado</div>
-            <label style="cursor:pointer">
-              <input type="file" id="termo-arquivo-upload" accept=".pdf,.png,.jpg,.jpeg"
-                style="display:none" onchange="_termoPreviewArquivo(this)">
-              <span class="btn btn-primary">📁 Selecionar arquivo</span>
-            </label>
-            <div id="termo-arquivo-preview" style="margin-top:16px;display:none">
-              <div id="termo-arquivo-nome" style="font-size:12px;color:var(--g600);margin-bottom:10px"></div>
-              <button class="btn btn-primary" onclick="_termoEnviarArquivo('${sm.id}')">⬆️ Enviar e vincular ao smartphone</button>
-            </div>
-          </div>
-          ${sm.termoArquivoUrl ? `
-          <div style="margin-top:16px;padding:12px;background:#eaf3de;border-radius:8px;display:flex;align-items:center;gap:10px">
-            <span style="font-size:20px">✅</span>
-            <div>
-              <div style="font-size:13px;font-weight:600;color:#3b6d11">Termo já anexado</div>
-              <div style="font-size:11px;color:#5a9a30;margin-top:2px">Enviado em: ${sm.termoAnexadoEm ? new Date(sm.termoAnexadoEm?.seconds?sm.termoAnexadoEm.seconds*1000:sm.termoAnexadoEm).toLocaleString('pt-BR') : '—'}</div>
-            </div>
-            <a href="${sm.termoArquivoUrl}" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:auto">👁 Ver arquivo</a>
-          </div>` : ''}
-        </div>
-
-        <!-- Aba 3: Histórico -->
-        <div id="termo-pane-3" style="display:none">
-          <div style="font-size:12px;color:var(--g600)">
-            ${jaAssinado ? `
-            <div style="padding:12px;background:#eaf3de;border-radius:8px;margin-bottom:12px;display:flex;gap:10px">
-              <span style="font-size:20px">✅</span>
-              <div>
-                <div style="font-weight:600;color:#3b6d11">Termo assinado digitalmente</div>
-                <div style="color:#5a9a30;font-size:11px;margin-top:2px">
-                  ${sm.termoAssinadoEm ? 'Em: '+new Date(sm.termoAssinadoEm?.seconds?sm.termoAssinadoEm.seconds*1000:sm.termoAssinadoEm).toLocaleString('pt-BR') : '—'}
-                </div>
-              </div>
-            </div>` : '<div style="padding:16px;text-align:center;color:var(--g400)">Nenhum termo assinado ainda.</div>'}
-            ${sm.termoArquivoUrl ? `
-            <div style="padding:12px;background:#EFF6FF;border-radius:8px;display:flex;gap:10px;align-items:center">
-              <span style="font-size:20px">📎</span>
-              <div>
-                <div style="font-weight:600;color:#1D4ED8">Arquivo físico anexado</div>
-                <div style="color:#2563EB;font-size:11px;margin-top:2px">Enviado em: ${sm.termoAnexadoEm ? new Date(sm.termoAnexadoEm?.seconds?sm.termoAnexadoEm.seconds*1000:sm.termoAnexadoEm).toLocaleString('pt-BR') : '—'}</div>
-              </div>
-              <a href="${sm.termoArquivoUrl}" target="_blank" class="btn btn-ghost btn-sm" style="margin-left:auto">👁 Ver</a>
-            </div>` : ''}
-          </div>
-        </div>
-
+      <p>Comprometo-me a zelar pelo bom uso, conservação e segurança do dispositivo, utilizando-o exclusivamente para fins corporativos, e a comunicar imediatamente ao setor de TI qualquer ocorrência de perda, roubo, dano ou mau funcionamento.</p>
+      <p>Declaro ainda estar ciente de que o dispositivo poderá ser monitorado e gerenciado remotamente, conforme as políticas de uso da empresa e em conformidade com a LGPD.</p>
+      <div style="margin-top:20px;display:flex;gap:24px">
+        <div style="flex:1;border-top:1px solid var(--g400);padding-top:6px;text-align:center;font-size:11px">Assinatura do Empregado</div>
+        <div style="flex:1;border-top:1px solid var(--g400);padding-top:6px;text-align:center;font-size:11px">Assinatura Responsável TI / SYSACK</div>
       </div>
-    </div>
-  </div>`;
-
-  document.body.insertAdjacentHTML('beforeend', html);
-
-  // Init canvas drawing
-  setTimeout(() => {
-    const canvas = document.getElementById('termo-canvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    let drawing = false, lastX = 0, lastY = 0;
-
-    function getPos(e) {
-      const r = canvas.getBoundingClientRect();
-      const t = e.touches ? e.touches[0] : e;
-      return { x: (t.clientX - r.left) * (canvas.width / r.width),
-               y: (t.clientY - r.top)  * (canvas.height / r.height) };
-    }
-    function startDraw(e) {
-      e.preventDefault(); drawing = true;
-      const p = getPos(e); lastX = p.x; lastY = p.y;
-      document.getElementById('termo-canvas-hint').style.display = 'none';
-    }
-    function draw(e) {
-      if (!drawing) return; e.preventDefault();
-      const p = getPos(e);
-      ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y);
-      ctx.strokeStyle = '#1a1a2e'; ctx.lineWidth = 2.5;
-      ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
-      lastX = p.x; lastY = p.y;
-    }
-    function stopDraw() { drawing = false; }
-
-    canvas.addEventListener('mousedown', startDraw);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', stopDraw);
-    canvas.addEventListener('touchstart', startDraw, { passive:false });
-    canvas.addEventListener('touchmove',  draw,      { passive:false });
-    canvas.addEventListener('touchend',   stopDraw);
-  }, 150);
+    </div>`;
+  openModal('modal-gerar-termo');
 }
-
-function _termoTab(i) {
-  [0,1,2,3].forEach(j => {
-    const pane = document.getElementById('termo-pane-'+j);
-    const btn  = document.getElementById('termo-tab-btn-'+j);
-    if (pane) pane.style.display = j===i ? '' : 'none';
-    if (btn) {
-      btn.style.fontWeight  = j===i ? '700' : '500';
-      btn.style.color       = j===i ? 'var(--accent)' : 'var(--g500)';
-      btn.style.borderBottom= j===i ? '2px solid var(--accent)' : '2px solid transparent';
-    }
-  });
-}
-
-function _termoLimparCanvas() {
-  const canvas = document.getElementById('termo-canvas');
-  if (!canvas) return;
-  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-  const hint = document.getElementById('termo-canvas-hint');
-  if (hint) hint.style.display = '';
-}
-
-// Trava/Destrava scroll e zoom da página para facilitar assinatura no celular
-let _termoTravado = false;
-function _termoTravarCanvas() {
-  _termoTravado = !_termoTravado;
-  const btn    = document.getElementById('termo-btn-travar');
-  const aviso  = document.getElementById('termo-trava-aviso');
-  const canvas = document.getElementById('termo-canvas');
-
-  if (_termoTravado) {
-    // Desativa scroll e zoom do viewport
-    document.body.style.overflow    = 'hidden';
-    document.body.style.touchAction = 'none';
-    // Meta viewport — impede pinch-to-zoom
-    let metaVp = document.querySelector('meta[name="viewport"]');
-    if (metaVp) {
-      metaVp._backupContent = metaVp.content;
-      metaVp.content = 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no';
-    }
-    if (btn) {
-      btn.textContent = '🔓 Destravar';
-      btn.style.background     = '#FEE2E2';
-      btn.style.color          = '#991B1B';
-      btn.style.borderColor    = '#FCA5A5';
-    }
-    if (aviso)  aviso.style.display  = '';
-    if (canvas) canvas.style.border  = '3px solid #F59E0B';
-  } else {
-    // Restaura scroll normal
-    document.body.style.overflow    = '';
-    document.body.style.touchAction = '';
-    let metaVp = document.querySelector('meta[name="viewport"]');
-    if (metaVp && metaVp._backupContent) {
-      metaVp.content = metaVp._backupContent;
-    }
-    if (btn) {
-      btn.textContent          = '🔒 Travar tela';
-      btn.style.background     = '#FEF3C7';
-      btn.style.color          = '#92400E';
-      btn.style.borderColor    = '#FCD34D';
-    }
-    if (aviso)  aviso.style.display  = 'none';
-    if (canvas) canvas.style.border  = '';
-  }
-}
-
-// Garante destravar ao fechar o modal
-(function() {
-  const _origRemove = Element.prototype.remove;
-  // Destravar quando o modal-termo-sm for removido
-  document.addEventListener('click', function(e) {
-    if (e.target?.classList?.contains('close-btn') && _termoTravado) {
-      _termoTravado = true; // força destravar
-      _termoTravarCanvas();
-    }
-  }, true);
-})();
-
-function _termoCanvasVazio() {
-  const canvas = document.getElementById('termo-canvas');
-  if (!canvas) return true;
-  const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-  return !data.some(v => v !== 0);
-}
-
-async function _termoSalvarAssinatura(smId) {
-  if (_termoCanvasVazio()) return showToast('Desenhe a assinatura antes de salvar', 'warning');
-  const canvas = document.getElementById('termo-canvas');
-  const b64    = canvas.toDataURL('image/png');
-  await _termoGravar(smId, { termoAssinaturaB64: b64, termoAssinadoEm: new Date(), termoStatus: 'assinado' });
-  showToast('✓ Assinatura salva com sucesso!', 'success');
-  document.getElementById('modal-termo-sm')?.remove();
-}
-
-function _termoPreviewAssinaturaUpload(input) {
-  const file = input.files?.[0];
-  if (!file) return;
-  document.getElementById('termo-assinatura-file-nome').textContent = file.name;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const preview = document.getElementById('termo-assinatura-upload-preview');
-    const img     = document.getElementById('termo-assinatura-upload-img');
-    if (img) img.src = e.target.result;
-    if (preview) preview.style.display = '';
-  };
-  reader.readAsDataURL(file);
-}
-
-async function _termoSalvarAssinaturaUpload(smId) {
-  const img = document.getElementById('termo-assinatura-upload-img');
-  if (!img?.src) return showToast('Selecione uma imagem primeiro', 'warning');
-  await _termoGravar(smId, { termoAssinaturaB64: img.src, termoAssinadoEm: new Date(), termoStatus: 'assinado_upload' });
-  showToast('✓ Imagem de assinatura salva!', 'success');
-  document.getElementById('modal-termo-sm')?.remove();
-}
-
-function _termoPreviewArquivo(input) {
-  const file = input.files?.[0];
-  if (!file) return;
-  const preview = document.getElementById('termo-arquivo-preview');
-  const nome    = document.getElementById('termo-arquivo-nome');
-  if (nome) nome.textContent = '📎 ' + file.name + ' (' + (file.size/1024).toFixed(0) + ' KB)';
-  if (preview) preview.style.display = '';
-}
-
-async function _termoEnviarArquivo(smId) {
-  const input = document.getElementById('termo-arquivo-upload');
-  const file  = input?.files?.[0];
-  if (!file) return showToast('Selecione um arquivo primeiro', 'warning');
-
-  // Para versão sem Storage: salva em base64 no Firestore (limite ~900KB)
-  // Em produção com Firebase Storage, fazer upload e salvar a URL
-  if (file.size > 900000) {
-    showToast('Arquivo muito grande. Máximo: 900KB. Comprima o PDF antes de enviar.', 'warning', 5000);
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = async e => {
-    await _termoGravar(smId, {
-      termoArquivoUrl: e.target.result,   // base64 — trocar por URL do Storage em produção
-      termoArquivoNome: file.name,
-      termoAnexadoEm: new Date(),
-      termoStatus: 'arquivo_anexado',
-    });
-    showToast('✓ Arquivo vinculado ao smartphone!', 'success');
-    document.getElementById('modal-termo-sm')?.remove();
-  };
-  reader.readAsDataURL(file);
-}
-
-async function _termoGravar(smId, dados) {
-  // Atualiza STATE local
-  const sm = (STATE.smartphones||[]).find(s => s.id === smId);
-  if (sm) Object.assign(sm, dados);
-  // Grava no Firestore
-  try {
-    if (FB_READY && db) {
-      await db.collection('smartphones').doc(smId).update({
-        ...dados,
-        updatedAt: new Date(),
-      });
-    }
-  } catch(e) {
-    console.warn('[Termo] Erro ao gravar:', e.message);
-    showToast('Salvo localmente — sincronização pendente', 'warning');
-  }
-}
-
-function _termoPrint() {
-  const content = document.getElementById('termo-pane-0')?.innerHTML || '';
-  const w = window.open('', '_blank', 'width=800,height=900');
-  w.document.write('<html><head><title>Termo de Responsabilidade</title><style>body{font-family:Arial,sans-serif;padding:32px;font-size:13px;line-height:1.8}h1{font-size:16px}</style></head><body>' + content + '</body></html>');
-  w.document.close();
-  w.print();
-}
-
 
 // ============================================================
 // AUTO-FILL EMPREGADO (helper)
@@ -5837,6 +5480,278 @@ function smStatusHtml(s) {
 // PATCH goPage para MDM
 
 // ============================================================
+
+
+// ════════════════════════════════════════════════════════════════════════
+// CLIENTE SMARTPHONE — Auto-cadastro integrado no SYSACK
+// Abre via: abrirClienteSmartphone() ou URL ?sm=1
+// ════════════════════════════════════════════════════════════════════════
+const SM_APPS_CORP = [
+  {nome:'SAP GUI / SAP Mobile', icon:'🏭'}, {nome:'Microsoft Teams', icon:'💬'},
+  {nome:'Outlook', icon:'📧'}, {nome:'OneDrive', icon:'☁️'},
+  {nome:'WhatsApp', icon:'💬'}, {nome:'Google Chrome', icon:'🌐'},
+  {nome:'Acrobat / PDF', icon:'📄'}, {nome:'Zoom', icon:'📹'},
+  {nome:'Antivírus corporativo', icon:'🛡️'}, {nome:'VPN corporativa', icon:'🔒'},
+  {nome:'Power BI Mobile', icon:'📊'}, {nome:'Authenticator (2FA)', icon:'🔑'},
+  {nome:'SYSACK Self-Service', icon:'⚙️'},
+];
+
+let _smDeviceInfo = {};
+
+function abrirClienteSmartphone() {
+  const modal = document.getElementById('modal-sm-cliente');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  smIrPasso(1);
+  // Renderiza lista de apps
+  const appsEl = document.getElementById('sm-apps-lista');
+  if (appsEl && !appsEl.children.length) {
+    appsEl.innerHTML = SM_APPS_CORP.map(a => `
+      <label style="display:flex;align-items:center;gap:12px;padding:10px 0;
+                    border-bottom:1px solid var(--g100);cursor:pointer">
+        <input type="checkbox" data-app="${escapeHtml(a.nome)}"
+               style="accent-color:var(--accent);width:18px;height:18px;flex-shrink:0">
+        <span style="font-size:20px">${a.icon}</span>
+        <span style="font-size:13px;font-weight:500;color:var(--g700)">${escapeHtml(a.nome)}</span>
+      </label>`).join('');
+  }
+}
+
+// Abre automaticamente se URL tem ?sm=1
+(function() {
+  if (location.search.includes('sm=1') || location.hash.includes('sm=1')) {
+    setTimeout(abrirClienteSmartphone, 1500);
+  }
+})();
+
+function smIrPasso(n) {
+  [1,2,3,4,5].forEach(i => {
+    const p = document.getElementById('sm-pane-'+i);
+    if (p) p.style.display = i===n ? '' : 'none';
+  });
+  [1,2,3,4].forEach(i => {
+    const s = document.getElementById('sm-step-'+i);
+    if (!s) return;
+    const num = s.querySelector('div');
+    if (i < n) {
+      s.style.color = 'rgba(255,255,255,.7)';
+      if (num) { num.style.background = '#059669'; num.style.color = '#fff'; num.textContent = '✓'; }
+    } else if (i === n) {
+      s.style.color = '#fff';
+      if (num) { num.style.background = '#fff'; num.style.color = '#2563EB'; num.textContent = String(i); }
+    } else {
+      s.style.color = 'rgba(255,255,255,.4)';
+      if (num) { num.style.background = 'rgba(255,255,255,.15)'; num.style.color = 'rgba(255,255,255,.5)'; num.textContent = String(i); }
+    }
+  });
+  const modal = document.getElementById('modal-sm-cliente');
+  if (modal) modal.querySelector('div').scrollTop = 0;
+}
+
+function smIrPasso2() {
+  const mat  = document.getElementById('sm-mat')?.value?.trim();
+  const nome = document.getElementById('sm-nome')?.value?.trim();
+  const email= document.getElementById('sm-email')?.value?.trim();
+  if (!mat)   return showToast('Informe sua matrícula', 'warning');
+  if (!nome)  return showToast('Informe seu nome completo', 'warning');
+  if (!email) return showToast('Informe seu e-mail corporativo', 'warning');
+  smIrPasso(2);
+  smColetarDispositivo();
+}
+
+async function smColetarDispositivo() {
+  const progEl   = document.getElementById('sm-coleta-progress');
+  const rowsEl   = document.getElementById('sm-device-rows');
+  _smDeviceInfo  = {};
+
+  function addRow(label, value) {
+    if (!rowsEl) return;
+    rowsEl.innerHTML += `<div style="display:flex;justify-content:space-between;align-items:center;
+      padding:8px 0;border-bottom:1px solid var(--g100);font-size:12px">
+      <span style="color:var(--g500)">${escapeHtml(label)}</span>
+      <span style="font-weight:600;color:var(--g800);text-align:right;max-width:55%;word-break:break-all">${escapeHtml(String(value))}</span>
+    </div>`;
+  }
+
+  if (rowsEl) rowsEl.innerHTML = '';
+
+  // SO
+  const ua = navigator.userAgent;
+  let so = 'Desconhecido';
+  if (/iPhone|iPad/.test(ua))     so = 'iOS '     + (ua.match(/OS (\d+_\d+)/)?.[1]?.replace('_','.')||'');
+  else if (/Android/.test(ua))    so = 'Android ' + (ua.match(/Android ([\d.]+)/)?.[1]||'');
+  else if (/Windows/.test(ua))    so = 'Windows';
+  else if (/Mac/.test(ua))        so = 'macOS';
+  _smDeviceInfo.so        = so;
+  _smDeviceInfo.userAgent = ua;
+  _smDeviceInfo.platform  = navigator.platform || '—';
+  _smDeviceInfo.ram       = navigator.deviceMemory ? navigator.deviceMemory + ' GB' : null;
+  _smDeviceInfo.cpus      = navigator.hardwareConcurrency || null;
+  _smDeviceInfo.resolucao = window.screen.width + 'x' + window.screen.height + ' @' + (window.devicePixelRatio||1) + 'x';
+  _smDeviceInfo.touch     = navigator.maxTouchPoints > 0 ? 'Sim (' + navigator.maxTouchPoints + ' pontos)' : 'Não';
+  _smDeviceInfo.idioma    = navigator.language || '—';
+  _smDeviceInfo.rede      = navigator.onLine ? 'Online' : 'Offline';
+
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (conn) _smDeviceInfo.rede = (conn.effectiveType||'').toUpperCase() + (conn.downlink ? ' · ' + conn.downlink + ' Mbps' : '');
+
+  // Bateria
+  try {
+    if (navigator.getBattery) {
+      const bat = await navigator.getBattery();
+      _smDeviceInfo.bateria = Math.round(bat.level*100) + '%' + (bat.charging ? ' ⚡' : '');
+    }
+  } catch {}
+
+  // Câmeras
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    _smDeviceInfo.cameras = devs.filter(d=>d.kind==='videoinput').length;
+  } catch {}
+
+  // Armazenamento
+  try {
+    if (navigator.storage?.estimate) {
+      const est = await navigator.storage.estimate();
+      _smDeviceInfo.armazenamento = est.quota ? (est.quota/1e9).toFixed(1)+' GB' : '—';
+    }
+  } catch {}
+
+  // Preenche linhas
+  addRow('Sistema Operacional', _smDeviceInfo.so);
+  addRow('Plataforma', _smDeviceInfo.platform);
+  addRow('Idioma', _smDeviceInfo.idioma);
+  if (_smDeviceInfo.ram)  addRow('Memória RAM (aprox.)', _smDeviceInfo.ram);
+  if (_smDeviceInfo.cpus) addRow('Núcleos CPU', _smDeviceInfo.cpus);
+  addRow('Resolução', _smDeviceInfo.resolucao);
+  addRow('Touch screen', _smDeviceInfo.touch);
+  if (_smDeviceInfo.bateria) addRow('Bateria', _smDeviceInfo.bateria);
+  addRow('Conexão', _smDeviceInfo.rede);
+  if (_smDeviceInfo.cameras != null) addRow('Câmeras', _smDeviceInfo.cameras);
+  if (_smDeviceInfo.armazenamento) addRow('Armazenamento', _smDeviceInfo.armazenamento);
+
+  // Autodetecta marca/modelo
+  const marcaEl  = document.getElementById('sm-marca');
+  const modeloEl = document.getElementById('sm-modelo');
+  if (marcaEl && !marcaEl.value) {
+    if (/Samsung/.test(ua)) marcaEl.value = 'Samsung';
+    else if (/iPhone|iPad/.test(ua)) marcaEl.value = 'Apple';
+    else if (/Motorola|moto/i.test(ua)) marcaEl.value = 'Motorola';
+    else if (/Xiaomi|MIUI/.test(ua)) marcaEl.value = 'Xiaomi';
+    else if (/HUAWEI|Honor/.test(ua)) marcaEl.value = 'Huawei';
+  }
+  if (modeloEl && !modeloEl.value) {
+    const m = ua.match(/(?:SM-|moto |iPhone )([A-Z0-9 ]+?)(?:Build|\)|;)/i);
+    if (m) modeloEl.value = m[1].trim();
+  }
+
+  if (progEl) progEl.style.display = 'none';
+  if (rowsEl) rowsEl.style.display = '';
+}
+
+function smIrPasso3() {
+  const imei1 = document.getElementById('sm-imei1')?.value?.trim();
+  if (!imei1 || imei1.length < 14) return showToast('Informe o IMEI 1 corretamente', 'warning');
+  smIrPasso(3);
+}
+
+function smIrPasso4() {
+  const appsChecked = [...document.querySelectorAll('#sm-apps-lista input:checked')]
+    .map(el => el.dataset.app).filter(Boolean);
+  const appsOutros  = (document.getElementById('sm-apps-outros')?.value||'')
+    .split('\n').map(s=>s.trim()).filter(Boolean);
+  _smDeviceInfo.apps = [...appsChecked, ...appsOutros];
+
+  // Monta resumo
+  const dados = {
+    'Matrícula':    document.getElementById('sm-mat')?.value,
+    'Nome':         document.getElementById('sm-nome')?.value,
+    'E-mail':       document.getElementById('sm-email')?.value,
+    'Setor':        document.getElementById('sm-setor')?.value,
+    'IMEI 1':       document.getElementById('sm-imei1')?.value,
+    'IMEI 2':       document.getElementById('sm-imei2')?.value || '—',
+    'Linha':        document.getElementById('sm-linha')?.value || '—',
+    'Operadora':    document.getElementById('sm-operadora')?.value || '—',
+    'Marca':        document.getElementById('sm-marca')?.value || '—',
+    'Modelo':       document.getElementById('sm-modelo')?.value || '—',
+    'S.O.':         _smDeviceInfo.so || '—',
+    'RAM':          _smDeviceInfo.ram || '—',
+    'Apps':         _smDeviceInfo.apps.length + ' selecionados',
+  };
+  const resumoEl = document.getElementById('sm-resumo');
+  if (resumoEl) {
+    resumoEl.innerHTML = Object.entries(dados).map(([k,v]) => `
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--g100);font-size:12px">
+        <span style="color:var(--g500)">${escapeHtml(k)}</span>
+        <span style="font-weight:600;color:var(--g800)">${escapeHtml(v||'—')}</span>
+      </div>`).join('');
+  }
+  smIrPasso(4);
+}
+
+async function smEnviarCadastro() {
+  if (!document.getElementById('sm-termo')?.checked)
+    return showToast('Aceite o termo de responsabilidade', 'warning');
+
+  const btn = document.getElementById('sm-btn-enviar');
+  if (btn) { btn.textContent = '⏳ Enviando...'; btn.disabled = true; }
+
+  const protocolo = 'SM-' + Date.now().toString(36).toUpperCase();
+
+  const payload = {
+    empMat:    document.getElementById('sm-mat')?.value?.trim(),
+    empNome:   document.getElementById('sm-nome')?.value?.trim(),
+    empEmail:  document.getElementById('sm-email')?.value?.trim(),
+    empSetor:  document.getElementById('sm-setor')?.value?.trim(),
+    empRamal:  document.getElementById('sm-ramal')?.value?.trim() || null,
+    imei1:     document.getElementById('sm-imei1')?.value?.trim(),
+    imei2:     document.getElementById('sm-imei2')?.value?.trim() || null,
+    linha:     document.getElementById('sm-linha')?.value?.trim() || null,
+    operadora: document.getElementById('sm-operadora')?.value || null,
+    pat:       document.getElementById('sm-pat')?.value?.trim() || null,
+    serial:    document.getElementById('sm-serial')?.value?.trim() || null,
+    marca:     document.getElementById('sm-marca')?.value?.trim() || null,
+    modelo:    document.getElementById('sm-modelo')?.value?.trim() || null,
+    so:        _smDeviceInfo.so || null,
+    versao:    _smDeviceInfo.so || null,
+    userAgent: _smDeviceInfo.userAgent || navigator.userAgent,
+    platform:  _smDeviceInfo.platform || navigator.platform,
+    ram:       _smDeviceInfo.ram || null,
+    cpus:      _smDeviceInfo.cpus || null,
+    resolucao: _smDeviceInfo.resolucao || null,
+    bateria:   _smDeviceInfo.bateria || null,
+    rede:      _smDeviceInfo.rede || null,
+    cameras:   _smDeviceInfo.cameras ?? null,
+    armazenamento: _smDeviceInfo.armazenamento || null,
+    appsInstalados: _smDeviceInfo.apps || [],
+    protocolo,
+    status:       'pendente',
+    origem:       'auto-cadastro-sysack',
+    cadastradoEm: new Date(),
+    termoAceito:  true,
+  };
+
+  try {
+    if (FB_READY && db) {
+      await db.collection('smartphones').add(payload);
+      await db.collection('notificacoes_ti').add({
+        tipo: 'novo_smartphone_cliente', protocolo,
+        empNome: payload.empNome, empMat: payload.empMat, empSetor: payload.empSetor,
+        imei1: payload.imei1, marca: payload.marca, modelo: payload.modelo,
+        criadoEm: new Date(), lida: false,
+      });
+    }
+    document.getElementById('sm-protocolo-num').textContent = protocolo;
+    document.getElementById('sm-protocolo-box').style.display = '';
+    document.getElementById('sm-steps-bar').style.display = 'none';
+    smIrPasso(5);
+    showToast('✓ Smartphone cadastrado! Protocolo: ' + protocolo, 'success', 5000);
+  } catch(e) {
+    if (btn) { btn.textContent = '📤 Enviar cadastro ao SYSACK CESAN'; btn.disabled = false; }
+    showToast('Erro ao enviar: ' + e.message, 'danger');
+  }
+}
+
 
 // ============================================================
 // EXECUTIVE DASHBOARD RENDER
@@ -13257,8 +13172,22 @@ function abrirGerenciarSwitch(id){
   document.getElementById('ger-sw-nome').textContent=`${sw.hostname} — ${sw.pat}`;
   document.getElementById('ger-sw-status-live').innerHTML=swStatusHtml(sw.status);
   document.getElementById('ger-sw-ip-live').textContent=sw.ip;
-  document.getElementById('ger-sw-uptime-live').textContent=sw.uptime||'—';
-  document.getElementById('ger-sw-portas-live').textContent=`${sw.portasUso}/${sw.totalPortas}`;
+  document.getElementById('ger-sw-uptime-live').textContent = sw.uptime || '—';
+  // Latência com cor
+  const _latLive = document.getElementById('ger-sw-lat-live');
+  if (_latLive) {
+    const lms = sw.latencyMs;
+    if (lms != null) {
+      const lc = lms < 5 ? 'var(--success)' : lms < 30 ? 'var(--warning)' : 'var(--danger)';
+      _latLive.innerHTML = `<span style="color:${lc}">${lms.toFixed(1)}ms</span>`;
+    } else {
+      _latLive.textContent = '—';
+    }
+  }
+  const _pUso   = sw.portasUso   != null && sw.portasUso   !== 'undefined' ? sw.portasUso   : null;
+  const _pTotal = sw.totalPortas != null && sw.totalPortas !== 'undefined' ? sw.totalPortas : null;
+  document.getElementById('ger-sw-portas-live').textContent =
+    (_pUso !== null && _pTotal !== null) ? `${_pUso}/${_pTotal}` : '—';
   document.getElementById('ger-sw-fw-live').textContent=sw.firmware||'—';
   const pm=document.getElementById('ger-sw-port-map');
   if(pm) {
@@ -13278,8 +13207,19 @@ function abrirGerenciarSwitch(id){
           + row.map(p => {
             const cor  = p.status==='up' ? '#10B981' : '#E2E8F0';
             const text = p.status==='up' ? '#fff' : '#94A3B8';
-            const tip  = `Porta ${p.porta}: ${p.status==='up'?'Em uso':'Livre'}${p.alias?' — '+p.alias:''}`;
-            return `<div title="${escapeHtml(tip)}" style="width:28px;height:28px;background:${cor};color:${text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;cursor:default">${p.porta}</div>`;
+            // Tenta encontrar ativo/hostname conectado nesta porta pelo IP ou MAC
+            let deviceInfo = '';
+            if (p.ip) {
+              const ativo = (STATE.ativos||[]).find(a => a.ip === p.ip) ||
+                            (STATE.switches||[]).find(a => a.ip === p.ip);
+              deviceInfo = ativo ? (ativo.hostname || ativo.desc || ativo.ip) : p.ip;
+            } else if (p.mac) {
+              const ativo = (STATE.ativos||[]).find(a => (a.mac||'').toLowerCase() === p.mac.toLowerCase());
+              deviceInfo = ativo ? (ativo.hostname || ativo.desc || p.mac) : p.mac;
+            }
+            const tip  = `Porta ${p.porta}: ${p.status==='up'?'Em uso':'Livre'}${p.alias?' — '+p.alias:''}${deviceInfo?' \n🖥 '+deviceInfo:''}${p.speed?' \n📡 '+p.speed:''}`;
+            const hasDevice = p.status === 'up' && deviceInfo;
+            return `<div title="${escapeHtml(tip)}" style="position:relative;width:28px;height:28px;background:${cor};color:${text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;cursor:${hasDevice?'pointer':'default'}" ${hasDevice?`onclick="swMostrarPortaDetalhe(${JSON.stringify({porta:p.porta,ip:p.ip||'',mac:p.mac||'',alias:p.alias||'',speed:p.speed||'',device:deviceInfo})})"`:''}>${p.porta}${hasDevice?'<span style="position:absolute;top:-2px;right:-2px;width:7px;height:7px;background:#60A5FA;border-radius:50%;border:1px solid #fff"></span>':''}</div>`;
           }).join('')
           + `</div>`
         );
@@ -13326,7 +13266,19 @@ function abrirGerenciarSwitch(id){
           <td><span class='tag'>${v.tipo||'802.1Q'}</span></td>
           <td class='td-mono' style='font-size:10.5px'>${v.rede||'—'}</td>
         </tr>`).join('')
-      : '<tr><td colspan=4 style="text-align:center;padding:20px;color:var(--g400)">⏳ Aguardando coleta SNMP pelo agente...</td></tr>';
+      : `<tr><td colspan=4 style="padding:16px">
+          <div style="background:#FFFBEB;border-radius:8px;padding:14px;text-align:center;font-size:12px;color:#92400E">
+            <div style="font-size:20px;margin-bottom:8px">🔀</div>
+            <div style="font-weight:600;margin-bottom:6px">Nenhuma VLAN cadastrada para este switch</div>
+            <div style="color:#A16207;font-size:11px;margin-bottom:10px">
+              O agente SYSACK coleta VLANs via SNMP automaticamente.<br>
+              Você também pode cadastrar manualmente enquanto aguarda.
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="abrirGerenciarSwitch(currentSwitch?.id);setTimeout(()=>document.getElementById('sw-ger-tab-vlans-btn')?.click(),200)">
+              + Adicionar VLAN manualmente
+            </button>
+          </div>
+        </td></tr>`;
   }
   const mb=document.getElementById('ger-sw-mac-body');
   if(mb) mb.innerHTML=[{porta:'Gi1',mac:'00:1A:2B:3C:4D:5E',vlan:'20',tipo:'Dinâmico'},{porta:'Gi2',mac:'00:1A:2B:3C:4D:6F',vlan:'20',tipo:'Dinâmico'},{porta:'Gi24',mac:'00:AA:BB:CC:DD:EE',vlan:'99',tipo:'Estático'}].map(m=>`<tr><td class='td-mono' style='font-size:10.5px'>${m.porta}</td><td class='td-mono' style='font-size:10px'>${m.mac}</td><td class='td-mono'>${m.vlan}</td><td>${m.tipo}</td></tr>`).join('');
@@ -13384,6 +13336,51 @@ function abrirGerenciarSwitch(id){
   if(tl) tl.innerHTML=(sw.historico||[]).map(h=>`<div class='tl-item'><div class='tl-dot ${h.dot}'></div><div class='tl-title'>${h.titulo}</div><div class='tl-desc'>${h.desc}</div><div class='tl-time'>${h.data}</div></div>`).join('');
   openModal('modal-gerenciar-switch');
 }
+
+// Mostra popup com detalhe da porta clicada no mapa de portas
+function swMostrarPortaDetalhe(p) {
+  // Busca ativo com aquele IP
+  const ativo = p.ip ? (
+    (STATE.ativos||[]).find(a => a.ip === p.ip) ||
+    (STATE.switches||[]).find(a => a.ip === p.ip)
+  ) : null;
+
+  const content = `
+    <div style="min-width:220px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">🔌 Porta ${escapeHtml(String(p.porta))}</div>
+      ${p.alias ? `<div style="font-size:11px;color:var(--g500);margin-bottom:8px">${escapeHtml(p.alias)}</div>` : ''}
+      <div style="display:flex;flex-direction:column;gap:5px;font-size:12px">
+        ${p.ip    ? `<div><span style="color:var(--g400)">IP:</span> <span style="font-family:monospace;font-weight:600">${escapeHtml(p.ip)}</span></div>` : ''}
+        ${p.mac   ? `<div><span style="color:var(--g400)">MAC:</span> <span style="font-family:monospace;font-size:11px">${escapeHtml(p.mac)}</span></div>` : ''}
+        ${p.speed ? `<div><span style="color:var(--g400)">Velocidade:</span> ${escapeHtml(p.speed)}</div>` : ''}
+        ${p.device? `<div><span style="color:var(--g400)">Dispositivo:</span> <strong>${escapeHtml(p.device)}</strong></div>` : ''}
+        ${ativo   ? `<div><span style="color:var(--g400)">Tipo:</span> ${escapeHtml(ativo.tipo||'—')}</div>` : ''}
+        ${ativo   ? `<div><span style="color:var(--g400)">Patrimônio:</span> ${escapeHtml(ativo.pat||'—')}</div>` : ''}
+      </div>
+      ${ativo ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;width:100%"
+        onclick="document.getElementById('sw-porta-popup')?.remove();goPage('ativos');setTimeout(()=>abrirLinhaDoTempo('${ativo.id||''}','${ativo.pat||''}'),400)">
+        🔍 Ver ativo completo</button>` : ''}
+    </div>`;
+
+  // Remove popup anterior se houver
+  document.getElementById('sw-porta-popup')?.remove();
+
+  const popup = document.createElement('div');
+  popup.id = 'sw-porta-popup';
+  popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+    'background:#fff;border-radius:12px;padding:16px;box-shadow:0 8px 32px rgba(0,0,0,.2);' +
+    'z-index:99999;min-width:240px;border:1px solid var(--g200)';
+  popup.innerHTML = `<button onclick="this.parentElement.remove()" style="position:absolute;top:8px;right:10px;border:none;background:none;font-size:18px;cursor:pointer;color:var(--g400)">✕</button>${content}`;
+  document.body.appendChild(popup);
+
+  // Fecha ao clicar fora
+  setTimeout(() => {
+    document.addEventListener('click', function handler(e) {
+      if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', handler); }
+    });
+  }, 100);
+}
+
 function abrirHistSwitch(id){abrirGerenciarSwitch(id);}
 
 const SW_ACTIONS={
