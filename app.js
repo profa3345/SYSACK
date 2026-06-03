@@ -820,25 +820,6 @@ function startFirestoreListeners() {
     };
   }
 
-  // ── Cache local com refresh periódico ────────────────────────────────────
-  // Substitui onSnapshot permanente nas coleções grandes por getDocs com TTL
-  // Reduz drasticamente reads do Firestore (1 read/doc na abertura do listener)
-  const _localCache = new Map();
-  const CACHE_TTL   = 5 * 60 * 1000; // 5 minutos
-
-  function scheduleRefresh(ref, colKey, onData, intervalMs) {
-    intervalMs = intervalMs || CACHE_TTL;
-    var run = function() {
-      ref.get().then(function(snap) {
-        var data = snap2arr(snap);
-        _localCache.set(colKey, { data: data, ts: Date.now() });
-        onData(data, snap);
-      }).catch(function(e) { console.warn('[Cache] Erro refresh', colKey, e.message); });
-    };
-    run();
-    return setInterval(run, intervalMs);
-  }
-
   // ativos
   db.collection('ativos').onSnapshot(function(snap) {
     STATE._assetsDisc = snap2arr(snap).map(norm);
@@ -1071,10 +1052,7 @@ const _origAuditLog = window.auditLog;
 window.auditLog = function(action, module, resourceId, resourceType, details = {}) {
   const entry = typeof auditLog_local === 'function'
     ? auditLog_local(action, module, resourceId, resourceType, details) : null;
-  // Só grava no Firestore se o usuário tiver UID Firebase real (não local)
-  // Evita erro "Missing or insufficient permissions" durante login local
-  const _hasFirebaseUid = CURRENT_USER?.uid && !CURRENT_USER.uid.startsWith('local_');
-  if (FB_READY && db && window._fs && _hasFirebaseUid) {
+  if (FB_READY && db && window._fs) {
     const { collection, addDoc, serverTimestamp } = window._fs;
     addDoc(collection('audit_logs'), {
       userId: CURRENT_USER.uid, userName: CURRENT_USER.nome,
@@ -1298,6 +1276,41 @@ function filtrarAtivosPorTipo(tipos, el) {
   renderAtivos();
 }
 
+
+// ── Lookup de sigla/nome por IP usando REDES_PREFIX e STATE_REDES ──────────
+// Usa os mesmos dados do card "Faixas de Rede" — nunca duplica informação
+function _ipParaRede(ip) {
+  if (!ip) return null;
+  const pts = ip.split('.');
+  if (pts.length !== 4) return null;
+
+  // 1. Tenta primeiro nos overrides do Firestore (STATE_REDES) — /24 e /16
+  if (window.STATE_REDES && STATE_REDES.length) {
+    for (const r of STATE_REDES) {
+      if (!r.prefix) continue;
+      if (ip.startsWith(r.prefix + '.') || ip.startsWith(r.prefix)) {
+        return { sigla: r.sigla, nome: r.nome || r.desc || r.sigla };
+      }
+    }
+  }
+
+  // 2. Tenta prefixo /24 (xxx.xxx.xxx) em REDES_PREFIX
+  const p24 = pts.slice(0, 3).join('.');
+  if (window.REDES_PREFIX && REDES_PREFIX[p24]) {
+    const r = REDES_PREFIX[p24];
+    return { sigla: r.sigla, nome: r.nome };
+  }
+
+  // 3. Tenta prefixo /16 (xxx.xxx)
+  const p16 = pts.slice(0, 2).join('.');
+  if (window.REDES_PREFIX) {
+    const match = Object.entries(REDES_PREFIX).find(([k]) => k.startsWith(p16 + '.'));
+    if (match) return { sigla: match[1].sigla, nome: match[1].nome };
+  }
+
+  return null;
+}
+
 function renderAtivos() {
   const q      = (document.getElementById('pat-search')?.value || '').toLowerCase();
   const fSt    = document.getElementById('pat-filter-status')?.value || '';
@@ -1310,8 +1323,8 @@ function renderAtivos() {
   if (thead) {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
-      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Responsável</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
-      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
+      <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th style="font-size:11px">Sigla</th><th style="font-size:11px">IP</th><th style="font-size:11px">Localidade</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
+      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
   }
@@ -1339,7 +1352,7 @@ function renderAtivos() {
     return true;
   });
 
-  const colspan = isComp ? '14' : '8';
+  const colspan = isComp ? '14' : '10'; // Sigla + IP + Localidade no lugar de Responsável
   document.getElementById('ativos-body').innerHTML = lista.map(a => `
     <tr>
       ${isComp ? (()=>{
@@ -1363,15 +1376,40 @@ function renderAtivos() {
       }</td>
       <td><span class="tag">${a.tipo||'—'}</span></td>`}
       <td>${a.area||'—'}</td>
-      <td>${(()=>{
-        if (a.resp) return a.resp;
-        // Tenta pegar usuário logado do agente
-        const ag = (STATE_AGENTS?.list||[]).find(x =>
-          (a.ip && x.ip === a.ip) ||
-          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
-        );
-        return ag?.usuarioLogado ? '<span style="color:var(--g500);font-size:11px">'+escapeHtml(ag.usuarioLogado)+'</span>' : '—';
-      })()}</td>
+      ${(()=>{
+        // ── Sigla + IP + Localidade usando REDES_PREFIX / STATE_REDES ──
+        const _rede = _ipParaRede(a.ip);
+
+        // Sigla
+        const _sigla = _rede?.sigla || null;
+        const _siglaDisp = _sigla
+          ? '<span style="font-family:monospace;font-size:11px;font-weight:700;color:var(--accent);background:#EFF6FF;padding:2px 6px;border-radius:4px">' + escapeHtml(_sigla.toUpperCase()) + '</span>'
+          : '<span style="color:var(--g300)">—</span>';
+
+        // IP
+        const _ipDisp = a.ip
+          ? '<span style="font-family:monospace;font-size:11px;color:var(--g600)">' + escapeHtml(a.ip) + '</span>'
+          : '<span style="color:var(--g300)">—</span>';
+
+        // Localidade — nome da rede + botão 📍 para card Localidades + 🗺️ Maps
+        const _nomeRede = _rede?.nome || null;
+        // Busca coords na LOCALIDADES_CESAN pelo nome da área
+        const _locObj = window.LOCALIDADES_CESAN
+          ? LOCALIDADES_CESAN.find(l => l.nome === _nomeRede || l.nome === a.area || (a.area && l.nome && l.nome.toLowerCase().includes((a.area||'').toLowerCase())))
+          : null;
+        const _temGeo  = _locObj?.lat && _locObj?.lng;
+        const _mapsUrl = _locObj?.mapsUrl || (_locObj?.lat ? 'https://www.google.com/maps?q='+_locObj.lat+','+_locObj.lng : '');
+        const _locLabel = _nomeRede || a.area || null;
+        const _locDisp = _locLabel
+          ? '<span style="display:inline-flex;align-items:center;gap:3px">'
+              + '<span style="font-size:11.5px;color:var(--g700);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(_locLabel) + '">' + escapeHtml(_locLabel) + '</span>'
+              + '<button class="btn btn-ghost btn-xs" title="Ver card localidade" style="padding:0 3px;font-size:10px;line-height:1.4" onclick="event.stopPropagation();goPage('localidades');setTimeout(()=>locAbrirDetalhe(' + JSON.stringify(_locLabel) + '),420)">📍</button>'
+              + (_temGeo ? '<a href="' + escapeHtml(_mapsUrl) + '" target="_blank" rel="noopener" title="Google Maps" onclick="event.stopPropagation()" style="font-size:11px;color:var(--g400);text-decoration:none">🗺️</a>' : '')
+              + '</span>'
+          : '<span style="color:var(--g300)">—</span>';
+
+        return '<td>' + _siglaDisp + '</td><td>' + _ipDisp + '</td><td style="white-space:nowrap">' + _locDisp + '</td>';
+      })()}
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="text-align:center">${(()=>{
         const _ag = (STATE_AGENTS?.list||[]).find(x =>
@@ -1397,8 +1435,7 @@ function renderAtivos() {
         const so = escapeHtml(_soRaw ? _soRaw.replace('Microsoft Windows ','Win ').replace('Windows ','Win ') : '—');
         const ip = a.ip ? `<span style="font-family:monospace;font-size:11px">${escapeHtml(a.ip)}</span>` : '—';
         return `<td style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${monitores}">${monitores}</td>
-        <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${so}">${so}</td>
-        <td>${ip}</td>`;
+        <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${so}">${so}</td>`;
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
       <td><div class="flex gap-6">
