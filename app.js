@@ -1403,7 +1403,7 @@ function renderAtivos() {
         const _locDisp = _locLabel
           ? '<span style="display:inline-flex;align-items:center;gap:3px">'
               + '<span style="font-size:11.5px;color:var(--g700);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(_locLabel) + '">' + escapeHtml(_locLabel) + '</span>'
-              + '<button class="btn btn-ghost btn-xs" title="Ver card localidade" style="padding:0 3px;font-size:10px;line-height:1.4" onclick="event.stopPropagation();goPage('localidades');setTimeout(()=>locAbrirDetalhe(' + JSON.stringify(_locLabel) + '),420)">📍</button>'
+              + '<button class="btn btn-ghost btn-xs" title="Ver card localidade" style="padding:0 3px;font-size:10px;line-height:1.4" onclick="event.stopPropagation();goPage(&apos;localidades&apos;);setTimeout(()=>locAbrirDetalhe(' + JSON.stringify(_locLabel).replace(/"/g, '&quot;') + '),420)">📍</button>'
               + (_temGeo ? '<a href="' + escapeHtml(_mapsUrl) + '" target="_blank" rel="noopener" title="Google Maps" onclick="event.stopPropagation()" style="font-size:11px;color:var(--g400);text-decoration:none">🗺️</a>' : '')
               + '</span>'
           : '<span style="color:var(--g300)">—</span>';
