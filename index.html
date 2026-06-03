@@ -6488,8 +6488,7 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
     </div>
   </div>
 </div>
-
-  <!-- ══ MODAL: CLIENTE SMARTPHONE (auto-cadastro pelo empregado) ══════════ -->
+<!-- ══ MODAL: CLIENTE SMARTPHONE (auto-cadastro pelo empregado) ══════════ -->
   <!-- Acessível via sysack.vercel.app?sm=1 ou botão no card de Smartphones   -->
   <div class="modal-overlay" id="modal-sm-cliente" style="display:none;align-items:stretch;padding:0">
     <div style="width:100%;max-width:520px;margin:auto;height:100vh;overflow-y:auto;background:var(--g50)">
@@ -6559,10 +6558,25 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
           <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
             <div style="font-size:14px;font-weight:700;color:var(--g700);margin-bottom:6px">🔑 Dados manuais (obrigatórios)</div>
             <div style="font-size:11px;color:var(--g400);margin-bottom:12px">📞 Disque <strong>*#06#</strong> para ver o IMEI</div>
-            <div class="form-group"><label class="form-label">IMEI 1 *</label>
-              <input class="form-control" id="sm-imei1" placeholder="15 dígitos" inputmode="numeric" maxlength="15"></div>
-            <div class="form-group"><label class="form-label">IMEI 2 (dual SIM)</label>
-              <input class="form-control" id="sm-imei2" placeholder="Deixe vazio se não tiver" inputmode="numeric" maxlength="15"></div>
+            <div class="form-group">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+                <label class="form-label" style="margin:0">IMEI 1 *</label>
+                <button onclick="abrirQRScanner('imei1')" style="background:var(--accent);color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">
+                  📷 Escanear
+                </button>
+              </div>
+              <input class="form-control" id="sm-imei1" placeholder="📞 Disque *#06# ou escaneie" inputmode="numeric" maxlength="15">
+              <div style="font-size:10.5px;color:var(--g400);margin-top:4px">💡 Use o botão Escanear para ler o IMEI da caixa/etiqueta do aparelho</div>
+            </div>
+            <div class="form-group">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+                <label class="form-label" style="margin:0">IMEI 2 (dual SIM)</label>
+                <button onclick="abrirQRScanner('imei2')" style="background:var(--g100);color:var(--g600);border:none;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">
+                  📷 Escanear
+                </button>
+              </div>
+              <input class="form-control" id="sm-imei2" placeholder="Deixe vazio se não tiver" inputmode="numeric" maxlength="15">
+            </div>
             <div class="form-group"><label class="form-label">Número da linha corporativa</label>
               <input class="form-control" id="sm-linha" placeholder="(27) 99999-9999" inputmode="tel"></div>
             <div class="form-group"><label class="form-label">Operadora</label>
