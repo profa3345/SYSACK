@@ -3041,7 +3041,6 @@ async function _fazerLoginInterno() {
         try {
           if (auth && !auth.currentUser) {
             await auth.signInAnonymously();
-            console.log('[Auth] signInAnonymously OK — Firestore listeners liberados');
             if (!window._protectedListenersAtivos) startProtectedListeners();
           }
         } catch(e2) { console.warn('[Auth] signInAnonymously falhou:', e2.message); }
@@ -5481,515 +5480,9 @@ function smStatusHtml(s) {
 
 // ============================================================
 
-
-// ════════════════════════════════════════════════════════════════════════
-// CLIENTE SMARTPHONE — Auto-cadastro integrado no SYSACK
-// Abre via: abrirClienteSmartphone() ou URL ?sm=1
-// NÃO precisa instalar nada — roda no navegador do celular
-// Usa db e FB_READY globais do SYSACK (Firebase já carregado no index.html)
-// ════════════════════════════════════════════════════════════════════════
-const SM_APPS_CORP = [
-  {nome:'SAP GUI / SAP Mobile',icon:'🏭'},{nome:'Microsoft Teams',icon:'💬'},
-  {nome:'Outlook',icon:'📧'},{nome:'OneDrive',icon:'☁️'},
-  {nome:'WhatsApp',icon:'💬'},{nome:'Google Chrome',icon:'🌐'},
-  {nome:'Acrobat / PDF',icon:'📄'},{nome:'Zoom',icon:'📹'},
-  {nome:'Antivírus corporativo',icon:'🛡️'},{nome:'VPN corporativa',icon:'🔒'},
-  {nome:'Power BI Mobile',icon:'📊'},{nome:'Authenticator (2FA)',icon:'🔑'},
-  {nome:'SYSACK Self-Service',icon:'⚙️'},
-];
-let _smDeviceInfo = {};
-
-function abrirClienteSmartphone() {
-  const modal = document.getElementById('modal-sm-cliente');
-  if (!modal) return;
-  modal.style.display = 'flex';
-  smIrPasso(1);
-  const appsEl = document.getElementById('sm-apps-lista');
-  if (appsEl && !appsEl.children.length) {
-    appsEl.innerHTML = SM_APPS_CORP.map(a => `
-      <label style="display:flex;align-items:center;gap:12px;padding:10px 0;
-                    border-bottom:1px solid var(--g100);cursor:pointer">
-        <input type="checkbox" data-app="${escapeHtml(a.nome)}"
-               style="accent-color:var(--accent);width:18px;height:18px;flex-shrink:0">
-        <span style="font-size:20px">${a.icon}</span>
-        <span style="font-size:13px;font-weight:500;color:var(--g700)">${escapeHtml(a.nome)}</span>
-      </label>`).join('');
-  }
-}
-(function() {
-  if (location.search.includes('sm=1') || location.hash.includes('sm=1'))
-    setTimeout(abrirClienteSmartphone, 1500);
-})();
-
-function smIrPasso(n) {
-  [1,2,3,4,5].forEach(i => {
-    const p = document.getElementById('sm-pane-'+i);
-    if (p) p.style.display = i===n ? '' : 'none';
-  });
-  [1,2,3,4].forEach(i => {
-    const s = document.getElementById('sm-step-'+i); if (!s) return;
-    const num = s.querySelector('div');
-    if (i < n) {
-      s.style.color = 'rgba(255,255,255,.7)';
-      if (num) { num.style.background='#059669'; num.style.color='#fff'; num.textContent='✓'; }
-    } else if (i === n) {
-      s.style.color = '#fff';
-      if (num) { num.style.background='#fff'; num.style.color='#2563EB'; num.textContent=String(i); }
-    } else {
-      s.style.color = 'rgba(255,255,255,.4)';
-      if (num) { num.style.background='rgba(255,255,255,.15)'; num.style.color='rgba(255,255,255,.5)'; num.textContent=String(i); }
-    }
-  });
-  const modal = document.getElementById('modal-sm-cliente');
-  if (modal) { const inner = modal.querySelector('div'); if(inner) inner.scrollTop=0; }
-}
-
-function smIrPasso2() {
-  const mat=document.getElementById('sm-mat')?.value?.trim();
-  const nome=document.getElementById('sm-nome')?.value?.trim();
-  const email=document.getElementById('sm-email')?.value?.trim();
-  if (!mat)   return showToast('Informe sua matrícula','warning');
-  if (!nome)  return showToast('Informe seu nome completo','warning');
-  if (!email) return showToast('Informe seu e-mail corporativo','warning');
-  smIrPasso(2); smColetarDispositivo();
-}
-
-async function smColetarDispositivo() {
-  const progEl=document.getElementById('sm-coleta-progress');
-  const rowsEl=document.getElementById('sm-device-rows');
-  _smDeviceInfo={};
-  if (rowsEl) rowsEl.innerHTML='';
-  function addRow(label,value) {
-    if(!rowsEl||!value) return;
-    rowsEl.innerHTML+=`<div style="display:flex;justify-content:space-between;align-items:center;
-      padding:8px 0;border-bottom:1px solid var(--g100);font-size:12px">
-      <span style="color:var(--g500)">${escapeHtml(label)}</span>
-      <span style="font-weight:600;color:var(--g800);text-align:right;max-width:55%;word-break:break-all">${escapeHtml(String(value))}</span>
-    </div>`;
-  }
-  const ua=navigator.userAgent;
-  let so='Desconhecido';
-  if(/iPhone|iPad/.test(ua))    so='iOS '+(ua.match(/OS (\d+_\d+)/)?.[1]?.replace('_','.')||'');
-  else if(/Android/.test(ua))   so='Android '+(ua.match(/Android ([\d.]+)/)?.[1]||'');
-  else if(/Windows/.test(ua))   so='Windows';
-  else if(/Mac/.test(ua))       so='macOS';
-  _smDeviceInfo.so=so; _smDeviceInfo.userAgent=ua;
-  _smDeviceInfo.platform=navigator.platform||'—';
-  _smDeviceInfo.ram=navigator.deviceMemory?navigator.deviceMemory+' GB':null;
-  _smDeviceInfo.cpus=navigator.hardwareConcurrency||null;
-  _smDeviceInfo.resolucao=window.screen.width+'x'+window.screen.height+' @'+(window.devicePixelRatio||1)+'x';
-  _smDeviceInfo.touch=navigator.maxTouchPoints>0?'Sim ('+navigator.maxTouchPoints+' pontos)':'Não';
-  _smDeviceInfo.idioma=navigator.language||'—';
-  const conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
-  _smDeviceInfo.rede=conn?((conn.effectiveType||'').toUpperCase()+(conn.downlink?' · '+conn.downlink+' Mbps':'')):(navigator.onLine?'Online':'Offline');
-  try { if(navigator.getBattery){const b=await navigator.getBattery();_smDeviceInfo.bateria=Math.round(b.level*100)+'%'+(b.charging?' ⚡':'');} } catch{}
-  try { const d=await navigator.mediaDevices.enumerateDevices();_smDeviceInfo.cameras=d.filter(x=>x.kind==='videoinput').length; } catch{}
-  try { if(navigator.storage?.estimate){const e=await navigator.storage.estimate();_smDeviceInfo.armazenamento=e.quota?(e.quota/1e9).toFixed(1)+' GB':null;} } catch{}
-  addRow('Sistema Operacional',_smDeviceInfo.so);
-  addRow('Plataforma',_smDeviceInfo.platform);
-  addRow('Idioma',_smDeviceInfo.idioma);
-  if(_smDeviceInfo.ram)  addRow('Memória RAM',_smDeviceInfo.ram);
-  if(_smDeviceInfo.cpus) addRow('Núcleos CPU',_smDeviceInfo.cpus);
-  addRow('Resolução',_smDeviceInfo.resolucao);
-  addRow('Touch screen',_smDeviceInfo.touch);
-  if(_smDeviceInfo.bateria)   addRow('Bateria',_smDeviceInfo.bateria);
-  addRow('Conexão',_smDeviceInfo.rede);
-  if(_smDeviceInfo.cameras!=null) addRow('Câmeras',_smDeviceInfo.cameras);
-  if(_smDeviceInfo.armazenamento) addRow('Armazenamento',_smDeviceInfo.armazenamento);
-  // Autodetecta marca/modelo
-  const mEl=document.getElementById('sm-marca');
-  const moEl=document.getElementById('sm-modelo');
-  if(mEl&&!mEl.value){
-    if(/Samsung/.test(ua)) mEl.value='Samsung';
-    else if(/iPhone|iPad/.test(ua)) mEl.value='Apple';
-    else if(/Motorola|moto/i.test(ua)) mEl.value='Motorola';
-    else if(/Xiaomi|MIUI/.test(ua)) mEl.value='Xiaomi';
-    else if(/HUAWEI|Honor/.test(ua)) mEl.value='Huawei';
-  }
-  if(moEl&&!moEl.value){const m=ua.match(/(?:SM-|moto |iPhone )([A-Z0-9 ]+?)(?:Build|\)|;)/i);if(m)moEl.value=m[1].trim();}
-  if(progEl) progEl.style.display='none';
-  if(rowsEl) rowsEl.style.display='';
-}
-
-function smIrPasso3() {
-  const imei1=document.getElementById('sm-imei1')?.value?.trim();
-  if(!imei1||imei1.length<14) return showToast('Informe o IMEI 1 (mínimo 14 dígitos)','warning');
-  smIrPasso(3);
-}
-
-function smIrPasso4() {
-  const appsChecked=[...document.querySelectorAll('#sm-apps-lista input:checked')].map(el=>el.dataset.app).filter(Boolean);
-  const appsOutros=(document.getElementById('sm-apps-outros')?.value||'').split('\n').map(s=>s.trim()).filter(Boolean);
-  _smDeviceInfo.apps=[...appsChecked,...appsOutros];
-  const dados={'Matrícula':document.getElementById('sm-mat')?.value,'Nome':document.getElementById('sm-nome')?.value,'E-mail':document.getElementById('sm-email')?.value,'Setor':document.getElementById('sm-setor')?.value,'IMEI 1':document.getElementById('sm-imei1')?.value,'IMEI 2':document.getElementById('sm-imei2')?.value||'—','Linha':document.getElementById('sm-linha')?.value||'—','Operadora':document.getElementById('sm-operadora')?.value||'—','Marca':document.getElementById('sm-marca')?.value||'—','Modelo':document.getElementById('sm-modelo')?.value||'—','S.O.':_smDeviceInfo.so||'—','Apps':_smDeviceInfo.apps.length+' selecionados'};
-  const resumoEl=document.getElementById('sm-resumo');
-  if(resumoEl) resumoEl.innerHTML=Object.entries(dados).map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--g100);font-size:12px"><span style="color:var(--g500)">${escapeHtml(k)}</span><span style="font-weight:600;color:var(--g800)">${escapeHtml(v||'—')}</span></div>`).join('');
-  smIrPasso(4);
-}
-
-async function smEnviarCadastro() {
-  if(!document.getElementById('sm-termo')?.checked) return showToast('Aceite o termo de responsabilidade','warning');
-  const btn=document.getElementById('sm-btn-enviar');
-  if(btn){btn.textContent='⏳ Enviando...';btn.disabled=true;}
-  const protocolo='SM-'+Date.now().toString(36).toUpperCase();
-  const payload={
-    empMat:document.getElementById('sm-mat')?.value?.trim(),
-    empNome:document.getElementById('sm-nome')?.value?.trim(),
-    empEmail:document.getElementById('sm-email')?.value?.trim(),
-    empSetor:document.getElementById('sm-setor')?.value?.trim(),
-    empRamal:document.getElementById('sm-ramal')?.value?.trim()||null,
-    imei1:document.getElementById('sm-imei1')?.value?.trim(),
-    imei2:document.getElementById('sm-imei2')?.value?.trim()||null,
-    linha:document.getElementById('sm-linha')?.value?.trim()||null,
-    operadora:document.getElementById('sm-operadora')?.value||null,
-    pat:document.getElementById('sm-pat')?.value?.trim()||null,
-    serial:document.getElementById('sm-serial')?.value?.trim()||null,
-    marca:document.getElementById('sm-marca')?.value?.trim()||null,
-    modelo:document.getElementById('sm-modelo')?.value?.trim()||null,
-    so:_smDeviceInfo.so||null,versao:_smDeviceInfo.so||null,
-    userAgent:_smDeviceInfo.userAgent||navigator.userAgent,
-    platform:_smDeviceInfo.platform||navigator.platform,
-    ram:_smDeviceInfo.ram||null,cpus:_smDeviceInfo.cpus||null,
-    resolucao:_smDeviceInfo.resolucao||null,bateria:_smDeviceInfo.bateria||null,
-    rede:_smDeviceInfo.rede||null,cameras:_smDeviceInfo.cameras??null,
-    armazenamento:_smDeviceInfo.armazenamento||null,
-    appsInstalados:_smDeviceInfo.apps||[],
-    protocolo,status:'pendente',origem:'auto-cadastro-sysack',
-    cadastradoEm:new Date(),termoAceito:true,
-  };
-  try {
-    // Usa db global do SYSACK (Firebase já inicializado no index.html)
-    if(FB_READY&&db){
-      const docRef = await db.collection('smartphones').add(payload);
-      await db.collection('notificacoes_ti').add({
-        tipo:'novo_smartphone_cliente',protocolo,
-        empNome:payload.empNome,empMat:payload.empMat,empSetor:payload.empSetor,
-        imei1:payload.imei1,marca:payload.marca,modelo:payload.modelo,
-        criadoEm:new Date(),lida:false,
-      });
-    } else {
-      throw new Error('Banco de dados não disponível — aguarde a conexão Firebase');
-    }
-    document.getElementById('sm-protocolo-num').textContent=protocolo;
-    document.getElementById('sm-protocolo-box').style.display='';
-    document.getElementById('sm-steps-bar').style.display='none';
-    smIrPasso(5);
-    showToast('✓ Smartphone cadastrado! Protocolo: '+protocolo,'success',5000);
-    // Salva o ID do documento no app nativo para sincronizações futuras
-    if (window.SysackNative?.savePreference && docRef?.id) {
-      SysackNative.savePreference('smartphone_id', docRef.id);
-    }
-  } catch(e) {
-    if(btn){btn.textContent='📤 Enviar cadastro ao SYSACK CESAN';btn.disabled=false;}
-    showToast('Erro ao enviar: '+e.message,'danger',5000);
-  }
-}
-
-
 // ============================================================
 // EXECUTIVE DASHBOARD RENDER
 // ============================================================
-
-// ════════════════════════════════════════════════════════════════════════
-// ANDROID NATIVE BRIDGE — recebe dados do app nativo (IMEI, etc.)
-// Chamado pelo MainActivity.kt via evaluateJavascript()
-// ════════════════════════════════════════════════════════════════════════
-function smReceberDadosNativos(dados) {
-  console.log('[SYSACK Native] Dados recebidos do Android:', dados);
-
-  // Preenche IMEI automaticamente
-  const imei1El = document.getElementById('sm-imei1');
-  const imei2El = document.getElementById('sm-imei2');
-  if (imei1El && dados.imei1) {
-    imei1El.value = dados.imei1;
-    imei1El.style.background = '#eaf3de';
-    imei1El.style.borderColor = '#059669';
-    imei1El.setAttribute('readonly', 'readonly');
-    imei1El.title = 'IMEI coletado automaticamente pelo app nativo';
-  }
-  if (imei2El && dados.imei2) {
-    imei2El.value = dados.imei2;
-    imei2El.style.background = '#eaf3de';
-    imei2El.style.borderColor = '#059669';
-    imei2El.setAttribute('readonly', 'readonly');
-  }
-
-  // Linha e operadora
-  const linhaEl = document.getElementById('sm-linha');
-  const opEl    = document.getElementById('sm-operadora');
-  if (linhaEl && dados.linha) linhaEl.value = dados.linha;
-  if (opEl && dados.operadora) {
-    // Tenta bater com as opções do select
-    const ops = [...opEl.options].map(o => o.value.toLowerCase());
-    const op  = (dados.operadora||'').toLowerCase();
-    const found = ops.findIndex(o => op.includes(o) || o.includes(op.split(' ')[0]));
-    if (found >= 0) opEl.selectedIndex = found;
-  }
-
-  // Marca e modelo
-  const marcaEl  = document.getElementById('sm-marca');
-  const modeloEl = document.getElementById('sm-modelo');
-  if (marcaEl && dados.marca) marcaEl.value = dados.marca;
-  if (modeloEl && dados.modelo) modeloEl.value = dados.modelo;
-
-  // Serial
-  const serialEl = document.getElementById('sm-serial');
-  if (serialEl && dados.serial && dados.serial !== 'unknown') serialEl.value = dados.serial;
-
-  // Complementa _smDeviceInfo com dados nativos
-  _smDeviceInfo.so          = dados.so          || _smDeviceInfo.so;
-  _smDeviceInfo.ram         = dados.ramTotalMB   ? Math.round(dados.ramTotalMB/1024*10)/10 + ' GB' : _smDeviceInfo.ram;
-  _smDeviceInfo.cpus        = dados.cpuCores     || _smDeviceInfo.cpus;
-  _smDeviceInfo.resolucao   = dados.resolucao    || _smDeviceInfo.resolucao;
-  _smDeviceInfo.bateria     = dados.bateria      ? dados.bateria + '%' + (dados.carregando ? ' ⚡' : '') : _smDeviceInfo.bateria;
-  _smDeviceInfo.rede        = dados.tipoRede     || _smDeviceInfo.rede;
-  _smDeviceInfo.armazenamento = dados.armazenamentoTotalGB ? dados.armazenamentoTotalGB.toFixed(1) + ' GB' : _smDeviceInfo.armazenamento;
-  _smDeviceInfo.imei1       = dados.imei1        || '';
-  _smDeviceInfo.imei2       = dados.imei2        || '';
-  _smDeviceInfo.simSerial   = dados.simSerial    || '';
-  _smDeviceInfo.wifiMac     = dados.wifiMac      || '';
-  _smDeviceInfo.wifiSsid    = dados.wifiSsid     || '';
-  _smDeviceInfo.apiLevel    = dados.apiLevel     || '';
-  _smDeviceInfo.fingerprint = dados.fingerprint  || '';
-
-  // Apps instalados vindos do app nativo — substitui a lista manual
-  if (dados.appsInstalados && dados.appsInstalados.length) {
-    _smDeviceInfo.appsNativos = dados.appsInstalados; // array de {nome, pkg, versao}
-    _smDeviceInfo.apps = dados.appsInstalados.map(a => a.nome + (a.versao ? ' v' + a.versao : ''));
-
-    // Marca automaticamente os checkboxes dos apps corporativos encontrados
-    const pkgsNativos = dados.appsInstalados.map(a => (a.pkg||'').toLowerCase());
-    document.querySelectorAll('#sm-apps-lista input[type=checkbox]').forEach(cb => {
-      const nomeLower = (cb.dataset.app||'').toLowerCase();
-      const found = pkgsNativos.some(pkg =>
-        pkg.includes(nomeLower.split(' ')[0].replace(/[^a-z]/g,'')) ||
-        nomeLower.includes(pkg.split('.').pop())
-      );
-      if (found) { cb.checked = true; cb.parentElement.style.background = '#eaf3de'; }
-    });
-
-    // Atualiza badge de quantidade
-    showToast(`✓ ${dados.appsInstalados.length} apps detectados automaticamente`, 'success', 3000);
-  }
-
-  // Badge "Nativo" nos campos IMEI
-  const badge = '<span style="font-size:10px;background:#eaf3de;color:#3b6d11;padding:1px 6px;' +
-    'border-radius:8px;font-weight:700;margin-left:6px">✓ Auto</span>';
-  const imeiLabel = document.querySelector('label[for="sm-imei1"], #sm-pane-2 label');
-  if (imeiLabel && !imeiLabel.querySelector('.auto-badge')) {
-    const b = document.createElement('span');
-    b.className = 'auto-badge';
-    b.innerHTML = badge;
-    imeiLabel.appendChild(b);
-  }
-
-  // Mostra aviso de coleta automática no topo do pane-2
-  const pane2 = document.getElementById('sm-pane-2');
-  if (pane2 && !pane2.querySelector('.native-ok-banner')) {
-    const banner = document.createElement('div');
-    banner.className = 'native-ok-banner';
-    banner.style.cssText = 'background:#eaf3de;border-radius:10px;padding:12px 16px;' +
-      'margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:13px;color:#3b6d11';
-    banner.innerHTML = '<span style="font-size:20px">📱</span>' +
-      '<div><strong>Dados coletados automaticamente!</strong><br>' +
-      '<span style="font-size:11px;opacity:.8">IMEI, marca, modelo e apps detectados pelo app SYSACK.</span></div>';
-    pane2.insertBefore(banner, pane2.firstChild);
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// QR CODE SCANNER — TI escaneia etiqueta/caixa do smartphone
-// Usa a câmera do dispositivo onde o SYSACK está aberto (PC do TI ou celular)
-// Interpreta IMEI de QR/barcode padrão GS1 ou texto simples
-// ════════════════════════════════════════════════════════════════════════
-let _qrStream = null;
-
-function abrirQRScanner(campo) {
-  // campo: 'imei1' ou 'imei2'
-  document.getElementById('modal-qr-scanner')?.remove();
-
-  const html = `
-  <div class="modal-overlay open" id="modal-qr-scanner" onclick="if(event.target===this)fecharQRScanner()">
-    <div class="modal" style="max-width:480px;background:#0F172A;border:none">
-      <div class="modal-header" style="background:#0F172A;border-bottom:1px solid #1E293B">
-        <div>
-          <h3 style="color:#F1F5F9">📷 Escanear IMEI</h3>
-          <div style="font-size:11px;color:#64748B;margin-top:2px">
-            Aponte para o QR Code ou código de barras da caixa/etiqueta do aparelho
-          </div>
-        </div>
-        <button class="close-btn" style="color:#94A3B8" onclick="fecharQRScanner()">✕</button>
-      </div>
-      <div style="padding:16px">
-        <!-- Viewfinder -->
-        <div style="position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3">
-          <video id="qr-video" style="width:100%;height:100%;object-fit:cover" autoplay playsinline muted></video>
-          <!-- Mira -->
-          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
-            <div style="width:200px;height:200px;border:2px solid rgba(37,99,235,.8);border-radius:8px;
-                        box-shadow:0 0 0 9999px rgba(0,0,0,.5)">
-              <!-- cantos animados -->
-              <div style="position:absolute;top:-2px;left:-2px;width:24px;height:24px;border-top:3px solid #2563EB;border-left:3px solid #2563EB;border-radius:4px 0 0 0"></div>
-              <div style="position:absolute;top:-2px;right:-2px;width:24px;height:24px;border-top:3px solid #2563EB;border-right:3px solid #2563EB;border-radius:0 4px 0 0"></div>
-              <div style="position:absolute;bottom:-2px;left:-2px;width:24px;height:24px;border-bottom:3px solid #2563EB;border-left:3px solid #2563EB;border-radius:0 0 0 4px"></div>
-              <div style="position:absolute;bottom:-2px;right:-2px;width:24px;height:24px;border-bottom:3px solid #2563EB;border-right:3px solid #2563EB;border-radius:0 0 4px 0"></div>
-            </div>
-          </div>
-          <canvas id="qr-canvas" style="display:none"></canvas>
-        </div>
-
-        <div id="qr-status" style="text-align:center;margin-top:12px;font-size:13px;color:#64748B">
-          Iniciando câmera...
-        </div>
-
-        <!-- Entrada manual como fallback -->
-        <div style="margin-top:16px;padding-top:16px;border-top:1px solid #1E293B">
-          <div style="font-size:11px;color:#64748B;margin-bottom:8px">Ou digite/cole o IMEI manualmente:</div>
-          <div style="display:flex;gap:8px">
-            <input id="qr-manual-input" class="form-control"
-              style="background:#1E293B;border-color:#334155;color:#F1F5F9;font-family:monospace"
-              placeholder="IMEI (15 dígitos)" inputmode="numeric" maxlength="15"
-              oninput="this.value=this.value.replace(/\D/g,'')">
-            <button class="btn btn-primary btn-sm" style="white-space:nowrap"
-              onclick="qrConfirmarManual('${campo}')">✓ OK</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>`;
-
-  document.body.insertAdjacentHTML('beforeend', html);
-  iniciarQRCamera(campo);
-}
-
-async function iniciarQRCamera(campo) {
-  const video    = document.getElementById('qr-video');
-  const canvas   = document.getElementById('qr-canvas');
-  const statusEl = document.getElementById('qr-status');
-  if (!video || !canvas) return;
-
-  try {
-    _qrStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
-    video.srcObject = _qrStream;
-    await video.play();
-    if (statusEl) statusEl.textContent = 'Aponte para o código de barras ou QR Code do IMEI';
-
-    // Tenta usar BarcodeDetector (Chrome Android/PC)
-    if ('BarcodeDetector' in window) {
-      const detector = new BarcodeDetector({ formats: ['qr_code','code_128','code_39','ean_13','ean_8','itf'] });
-      const tick = async () => {
-        if (!document.getElementById('modal-qr-scanner')) return; // modal fechado
-        try {
-          const barcodes = await detector.detect(video);
-          if (barcodes.length > 0) {
-            const raw = barcodes[0].rawValue;
-            const imei = extrairIMEI(raw);
-            if (imei) {
-              qrPreencherCampo(campo, imei);
-              return;
-            }
-          }
-        } catch {}
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    } else {
-      // Fallback: usa canvas + processamento manual via jsQR (CDN)
-      if (!window.jsQR) {
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
-        script.onload = () => qrScanLoop(video, canvas, campo);
-        document.head.appendChild(script);
-      } else {
-        qrScanLoop(video, canvas, campo);
-      }
-    }
-  } catch(e) {
-    if (statusEl) statusEl.innerHTML =
-      '<span style="color:#EF4444">❌ Câmera não disponível: ' + e.message + '</span><br>' +
-      '<span style="font-size:11px;color:#64748B">Use a entrada manual abaixo</span>';
-  }
-}
-
-function qrScanLoop(video, canvas, campo) {
-  if (!document.getElementById('modal-qr-scanner')) return;
-  const ctx = canvas.getContext('2d');
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = window.jsQR?.(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert',
-    });
-    if (code) {
-      const imei = extrairIMEI(code.data);
-      if (imei) { qrPreencherCampo(campo, imei); return; }
-    }
-  }
-  setTimeout(() => qrScanLoop(video, canvas, campo), 150);
-}
-
-function extrairIMEI(raw) {
-  if (!raw) return null;
-  raw = raw.trim();
-  // IMEI puro: 15 dígitos
-  if (/^\d{15}$/.test(raw)) return raw;
-  // GS1/QR Code padrão: pode ter prefixo como "01" (GTIN) ou "21" (serial)
-  // Formato comum: "0150IMEI0000000" ou só IMEI nos primeiros 15 dígitos de um número
-  const match15 = raw.match(/\b(\d{15})\b/);
-  if (match15) return match15[1];
-  // IMEI com traços: ex 35-809104-376197-1
-  const clean = raw.replace(/[-\s]/g, '');
-  if (/^\d{14,15}$/.test(clean)) return clean.slice(0, 15);
-  return null;
-}
-
-function qrPreencherCampo(campo, imei) {
-  fecharQRScanner();
-  const el = document.getElementById('sm-' + campo);
-  if (el) {
-    el.value = imei;
-    el.style.background = '#eaf3de';
-    el.style.borderColor = '#059669';
-    showToast('✓ IMEI capturado: ' + imei, 'success', 3000);
-    // Valida checksum Luhn
-    if (!luhnCheck(imei)) {
-      showToast('⚠️ IMEI pode estar incorreto (falha na validação Luhn)', 'warning', 4000);
-    }
-  }
-}
-
-function qrConfirmarManual(campo) {
-  const val = document.getElementById('qr-manual-input')?.value?.trim();
-  if (!val || val.length < 14) return showToast('IMEI deve ter 15 dígitos', 'warning');
-  qrPreencherCampo(campo, val.slice(0,15));
-}
-
-function fecharQRScanner() {
-  if (_qrStream) {
-    _qrStream.getTracks().forEach(t => t.stop());
-    _qrStream = null;
-  }
-  document.getElementById('modal-qr-scanner')?.remove();
-}
-
-// Algoritmo de Luhn — valida IMEI
-function luhnCheck(num) {
-  let sum = 0;
-  let alt = false;
-  for (let i = num.length - 1; i >= 0; i--) {
-    let n = parseInt(num.charAt(i));
-    if (alt) { n *= 2; if (n > 9) n -= 9; }
-    sum += n;
-    alt = !alt;
-  }
-  return sum % 10 === 0;
-}
-
-
 function renderExecDashboard() {
   const chamados = STATE.chamados || [];
   const ativos = STATE.ativos || [];
@@ -13600,11 +13093,7 @@ const SW_ACTIONS={
   'backup-config':{title:'💾 Backup Config',terminal:true,motivo:false,out:(sw)=>`Conectando ${sw.ip}...\nBaixando running-config...\n[OK]\nSalvo: ${sw.hostname}_backup_${new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')}.cfg`},
   'update-firmware':{title:'⬆️ Atualização Firmware',terminal:true,motivo:true,out:(sw)=>`Versão atual: ${sw.firmware}\nNova versão detectada.\n[======] 100%\nAguardando janela de manutenção.`},
   'save-config':{title:'✅ Salvar Config',terminal:true,motivo:false,out:(sw)=>`${sw.hostname}# copy running-config startup-config\nBuilding configuration...\n[OK]`},
-  'reboot':{title:'⚠️ Reiniciar',terminal:true,motivo:true,out:(sw)=>{
-    const h=sw.hostname||sw.ip||'switch';
-    return `ATENÇÃO: Reiniciando ${h}!\n${h}# reload\nThis will reload the active configuration. Continue? [y/n]: y\n\nBroadcast message from ${h}:\n    System reloading...\n\nSystem Bootstrap\nLoading startup-config...\nApplying IP routing table...\nApplying VLAN database...\n.....\nInit done. ${h} online.`;
-  }},
-
+  'reboot':{title:'⚠️ Reiniciar',terminal:true,motivo:true,out:(sw)=>`ATENÇÃO: Reiniciando ${sw.hostname}!\n${sw.hostname}# reload\n[confirm] y\nSystem Bootstrap...`},
 };
 
 function swAction(type){if(currentSwitch) swActionDirect(type,currentSwitch.id);}
@@ -13713,56 +13202,16 @@ function confirmSwAction(){
   if(cfg.motivo&&!(document.getElementById('sw-action-motivo')?.value?.trim())) return showToast('Motivo obrigatório','danger');
   if(cfg.action){ cfg.action(sw); return; }
   const term=document.getElementById('sw-action-terminal');
-  const btn=document.getElementById('sw-action-confirm');if(btn) btn.style.display='none';
   if(cfg.terminal&&cfg.out){
     term.style.display='';term.textContent='';
     const out=cfg.out(sw);let i=0;
-    const iv=setInterval(()=>{
-      term.textContent+=out[i]||'';
-      term.scrollTop=term.scrollHeight;
-      i++;
-      if(i>=out.length){
-        clearInterval(iv);
-        // ── Após terminar a animação: adiciona linha de conclusão + botão Fechar ──
-        const isReboot = type==='reboot';
-        setTimeout(()=>{
-          term.textContent += isReboot
-            ? '\n\nSistema reiniciado com sucesso.\nAguardando reconexão...'
-            : '\n\nConcluído.';
-          term.scrollTop=term.scrollHeight;
-          // Botão Fechar no rodapé
-          const footer=document.querySelector('#modal-sw-action .modal-footer');
-          if(footer){
-            const closeBtn=document.createElement('button');
-            closeBtn.className='btn btn-primary';
-            closeBtn.textContent='✓ Fechar';
-            closeBtn.onclick=function(){ closeModal('modal-sw-action'); };
-            // Remove qualquer botão fechar anterior
-            footer.querySelectorAll('.sw-close-after').forEach(el=>el.remove());
-            closeBtn.classList.add('sw-close-after');
-            footer.appendChild(closeBtn);
-          }
-          // Toast de confirmação
-          showToast('✓ '+cfg.title+' executado em '+(sw.hostname||sw.ip),'success',3000);
-        }, 400);
-      }
-    },12);
+    const iv=setInterval(()=>{term.textContent+=out[i]||'';term.scrollTop=term.scrollHeight;i++;if(i>=out.length)clearInterval(iv);},12);
+    const btn=document.getElementById('sw-action-confirm');if(btn)btn.style.display='none';
     if(!sw.historico) sw.historico=[];
-    sw.historico.push({dot:'blue',titulo:`${cfg.title} executado`,desc:`Por ${CURRENT_USER?.nome||'Técnico'}.`,data:new Date().toLocaleDateString('pt-BR')});
+    sw.historico.push({dot:'blue',titulo:`${cfg.title} executado`,desc:`Por João Martins.`,data:new Date().toLocaleDateString('pt-BR')});
     if(type==='reboot') sw.uptime='0d 0h 0m';
-    // Salva no Firestore
-    if(FB_READY&&db&&sw.id){
-      db.collection('switches').doc(sw.id).update({
-        historico: sw.historico,
-        uptime: sw.uptime||sw.uptime,
-        updatedAt: new Date()
-      }).catch(e=>console.warn('[Switch] update historico:',e.message));
-    }
     renderSwitches();
-  } else {
-    closeModal('modal-sw-action');
-    showToast('✓ '+cfg.title+' executado em '+(sw.hostname||sw.ip),'success');
-  }
+  } else { closeModal('modal-sw-action');showToast(`✓ ${cfg.title} executado em ${sw.hostname}`); }
 }
 
 function salvarSwitch(){
@@ -25542,8 +24991,9 @@ function renderTelecomKpis() {
 
   // Custo do mês mais recente
   const faturaRecente = faturas[0];
-  if (faturaRecente?.totalGeral) {
-    sv('tc-custo-mes', 'R$ ' + Number(faturaRecente.totalGeral).toLocaleString('pt-BR', {minimumFractionDigits:2}));
+  const _tcTotal = faturaRecente?.totalGeral || faturaRecente?.totalCalculado || 0;
+  if (_tcTotal > 0) {
+    sv('tc-custo-mes', 'R$ ' + Number(_tcTotal).toLocaleString('pt-BR', {minimumFractionDigits:2}));
   } else {
     sv('tc-custo-mes', '—');
   }
@@ -25643,23 +25093,49 @@ function renderTelecomFaturas() {
     return;
   }
 
-  tbody.innerHTML = fats.map(f => `
-    <tr>
+  // Calcula totais e variações
+  const fatsOrdenadas = [...fats].sort((a,b) => (a.competencia||'').localeCompare(b.competencia||''));
+  tbody.innerHTML = fats.map((f, idx) => {
+    const total = f.totalGeral || f.totalCalculado || 0;
+    const linhas = f.totalLinhas || 1;
+    const custoMedio = total / linhas;
+
+    // Variação vs mês anterior (fatura anterior na lista ordenada)
+    const fatAnterior = fatsOrdenadas[fatsOrdenadas.indexOf(f) - 1];
+    const totalAnt = fatAnterior ? (fatAnterior.totalGeral || fatAnterior.totalCalculado || 0) : null;
+    let variacaoHtml = '—';
+    if (totalAnt !== null && totalAnt > 0) {
+      const pct  = ((total - totalAnt) / totalAnt * 100).toFixed(1);
+      const sobe = total > totalAnt;
+      variacaoHtml = `<span style="color:${sobe?'var(--danger)':'var(--success)'};font-weight:700;font-size:12px">
+        ${sobe?'▲':'▼'} ${Math.abs(pct)}%</span>
+        <div style="font-size:10px;color:var(--g400)">vs ${fatAnterior.competencia}</div>`;
+    }
+
+    // Alertas críticos
+    const alertasCrit = f.alertasCriticos || f.qtdExcedentes || 0;
+    const totalAlertas = f.alertas || 0;
+
+    return `<tr>
       <td class="td-mono" style="font-weight:700">${escapeHtml(f.competencia || '—')}</td>
-      <td class="td-mono">${f.totalLinhas || 0}</td>
-      <td class="td-mono" style="font-weight:700;color:var(--accent)">R$ ${Number(f.totalGeral||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-      <td>${f.qtdExcedentes ? `<span class="tag tag-danger">${f.qtdExcedentes} linhas</span>` : '<span class="tag tag-success">Nenhum</span>'}</td>
-      <td>${f.qtdForaExpediente ? `<span class="tag tag-warning">${f.qtdForaExpediente} linhas</span>` : '—'}</td>
-      <td>${f.qtdSemUso ? `<span class="tag" style="background:var(--g100)">${f.qtdSemUso} linhas</span>` : '—'}</td>
+      <td class="td-mono">${linhas.toLocaleString('pt-BR')}</td>
+      <td class="td-mono" style="font-weight:700;color:var(--accent)">R$ ${Number(total).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+      <td style="font-size:12px;color:var(--g600)">R$ ${custoMedio.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+      <td>${variacaoHtml}</td>
+      <td>${alertasCrit > 0
+        ? `<span class="tag tag-danger" title="${totalAlertas} alertas total">${alertasCrit} críticos</span>`
+        : '<span class="tag tag-success">Nenhum</span>'}</td>
+      <td>${f.qtdExcedentes ? `<span class="tag tag-warning">${f.qtdExcedentes} linhas</span>` : '—'}</td>
       <td style="font-size:11px;color:var(--g400)">${f.importadaEm ? new Date(f.importadaEm.seconds ? f.importadaEm.seconds*1000 : f.importadaEm).toLocaleDateString('pt-BR') : '—'}</td>
       <td>
         <div class="flex gap-4">
-          <button class="btn btn-ghost btn-xs" onclick="tcAbrirDetalhesFatura('${escapeHtml(f.id)}','${escapeHtml(f.competencia||'')}')" title="Ver todas as linhas">📋 Linhas</button>
+          <button class="btn btn-ghost btn-xs" onclick="tcAbrirDetalhesFatura('${escapeHtml(f.id)}','${escapeHtml(f.competencia||'')}')">📋 Linhas</button>
           <button class="btn btn-ghost btn-xs" onclick="tcVerRelatorioFatura('${escapeHtml(f.id)}')">📊 Ver</button>
           <button class="btn btn-ghost btn-xs" onclick="tcExcluirFatura('${escapeHtml(f.id)}')" style="color:var(--danger)">🗑</button>
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 // ── Alertas ───────────────────────────────────────────────────────────────
@@ -26185,6 +25661,7 @@ async function _tcParseTXTVivo(file, mes) {
     const faturaRef = await db.collection('faturas_telecom').add({
       competencia:     mes,
       conta:           '0120692821',
+      totalGeral:      +totalCalc.toFixed(2),   // campo lido por renderTelecomKpis/Faturas
       totalCalculado:  +totalCalc.toFixed(2),
       totalLinhas:     listaFinal.length,
       alertas:         alertasContrato.reduce((s,l) => s + l.alertas.length, 0),

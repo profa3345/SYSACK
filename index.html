@@ -885,14 +885,15 @@ window.dispatchEvent(new Event('firebase-ready'));
           <th>Competência</th>
           <th>Linhas</th>
           <th>Total R$</th>
-          <th>Excedentes</th>
-          <th>Fora expediente</th>
-          <th>Sem uso</th>
+          <th title="Custo médio por linha">R$/Linha</th>
+          <th title="Variação vs mês anterior">Variação</th>
+          <th title="Alertas críticos (valores fora do contrato)">Alertas</th>
+          <th title="Linhas com consumo acima da franquia">Excedentes</th>
           <th>Importada em</th>
           <th>Ações</th>
         </tr></thead>
         <tbody id="tc-faturas-body">
-          <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma fatura importada</td></tr>
+          <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--g400)">Nenhuma fatura importada</td></tr>
         </tbody>
       </table>
     </div>
@@ -6488,167 +6489,5 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
     </div>
   </div>
 </div>
-<!-- ══ MODAL: CLIENTE SMARTPHONE (auto-cadastro pelo empregado) ══════════ -->
-  <!-- Acessível via sysack.vercel.app?sm=1 ou botão no card de Smartphones   -->
-  <div class="modal-overlay" id="modal-sm-cliente" style="display:none;align-items:stretch;padding:0">
-    <div style="width:100%;max-width:520px;margin:auto;height:100vh;overflow-y:auto;background:var(--g50)">
-
-      <!-- Header -->
-      <div style="background:linear-gradient(135deg,#1E3A8A,#2563EB);padding:20px 16px 24px;color:#fff;text-align:center;position:sticky;top:0;z-index:10">
-        <button onclick="document.getElementById('modal-sm-cliente').style.display='none'"
-          style="position:absolute;top:12px;right:12px;background:rgba(255,255,255,.15);border:none;
-                 color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px">✕</button>
-        <div style="font-size:28px;margin-bottom:4px">📱</div>
-        <div style="font-size:17px;font-weight:800">SYSACK · CESAN</div>
-        <div style="font-size:12px;opacity:.75;margin-top:4px">Cadastro do meu smartphone corporativo</div>
-      </div>
-
-      <!-- Steps bar -->
-      <div id="sm-steps-bar" style="display:flex;background:#1E3A8A;padding:0 16px 14px">
-        <div class="sm-step active" id="sm-step-1" style="flex:1;text-align:center;font-size:10px;color:rgba(255,255,255,.5);font-weight:600">
-          <div style="width:26px;height:26px;border-radius:50%;background:#fff;color:#2563EB;display:flex;align-items:center;justify-content:center;margin:0 auto 4px;font-size:12px;font-weight:800">1</div>
-          Identidade
-        </div>
-        <div class="sm-step" id="sm-step-2" style="flex:1;text-align:center;font-size:10px;color:rgba(255,255,255,.4);font-weight:600">
-          <div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;margin:0 auto 4px;font-size:12px;font-weight:800;color:rgba(255,255,255,.5)">2</div>
-          Dispositivo
-        </div>
-        <div class="sm-step" id="sm-step-3" style="flex:1;text-align:center;font-size:10px;color:rgba(255,255,255,.4);font-weight:600">
-          <div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;margin:0 auto 4px;font-size:12px;font-weight:800;color:rgba(255,255,255,.5)">3</div>
-          Apps
-        </div>
-        <div class="sm-step" id="sm-step-4" style="flex:1;text-align:center;font-size:10px;color:rgba(255,255,255,.4);font-weight:600">
-          <div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;margin:0 auto 4px;font-size:12px;font-weight:800;color:rgba(255,255,255,.5)">4</div>
-          Envio
-        </div>
-      </div>
-
-      <div style="padding:16px">
-
-        <!-- PANE 1: Identificação -->
-        <div id="sm-pane-1">
-          <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
-            <div style="font-size:14px;font-weight:700;color:var(--g700);margin-bottom:14px;display:flex;align-items:center;gap:8px">👤 Sua identificação</div>
-            <div class="form-group"><label class="form-label">Matrícula CESAN</label>
-              <input class="form-control" id="sm-mat" placeholder="Ex: 123456" inputmode="numeric"></div>
-            <div class="form-group"><label class="form-label">Nome completo</label>
-              <input class="form-control" id="sm-nome" placeholder="Seu nome completo"></div>
-            <div class="form-group"><label class="form-label">E-mail corporativo</label>
-              <input class="form-control" id="sm-email" type="email" placeholder="nome@cesan.com.br"></div>
-            <div class="form-group"><label class="form-label">Setor / Área</label>
-              <input class="form-control" id="sm-setor" placeholder="Ex: A-GTI, A-DSI..."></div>
-            <div class="form-group"><label class="form-label">Ramal</label>
-              <input class="form-control" id="sm-ramal" placeholder="Ramal CESAN" inputmode="numeric"></div>
-          </div>
-          <button class="btn btn-primary" style="width:100%;padding:14px;font-size:15px;font-weight:700;border:none;border-radius:12px;cursor:pointer;background:var(--accent);color:#fff" onclick="smIrPasso2()">
-            Próximo: Dados do dispositivo →
-          </button>
-        </div>
-
-        <!-- PANE 2: Dispositivo -->
-        <div id="sm-pane-2" style="display:none">
-          <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
-            <div style="font-size:14px;font-weight:700;color:var(--g700);margin-bottom:12px">📱 Dados coletados automaticamente</div>
-            <div id="sm-coleta-progress" style="text-align:center;padding:16px">
-              <div style="width:40px;height:40px;border:4px solid var(--g200);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div>
-              <div style="font-size:13px;color:var(--g400)">Coletando informações...</div>
-            </div>
-            <div id="sm-device-rows" style="display:none"></div>
-          </div>
-          <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
-            <div style="font-size:14px;font-weight:700;color:var(--g700);margin-bottom:6px">🔑 Dados manuais (obrigatórios)</div>
-            <div style="font-size:11px;color:var(--g400);margin-bottom:12px">📞 Disque <strong>*#06#</strong> para ver o IMEI</div>
-            <div class="form-group">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-                <label class="form-label" style="margin:0">IMEI 1 *</label>
-                <button onclick="abrirQRScanner('imei1')" style="background:var(--accent);color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">
-                  📷 Escanear
-                </button>
-              </div>
-              <input class="form-control" id="sm-imei1" placeholder="📞 Disque *#06# ou escaneie" inputmode="numeric" maxlength="15">
-              <div style="font-size:10.5px;color:var(--g400);margin-top:4px">💡 Use o botão Escanear para ler o IMEI da caixa/etiqueta do aparelho</div>
-            </div>
-            <div class="form-group">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-                <label class="form-label" style="margin:0">IMEI 2 (dual SIM)</label>
-                <button onclick="abrirQRScanner('imei2')" style="background:var(--g100);color:var(--g600);border:none;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">
-                  📷 Escanear
-                </button>
-              </div>
-              <input class="form-control" id="sm-imei2" placeholder="Deixe vazio se não tiver" inputmode="numeric" maxlength="15">
-            </div>
-            <div class="form-group"><label class="form-label">Número da linha corporativa</label>
-              <input class="form-control" id="sm-linha" placeholder="(27) 99999-9999" inputmode="tel"></div>
-            <div class="form-group"><label class="form-label">Operadora</label>
-              <select class="form-control" id="sm-operadora">
-                <option value="">Selecione...</option>
-                <option>Claro</option><option>Vivo</option><option>TIM</option><option>Oi</option><option>Outra</option>
-              </select></div>
-            <div class="form-group"><label class="form-label">Marca</label>
-              <input class="form-control" id="sm-marca" placeholder="Samsung, Apple, Motorola..."></div>
-            <div class="form-group"><label class="form-label">Modelo</label>
-              <input class="form-control" id="sm-modelo" placeholder="Galaxy A54, iPhone 13..."></div>
-            <div class="form-group"><label class="form-label">Número de série</label>
-              <input class="form-control" id="sm-serial" placeholder="Configurações → Sobre → N° de série"></div>
-            <div class="form-group"><label class="form-label">Patrimônio CESAN (se tiver)</label>
-              <input class="form-control" id="sm-pat" placeholder="Número da etiqueta"></div>
-          </div>
-          <button class="btn btn-primary" style="width:100%;padding:14px;font-size:15px;font-weight:700;border:none;border-radius:12px;cursor:pointer;background:var(--accent);color:#fff" onclick="smIrPasso3()">Próximo: Apps instalados →</button>
-          <button style="width:100%;padding:10px;font-size:13px;border:none;border-radius:10px;cursor:pointer;background:var(--g100);color:var(--g700);margin-top:8px" onclick="smIrPasso(1)">← Voltar</button>
-        </div>
-
-        <!-- PANE 3: Apps -->
-        <div id="sm-pane-3" style="display:none">
-          <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
-            <div style="font-size:14px;font-weight:700;color:var(--g700);margin-bottom:6px">📦 Apps instalados</div>
-            <div style="font-size:12px;color:var(--g400);margin-bottom:12px">Marque todos os apps presentes no aparelho</div>
-            <div id="sm-apps-lista"></div>
-            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--g100)">
-              <label class="form-label">Outros apps (um por linha):</label>
-              <textarea class="form-control" id="sm-apps-outros" rows="3" placeholder="Teams&#10;Zoom&#10;..."></textarea>
-            </div>
-          </div>
-          <button class="btn btn-primary" style="width:100%;padding:14px;font-size:15px;font-weight:700;border:none;border-radius:12px;cursor:pointer;background:var(--accent);color:#fff" onclick="smIrPasso4()">Próximo: Revisar e enviar →</button>
-          <button style="width:100%;padding:10px;font-size:13px;border:none;border-radius:10px;cursor:pointer;background:var(--g100);color:var(--g700);margin-top:8px" onclick="smIrPasso(2)">← Voltar</button>
-        </div>
-
-        <!-- PANE 4: Envio -->
-        <div id="sm-pane-4" style="display:none">
-          <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
-            <div style="font-size:14px;font-weight:700;color:var(--g700);margin-bottom:12px">✅ Revisão</div>
-            <div id="sm-resumo"></div>
-          </div>
-          <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.06)">
-            <div style="font-size:13px;line-height:1.7;color:var(--g600);margin-bottom:12px">
-              Ao enviar, declaro que as informações são verdadeiras e me comprometo a utilizar o dispositivo exclusivamente para fins corporativos.
-            </div>
-            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;color:var(--g700)">
-              <input type="checkbox" id="sm-termo" style="margin-top:2px;accent-color:var(--accent)">
-              Aceito os termos de responsabilidade
-            </label>
-          </div>
-          <button id="sm-btn-enviar" style="width:100%;padding:14px;font-size:15px;font-weight:700;border:none;border-radius:12px;cursor:pointer;background:var(--success);color:#fff" onclick="smEnviarCadastro()">
-            📤 Enviar cadastro ao SYSACK CESAN
-          </button>
-          <button style="width:100%;padding:10px;font-size:13px;border:none;border-radius:10px;cursor:pointer;background:var(--g100);color:var(--g700);margin-top:8px" onclick="smIrPasso(3)">← Voltar</button>
-        </div>
-
-        <!-- PANE 5: Sucesso -->
-        <div id="sm-pane-5" style="display:none;text-align:center;padding:32px 16px">
-          <div style="font-size:64px;margin-bottom:16px">🎉</div>
-          <div style="font-size:22px;font-weight:800;color:var(--success);margin-bottom:8px">Cadastro enviado!</div>
-          <div style="font-size:14px;color:var(--g500);line-height:1.6">Seus dados foram enviados ao setor de TI da CESAN.<br>O TI irá registrar o dispositivo no sistema.</div>
-          <div id="sm-protocolo-box" style="margin-top:16px;padding:12px;background:#eaf3de;border-radius:10px;font-size:13px;color:#3b6d11;display:none">
-            📋 Protocolo: <strong id="sm-protocolo-num">—</strong>
-          </div>
-          <button style="margin-top:20px;padding:12px 24px;background:var(--accent);color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:700" onclick="document.getElementById('modal-sm-cliente').style.display='none'">
-            Fechar
-          </button>
-        </div>
-
-      </div><!-- /padding -->
-    </div><!-- /modal inner -->
-  </div><!-- /modal-sm-cliente -->
-
 </body>
 </html>
