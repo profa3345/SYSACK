@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.0
+ * SYSACK Agent Desktop v2.1
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
