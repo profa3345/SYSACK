@@ -7358,7 +7358,7 @@ function renderAssistenciaRemota() {
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:2px 7px;font-size:12px">📋</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
-          <button class="btn btn-secondary btn-xs" onclick="arInstalarPatches('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Patches" style="padding:2px 7px;font-size:12px">🔒</button>
+          <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">📋</button>
         </div>
       </td>
     </tr>`;
@@ -7366,6 +7366,31 @@ function renderAssistenciaRemota() {
 }
 
 // ── ABRIR REMOTE VIEWER ───────────────────────────────────────
+function abrirInventarioAgente(agentId) {
+
+  goPage('apps');
+
+  setTimeout(() => {
+
+    const btnPorMaquina =
+      [...document.querySelectorAll('button')]
+      .find(b => b.textContent.includes('Por Máquina'));
+
+    if (btnPorMaquina) btnPorMaquina.click();
+
+    const busca =
+      document.getElementById('sw-search') ||
+      document.querySelector('#page-apps input');
+
+if (busca) {
+  const ag = STATE_AGENTS.list.find(a => a.id === agentId);
+  busca.value = ag?.hostname || agentId;
+  busca.dispatchEvent(new Event('input'));
+    }
+
+  }, 500);
+
+}
 async function arAbrirViewer(agentId) {
   const agente = STATE_AGENTS.list.find(a => a.id === agentId);
   if (!agente) return showToast('Agente não encontrado', 'warning');
