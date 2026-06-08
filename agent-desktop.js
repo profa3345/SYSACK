@@ -25,6 +25,8 @@ const PROJECT_ID = cfg.firebaseProjectId || 'sysack-829e2';
 const API_KEY    = cfg.firebaseApiKey    || 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
 const AGENT_ID   = cfg.agentId          || os.hostname();
 const INTERVAL   = (cfg.intervalSeconds || 60) * 1000;
+const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000; // coleta completa de softwares a cada 6h
+let _softwareCache = { at: 0, list: [] };
 
 // ── Log ───────────────────────────────────────────────────────────
 const LOG_FILE = path.join(__dirname, 'agent.log');
@@ -274,6 +276,96 @@ function getSegurancaInfo() {
   return info;
 }
 
+
+// ── Inventário de Software instalado ──────────────────────────────
+function normalizarSoftwareNome(nome) {
+  return String(nome || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*\(.*?\)\s*$/g, '')
+    .trim();
+}
+
+function getInstalledSoftware(force = false) {
+  const now = Date.now();
+  if (!force && _softwareCache.list.length && (now - _softwareCache.at) < SOFTWARE_INTERVAL) {
+    return _softwareCache.list;
+  }
+
+  try {
+    if (process.platform !== 'win32') return [];
+
+    const psScript = [
+      '$ErrorActionPreference = "SilentlyContinue"',
+      '$paths = @(',
+      '  "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",',
+      '  "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*"',
+      ')',
+      '# Quando o serviço roda como SYSTEM, HKCU não representa o usuário logado.',
+      '# Por isso também verificamos HKU para softwares instalados por usuário.',
+      '$userPaths = Get-ChildItem Registry::HKEY_USERS | Where-Object { $_.Name -match "S-1-5-21" } | ForEach-Object {',
+      '  "Registry::" + $_.Name + "\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*"',
+      '}',
+      '$items = @()',
+      '$items += Get-ItemProperty $paths -ErrorAction SilentlyContinue',
+      '$items += Get-ItemProperty $userPaths -ErrorAction SilentlyContinue',
+      '$items | Where-Object {',
+      '  $_.DisplayName -and',
+      '  $_.SystemComponent -ne 1 -and',
+      '  $_.ReleaseType -ne "Update" -and',
+      '  $_.ParentKeyName -eq $null',
+      '} | Select-Object @{n="nome";e={$_.DisplayName}},',
+      '                  @{n="versao";e={$_.DisplayVersion}},',
+      '                  @{n="fabricante";e={$_.Publisher}},',
+      '                  @{n="dataInstalacao";e={$_.InstallDate}},',
+      '                  @{n="localInstalacao";e={$_.InstallLocation}},',
+      '                  @{n="origem";e={ if ($_.PSPath -like "*WOW6432Node*") { "win32" } elseif ($_.PSPath -like "*HKEY_USERS*") { "usuario" } else { "win64" } }} |',
+      '  Sort-Object nome, versao -Unique |',
+      '  ConvertTo-Json -Depth 4 -Compress'
+    ].join('\n');
+
+    const psFile = path.join(__dirname, '_software.ps1');
+    fs.writeFileSync(psFile, psScript, 'utf8');
+
+    const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"', {
+      timeout: 60000,
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024
+    }).toString().trim();
+
+    try { fs.unlinkSync(psFile); } catch(e) {}
+    if (!out) return [];
+
+    const parsed = JSON.parse(out);
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    const seen = new Set();
+
+    const softwares = arr.map(s => {
+      const nome = normalizarSoftwareNome(s.nome);
+      const versao = String(s.versao || '').trim();
+      const fabricante = String(s.fabricante || '').trim();
+      const key = (nome + '|' + versao + '|' + fabricante).toLowerCase();
+      if (!nome || seen.has(key)) return null;
+      seen.add(key);
+      return {
+        nome,
+        nomeLower: nome.toLowerCase(),
+        versao,
+        fabricante,
+        dataInstalacao: String(s.dataInstalacao || '').trim(),
+        localInstalacao: String(s.localInstalacao || '').trim().slice(0, 180),
+        origem: String(s.origem || '').trim(),
+      };
+    }).filter(Boolean).slice(0, 1000);
+
+    _softwareCache = { at: now, list: softwares };
+    log('[Software] ' + softwares.length + ' programas inventariados');
+    return softwares;
+  } catch(e) {
+    log('[Software] Erro ao coletar programas: ' + e.message);
+    return _softwareCache.list || [];
+  }
+}
+
 // ── Firebase REST API ─────────────────────────────────────────────
 function firestoreSet(docPath, data) {
   return new Promise((resolve, reject) => {
@@ -356,6 +448,7 @@ async function reportar() {
 
     const hw  = getHardwareInfo();
     const sec = getSegurancaInfo();
+    const software = getInstalledSoftware(false);
 
     const dados = {
       hostname:          AGENT_ID,
@@ -388,7 +481,10 @@ async function reportar() {
       uptime:            uptimeSec,
       uptimeH:           Math.floor(uptimeSec / 3600),
       monitores:         getMonitores(),
-      versaoAgente:      '2.0.0',
+      software:          software,
+      softwareCount:     software.length,
+      softwareAtualizadoEm: _softwareCache.at ? new Date(_softwareCache.at).toISOString() : now,
+      versaoAgente:      '2.1.0',
       ultimaAtualizacao: now,
       lastSeen:          now,
       status:            'online',
@@ -408,7 +504,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
