@@ -7622,7 +7622,13 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     rvSetStatus('detectando', 'Conectando...');
 
     const agente = STATE_AGENTS?.list?.find(a => a.id === agentId);
-    const tunnelUrl = agente?.tunnelUrl;
+    const tunnelUrl =
+  agente?.tunnelUrl ||
+  agente?.tunnelURL ||
+  agente?.cloudflareUrl ||
+  agente?.cloudflareTunnelUrl ||
+  agente?.remoteUrl ||
+  '';
 
     // Página em HTTPS não pode abrir ws:// (mixed content bloqueado pelo browser)
     // Nesse caso vai direto para o tunnel Cloudflare (wss://)
@@ -7641,7 +7647,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     }
 
     // 2. Tunnel Cloudflare (wss:// — funciona em HTTPS e HTTP)
-    if (tunnelUrl && agente?.tunnelAtivo) {
+    if (tunnelUrl && tunnelUrl.startsWith('wss://')) {
       _modoConexao = 'tunnel';
       rvSetStatus('tunnel', 'Via Cloudflare Tunnel 🌐');
       rvMostrarBannerConexao('tunnel');
