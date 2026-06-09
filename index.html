@@ -2371,17 +2371,21 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="stat-label">Softwares distintos</div>
     </div>
     <div class="stat-card">
+      <div class="stat-value" id="swinv-total-inst">—</div>
+      <div class="stat-label">Instalações detectadas</div>
+    </div>
+    <div class="stat-card">
       <div class="stat-value" id="swinv-total-maq">—</div>
       <div class="stat-label">Máquinas inventariadas</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" id="swinv-sem-inventario" style="color:var(--warning)">—</div>
-      <div class="stat-label">Sem inventário</div>
+      <div class="stat-value" id="swinv-criticos" style="color:var(--warning)">—</div>
+      <div class="stat-label">Críticos / Atenção</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-value" id="swinv-ultima-sync">—</div>
-      <div class="stat-label">Última sincronização</div>
-    </div>
+  </div>
+  <div style="display:none">
+    <span id="swinv-sem-inventario">—</span>
+    <span id="swinv-ultima-sync">—</span>
   </div>
 
   <!-- Abas -->
@@ -2394,11 +2398,21 @@ window.dispatchEvent(new Event('firebase-ready'));
   <div id="swinv-view-sw">
     <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
       <input class="form-control" id="swinv-busca-sw"
-             placeholder="🔍 Buscar software pelo nome..."
-             style="max-width:360px;flex:1"
+             placeholder="🔍 Buscar por nome, categoria, fabricante, risco ou licença..."
+             style="max-width:420px;flex:1"
              oninput="renderSwInvPorSoftware()">
-      <select class="form-control" style="max-width:180px" id="swinv-filtro-fab" onchange="renderSwInvPorSoftware()">
+      <select class="form-control" style="max-width:190px" id="swinv-filtro-fab" onchange="renderSwInvPorSoftware()">
         <option value="">Todos os fabricantes</option>
+      </select>
+      <select class="form-control" style="max-width:180px" id="swinv-filtro-cat" onchange="renderSwInvPorSoftware()">
+        <option value="">Todas as categorias</option>
+      </select>
+      <select class="form-control" style="max-width:170px" id="swinv-filtro-risco" onchange="renderSwInvPorSoftware()">
+        <option value="">Todos os riscos</option>
+        <option value="critico">Crítico</option>
+        <option value="alerta">Atenção</option>
+        <option value="ok">Monitorar</option>
+        <option value="info">Normal</option>
       </select>
     </div>
     <div class="table-container">
@@ -2406,12 +2420,15 @@ window.dispatchEvent(new Event('firebase-ready'));
         <thead><tr>
           <th>Software</th>
           <th>Fabricante</th>
+          <th>Categoria</th>
+          <th>Status</th>
           <th>Versão mais recente</th>
           <th style="text-align:center">Máquinas</th>
           <th>Instalado em</th>
+          <th>Ações</th>
         </tr></thead>
         <tbody id="swinv-sw-body">
-          <tr><td colspan="5" style="text-align:center;padding:32px;color:var(--g400)">
+          <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">
             Carregando inventário...
           </td></tr>
         </tbody>
@@ -2423,7 +2440,7 @@ window.dispatchEvent(new Event('firebase-ready'));
   <div id="swinv-view-maq" style="display:none">
     <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
       <input class="form-control" id="swinv-busca-maq"
-             placeholder="🔍 Buscar por hostname, PAT ou área..."
+             placeholder="🔍 Buscar por hostname, PAT, área ou software instalado..."
              style="max-width:360px;flex:1"
              oninput="renderSwInvPorMaquina()">
       <select class="form-control" style="max-width:180px" id="swinv-filtro-status-maq" onchange="renderSwInvPorMaquina()">

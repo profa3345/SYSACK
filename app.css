@@ -952,3 +952,217 @@ textarea.form-control{resize:vertical;min-height:80px}
 #ar-table th { font-size: 11px; font-weight: 600; color: var(--g500); text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid var(--g200); }
 #ar-table td { border-bottom: 1px solid var(--g100); }
 #ar-table .monitor-cell { white-space: normal; line-height: 1.3; }
+
+
+/* ═══════════════════════════════════════════════
+   Inventário de Software — melhorias SYSACK
+═══════════════════════════════════════════════ */
+.swinv-row { cursor:pointer; transition:background .15s ease; }
+.swinv-row:hover td { background:var(--g50); }
+
+.swinv-software-name {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-weight:700;
+  color:var(--accent);
+}
+
+.swinv-icon {
+  width:24px;
+  height:24px;
+  border-radius:7px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:var(--accent-l);
+  flex-shrink:0;
+}
+
+.swinv-sub {
+  margin-top:3px;
+  font-size:10.5px;
+  color:var(--g400);
+}
+
+.swinv-category {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:3px 7px;
+  border-radius:999px;
+  background:var(--g50);
+  border:1px solid var(--g100);
+  color:var(--g600);
+  font-size:11px;
+  font-weight:700;
+  white-space:nowrap;
+}
+
+.swinv-risk {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.swinv-risk-danger {
+  background:var(--danger-l);
+  color:var(--danger);
+}
+
+.swinv-risk-warning {
+  background:var(--warning-l);
+  color:#B45309;
+}
+
+.swinv-risk-success {
+  background:var(--success-l);
+  color:var(--success);
+}
+
+.swinv-risk-info {
+  background:var(--g50);
+  color:var(--g500);
+  border:1px solid var(--g100);
+}
+
+.swinv-count {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:28px;
+  height:24px;
+  padding:0 8px;
+  border-radius:999px;
+  background:var(--accent-l);
+  color:var(--accent);
+  font-weight:800;
+}
+
+.swinv-chip-wrap {
+  display:flex;
+  gap:4px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+
+.swinv-machine-chip {
+  font-size:10.5px;
+  background:var(--accent-l);
+  color:var(--accent);
+  border-radius:5px;
+  padding:3px 7px;
+  cursor:pointer;
+  font-weight:700;
+}
+
+.swinv-machine-chip:hover {
+  background:var(--accent);
+  color:#fff;
+}
+
+.swinv-extra {
+  font-size:11px;
+  color:var(--g400);
+}
+
+.swinv-detail-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  margin-bottom:12px;
+}
+
+.swinv-detail-grid > div {
+  border:1px solid var(--g100);
+  border-radius:10px;
+  padding:10px 12px;
+  background:var(--g50);
+}
+
+.swinv-detail-grid strong {
+  display:block;
+  font-size:16px;
+  color:var(--g900);
+}
+
+.swinv-detail-grid span {
+  display:block;
+  margin-top:3px;
+  font-size:10.5px;
+  color:var(--g400);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  font-weight:700;
+}
+
+.swinv-alert {
+  border-radius:10px;
+  padding:10px 12px;
+  font-size:12px;
+  font-weight:700;
+  margin-bottom:10px;
+  border:1px solid var(--g100);
+}
+
+.swinv-alert.danger {
+  background:var(--danger-l);
+  color:var(--danger);
+  border-color:rgba(239,68,68,.25);
+}
+
+.swinv-alert.warning {
+  background:var(--warning-l);
+  color:#B45309;
+  border-color:rgba(245,158,11,.25);
+}
+
+.swinv-alert.info {
+  background:var(--accent-l);
+  color:var(--accent);
+  border-color:rgba(37,99,235,.18);
+}
+
+.swinv-modal-row {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:10px 12px;
+  cursor:pointer;
+  border-bottom:1px solid var(--g100);
+  border-radius:8px;
+}
+
+.swinv-modal-row:hover {
+  background:var(--g50);
+}
+
+.swinv-device-dot {
+  width:36px;
+  height:36px;
+  border-radius:9px;
+  background:#F1F5F9;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:18px;
+  flex-shrink:0;
+}
+
+.swinv-device-dot.online {
+  background:#DCFCE7;
+}
+
+[data-theme="dark"] .swinv-category,
+[data-theme="dark"] .swinv-detail-grid > div,
+[data-theme="dark"] .swinv-risk-info {
+  border-color:#334155;
+}
+
+[data-theme="dark"] .swinv-device-dot { background:#334155; }
+[data-theme="dark"] .swinv-device-dot.online { background:rgba(16,185,129,.18); }

@@ -11931,16 +11931,128 @@ const APPS_DATA = [
   { nome:'Advanced IP Scanner', versao:'2.5', fabricante:'Famatech', licenca:'Gratuito', resp:'TI', status:'ativo' },
 ];
 
+
 // ════════════════════════════════════════════════════════════════════════
-// INVENTÁRIO DE SOFTWARE — módulo completo
+// INVENTÁRIO DE SOFTWARE — módulo completo aprimorado
 // Fonte: agents/{id}.inventario (JSON) — campo software[]
 // Estrutura software: { nome, versao, fabricante, Publisher, DisplayName, DisplayVersion }
+// Melhorias: normalização de texto, categorias, risco, busca inteligente, KPIs,
+// exportação e modais mais completos.
 // ════════════════════════════════════════════════════════════════════════
 
-// Cache consolidado: { nomeNorm → { nome, fabricante, versoes:[], maquinas:[{id,hostname,pat,versao,area}] } }
 let _swInvIndex   = null;   // índice por software
 let _swInvMaqList = null;   // lista de máquinas com metadados
 let _swInvSyncAt  = null;
+
+function _swInvText(v) {
+  return String(v ?? '')
+    .replace(/\uFFFD/g, 'ç')
+    .replace(/\?{2,}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _swInvNorm(v) {
+  return _swInvText(v)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function _swInvKey(v) {
+  return _swInvNorm(v).replace(/[^a-z0-9]/g, '');
+}
+
+function _swInvGetSoftwareName(s) {
+  return _swInvText(s.nome || s.DisplayName || s.displayName || s.name || s.Name || '');
+}
+
+function _swInvGetSoftwareVersion(s) {
+  return _swInvText(s.versao || s.DisplayVersion || s.displayVersion || s.version || s.Version || '');
+}
+
+function _swInvGetSoftwarePublisher(s) {
+  return _swInvText(s.fabricante || s.Publisher || s.publisher || s.Fabricante || s.vendor || s.Vendor || '');
+}
+
+function _swInvExtrairSoftwares(ag) {
+  let softwares = [];
+  if (ag?.inventario) {
+    try {
+      const inv = typeof ag.inventario === 'string' ? JSON.parse(ag.inventario) : ag.inventario;
+      softwares = inv.software || inv.softwares || inv.apps || [];
+    } catch {}
+  }
+  if (!softwares.length && Array.isArray(ag?.software)) softwares = ag.software;
+  if (!softwares.length && Array.isArray(ag?.softwares)) softwares = ag.softwares;
+
+  return (softwares || [])
+    .map(s => ({
+      nome: _swInvGetSoftwareName(s),
+      versao: _swInvGetSoftwareVersion(s),
+      fabricante: _swInvGetSoftwarePublisher(s),
+      bruto: s
+    }))
+    .filter(s => s.nome);
+}
+
+function _swInvCategoria(nome, fabricante = '') {
+  const t = _swInvNorm(nome + ' ' + fabricante);
+  if (/flash|java|silverlight/.test(t)) return { nome:'Legado/Obsoleto', icon:'⛔' };
+  if (/acrobat|reader|pdf|foxit/.test(t)) return { nome:'PDF', icon:'📕' };
+  if (/chrome|edge|firefox|brave|opera|safari/.test(t)) return { nome:'Navegador', icon:'🌐' };
+  if (/office|word|excel|powerpoint|libreoffice|teams|outlook/.test(t)) return { nome:'Produtividade', icon:'📄' };
+  if (/forti|symantec|trend|sophos|kaspersky|defender|antivirus|vpn/.test(t)) return { nome:'Segurança', icon:'🛡️' };
+  if (/anydesk|teamviewer|vnc|remote|assistencia|putty|ssh/.test(t)) return { nome:'Acesso remoto', icon:'🖥️' };
+  if (/android studio|visual studio|vscode|node|python|git|java sdk|jdk|sql|developer/.test(t)) return { nome:'Desenvolvimento', icon:'🧑‍💻' };
+  if (/7-zip|winrar|zip/.test(t)) return { nome:'Utilitário', icon:'📦' };
+  if (/vlc|media player|codec/.test(t)) return { nome:'Mídia', icon:'🎬' };
+  if (/scanner|advanced ip|nmap|wireshark|angry ip/.test(t)) return { nome:'Rede', icon:'📡' };
+  return { nome:'Outros', icon:'🔹' };
+}
+
+function _swInvRisco(nome, fabricante = '', versao = '') {
+  const t = _swInvNorm(nome + ' ' + fabricante + ' ' + versao);
+  if (/flash player|silverlight|java 6|java 7|internet explorer/.test(t)) {
+    return { nivel:'critico', label:'Obsoleto', icon:'🔴', desc:'Software legado/obsoleto detectado' };
+  }
+  if (/utorrent|bittorrent|keygen|crack/.test(t)) {
+    return { nivel:'critico', label:'Proibido', icon:'🔴', desc:'Software potencialmente não autorizado' };
+  }
+  if (/anydesk|teamviewer|vnc|advanced ip scanner|angry ip scanner|nmap|wireshark/.test(t)) {
+    return { nivel:'alerta', label:'Atenção', icon:'🟡', desc:'Ferramenta sensível: remoto/rede' };
+  }
+  if (/acrobat|reader|chrome|edge|firefox|brave|office|teams|defender/.test(t)) {
+    return { nivel:'ok', label:'Monitorar', icon:'🟢', desc:'Software comum, manter atualizado' };
+  }
+  return { nivel:'info', label:'Normal', icon:'⚪', desc:'Sem regra especial cadastrada' };
+}
+
+function _swInvLicenca(nome, fabricante = '') {
+  const t = _swInvNorm(nome + ' ' + fabricante);
+  if (/acrobat pro|photoshop|illustrator|autocad|office professional|visio|project/.test(t)) return 'Comercial';
+  if (/7-zip|vlc|libreoffice|keepass|brave|firefox|chrome|edge|android studio/.test(t)) return 'Gratuito/Livre';
+  return 'Não classificado';
+}
+
+function _swInvBuscaTextoSoftware(sw) {
+  return _swInvNorm([
+    sw.nome,
+    sw.fabricante,
+    sw.categoria,
+    sw.riscoLabel,
+    sw.licenca,
+    ...(sw.versoes || [])
+  ].join(' '));
+}
+
+function _swInvBadgeRisco(risco) {
+  const cls = risco?.nivel === 'critico' ? 'danger'
+    : risco?.nivel === 'alerta' ? 'warning'
+    : risco?.nivel === 'ok' ? 'success'
+    : 'info';
+  return `<span class="swinv-risk swinv-risk-${cls}" title="${escapeHtml(risco?.desc || '')}">${risco?.icon || '⚪'} ${escapeHtml(risco?.label || 'Normal')}</span>`;
+}
 
 // ── Chamado quando a página abre ─────────────────────────────────────────
 function renderApps() {
@@ -11949,90 +12061,105 @@ function renderApps() {
   renderSwInvPorMaquina();
   _swInvAtualizarKPIs();
   _swInvPopularFabricante();
+  _swInvPopularCategoria();
 }
 
 // ── Constrói índice a partir dos agentes ─────────────────────────────────
 function _swInvConstruirIndice() {
   const agentes = STATE_AGENTS?.list || [];
-
-  // Tipos de máquina que interessam
   const TIPOS_MAQUINA = ['computador','notebook','servidor','desktop','laptop','server','workstation'];
 
-  const index = {};   // software normalizado → dados
+  const index = {};
   const maqList = [];
 
   for (const ag of agentes) {
-    // Filtra só computadores/notebooks/servidores (não impressoras, switches, etc.)
     const tipo = (ag.tipo || ag.deviceType || '').toLowerCase();
     const deveIncluir = !tipo || TIPOS_MAQUINA.some(t => tipo.includes(t)) || ag.os || ag.so;
     if (!deveIncluir) continue;
 
-    // Extrai softwares do campo inventario
-    let softwares = [];
-    if (ag.inventario) {
-      try {
-        const inv = typeof ag.inventario === 'string' ? JSON.parse(ag.inventario) : ag.inventario;
-        softwares = inv.software || inv.softwares || [];
-      } catch {}
-    }
-    // Também tenta campo direto
-    if (!softwares.length && Array.isArray(ag.software)) softwares = ag.software;
-    if (!softwares.length && Array.isArray(ag.softwares)) softwares = ag.softwares;
-
-    // Ativo vinculado (para pegar PAT e área)
+    const softwares = _swInvExtrairSoftwares(ag);
     const ativoVinc = (STATE.ativos || []).find(a =>
-      a.hostname === ag.hostname || a.pat === ag.pat
+      a.hostname === ag.hostname || a.pat === ag.pat || a.id === ag.id
     );
 
     const maqInfo = {
-      id:          ag.id,
-      hostname:    ag.hostname   || ag.id,
-      pat:         ag.pat        || ativoVinc?.pat   || '—',
-      area:        ag.area       || ag.empSetor      || ativoVinc?.area || '—',
-      empNome:     ag.empNome    || ativoVinc?.resp   || '',
-      status:      ag.status     || 'offline',
-      lastSeen:    ag.lastSeen,
+      id: ag.id,
+      hostname: _swInvText(ag.hostname || ag.nome || ag.id),
+      pat: _swInvText(ag.pat || ativoVinc?.pat || '—'),
+      area: _swInvText(ag.area || ag.empSetor || ativoVinc?.area || '—'),
+      empNome: _swInvText(ag.empNome || ag.resp || ativoVinc?.resp || ''),
+      status: ag.status || (ag.online ? 'online' : 'offline'),
+      lastSeen: ag.lastSeen || ag.updatedAt || ag.ultimaColeta,
       qtdSoftwares: softwares.length,
       temInventario: softwares.length > 0,
+      softwares
     };
+
     maqList.push(maqInfo);
 
     for (const sw of softwares) {
-      const nome = (sw.nome || sw.DisplayName || sw.name || '').trim();
-      const versao = (sw.versao || sw.DisplayVersion || sw.version || '').trim();
-      const fab    = (sw.fabricante || sw.Publisher || sw.publisher || '').trim();
+      const nome = sw.nome;
+      const versao = sw.versao;
+      const fab = sw.fabricante;
       if (!nome) continue;
 
-      const chave = nome.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const chave = _swInvKey(nome);
+      const categoria = _swInvCategoria(nome, fab);
+      const risco = _swInvRisco(nome, fab, versao);
+      const licenca = _swInvLicenca(nome, fab);
+
       if (!index[chave]) {
-        index[chave] = { nome, fabricante: fab, versoes: new Set(), maquinas: [] };
+        index[chave] = {
+          key: chave,
+          nome,
+          fabricante: fab,
+          versoes: new Set(),
+          maquinas: [],
+          categoria: categoria.nome,
+          categoriaIcon: categoria.icon,
+          risco,
+          riscoLabel: risco.label,
+          licenca,
+          aliases: new Set([nome, fab, categoria.nome, risco.label, licenca].filter(Boolean))
+        };
       }
+
       if (versao) index[chave].versoes.add(versao);
       if (fab && !index[chave].fabricante) index[chave].fabricante = fab;
-      index[chave].maquinas.push({ ...maqInfo, versao });
+      if (risco.nivel === 'critico') index[chave].risco = risco;
+      index[chave].aliases.add(nome);
+      index[chave].maquinas.push({ ...maqInfo, versao, fabricante: fab });
     }
   }
 
-  // Converte Set para Array
   for (const k of Object.keys(index)) {
     index[k].versoes = [...index[k].versoes].sort().reverse();
+    index[k].instalacoes = index[k].maquinas.length;
+    index[k].busca = _swInvBuscaTextoSoftware(index[k]) + ' ' + [...index[k].aliases].map(_swInvNorm).join(' ');
   }
 
-  _swInvIndex   = index;
+  _swInvIndex = index;
   _swInvMaqList = maqList;
-  _swInvSyncAt  = new Date();
+  _swInvSyncAt = new Date();
 }
 
 // ── KPIs ─────────────────────────────────────────────────────────────────
 function _swInvAtualizarKPIs() {
   if (!_swInvIndex) return;
-  const totalSw  = Object.keys(_swInvIndex).length;
-  const maqComInv = (_swInvMaqList||[]).filter(m => m.temInventario).length;
-  const semInv    = (_swInvMaqList||[]).filter(m => !m.temInventario).length;
-  sv('swinv-total-sw',        totalSw.toLocaleString('pt-BR'));
-  sv('swinv-total-maq',       maqComInv);
-  sv('swinv-sem-inventario',  semInv);
-  sv('swinv-ultima-sync',     _swInvSyncAt ? _swInvSyncAt.toLocaleTimeString('pt-BR') : '—');
+  const lista = Object.values(_swInvIndex);
+  const totalSw = lista.length;
+  const totalInstalacoes = lista.reduce((s, sw) => s + (sw.instalacoes || sw.maquinas?.length || 0), 0);
+  const maqComInv = (_swInvMaqList || []).filter(m => m.temInventario).length;
+  const criticos = lista.filter(sw => sw.risco?.nivel === 'critico' || sw.risco?.nivel === 'alerta').length;
+
+  sv('swinv-total-sw', totalSw.toLocaleString('pt-BR'));
+  sv('swinv-total-inst', totalInstalacoes.toLocaleString('pt-BR'));
+  sv('swinv-total-maq', maqComInv);
+  sv('swinv-criticos', criticos);
+  sv('swinv-ultima-sync', _swInvSyncAt ? _swInvSyncAt.toLocaleTimeString('pt-BR') : '—');
+
+  // Compatibilidade com o ID antigo
+  sv('swinv-sem-inventario', (_swInvMaqList || []).filter(m => !m.temInventario).length);
 }
 
 function _swInvPopularFabricante() {
@@ -12041,6 +12168,14 @@ function _swInvPopularFabricante() {
   const fabs = [...new Set(Object.values(_swInvIndex).map(s => s.fabricante).filter(Boolean))].sort();
   sel.innerHTML = '<option value="">Todos os fabricantes</option>' +
     fabs.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
+}
+
+function _swInvPopularCategoria() {
+  const sel = document.getElementById('swinv-filtro-cat');
+  if (!sel || !_swInvIndex) return;
+  const cats = [...new Set(Object.values(_swInvIndex).map(s => s.categoria).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Todas as categorias</option>' +
+    cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
 }
 
 // ── Abas ──────────────────────────────────────────────────────────────────
@@ -12059,38 +12194,46 @@ function renderSwInvPorSoftware() {
   const tbody = document.getElementById('swinv-sw-body');
   if (!tbody) return;
 
-  const q   = (document.getElementById('swinv-busca-sw')?.value || '').toLowerCase();
+  const q = _swInvNorm(document.getElementById('swinv-busca-sw')?.value || '');
   const fab = document.getElementById('swinv-filtro-fab')?.value || '';
+  const cat = document.getElementById('swinv-filtro-cat')?.value || '';
+  const risco = document.getElementById('swinv-filtro-risco')?.value || '';
 
   let lista = Object.values(_swInvIndex || {});
-  if (q)   lista = lista.filter(s => s.nome.toLowerCase().includes(q) || (s.fabricante||'').toLowerCase().includes(q));
+  if (q) lista = lista.filter(s => (s.busca || '').includes(q));
   if (fab) lista = lista.filter(s => s.fabricante === fab);
-  lista.sort((a, b) => b.maquinas.length - a.maquinas.length || a.nome.localeCompare(b.nome));
+  if (cat) lista = lista.filter(s => s.categoria === cat);
+  if (risco) lista = lista.filter(s => s.risco?.nivel === risco);
+  lista.sort((a, b) => (b.maquinas.length - a.maquinas.length) || a.nome.localeCompare(b.nome));
 
   if (!lista.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--g400)">Nenhum software encontrado</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--g400)">Nenhum software encontrado</td></tr>';
     return;
   }
 
-  tbody.innerHTML = lista.slice(0, 200).map(sw => {
+  tbody.innerHTML = lista.slice(0, 300).map(sw => {
     const maqPreview = sw.maquinas.slice(0, 4).map(m =>
-      `<span style="font-size:10.5px;background:var(--accent-l);color:var(--accent);
-              border-radius:4px;padding:2px 6px;cursor:pointer"
-             onclick="swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')"
-             title="${escapeHtml(m.hostname)} — ${escapeHtml(m.area)}">${escapeHtml(m.hostname)}</span>`
+      `<span class="swinv-machine-chip" onclick="event.stopPropagation();swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')" title="${escapeHtml(m.hostname)} — ${escapeHtml(m.area)}">${escapeHtml(m.hostname)}</span>`
     ).join('');
-    const extra = sw.maquinas.length > 4
-      ? `<span style="font-size:11px;color:var(--g400)">+${sw.maquinas.length-4} mais</span>` : '';
+    const extra = sw.maquinas.length > 4 ? `<span class="swinv-extra">+${sw.maquinas.length-4} mais</span>` : '';
 
-    return `<tr style="cursor:pointer" onclick="swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')"
-                onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
-      <td style="font-weight:600;color:var(--accent)">${escapeHtml(sw.nome)}</td>
-      <td style="font-size:12px;color:var(--g500)">${escapeHtml(sw.fabricante||'—')}</td>
-      <td class="td-mono" style="font-size:11.5px">${escapeHtml(sw.versoes[0]||'—')}</td>
-      <td style="text-align:center">
-        <span style="font-weight:700;font-size:14px;color:var(--accent)">${sw.maquinas.length}</span>
+    return `<tr class="swinv-row" onclick="swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')">
+      <td>
+        <div class="swinv-software-name">
+          <span class="swinv-icon">${escapeHtml(sw.categoriaIcon || '🔹')}</span>
+          <span>${escapeHtml(sw.nome)}</span>
+        </div>
+        <div class="swinv-sub">${escapeHtml(sw.licenca || 'Não classificado')}</div>
       </td>
-      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${maqPreview}${extra}</div></td>
+      <td style="font-size:12px;color:var(--g500)">${escapeHtml(sw.fabricante || '—')}</td>
+      <td><span class="swinv-category">${escapeHtml(sw.categoriaIcon || '🔹')} ${escapeHtml(sw.categoria || 'Outros')}</span></td>
+      <td>${_swInvBadgeRisco(sw.risco)}</td>
+      <td class="td-mono" style="font-size:11.5px">${escapeHtml(sw.versoes[0] || '—')}</td>
+      <td style="text-align:center"><span class="swinv-count">${sw.maquinas.length}</span></td>
+      <td><div class="swinv-chip-wrap">${maqPreview}${extra}</div></td>
+      <td>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')">Detalhes</button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -12098,7 +12241,7 @@ function renderSwInvPorSoftware() {
 // ── Modal: máquinas com determinado software ──────────────────────────────
 function swInvVerMaquinasSoftware(nomeSw) {
   if (!_swInvIndex) return;
-  const chave = nomeSw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const chave = _swInvKey(nomeSw);
   const sw = _swInvIndex[chave];
   if (!sw) return;
 
@@ -12110,32 +12253,32 @@ function swInvVerMaquinasSoftware(nomeSw) {
 
   const html = `
   <div class="modal-overlay open" id="modal-swinv-maq" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:680px">
+    <div class="modal" style="max-width:820px">
       <div class="modal-header">
         <div>
-          <h3 style="margin-bottom:2px">${escapeHtml(nomeSw)}</h3>
-          <div style="font-size:12px;color:var(--g400)">${escapeHtml(sw.fabricante||'')}
-            ${sw.versoes.length ? ' · ' + sw.versoes.slice(0,3).map(escapeHtml).join(', ') : ''}
+          <h3 style="margin-bottom:2px">${escapeHtml(sw.categoriaIcon || '🔹')} ${escapeHtml(sw.nome)}</h3>
+          <div style="font-size:12px;color:var(--g400)">
+            ${escapeHtml(sw.fabricante || 'Fabricante não informado')} · ${escapeHtml(sw.categoria || 'Outros')} · ${escapeHtml(sw.licenca || 'Licença não classificada')}
           </div>
         </div>
         <button class="close-btn" onclick="document.getElementById('modal-swinv-maq').remove()">✕</button>
       </div>
       <div class="modal-body">
-        <div style="font-size:12.5px;color:var(--g600);margin-bottom:14px">
-          Instalado em <strong>${maqUnicas.length} máquina${maqUnicas.length!==1?'s':''}</strong>
+        <div class="swinv-detail-grid">
+          <div><strong>${maqUnicas.length}</strong><span>máquina(s)</span></div>
+          <div><strong>${escapeHtml(sw.versoes[0] || '—')}</strong><span>versão mais recente</span></div>
+          <div><strong>${_swInvBadgeRisco(sw.risco)}</strong><span>status</span></div>
         </div>
-        <input class="form-control" placeholder="Filtrar máquinas..." style="margin-bottom:12px"
+        <div class="swinv-alert ${sw.risco?.nivel === 'critico' ? 'danger' : sw.risco?.nivel === 'alerta' ? 'warning' : 'info'}">
+          ${escapeHtml(sw.risco?.desc || 'Sem observação especial.')}
+        </div>
+        <input class="form-control" placeholder="Filtrar máquinas..." style="margin:12px 0"
                oninput="swInvFiltrarModal(this.value,'modal-swinv-maq-list')">
         <div id="modal-swinv-maq-list" style="max-height:420px;overflow-y:auto">
           ${maqUnicas.map(m => `
           <div onclick="swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')"
-               style="display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;
-                      border-bottom:1px solid var(--g100);border-radius:8px"
-               onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
-            <div style="width:36px;height:36px;border-radius:8px;background:${m.status==='online'?'#DCFCE7':'#F1F5F9'};
-                        display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
-              ${m.status === 'online' ? '🟢' : '⚫'}
-            </div>
+               class="swinv-modal-row">
+            <div class="swinv-device-dot ${m.status === 'online' ? 'online' : ''}">${m.status === 'online' ? '🟢' : '⚫'}</div>
             <div style="flex:1;min-width:0">
               <div style="font-weight:700;font-size:13px">${escapeHtml(m.hostname)}</div>
               <div style="font-size:11.5px;color:var(--g400)">
@@ -12145,7 +12288,7 @@ function swInvVerMaquinasSoftware(nomeSw) {
               </div>
             </div>
             <div style="text-align:right;flex-shrink:0">
-              <div style="font-size:11.5px;font-family:monospace;color:var(--g600)">${escapeHtml(m.versao||'—')}</div>
+              <div style="font-size:11.5px;font-family:monospace;color:var(--g600)">${escapeHtml(m.versao || '—')}</div>
               <div style="font-size:10.5px;color:var(--g400)">ver. instalada</div>
             </div>
             <span style="font-size:11px;color:var(--accent)">→ ver softwares</span>
@@ -12154,7 +12297,7 @@ function swInvVerMaquinasSoftware(nomeSw) {
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="document.getElementById('modal-swinv-maq').remove()">Fechar</button>
-        <button class="btn btn-secondary btn-sm" onclick="swInvExportarCSV('${escapeHtml(nomeSw)}')">⬇ Exportar CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="swInvExportarCSV('${escapeHtml(sw.nome)}')">⬇ Exportar CSV</button>
       </div>
     </div>
   </div>`;
@@ -12169,39 +12312,20 @@ function renderSwInvPorMaquina() {
   const tbody = document.getElementById('swinv-maq-body');
   if (!tbody) return;
 
-  const q      = (document.getElementById('swinv-busca-maq')?.value || '').toLowerCase();
+  const q = _swInvNorm(document.getElementById('swinv-busca-maq')?.value || '');
   const filtro = document.getElementById('swinv-filtro-status-maq')?.value || '';
 
   let lista = _swInvMaqList || [];
- if (q) lista = lista.filter(m => {
-  const textoMaquina = [
-    m.hostname,
-    m.pat,
-    m.area,
-    m.empNome
-  ].join(' ').toLowerCase();
-
-  const textoSoftwares = (m.softwares || [])
-    .map(s => [
-      s.nome,
-      s.name,
-      s.DisplayName,
-      s.displayName,
-      s.fabricante,
-      s.publisher,
-      s.Publisher,
-      s.versao,
-      s.version,
-      s.DisplayVersion
-    ].join(' '))
-    .join(' ')
-    .toLowerCase();
-
-  return textoMaquina.includes(q) || textoSoftwares.includes(q);
-});
-  if (filtro === 'online')   lista = lista.filter(m => m.status === 'online');
-  if (filtro === 'offline')  lista = lista.filter(m => m.status !== 'online');
-  if (filtro === 'sem-inv')  lista = lista.filter(m => !m.temInventario);
+  if (q) lista = lista.filter(m => {
+    const textoMaquina = _swInvNorm([m.hostname, m.pat, m.area, m.empNome].join(' '));
+    const textoSoftwares = _swInvNorm((m.softwares || []).map(s => [
+      s.nome, s.fabricante, s.versao, _swInvCategoria(s.nome, s.fabricante).nome, _swInvRisco(s.nome, s.fabricante, s.versao).label
+    ].join(' ')).join(' '));
+    return textoMaquina.includes(q) || textoSoftwares.includes(q);
+  });
+  if (filtro === 'online') lista = lista.filter(m => m.status === 'online');
+  if (filtro === 'offline') lista = lista.filter(m => m.status !== 'online');
+  if (filtro === 'sem-inv') lista = lista.filter(m => !m.temInventario);
 
   lista.sort((a, b) => b.qtdSoftwares - a.qtdSoftwares);
 
@@ -12217,8 +12341,7 @@ function renderSwInvPorMaquina() {
   };
 
   tbody.innerHTML = lista.map(m => `
-    <tr onclick="swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')" style="cursor:pointer"
-        onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
+    <tr class="swinv-row" onclick="swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')">
       <td>
         <div style="font-weight:700;font-size:13px">${escapeHtml(m.hostname)}</div>
         ${m.pat !== '—' ? `<div style="font-size:10.5px;color:var(--g400)">PAT: ${escapeHtml(m.pat)}</div>` : ''}
@@ -12230,14 +12353,12 @@ function renderSwInvPorMaquina() {
         : '<span class="badge">Offline</span>'}</td>
       <td style="text-align:center">
         ${m.temInventario
-          ? `<span style="font-weight:700;font-size:14px;color:var(--accent)">${m.qtdSoftwares}</span>`
+          ? `<span class="swinv-count">${m.qtdSoftwares}</span>`
           : '<span style="color:var(--g400);font-size:12px;font-style:italic">sem dados</span>'}
       </td>
       <td style="font-size:11.5px;color:var(--g400)">${fmtLastSeen(m.lastSeen)}</td>
       <td>
-        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')">
-          🗂️ Ver softwares
-        </button>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();swInvVerSoftwaresMaquina('${escapeHtml(m.id)}')">🗂️ Ver softwares</button>
       </td>
     </tr>`).join('');
 }
@@ -12247,32 +12368,17 @@ function swInvVerSoftwaresMaquina(agentId) {
   const ag = (STATE_AGENTS?.list || []).find(a => a.id === agentId);
   if (!ag) return showToast('Agente não encontrado', 'warning');
 
-  let softwares = [];
-  if (ag.inventario) {
-    try {
-      const inv = typeof ag.inventario === 'string' ? JSON.parse(ag.inventario) : ag.inventario;
-      softwares = inv.software || inv.softwares || [];
-    } catch {}
-  }
-  if (!softwares.length && Array.isArray(ag.software))   softwares = ag.software;
-  if (!softwares.length && Array.isArray(ag.softwares))  softwares = ag.softwares;
-
-  softwares = softwares.map(s => ({
-    nome:      s.nome || s.DisplayName || s.name || '',
-    versao:    s.versao || s.DisplayVersion || s.version || '',
-    fabricante:s.fabricante || s.Publisher || s.publisher || '',
-  })).filter(s => s.nome).sort((a,b) => a.nome.localeCompare(b.nome));
-
+  const softwares = _swInvExtrairSoftwares(ag).sort((a,b) => a.nome.localeCompare(b.nome));
   const html = `
   <div class="modal-overlay open" id="modal-swinv-maqsw" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:700px">
+    <div class="modal" style="max-width:820px">
       <div class="modal-header">
         <div>
-          <h3 style="margin-bottom:2px">🖥️ ${escapeHtml(ag.hostname||agentId)}</h3>
+          <h3 style="margin-bottom:2px">🖥️ ${escapeHtml(ag.hostname || agentId)}</h3>
           <div style="font-size:12px;color:var(--g400)">
-            ${ag.pat ? 'PAT: '+escapeHtml(ag.pat)+' · ' : ''}
-            ${ag.empNome || ''} · ${ag.area || '—'}
-            · <strong style="color:${softwares.length?'var(--accent)':'var(--g400)'}">${softwares.length} softwares instalados</strong>
+            ${ag.pat ? 'PAT: ' + escapeHtml(ag.pat) + ' · ' : ''}
+            ${escapeHtml(ag.empNome || '')} · ${escapeHtml(ag.area || '—')}
+            · <strong style="color:${softwares.length ? 'var(--accent)' : 'var(--g400)'}">${softwares.length} softwares instalados</strong>
           </div>
         </div>
         <button class="close-btn" onclick="document.getElementById('modal-swinv-maqsw').remove()">✕</button>
@@ -12282,37 +12388,34 @@ function swInvVerSoftwaresMaquina(agentId) {
           <div style="text-align:center;padding:32px;color:var(--g400)">
             <div style="font-size:32px;margin-bottom:8px">📭</div>
             <div style="font-size:14px;font-weight:600">Inventário não disponível</div>
-            <div style="font-size:12px;margin-top:4px">O agente ainda não enviou dados de software. Solicite um inventário.</div>
-            <button class="btn btn-primary btn-sm" style="margin-top:14px"
-                    onclick="swInvSolicitarInventario('${escapeHtml(agentId)}')">
-              📋 Solicitar inventário agora
-            </button>
+            <div style="font-size:12px;margin-top:4px">O agente ainda não enviou dados de software.</div>
+            <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="swInvSolicitarInventario('${escapeHtml(agentId)}')">📋 Solicitar inventário agora</button>
           </div>` : `
-          <input class="form-control" placeholder="🔍 Filtrar softwares..." style="margin-bottom:12px"
-                 oninput="swInvFiltrarModal(this.value,'modal-swinv-maqsw-list')">
-          <div style="font-size:11px;color:var(--g400);margin-bottom:8px">
-            Clique em um software para ver em quais outras máquinas está instalado
-          </div>
+          <input class="form-control" placeholder="🔍 Filtrar softwares..." style="margin-bottom:12px" oninput="swInvFiltrarModal(this.value,'modal-swinv-maqsw-list')">
           <div id="modal-swinv-maqsw-list" style="max-height:460px;overflow-y:auto">
             <table style="width:100%;border-collapse:collapse">
               <thead>
                 <tr style="background:var(--g50)">
-                  <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase">Software</th>
-                  <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase">Versão</th>
-                  <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase">Fabricante</th>
-                  <th style="padding:8px 12px;text-align:center;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase"># Máquinas</th>
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--g500);text-transform:uppercase">Software</th>
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--g500);text-transform:uppercase">Categoria</th>
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--g500);text-transform:uppercase">Status</th>
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--g500);text-transform:uppercase">Versão</th>
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--g500);text-transform:uppercase">Fabricante</th>
+                  <th style="padding:8px 12px;text-align:center;font-size:11px;color:var(--g500);text-transform:uppercase">#</th>
                 </tr>
               </thead>
               <tbody>
                 ${softwares.map(sw => {
-                  const chave = sw.nome.toLowerCase().replace(/[^a-z0-9]/g,'');
-                  const qtd   = _swInvIndex?.[chave]?.maquinas?.length || 1;
-                  return `<tr onclick="document.getElementById('modal-swinv-maqsw').remove();swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')"
-                               style="cursor:pointer;border-bottom:1px solid var(--g100)"
-                               onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
-                    <td style="padding:8px 12px;font-size:12.5px;font-weight:600;color:var(--accent)">${escapeHtml(sw.nome)}</td>
-                    <td style="padding:8px 12px;font-size:11.5px;font-family:monospace;color:var(--g600)">${escapeHtml(sw.versao||'—')}</td>
-                    <td style="padding:8px 12px;font-size:11.5px;color:var(--g500)">${escapeHtml(sw.fabricante||'—')}</td>
+                  const chave = _swInvKey(sw.nome);
+                  const qtd = _swInvIndex?.[chave]?.maquinas?.length || 1;
+                  const cat = _swInvCategoria(sw.nome, sw.fabricante);
+                  const risco = _swInvRisco(sw.nome, sw.fabricante, sw.versao);
+                  return `<tr onclick="document.getElementById('modal-swinv-maqsw').remove();swInvVerMaquinasSoftware('${escapeHtml(sw.nome)}')" class="swinv-row">
+                    <td style="padding:8px 12px;font-size:12.5px;font-weight:600;color:var(--accent)">${escapeHtml(cat.icon)} ${escapeHtml(sw.nome)}</td>
+                    <td style="padding:8px 12px;font-size:11.5px">${escapeHtml(cat.nome)}</td>
+                    <td style="padding:8px 12px">${_swInvBadgeRisco(risco)}</td>
+                    <td style="padding:8px 12px;font-size:11.5px;font-family:monospace;color:var(--g600)">${escapeHtml(sw.versao || '—')}</td>
+                    <td style="padding:8px 12px;font-size:11.5px;color:var(--g500)">${escapeHtml(sw.fabricante || '—')}</td>
                     <td style="padding:8px 12px;text-align:center;font-size:12px;font-weight:700;color:var(--g700)">${qtd}</td>
                   </tr>`;
                 }).join('')}
@@ -12323,7 +12426,6 @@ function swInvVerSoftwaresMaquina(agentId) {
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="document.getElementById('modal-swinv-maqsw').remove()">Fechar</button>
         ${softwares.length ? `<button class="btn btn-secondary btn-sm" onclick="swInvExportarMaqCSV('${escapeHtml(agentId)}')">⬇ Exportar CSV</button>` : ''}
-        <button class="btn btn-secondary btn-sm" onclick="swInvSolicitarInventario('${escapeHtml(agentId)}')">🔄 Atualizar inventário</button>
       </div>
     </div>
   </div>`;
@@ -12332,13 +12434,13 @@ function swInvVerSoftwaresMaquina(agentId) {
   document.body.insertAdjacentHTML('beforeend', html);
 }
 
-// ── Filtro inline nos modais ───────────────────────────────────────────────
+// ── Utilitários de filtro/modal ───────────────────────────────────────────
 function swInvFiltrarModal(q, listId) {
   const list = document.getElementById(listId);
   if (!list) return;
-  const qL = q.toLowerCase();
+  const qL = _swInvNorm(q);
   list.querySelectorAll('tr:not(thead tr), div[onclick]').forEach(el => {
-    const txt = el.textContent.toLowerCase();
+    const txt = _swInvNorm(el.textContent);
     el.style.display = !qL || txt.includes(qL) ? '' : 'none';
   });
 }
@@ -12350,7 +12452,7 @@ async function swInvSolicitarInventario(agentId) {
       await db.collection('agent_commands').add({
         agentId, tipo: 'inventory',
         criadoEm: new Date(),
-        status:   'pending',
+        status: 'pending',
       });
     }
     showToast('✓ Inventário solicitado — o agente coletará os dados na próxima conexão', 'success', 5000);
@@ -12362,9 +12464,8 @@ async function swInvSolicitarInventario(agentId) {
 // ── Sincronizar: força reload dos agentes e reconstrói índice ─────────────
 async function swInvSincronizar() {
   showToast('🔄 Sincronizando agentes...', 'info', 3000);
-  _swInvIndex   = null;
+  _swInvIndex = null;
   _swInvMaqList = null;
-  // Recarrega agentes do Firestore
   try {
     if (FB_READY && db) {
       const snap = await db.collection('agents').orderBy('lastSeen','desc').get();
@@ -12376,37 +12477,40 @@ async function swInvSincronizar() {
 }
 
 // ── Exportar CSV ──────────────────────────────────────────────────────────
+function _swInvCsvDownload(filename, rows) {
+  const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\ufeff' + csv);
+  a.download = filename;
+  a.click();
+}
+
 function swInvExportarCSV(nomeSw) {
-  const chave = nomeSw.toLowerCase().replace(/[^a-z0-9]/g,'');
-  const sw    = _swInvIndex?.[chave];
+  const sw = _swInvIndex?.[_swInvKey(nomeSw)];
   if (!sw) return;
-  const rows = [['Hostname','PAT','Área','Responsável','Versão','Status']];
+  const rows = [['Software','Fabricante','Categoria','Risco','Licença','Hostname','PAT','Área','Responsável','Versão','Status']];
   const visto = new Set();
   for (const m of sw.maquinas) {
     if (visto.has(m.id)) continue;
     visto.add(m.id);
-    rows.push([m.hostname, m.pat, m.area, m.empNome, m.versao, m.status]);
+    rows.push([sw.nome, sw.fabricante, sw.categoria, sw.risco?.label, sw.licenca, m.hostname, m.pat, m.area, m.empNome, m.versao, m.status]);
   }
-  const csv = rows.map(r => r.map(c => `"${(c||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = `software_${nomeSw.replace(/[^a-z0-9]/gi,'_')}.csv`;
-  a.click();
+  _swInvCsvDownload(`software_${sw.nome.replace(/[^a-z0-9]/gi,'_')}.csv`, rows);
 }
 
 function swInvExportarMaqCSV(agentId) {
-  const ag = (STATE_AGENTS?.list||[]).find(a => a.id === agentId);
+  const ag = (STATE_AGENTS?.list || []).find(a => a.id === agentId);
   if (!ag) return;
-  let softwares = [];
-  if (ag.inventario) { try { const inv = JSON.parse(ag.inventario); softwares = inv.software||[]; } catch {} }
-  const rows = [['Software','Versão','Fabricante']];
-  softwares.forEach(sw => rows.push([sw.nome||sw.DisplayName||'', sw.versao||sw.DisplayVersion||'', sw.fabricante||sw.Publisher||'']));
-  const csv = rows.map(r => r.map(c => `"${(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = `softwares_${ag.hostname||agentId}.csv`;
-  a.click();
+  const softwares = _swInvExtrairSoftwares(ag);
+  const rows = [['Software','Versão','Fabricante','Categoria','Risco','Licença']];
+  softwares.forEach(sw => {
+    const cat = _swInvCategoria(sw.nome, sw.fabricante);
+    const risco = _swInvRisco(sw.nome, sw.fabricante, sw.versao);
+    rows.push([sw.nome, sw.versao, sw.fabricante, cat.nome, risco.label, _swInvLicenca(sw.nome, sw.fabricante)]);
+  });
+  _swInvCsvDownload(`softwares_${(ag.hostname || agentId).replace(/[^a-z0-9]/gi,'_')}.csv`, rows);
 }
+
 
 // ============================================================
 // SWITCHES & ROTEADORES — STATE + RENDER + ACTIONS
