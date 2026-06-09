@@ -12936,10 +12936,7 @@ function abrirGerenciarSwitch(id){
   const pm=document.getElementById('ger-sw-port-map');
   if(pm) {
     // Usa dados reais do agente SNMP se disponíveis
-    const portasReal = (() => {
-      try { return sw.portasMap ? JSON.parse(sw.portasMap) : null; }
-      catch(e) { return null; }
-    })();
+   const portasReal = obterPortasSwitch(sw);
 
     if (portasReal && portasReal.length) {
       // Mapa real com status por porta
@@ -12951,11 +12948,17 @@ function abrirGerenciarSwitch(id){
           + row.map(p => {
             const cor  = p.status==='up' ? '#10B981' : '#E2E8F0';
             const text = p.status==='up' ? '#fff' : '#94A3B8';
-            const tip  = `Porta ${p.porta}: ${p.status==='up'?'Em uso':'Livre'}${p.alias?' — '+p.alias:''}`;
-            return `<div title="${escapeHtml(tip)}" style="width:28px;height:28px;background:${cor};color:${text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;cursor:default">${p.porta}</div>`;
-          }).join('')
-          + `</div>`
-        );
+            const ligado = p.conectados?.length
+  ? p.conectados.map(c => c.ativo
+      ? (c.ativo.hostname || c.ativo.desc || c.ativo.pat || c.mac)
+      : c.mac
+    ).join(', ')
+  : 'Nenhum MAC identificado';
+
+const tip = `${p.portaNome || 'Porta ' + p.portaNumero}: ${p.status==='up'?'Em uso':'Livre'} — Ligado: ${ligado}${p.alias?' — '+p.alias:''}`;
+
+return `<div title="${escapeHtml(tip)}" style="width:28px;height:28px;background:${cor};color:${text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;cursor:help">${p.portaNumero}</div>`;
+       );
       }
       const upCount   = portasReal.filter(p=>p.status==='up').length;
       const downCount = portasReal.filter(p=>p.status==='down').length;
@@ -12986,6 +12989,7 @@ function abrirGerenciarSwitch(id){
            </div>`;
     }
   }
+
   const vb=document.getElementById('ger-sw-vlans-body');
   if(vb) {
     const vlansArr = (() => {
@@ -13002,7 +13006,22 @@ function abrirGerenciarSwitch(id){
       : '<tr><td colspan=4 style="text-align:center;padding:20px;color:var(--g400)">⏳ Aguardando coleta SNMP pelo agente...</td></tr>';
   }
   const mb=document.getElementById('ger-sw-mac-body');
-  if(mb) mb.innerHTML=[{porta:'Gi1',mac:'00:1A:2B:3C:4D:5E',vlan:'20',tipo:'Dinâmico'},{porta:'Gi2',mac:'00:1A:2B:3C:4D:6F',vlan:'20',tipo:'Dinâmico'},{porta:'Gi24',mac:'00:AA:BB:CC:DD:EE',vlan:'99',tipo:'Estático'}].map(m=>`<tr><td class='td-mono' style='font-size:10.5px'>${m.porta}</td><td class='td-mono' style='font-size:10px'>${m.mac}</td><td class='td-mono'>${m.vlan}</td><td>${m.tipo}</td></tr>`).join('');
+  if(mb) {
+  const macsReais = parseJsonSeguro(sw.macTable || sw.macs, []);
+  mb.innerHTML = macsReais.length
+    ? macsReais.map(m => {
+        const ativo = encontrarAtivoPorMac(m.mac);
+        const nomeAtivo = ativo ? (ativo.hostname || ativo.desc || ativo.pat || 'Ativo encontrado') : 'Não identificado';
+        return `<tr>
+          <td class='td-mono' style='font-size:10.5px'>${escapeHtml(String(m.porta || m.ifName || m.ifIdx || '-'))}</td>
+          <td class='td-mono' style='font-size:10px'>${escapeHtml(m.mac || '-')}</td>
+          <td class='td-mono'>${escapeHtml(String(m.vlan || '-'))}</td>
+          <td>${escapeHtml(m.tipo || 'Dinâmico')}</td>
+          <td>${escapeHtml(nomeAtivo)}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--g400)">⏳ Aguardando tabela MAC via SNMP...</td></tr>';
+} 
   const lg=document.getElementById('ger-sw-log');
   if(lg) {
     // Carrega logs do syslog server do Firestore
