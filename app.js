@@ -12173,12 +12173,32 @@ function renderSwInvPorMaquina() {
   const filtro = document.getElementById('swinv-filtro-status-maq')?.value || '';
 
   let lista = _swInvMaqList || [];
-  if (q) lista = lista.filter(m =>
-    m.hostname.toLowerCase().includes(q) ||
-    m.pat.toLowerCase().includes(q) ||
-    m.area.toLowerCase().includes(q) ||
-    (m.empNome||'').toLowerCase().includes(q)
-  );
+ if (q) lista = lista.filter(m => {
+  const textoMaquina = [
+    m.hostname,
+    m.pat,
+    m.area,
+    m.empNome
+  ].join(' ').toLowerCase();
+
+  const textoSoftwares = (m.softwares || [])
+    .map(s => [
+      s.nome,
+      s.name,
+      s.DisplayName,
+      s.displayName,
+      s.fabricante,
+      s.publisher,
+      s.Publisher,
+      s.versao,
+      s.version,
+      s.DisplayVersion
+    ].join(' '))
+    .join(' ')
+    .toLowerCase();
+
+  return textoMaquina.includes(q) || textoSoftwares.includes(q);
+});
   if (filtro === 'online')   lista = lista.filter(m => m.status === 'online');
   if (filtro === 'offline')  lista = lista.filter(m => m.status !== 'online');
   if (filtro === 'sem-inv')  lista = lista.filter(m => !m.temInventario);
