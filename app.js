@@ -12940,30 +12940,39 @@ function abrirGerenciarSwitch(id){
 
     if (portasReal && portasReal.length) {
       // Mapa real com status por porta
-      const rows = [];
-      const perRow = 12;
-      for (let r = 0; r < Math.ceil(portasReal.length / perRow); r++) {
-        const row = portasReal.slice(r * perRow, (r+1) * perRow);
-        rows.push(`<div style="display:flex;gap:4px;margin-bottom:4px">`
-          + row.map(p => {
-            const cor  = p.status==='up' ? '#10B981' : '#E2E8F0';
-            const text = p.status==='up' ? '#fff' : '#94A3B8';
-let ligado = 'Nenhum MAC identificado';
+     const rows = [];
+const perRow = 12;
 
-if (p.conectados && p.conectados.length) {
-  ligado = p.conectados.map(c => {
-    if (c.ativo) {
-      return c.ativo.hostname || c.ativo.desc || c.ativo.pat || c.mac || 'Ativo';
+for (let r = 0; r < Math.ceil(portasReal.length / perRow); r++) {
+  const row = portasReal.slice(r * perRow, (r + 1) * perRow);
+
+  const rowHtml = row.map(p => {
+    const cor = p.status === 'up' ? '#10B981' : '#E2E8F0';
+    const text = p.status === 'up' ? '#fff' : '#94A3B8';
+
+    let ligado = 'Nenhum MAC identificado';
+
+    if (p.conectados && p.conectados.length) {
+      ligado = p.conectados.map(c => {
+        if (c.ativo) {
+          return c.ativo.hostname || c.ativo.desc || c.ativo.pat || c.mac || 'Ativo';
+        }
+        return c.mac || 'MAC sem identificação';
+      }).join(', ');
     }
-    return c.mac || 'MAC sem identificação';
-  }).join(', ');
+
+    const tip =
+      (p.portaNome || ('Porta ' + p.portaNumero)) +
+      ': ' +
+      (p.status === 'up' ? 'Em uso' : 'Livre') +
+      ' — Ligado: ' +
+      ligado;
+
+    return '<div title="' + escapeHtml(tip) + '" style="width:28px;height:28px;background:' + cor + ';color:' + text + ';border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;cursor:help">' + p.portaNumero + '</div>';
+  }).join('');
+
+  rows.push('<div style="display:flex;gap:4px;margin-bottom:4px">' + rowHtml + '</div>');
 }
-
-const tip = `${p.portaNome || 'Porta ' + p.portaNumero}: ${p.status === 'up' ? 'Em uso' : 'Livre'} — Ligado: ${ligado}${p.alias ? ' — ' + p.alias : ''}`;
-
-return `<div title="${escapeHtml(tip)}" style="width:28px;height:28px;background:${cor};color:${text};border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;cursor:help">${p.portaNumero}</div>`;
-       );
-      }
       const upCount   = portasReal.filter(p=>p.status==='up').length;
       const downCount = portasReal.filter(p=>p.status==='down').length;
       pm.innerHTML = `
