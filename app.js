@@ -1,4 +1,4 @@
-// SYSACK v2.1 — app.js
+function abrirGerenciarSwitch(id){// SYSACK v2.1 — app.js
 // Módulo principal de aplicação
 
 
@@ -12923,6 +12923,65 @@ function renderPortMinimap(s){
 }
 
 function goSwView(v){currentSwView=v;document.getElementById('sw-view-cards').style.display=v==='cards'?'':'none';document.getElementById('sw-view-table').style.display=v==='table'?'':'none';renderSwitches();}
+
+function parseJsonSeguro(valor, fallback = []) {
+  if (!valor) return fallback;
+  if (Array.isArray(valor)) return valor;
+  try {
+    return JSON.parse(valor);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizarMac(mac) {
+  return String(mac || '')
+    .toLowerCase()
+    .replace(/[^0-9a-f]/g, '')
+    .match(/.{1,2}/g)
+    ?.join(':') || '';
+}
+
+function encontrarAtivoPorMac(mac) {
+  const alvo = normalizarMac(mac);
+  if (!alvo) return null;
+
+  return (STATE.ativos || []).find(a => {
+    const macs = [
+      a.mac,
+      a.macAddress,
+      a.enderecoMac,
+      a.wifiMac,
+      a.ethernetMac,
+      ...(Array.isArray(a.macs) ? a.macs : [])
+    ];
+
+    return macs.some(m => normalizarMac(m) === alvo);
+  });
+}
+
+function obterPortasSwitch(sw) {
+  const portas = parseJsonSeguro(sw.portasMap || sw.portas, []);
+  const macs = parseJsonSeguro(sw.macTable || sw.macs, []);
+
+  return portas.map(p => {
+    const idx = Number(p.idx || p.ifIdx || p.porta);
+
+    const conectados = macs
+      .filter(m => Number(m.ifIdx || m.idx || m.porta) === idx)
+      .map(m => ({
+        mac: m.mac,
+        ativo: encontrarAtivoPorMac(m.mac)
+      }));
+
+    return {
+      ...p,
+      portaNumero: idx,
+      portaNome: p.nome || p.ifName || `Porta ${idx}`,
+      conectados
+    };
+  });
+}
 
 function abrirGerenciarSwitch(id){
   const sw=(STATE.switches||[]).find(s=>s.id===id);if(!sw) return;
