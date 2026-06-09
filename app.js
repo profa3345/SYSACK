@@ -2247,17 +2247,22 @@ function _chExecBusca(q) {
 
   res.innerHTML = emps.map(e => {
     const ini = (e.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
-    const info = [e.mat, e.setor||e.lotacao, e.ramal ? 'Ramal '+e.ramal : ''].filter(Boolean).join(' · ');
-    return `<div onclick="chSelecionarEmpregado(${JSON.stringify(e).replace(/"/g,'&quot;')})"
-      style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;gap:10px;align-items:center"
+    const metaArr = [e.mat, e.setor||e.lotacao, e.ramal ? 'Ramal '+e.ramal : ''].filter(Boolean);
+    const info = metaArr.join(' · ');
+    const email = e.email || '';
+    return `<div class="emp-ac-item" onclick="chSelecionarEmpregado(${JSON.stringify(e).replace(/"/g,'&quot;')})"
+      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--g100);display:flex;gap:10px;align-items:center;transition:background .12s"
       onmouseover="this.style.background='var(--g50)'" onmouseout="this.style.background=''">
-      <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;
-                  align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${ini}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:12.5px">${escapeHtml(e.nome||'—')}</div>
-        <div style="font-size:11px;color:var(--g400)">${escapeHtml(info)}</div>
+      <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--accent,#2563EB),#7C3AED);color:#fff;display:flex;
+                  align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;letter-spacing:.5px">${ini}</div>
+      <div class="emp-ac-item-main" style="flex:1;min-width:0;overflow:hidden">
+        <div style="font-weight:600;font-size:13px;color:var(--g900,#0F172A);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(e.nome||'—')}</div>
+        <div style="font-size:11px;color:var(--g500);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(info)}</div>
+        ${email ? `<div style="font-size:10.5px;color:var(--g400);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(email)}</div>` : ''}
       </div>
-      <div style="font-size:11px;color:var(--g500);flex-shrink:0">${escapeHtml(e.email||'')}</div>
+      <div class="emp-ac-item-right" style="flex-shrink:0;text-align:right">
+        ${e.mat ? `<span style="font-size:10px;font-weight:700;background:var(--g100);color:var(--g600);border-radius:4px;padding:2px 6px">${escapeHtml(e.mat)}</span>` : ''}
+      </div>
     </div>`;
   }).join('');
   res.style.display = '';

@@ -621,6 +621,31 @@ textarea.form-control{resize:vertical;min-height:80px}
 }
 .sidebar-overlay.open{display:block}
 
+/* ══ BOTÃO PWA INSTALAR ══ */
+#pwa-install-btn{
+  display:none;
+  align-items:center;
+  gap:6px;
+  padding:6px 12px;
+  background:linear-gradient(135deg,#2563EB,#7C3AED);
+  color:#fff !important;
+  border:none;
+  border-radius:20px;
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+  white-space:nowrap;
+  box-shadow:0 2px 10px rgba(37,99,235,.35);
+  transition:all .2s;
+  font-family:'Inter',sans-serif;
+}
+#pwa-install-btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 4px 16px rgba(37,99,235,.5);
+}
+#pwa-install-btn svg{ flex-shrink:0; }
+#pwa-install-btn .pwa-btn-text{ display:inline; }
+
 @media(max-width:768px){
   :root{--sw:0px}
 
@@ -650,8 +675,24 @@ textarea.form-control{resize:vertical;min-height:80px}
   .bc-seg:not(.cur){display:none}
   .bc-sep:not(:last-of-type){display:none}
 
-  /* Topbar mais compacta */
-  .topbar{padding:0 12px;gap:8px}
+  /* Topbar mais compacta — garante que não corte elementos */
+  .topbar{
+    padding:0 10px;
+    gap:6px;
+    height:56px;
+    overflow:visible;
+  }
+  .tb-actions{
+    gap:4px;
+    flex-shrink:0;
+  }
+  /* Botão PWA no mobile: só ícone + texto curto */
+  #pwa-install-btn .pwa-btn-text{ display:none; }
+  #pwa-install-btn{
+    padding:6px 8px;
+    border-radius:8px;
+    gap:0;
+  }
 
   /* Conteúdo das páginas */
   .page-content{padding:14px !important}
@@ -721,6 +762,28 @@ textarea.form-control{resize:vertical;min-height:80px}
   /* Oculta colunas menos importantes nas tabelas */
   .td-hide-mobile{display:none}
   th.hide-mobile{display:none}
+
+  /* ── Autocomplete de empregados — layout mobile ── */
+  .emp-ac-item{
+    flex-direction:column !important;
+    align-items:flex-start !important;
+    gap:4px !important;
+    padding:10px 14px !important;
+  }
+  .emp-ac-item-right{
+    display:none !important; /* oculta email no mobile; fica só na linha de info */
+  }
+  .emp-ac-item-main{ width:100%; }
+
+  /* Novo chamado — painel lateral colapsa abaixo do formulário */
+  .ch-split{
+    flex-direction:column !important;
+  }
+  .ch-sidebar{
+    width:100% !important;
+    border-left:none !important;
+    border-top:1px solid var(--g200);
+  }
 }
 
 @media(max-width:480px){
@@ -730,6 +793,11 @@ textarea.form-control{resize:vertical;min-height:80px}
   }
   .stat-value{font-size:18px !important}
   .page{padding:12px !important}
+
+  /* Topbar bem compacta */
+  .topbar{ padding:0 8px; gap:4px; }
+  /* Oculta botões menos críticos */
+  #download-client-btn{ display:none !important; }
 }
 .mdm-stat{background:#fff;border:1px solid var(--g200);border-radius:var(--r);padding:12px 14px;text-align:center;transition:all .2s}
 .mdm-stat:hover{box-shadow:var(--shm);transform:translateY(-2px)}

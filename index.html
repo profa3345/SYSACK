@@ -374,8 +374,9 @@ window.dispatchEvent(new Event('firebase-ready'));
     <button class="tb-btn" id="download-client-btn" onclick="baixarSysackClient()" title="Baixar SYSACK Client para Windows" style="display:none">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="4" rx="1" fill="currentColor" opacity=".3"/><path d="M12 8v8M9 13l3 3 3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="17" width="18" height="4" rx="1" fill="currentColor" opacity=".3"/></svg>
     </button>
-    <button class="tb-btn" id="pwa-install-btn" onclick="instalarPWA()" title="Instalar app no celular" style="display:none">
+    <button id="pwa-install-btn" onclick="instalarPWA()" title="Instalar SYSACK no seu dispositivo">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16l-4-4h3V4h2v8h3l-4 4z" fill="currentColor"/><path d="M20 18H4v2h16v-2z" fill="currentColor" opacity=".7"/></svg>
+      <span class="pwa-btn-text">Instalar App</span>
     </button>
     <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Alternar tema claro/escuro">🌙</button>
       <button class="tb-btn" id="notif-btn">
