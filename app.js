@@ -717,6 +717,160 @@ async function fsSet(col, id, data) {
   return db.collection(col).doc(id).set(data);
 }
 
+
+
+// ═══════════════════════════════════════════════════════════════
+// SYSACK — RASTREABILIDADE TOTAL DO ATIVO / MÁQUINA
+// Grava automaticamente no histórico do ativo qualquer mudança relevante:
+// grupo, área, card/status, responsável, monitor, IP/faixa de IP e chamados.
+// ═══════════════════════════════════════════════════════════════
+function sysackFaixaIP(ip) {
+  const m = String(ip || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return '';
+  return `${m[1]}.${m[2]}.${m[3]}.0/24`;
+}
+
+function sysackValor(v) {
+  if (v === undefined || v === null || v === '') return '—';
+  if (Array.isArray(v)) return v.map(x => typeof x === 'object' ? (x.nome || x.caption || x.pat || x.desc || JSON.stringify(x)) : x).join(', ') || '—';
+  if (typeof v === 'object') return v.nome || v.caption || v.pat || v.desc || JSON.stringify(v);
+  return String(v);
+}
+
+function sysackClone(obj) {
+  try { return JSON.parse(JSON.stringify(obj || {})); } catch { return { ...(obj || {}) }; }
+}
+
+function sysackAtivoLocal(col, docId) {
+  const arr = STATE?.[col] || [];
+  const a = arr.find(x => x.id === docId || x.docId === docId);
+  return a ? sysackClone(a) : null;
+}
+
+async function sysackHistoricoPathAdd(col, docId, data) {
+  if (!docId) return;
+  const payload = {
+    ...data,
+    autor: data.autor || CURRENT_USER?.nome || 'SYSACK',
+    usuario: CURRENT_USER?.nome || 'SYSACK',
+    usuarioId: CURRENT_USER?.uid || 'sistema',
+    data: data.data || new Date().toISOString(),
+    createdAt: data.createdAt || new Date().toISOString(),
+    syncSource: data.syncSource || 'sysack-frontend',
+  };
+  try {
+    if (FB_READY && db) await db.collection(col).doc(docId).collection('historico').add(payload);
+  } catch(e) { console.warn('[Histórico Ativo]', e.message); }
+}
+
+async function sysackGerarAlertaAtivo(titulo, desc, ativo, extras = {}) {
+  const payload = {
+    titulo, desc,
+    tipo: extras.tipo || 'patrimonial',
+    severidade: extras.severidade || 'warning',
+    ativoId: ativo?.id || extras.ativoId || '',
+    pat: ativo?.pat || extras.pat || '',
+    ip: ativo?.ip || extras.ip || '',
+    lida: false,
+    createdAt: new Date().toISOString(),
+    createdBy: CURRENT_USER?.uid || 'sistema',
+    origem: extras.origem || 'rastreabilidade-ativo',
+    ...extras,
+  };
+  try { if (FB_READY && db) await db.collection('alertas').add(payload); } catch(e) { console.warn('[Alerta]', e.message); }
+  try { if (FB_READY && db) await db.collection('eventos_detectados').add({ ...payload, detecEm: payload.createdAt }); } catch(e) {}
+}
+
+const SYSACK_CAMPOS_RASTREADOS_ATIVO = [
+  ['grupo', 'Grupo'], ['area', 'Área'], ['setor', 'Setor'], ['card', 'Card'], ['coluna', 'Card'],
+  ['status', 'Status'], ['resp', 'Responsável'], ['responsavel', 'Responsável'], ['matriculaResp', 'Matrícula responsável'],
+  ['loc', 'Localização'], ['local', 'Localização'], ['sala', 'Sala'], ['hostname', 'Hostname'], ['desc', 'Descrição'],
+  ['ip', 'IP'], ['pat', 'Patrimônio'], ['monitor', 'Monitor'], ['monitorId', 'Monitor'], ['monitores', 'Monitores']
+];
+
+async function sysackAuditarMudancaAtivo(col, docId, antes, depoisParcial, origem = 'fsUpdate') {
+  if (!['ativos','patrimonios','mobiliario'].includes(col) || !docId) return;
+  const antesObj = antes || sysackAtivoLocal(col, docId) || {};
+  const depoisObj = { ...antesObj, ...(depoisParcial || {}), id: docId };
+  const ativoRef = { ...depoisObj, id: docId };
+
+  for (const [campo, label] of SYSACK_CAMPOS_RASTREADOS_ATIVO) {
+    if (!(campo in (depoisParcial || {}))) continue;
+    const a = sysackValor(antesObj[campo]);
+    const d = sysackValor(depoisObj[campo]);
+    if (a === d) continue;
+
+    let tipo = 'alteracao_cadastro';
+    let dot = 'blue';
+    let titulo = `${label} alterado`;
+    let alerta = false;
+    if (['area','setor','loc','local','sala'].includes(campo)) { tipo = 'movimentacao_area_local'; titulo = `${label} do ativo alterado`; }
+    if (['grupo','card','coluna','status'].includes(campo)) { tipo = 'movimentacao_fluxo'; titulo = `${label} / fluxo alterado`; }
+    if (['resp','responsavel','matriculaResp'].includes(campo)) { tipo = 'troca_responsavel'; titulo = 'Responsável do ativo alterado'; }
+    if (['monitor','monitorId','monitores'].includes(campo)) { tipo = 'troca_monitor'; titulo = 'Monitor vinculado ao ativo alterado'; dot = 'orange'; alerta = true; }
+    if (campo === 'pat') { tipo = 'alteracao_patrimonio'; dot = 'red'; alerta = true; }
+    if (campo === 'ip') { tipo = 'alteracao_ip'; titulo = 'IP do ativo alterado'; dot = 'orange'; }
+
+    const desc = `${label}: ${a} → ${d}`;
+    await sysackHistoricoPathAdd(col, docId, { tipo, evento: tipo, dot, titulo, label: titulo, desc, campo, de: a, para: d, origem });
+    if (alerta) await sysackGerarAlertaAtivo(titulo, desc, ativoRef, { tipo, campo, de: a, para: d, severidade: campo === 'pat' ? 'critical' : 'warning' });
+  }
+
+  if ('ip' in (depoisParcial || {})) {
+    const faixaAntes = sysackFaixaIP(antesObj.ip);
+    const faixaDepois = sysackFaixaIP(depoisObj.ip);
+    if (faixaAntes && faixaDepois && faixaAntes !== faixaDepois) {
+      const desc = `Faixa de IP alterada: ${faixaAntes} → ${faixaDepois} · IP: ${sysackValor(antesObj.ip)} → ${sysackValor(depoisObj.ip)}`;
+      await sysackHistoricoPathAdd(col, docId, {
+        tipo: 'mudanca_faixa_ip', evento: 'mudanca_faixa_ip', dot: 'red',
+        titulo: 'Máquina mudou de faixa de IP', label: 'Máquina mudou de faixa de IP', desc,
+        ipAnterior: antesObj.ip || '', ipNovo: depoisObj.ip || '', faixaAnterior: faixaAntes, faixaNova: faixaDepois, origem,
+      });
+      await sysackGerarAlertaAtivo('Máquina mudou de faixa de IP', desc, ativoRef, {
+        tipo: 'mudanca_faixa_ip', severidade: 'critical', ipAnterior: antesObj.ip || '', ipNovo: depoisObj.ip || '', faixaAnterior: faixaAntes, faixaNova: faixaDepois,
+      });
+    }
+  }
+}
+
+function sysackAtivosDoChamado(ch) {
+  const ativos = STATE?.ativos || [];
+  const achados = [];
+  const add = a => { if (a && !achados.some(x => x.id === a.id)) achados.push(a); };
+  if (ch?.pat) add(ativos.find(a => a.pat === ch.pat || a.id === ch.pat));
+  (ch?.ativosVinculados || []).forEach(av => add(ativos.find(a => a.id === av.id || a.id === av.docId || a.pat === av.pat)));
+  if (ch?.movimentacao) {
+    add(ativos.find(a => a.pat === ch.movimentacao.patAntigo));
+    add(ativos.find(a => a.pat === ch.movimentacao.patNovo));
+  }
+  const texto = `${ch?.titulo || ''} ${ch?.desc || ''}`.toLowerCase();
+  if (texto) ativos.forEach(a => {
+    const hn = (a.hostname || a.nome || a.desc || '').toLowerCase();
+    if ((a.ip && texto.includes(String(a.ip).toLowerCase())) || (hn && hn.length > 3 && texto.includes(hn))) add(a);
+  });
+  return achados;
+}
+
+async function sysackRegistrarChamadoHistorico(chamado, chamadoId, acao = 'atualizado') {
+  if (!chamado) return;
+  const ativos = sysackAtivosDoChamado(chamado);
+  if (!ativos.length) return;
+  const status = chamado.status || 'aberto';
+  const tituloAcao = acao === 'criado' ? 'Chamado aberto para o ativo' : acao === 'encerrado' ? 'Chamado encerrado para o ativo' : 'Chamado atualizado para o ativo';
+  for (const a of ativos) {
+    await sysackHistoricoPathAdd('ativos', a.id, {
+      tipo: acao === 'criado' ? 'chamado_aberto' : acao === 'encerrado' ? 'chamado_encerrado' : 'chamado_atualizado',
+      evento: 'chamado', dot: status === 'fechado' || status === 'concluido' ? 'green' : 'blue',
+      titulo: tituloAcao,
+      label: tituloAcao,
+      chamadoId,
+      statusChamado: status,
+      desc: `Chamado ${chamadoId || ''} · ${status} · ${(chamado.titulo || chamado.desc || '').slice(0,140)}`,
+      origem: 'chamados',
+    });
+  }
+}
+
 async function fsAdd(col, data, localArr, _fromSync = false) {
   // Valida col — evita crash no Firestore com coleção inválida
   if (!col || typeof col !== 'string' || col.trim() === '') {
@@ -740,6 +894,9 @@ async function fsAdd(col, data, localArr, _fromSync = false) {
         new Promise((_, rej) => setTimeout(() => rej(new Error('fsAdd timeout')), 8000)),
       ]);
       auditLog('CREATE', col, ref.id, col, { after: data });
+      if (col === 'chamados') {
+        await sysackRegistrarChamadoHistorico(data, ref.id, 'criado').catch(e => console.warn('[Hist Chamado]', e.message));
+      }
       return ref.id;
     } catch (err) {
       console.error('[Banco] fsAdd:', err.message);
@@ -765,11 +922,20 @@ async function fsAdd(col, data, localArr, _fromSync = false) {
 }
 
 async function fsUpdate(col, docId, data) {
+  const _sysackAntes = ['ativos','patrimonios','mobiliario'].includes(col) ? sysackAtivoLocal(col, docId) : null;
   if (FB_READY && db && window._fs) {
     try {
       const { doc, updateDoc, serverTimestamp } = window._fs;
       await updateDoc(doc(db, col, docId), { ...data, updatedAt: serverTimestamp() });
       auditLog('UPDATE', col, docId, col, { after: data });
+      if (['ativos','patrimonios','mobiliario'].includes(col)) {
+        await sysackAuditarMudancaAtivo(col, docId, _sysackAntes, data, 'fsUpdate').catch(e => console.warn('[Hist Ativo]', e.message));
+      }
+      if (col === 'chamados') {
+        const _ch = { ...((STATE.chamados || []).find(c => c.id === docId) || {}), ...(data || {}) };
+        const _acao = ['fechado','concluido'].includes(_ch.status) ? 'encerrado' : 'atualizado';
+        await sysackRegistrarChamadoHistorico(_ch, docId, _acao).catch(e => console.warn('[Hist Chamado]', e.message));
+      }
       return true;
     } catch (err) { console.error('[Banco] fsUpdate:', err); }
   }
@@ -781,6 +947,9 @@ async function fsUpdate(col, docId, data) {
     // Atualiza STATE local imediatamente
     const ativoLocal = (STATE[col] || []).find(x => x.id === docId);
     if (ativoLocal) Object.assign(ativoLocal, data, { _offline: true });
+    if (['ativos','patrimonios','mobiliario'].includes(col)) {
+      await sysackAuditarMudancaAtivo(col, docId, _sysackAntes, data, 'offlineQueue').catch(e => console.warn('[Hist Ativo]', e.message));
+    }
     return true; // retorna true para UX não mostrar erro
   }
 
@@ -8819,10 +8988,12 @@ async function abrirLinhaDoTempo(ativoId, pat) {
           return '<span style="font-size:10.5px;color:var(--g500)">'+escapeHtml(e[0])+': <strong>'+escapeHtml(String(e[1]))+'</strong></span>';
         }).join(' · ');
       }
+      var chamadoBtn = ev.chamadoId ? '<button class="btn btn-secondary btn-xs" style="margin-top:6px" onclick="abrirDetalheChamado(\''+escapeHtml(String(ev.chamadoId))+'\')">🎫 Abrir chamado '+escapeHtml(String(ev.chamadoId))+'</button>' : '';
       return '<div style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--g100)">'
         +'<div style="font-size:20px;flex-shrink:0;margin-top:2px">'+ico+'</div>'
-        +'<div style="flex:1"><div style="font-weight:700;font-size:13px;color:var(--g900)">'+escapeHtml((ev.evento||'').replace(/-/g,' ').replace(/\w/g,function(l){return l.toUpperCase();}))+'</div>'
+        +'<div style="flex:1"><div style="font-weight:700;font-size:13px;color:var(--g900)">'+escapeHtml((ev.evento||'').replace(/-/g,' ').replace(/\b\w/g,function(l){return l.toUpperCase();}))+'</div>'
         +(dets?'<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">'+dets+'</div>':'')
+        + chamadoBtn
         +'<div style="font-size:10.5px;color:var(--g400);margin-top:4px">'+escapeHtml(ev.usuario)+' · '+data+'</div>'
         +'</div></div>';
     }).join('');
@@ -10535,7 +10706,10 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
     if (FB_READY && auth?.currentUser) {
       const data = await callFunction('getHistoricoUsuarios', { ativoId });
       usuarios   = data?.usuarios || [];
+      window._sysackLoginEventosAtivo = data?.loginEventos || [];
     }
+
+    if (!window._sysackLoginEventosAtivo) window._sysackLoginEventosAtivo = [];
 
     if (!usuarios.length) {
       body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)">' +
@@ -10569,6 +10743,7 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
             <th>Primeiro login</th>
             <th>Último login</th>
             <th>Total Dias Logado</th>
+            <th>Dias no ano</th>
             <th>Logins nesta semana</th>
             <th>Status</th>
           </tr></thead>
@@ -10592,6 +10767,9 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
                   <span style="font-size:15px;font-weight:800;color:var(--accent)">${u.totalDias || 0}</span>
                 </td>
                 <td style="text-align:center">
+                  <span style="font-size:13px;font-weight:800;color:var(--g700)">${u.contadorDiasAno || 0}</span>
+                </td>
+                <td style="text-align:center">
                   <span style="font-size:13px;font-weight:700;color:${diasSemAtu >= 2 ? 'var(--success)' : 'var(--g400)'}">${diasSemAtu}</span>
                   ${diasSemAtu >= 2 ? '<span style="font-size:10px;color:var(--success);display:block">&#10003; critério</span>' : ''}
                 </td>
@@ -10607,6 +10785,14 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
             }).join('')}
           </tbody>
         </table>
+      </div>
+      <div style="margin-top:14px">
+        <div style="font-size:12px;font-weight:800;color:var(--g700);margin-bottom:6px">📅 Ocorrências de login registradas</div>
+        ${(() => {
+          const evs = (window._sysackLoginEventosAtivo || []).slice(0,80);
+          if (!evs.length) return '<div style="padding:10px 12px;background:var(--g50);border-radius:8px;color:var(--g400);font-size:12px">Sem ocorrências individuais. O contador por usuário continua disponível acima.</div>';
+          return '<div class="table-wrap"><table><thead><tr><th>Data/hora</th><th>Usuário</th><th>Matrícula</th><th>Setor</th></tr></thead><tbody>' + evs.map(e => '<tr><td style="font-size:12px">' + fmtDate(e.data) + '</td><td><b>' + escapeHtml(e.nome || e.login || '—') + '</b><div style="font-size:11px;color:var(--g400)">' + escapeHtml(e.loginNorm || '') + '</div></td><td>' + escapeHtml(e.mat || '—') + '</td><td>' + escapeHtml(e.setor || '—') + '</td></tr>').join('') + '</tbody></table></div>';
+        })()}
       </div>
       <div style="margin-top:12px;padding:10px 14px;background:var(--g50);border-radius:8px;font-size:12px;color:var(--g500)">
         <strong>Como funciona a atribuição automática:</strong><br>
@@ -27174,7 +27360,7 @@ function renderBuscaMaquinasUsuario(ativos, resumo) {
       <div class="stat-card"><div class="stat-label">Mês / Ano</div><div class="stat-value">${resumo.mes || 0} / ${resumo.ano || 0}</div></div>
     </div>
     <div class="table-container"><table class="data-table" style="font-size:12px">
-      <thead><tr><th>Máquina</th><th>PAT</th><th>Área</th><th>Último login</th><th>Dias total</th><th>Últimos 7/30/365 dias</th><th>Papel</th></tr></thead>
+      <thead><tr><th>Máquina</th><th>PAT</th><th>Área</th><th>Último login</th><th>Dias total</th><th>Dias no ano</th><th>Últimos 7/30/365 dias</th><th>Papel</th></tr></thead>
       <tbody>${ativos.map(a => `
         <tr>
           <td><b>${escapeHtml(a.hostname || a.desc || a.ativoId)}</b><div style="font-size:11px;color:var(--g400)">${escapeHtml(a.ip || '')}</div></td>
@@ -27182,6 +27368,7 @@ function renderBuscaMaquinasUsuario(ativos, resumo) {
           <td>${escapeHtml(a.area || '—')}</td>
           <td>${fmt(a.ultimoLogin)}</td>
           <td>${a.totalDias || 0}</td>
+          <td>${a.contadorDiasAno || 0}</td>
           <td>${a.dias7 || 0} / ${a.dias30 || 0} / ${a.dias365 || 0}</td>
           <td>${a.ehPrincipal ? '<span class="tag tag-success">Usuário principal</span>' : ''}${a.maquinaCompartilhada ? '<span class="tag tag-warning">Compartilhada</span>' : ''}</td>
         </tr>`).join('')}</tbody>
