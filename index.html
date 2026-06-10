@@ -547,6 +547,26 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
 
       <!-- TRIAGEM AUTOMÁTICA DE CHAMADOS -->
+
+      <div class="card" style="margin-bottom:14px;border-left:4px solid var(--accent)">
+        <div class="card-header" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label class="form-label" style="margin-bottom:4px">Pesquisar máquinas por login de usuário</label>
+            <input id="loginhist-user" class="form-control" placeholder="Login AD, matrícula ou nome..." onkeydown="if(event.key==='Enter')buscarMaquinasPorUsuario()">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">De</label>
+            <input id="loginhist-de" type="date" class="form-control" style="width:145px">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Até</label>
+            <input id="loginhist-ate" type="date" class="form-control" style="width:145px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="buscarMaquinasPorUsuario()">🔎 Buscar logins</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparBuscaMaquinasPorUsuario()">Limpar</button>
+        </div>
+        <div id="loginhist-result" style="padding:0 16px 14px"></div>
+      </div>
       <div class="card">
         <div class="card-header">
           <h3>🎫 Triagem Automática de Chamados</h3>
@@ -1109,6 +1129,26 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="tab" onclick="filtrarAtivosPorTipo('switch,router,ap,firewall,Switch,Router',this)">Rede</div>
         <div class="tab" onclick="filtrarAtivosPorTipo('ups,camera,outros,Outro',this)">Outros</div>
       </div>
+
+      <div class="card" style="margin-bottom:14px;border-left:4px solid var(--accent)">
+        <div class="card-header" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label class="form-label" style="margin-bottom:4px">Pesquisar máquinas por login de usuário</label>
+            <input id="loginhist-user" class="form-control" placeholder="Login AD, matrícula ou nome..." onkeydown="if(event.key==='Enter')buscarMaquinasPorUsuario()">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">De</label>
+            <input id="loginhist-de" type="date" class="form-control" style="width:145px">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Até</label>
+            <input id="loginhist-ate" type="date" class="form-control" style="width:145px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="buscarMaquinasPorUsuario()">🔎 Buscar logins</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparBuscaMaquinasPorUsuario()">Limpar</button>
+        </div>
+        <div id="loginhist-result" style="padding:0 16px 14px"></div>
+      </div>
       <div class="card">
         <div class="card-header">
           <input id="pat-search" class="form-control" style="width:240px;margin:0" placeholder="🔍 Buscar PAT, hostname, IP, área, responsável..." oninput="renderAtivos()">
@@ -1245,6 +1285,26 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="stat-card orange"><div class="stat-label">Pendentes</div><div class="stat-value" id="mov-pend">—</div><div class="stat-sub">Aguardando aprovação</div></div>
         <div class="stat-card red"><div class="stat-label">Críticas (+10 dias)</div><div class="stat-value" id="mov-crit">—</div><div class="stat-sub">Sem resposta</div></div>
       </div>
+
+      <div class="card" style="margin-bottom:14px;border-left:4px solid var(--accent)">
+        <div class="card-header" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label class="form-label" style="margin-bottom:4px">Pesquisar máquinas por login de usuário</label>
+            <input id="loginhist-user" class="form-control" placeholder="Login AD, matrícula ou nome..." onkeydown="if(event.key==='Enter')buscarMaquinasPorUsuario()">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">De</label>
+            <input id="loginhist-de" type="date" class="form-control" style="width:145px">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Até</label>
+            <input id="loginhist-ate" type="date" class="form-control" style="width:145px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="buscarMaquinasPorUsuario()">🔎 Buscar logins</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparBuscaMaquinasPorUsuario()">Limpar</button>
+        </div>
+        <div id="loginhist-result" style="padding:0 16px 14px"></div>
+      </div>
       <div class="card">
         <div class="card-header">
           <h3>Todas as Movimentações</h3>
@@ -1261,6 +1321,26 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Empresa Terceirizada</h2><p class="text-sm text-muted mt-8">Controle de ativos enviados para manutenção externa</p></div>
       </div>
       <div id="terc-alertas-overdue" class="mb-20"></div>
+
+      <div class="card" style="margin-bottom:14px;border-left:4px solid var(--accent)">
+        <div class="card-header" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label class="form-label" style="margin-bottom:4px">Pesquisar máquinas por login de usuário</label>
+            <input id="loginhist-user" class="form-control" placeholder="Login AD, matrícula ou nome..." onkeydown="if(event.key==='Enter')buscarMaquinasPorUsuario()">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">De</label>
+            <input id="loginhist-de" type="date" class="form-control" style="width:145px">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Até</label>
+            <input id="loginhist-ate" type="date" class="form-control" style="width:145px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="buscarMaquinasPorUsuario()">🔎 Buscar logins</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparBuscaMaquinasPorUsuario()">Limpar</button>
+        </div>
+        <div id="loginhist-result" style="padding:0 16px 14px"></div>
+      </div>
       <div class="card">
         <div class="card-header"><h3>Ativos na Empresa Terceirizada</h3><button class="btn btn-primary btn-sm" onclick="openModal('modal-retorno-terc')">↩ Registrar Retorno</button></div>
         <div class="table-wrap"><table><thead><tr><th>Patrimônio</th><th>Ativo</th><th>Data Envio</th><th>Dias Úteis</th><th>Técnico Terc.</th><th>Chamado</th><th>Alerta</th><th>Status</th><th>Ações</th></tr></thead><tbody id="terc-body"></tbody></table></div>
@@ -1441,6 +1521,26 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="card mb-16">
         <div class="card-header"><h3>⏳ Aguardando sua aprovação</h3><span class="badge badge-danger" id="aprov-pending-count">0 pendentes</span></div>
         <div id="aprov-pending-list" class="card-body" style="padding:14px 18px"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px;border-left:4px solid var(--accent)">
+        <div class="card-header" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label class="form-label" style="margin-bottom:4px">Pesquisar máquinas por login de usuário</label>
+            <input id="loginhist-user" class="form-control" placeholder="Login AD, matrícula ou nome..." onkeydown="if(event.key==='Enter')buscarMaquinasPorUsuario()">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">De</label>
+            <input id="loginhist-de" type="date" class="form-control" style="width:145px">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Até</label>
+            <input id="loginhist-ate" type="date" class="form-control" style="width:145px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="buscarMaquinasPorUsuario()">🔎 Buscar logins</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparBuscaMaquinasPorUsuario()">Limpar</button>
+        </div>
+        <div id="loginhist-result" style="padding:0 16px 14px"></div>
       </div>
       <div class="card">
         <div class="card-header"><h3>Histórico de Aprovações</h3></div>
@@ -1748,6 +1848,26 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
 
       <!-- TABELA RAW -->
+
+      <div class="card" style="margin-bottom:14px;border-left:4px solid var(--accent)">
+        <div class="card-header" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label class="form-label" style="margin-bottom:4px">Pesquisar máquinas por login de usuário</label>
+            <input id="loginhist-user" class="form-control" placeholder="Login AD, matrícula ou nome..." onkeydown="if(event.key==='Enter')buscarMaquinasPorUsuario()">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">De</label>
+            <input id="loginhist-de" type="date" class="form-control" style="width:145px">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Até</label>
+            <input id="loginhist-ate" type="date" class="form-control" style="width:145px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="buscarMaquinasPorUsuario()">🔎 Buscar logins</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparBuscaMaquinasPorUsuario()">Limpar</button>
+        </div>
+        <div id="loginhist-result" style="padding:0 16px 14px"></div>
+      </div>
       <div class="card">
         <div class="card-header"><h3>Dados brutos</h3><button class="btn btn-ghost btn-sm" onclick="metExportarCSV()">⬇ CSV</button></div>
         <div class="table-wrap"><table>
@@ -3666,6 +3786,26 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
 
       <!-- MINHAS SOLICITAÇÕES -->
+
+      <div class="card" style="margin-bottom:14px;border-left:4px solid var(--accent)">
+        <div class="card-header" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label class="form-label" style="margin-bottom:4px">Pesquisar máquinas por login de usuário</label>
+            <input id="loginhist-user" class="form-control" placeholder="Login AD, matrícula ou nome..." onkeydown="if(event.key==='Enter')buscarMaquinasPorUsuario()">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">De</label>
+            <input id="loginhist-de" type="date" class="form-control" style="width:145px">
+          </div>
+          <div>
+            <label class="form-label" style="margin-bottom:4px">Até</label>
+            <input id="loginhist-ate" type="date" class="form-control" style="width:145px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="buscarMaquinasPorUsuario()">🔎 Buscar logins</button>
+          <button class="btn btn-ghost btn-sm" onclick="limparBuscaMaquinasPorUsuario()">Limpar</button>
+        </div>
+        <div id="loginhist-result" style="padding:0 16px 14px"></div>
+      </div>
       <div class="card">
         <div class="card-header">
           <h3>📋 Minhas Solicitações</h3>
