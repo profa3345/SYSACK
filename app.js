@@ -1486,14 +1486,21 @@ function sysackFindAgentForAtivo(a) {
   }) || null;
 }
 function sysackUsuariosPrincipaisAtivo(a, ag) {
+  // A aba Computadores precisa aceitar o mesmo formato usado pela Assistência Remota (/agents).
+  // Prioridade: usuário principal calculado; se ainda não existir, usa o usuário logado atual como principal provisório.
   const srcs = [a, ag].filter(Boolean);
   for (const src of srcs) {
     if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
-      const txt = src.usuariosPrincipais.map(u => u.nome || u.login || u.loginNorm || u.usuario || u.mat).filter(Boolean).join(', ');
+      const txt = src.usuariosPrincipais
+        .map(u => u.nome || u.login || u.loginNorm || u.usuario || u.usuarioLogado || u.mat)
+        .filter(Boolean)
+        .join(', ');
       if (txt) return txt;
     }
   }
-  return a?.usuarioPrincipal || a?.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioPrincipalLogin || '—';
+  return a?.usuarioPrincipal || a?.usuarioPrincipalLogin ||
+         ag?.usuarioPrincipal || ag?.usuarioPrincipalLogin ||
+         a?.usuarioLogado || a?.usuarioNome || ag?.usuarioLogado || ag?.usuarioNome || ag?.login || '—';
 }
 function sysackUltimoLoginAtivo(a, ag) {
   return a?.ultimoLoginEm || a?.ultimoLoginData || a?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || a?.updatedAt || '';
@@ -1503,12 +1510,14 @@ function sysackTextoUsuariosAtivo(a, ag) {
   const partes = [];
   const add = v => { if (v != null && String(v).trim()) partes.push(String(v)); };
   [a, ag].filter(Boolean).forEach(src => {
-    ['usuarioLogado','usuarioNome','usuarioMat','usuarioSetor','ultimoLoginUsuario','usuarioPrincipal','usuarioPrincipalLogin','resp','responsavel','matriculaResp','login','loginNorm'].forEach(k => add(src[k]));
-    if (Array.isArray(src.usuariosPrincipais)) src.usuariosPrincipais.forEach(u => ['login','loginNorm','nome','usuario','mat','setor'].forEach(k => add(u?.[k])));
-    const hist = src.historicoUsuarios || src.loginHistory || src.logins || src.usuariosHistorico || [];
-    if (Array.isArray(hist)) hist.forEach(u => ['login','loginNorm','usuario','usuarioLogado','nome','mat','setor'].forEach(k => add(u?.[k])));
+    ['usuarioLogado','usuarioNome','usuarioMat','usuarioSetor','ultimoLoginUsuario','ultimoLoginUsuarioNome','usuarioPrincipal','usuarioPrincipalLogin','resp','responsavel','matriculaResp','login','loginNorm','samAccountName','userName','username'].forEach(k => add(src[k]));
+    if (Array.isArray(src.usuariosPrincipais)) src.usuariosPrincipais.forEach(u => ['login','loginNorm','nome','usuario','usuarioLogado','usuarioNome','mat','matricula','setor'].forEach(k => add(u?.[k])));
+    const hist = src.historicoUsuarios || src.loginHistory || src.logins || src.usuariosHistorico || src.usuarios || [];
+    if (Array.isArray(hist)) hist.forEach(u => ['login','loginNorm','usuario','usuarioLogado','usuarioNome','nome','mat','matricula','setor'].forEach(k => add(u?.[k])));
   });
-  return partes.join(' ').toLowerCase();
+  // Também indexa versões normalizadas sem domínio, sem prefixo DOMÍNIO\ e sem e-mail.
+  const normalizados = partes.map(v => sysackNormKey(v)).filter(Boolean);
+  return partes.concat(normalizados).join(' ').toLowerCase();
 }
 function sysackUsuarioLogadoAtivo(a, ag) {
   return ag?.usuarioLogado || ag?.usuarioNome || ag?.login || a?.usuarioLogado || a?.usuarioNome || a?.ultimoLoginUsuario || '—';
@@ -1557,10 +1566,17 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
-    if (window._filtroLoginAtivoIds?.size || window._filtroLoginAtivoPats?.size) {
+    if (window._filtroLoginAtivoIds?.size || window._filtroLoginAtivoPats?.size || window._filtroLoginTexto) {
       const agFiltro = sysackFindAgentForAtivo(a);
       const hostFiltro = hostnameFromAtivo(a) || a.hostname || agFiltro?.hostname || agFiltro?.id || '';
-      if (!window._filtroLoginAtivoIds.has(a.id) && !window._filtroLoginAtivoIds.has(agFiltro?.id) && !window._filtroLoginAtivoIds.has(hostFiltro) && !window._filtroLoginAtivoPats.has(a.pat)) return false;
+      const idsOk = window._filtroLoginAtivoIds?.size
+        ? (window._filtroLoginAtivoIds.has(a.id) || window._filtroLoginAtivoIds.has(agFiltro?.id) || window._filtroLoginAtivoIds.has(hostFiltro) || window._filtroLoginAtivoIds.has(sysackNormKey(hostFiltro)))
+        : false;
+      const patOk = window._filtroLoginAtivoPats?.size ? window._filtroLoginAtivoPats.has(a.pat) : false;
+      const termoLogin = sysackNormKey(window._filtroLoginTexto || '');
+      const textoUsuarios = sysackTextoUsuariosAtivo(a, agFiltro);
+      const textoOk = termoLogin ? (textoUsuarios.includes(termoLogin) || textoUsuarios.includes(String(window._filtroLoginTexto||'').toLowerCase())) : false;
+      if (!idsOk && !patOk && !textoOk) return false;
     }
     if (q) {
       const agQ = sysackFindAgentForAtivo(a);
@@ -27518,7 +27534,8 @@ async function buscarMaquinasPorUsuario() {
     let ativos = data?.ativos || [];
     if (!ativos.length) ativos = filtrarMaquinasPorLoginLocal(q, de, ate);
     renderBuscaMaquinasUsuario(ativos, data?.resumo || resumoBuscaLoginLocal(ativos));
-    if (ativos.length) filtrarTabelaComputadoresPorResultadoLogin(ativos);
+    // Mesmo sem retorno da Cloud Function, aplica o filtro textual na tabela usando /agents + /ativos.
+    filtrarTabelaComputadoresPorResultadoLogin(ativos, q);
   } catch(e) {
     console.warn('[LoginHist]', e);
     if (body) body.innerHTML = `<div style="padding:14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:var(--danger);font-size:12.5px">Erro ao buscar: ${escapeHtml(e.message)}</div>`;
@@ -27592,13 +27609,18 @@ function filtrarMaquinasPorLoginLocal(q, de, ate) {
 function resumoBuscaLoginLocal(ativos) {
   return { ultimoHostname: ativos[0]?.hostname || ativos[0]?.pat || '', ultimoLogin: ativos[0]?.ultimoLogin || null, semana: ativos.filter(a=>a.dias7>0).length, mes: ativos.filter(a=>a.dias30>0).length, ano: ativos.filter(a=>a.dias365>0).length };
 }
-function filtrarTabelaComputadoresPorResultadoLogin(ativos) {
-  const ids = new Set(ativos.map(a => a.ativoId || a.id).filter(Boolean));
-  const pats = new Set(ativos.map(a => a.pat).filter(Boolean));
+function filtrarTabelaComputadoresPorResultadoLogin(ativos, termoBusca = '') {
+  const ids = new Set();
+  const pats = new Set();
+  (ativos || []).forEach(a => {
+    [a.ativoId, a.id, a.hostname].filter(Boolean).forEach(v => { ids.add(v); ids.add(sysackNormKey(v)); });
+    if (a.pat) pats.add(a.pat);
+  });
   const qbox = document.getElementById('pat-search');
   if (qbox) qbox.value = '';
   window._filtroLoginAtivoIds = ids;
   window._filtroLoginAtivoPats = pats;
+  window._filtroLoginTexto = termoBusca || document.getElementById('loginhist-user')?.value || '';
   renderAtivos();
 }
 
@@ -27638,6 +27660,7 @@ function limparBuscaMaquinasPorUsuario() {
   if (body) body.innerHTML = '';
   window._filtroLoginAtivoIds = null;
   window._filtroLoginAtivoPats = null;
+  window._filtroLoginTexto = '';
   renderAtivos?.();
 }
 
