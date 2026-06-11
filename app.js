@@ -3145,6 +3145,13 @@ const LOCAL_USERS = {
 
 let SESSION_USER = null;  // usuário logado na sessão atual
 
+// Ambiente local: somente aqui o fallback LOCAL_USERS pode ser usado.
+// Em produção (Vercel/HTTPS), o login precisa vir do Firebase Auth ou de Custom Token válido.
+const SYSACK_IS_LOCAL_DEV =
+  location.hostname === 'localhost' ||
+  location.hostname === '127.0.0.1' ||
+  location.protocol === 'file:';
+
 // ─── Verifica sessão salva (lembrar acesso) ──────────────────
 function checkSavedSession() {
   try {
@@ -3194,11 +3201,9 @@ function _tentarFirebaseAuthBackground(email, senha, tentativa = 1) {
       const naoExiste = err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' ||
                         err.code === 'auth/invalid-credential' || (err.message||'').includes('400');
       if (naoExiste) {
-        if (auth && !auth.currentUser) {
-          auth.signInAnonymously()
-            .then(() => { if (!window._protectedListenersAtivos) startProtectedListeners(); })
-            .catch(e => console.warn('[Auth] signInAnonymously falhou:', e.message));
-        }
+        // Produção: nunca entra como anônimo. Usuário anônimo não possui claims/role
+        // e quebra Cloud Functions callable/Firestore Rules.
+        console.warn('[Auth] Firebase Auth inválido — login anônimo bloqueado.');
         return;
       }
       const maxTentativas = 20;
@@ -3304,24 +3309,10 @@ async function _fazerLoginInterno() {
         }
       } catch (_) {}
 
-      // 3b. Se role ainda é viewer, tenta LOCAL_USERS pelo email (fallback seguro)
-      if (!claimsRole && (profile.role === 'viewer' || !profile.role)) {
-        const localUser = LOCAL_USERS[emailNorm] || LOCAL_USERS[emailRaw] ||
-          Object.values(LOCAL_USERS).find(u => u.email === emailNorm || u.email === emailRaw);
-        if (localUser?.role && localUser.role !== 'viewer') {
-          profile.role = localUser.role;
-          profile.permissions = localUser.permissions || permissionsForRole(localUser.role);
-          console.log('[Auth] Role corrigido via LOCAL_USERS:', profile.role);
-          // Atualiza no Firestore para corrigir para o futuro
-          try {
-            if (FB_READY && db) {
-              await db.collection('users').doc(fbUser.uid).set(
-                { role: profile.role, email: emailNorm, nome: profile.nome, updatedAt: new Date() },
-                { merge: true }
-              );
-            }
-          } catch(_) {}
-        }
+      // 3b. Produção: NÃO corrige role usando LOCAL_USERS.
+      // A role deve vir de custom claims ou do documento /users/{uid}.
+      if (!claimsRole && (!profile.role || profile.role === 'viewer')) {
+        console.warn('[Auth] Sem role privilegiada em claims/users — mantendo viewer.');
       }
 
       // 3. Garante que viewer não acessa admin mesmo se Banco for adulterado
@@ -3351,7 +3342,14 @@ async function _fazerLoginInterno() {
     }
   }
 
-  // ── Tentativa 2: fallback local (usado quando Firebase Auth não está acessível) ──
+  // ── Tentativa 2: fallback local somente em desenvolvimento ──
+  if (!SYSACK_IS_LOCAL_DEV) {
+    setLoginLoading(false);
+    showLoginError('Acesso local bloqueado em produção. Use uma conta Firebase/AD válida.');
+    console.warn('[Auth] LOCAL_USERS bloqueado em produção.');
+    return;
+  }
+
   const local = LOCAL_USERS[emailRaw.toLowerCase()] ||
                 LOCAL_USERS[emailNorm.toLowerCase()] ||
                 LOCAL_USERS[emailRaw];
@@ -3395,29 +3393,29 @@ async function _fazerLoginInterno() {
           }),
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
         ]);
-        if (resp.ok) {
-          const { token } = await resp.json();
-          if (token) {
-            await auth.signInWithCustomToken(token);
-            console.log('[Auth] Custom Token OK — Firestore autenticado com role:', local.role);
-          }
+        if (!resp.ok) {
+          const erro = await resp.text().catch(() => '');
+          throw new Error('gerarCustomToken HTTP ' + resp.status + ' ' + erro.slice(0,120));
         }
+        const { token, uid: uidToken, role: roleToken } = await resp.json();
+        if (!token) throw new Error('gerarCustomToken não retornou token');
+        await auth.signInWithCustomToken(token);
+        await auth.currentUser.getIdToken(true);
+        if (uidToken) user.uid = uidToken;
+        if (roleToken) {
+          user.role = roleToken;
+          user.permissions = permissionsForRole(roleToken);
+        }
+        console.log('[Auth] Custom Token OK — Firestore autenticado com role:', user.role);
       } catch(e) {
-        console.warn('[Auth] Custom Token indisponível:', e.message, '— tentando signInAnonymously');
-        try {
-          if (auth && !auth.currentUser) {
-            await auth.signInAnonymously();
-            if (!window._protectedListenersAtivos) startProtectedListeners();
-          }
-        } catch(e2) { console.warn('[Auth] signInAnonymously falhou:', e2.message); }
+        setLoginLoading(false);
+        console.warn('[Auth] Custom Token indisponível:', e.message, '— login local cancelado');
+        showLoginError('Não foi possível validar o login no Firebase. Login anônimo foi bloqueado por segurança.');
+        return;
       }
     }
 
     loginSuccess(user, true);
-
-    // Tenta autenticar no Firebase em background (pode estar bloqueado pelo ad-blocker)
-    // Quando conseguir, os listeners protegidos serão ativados automaticamente
-    _tentarFirebaseAuthBackground(emailNorm, senha);
     return;
   }
 
