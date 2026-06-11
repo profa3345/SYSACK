@@ -291,7 +291,14 @@ async function fsGetDoc(col, id) {
 
 async function getFbFunctions() {
   if (_fbFunctions) return _fbFunctions;
-  _fbFunctions = app.functions('us-central1');
+
+  const _app = window._app || (firebase.apps.length && firebase.apps[0]);
+
+  if (!_app) {
+    throw new Error('Firebase não inicializado');
+  }
+
+  _fbFunctions = _app.functions('us-central1');
   return _fbFunctions;
 }
 async function callFunction(name, data) {
