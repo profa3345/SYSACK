@@ -1465,17 +1465,34 @@ function sysackHostnameAtivo(a) {
 }
 function sysackFindAgentForAtivo(a) {
   if (!a || !window.STATE_AGENTS) return null;
-  const ip  = String(a.ip || '').trim();
+
+  // A aba Computadores precisa usar a MESMA lógica da Assistência Remota.
+  // Antes ela dependia demais do campo hostname do documento /ativos; quando o
+  // hostname vinha apenas da coleção /agents, usuário logado/principal ficava "—".
+  const ip  = String(a.ip || a.ipAddress || '').trim();
   const hn  = sysackNormKey(sysackHostnameAtivo(a));
+  const h2  = sysackNormKey(typeof hostnameFromAtivo === 'function' ? hostnameFromAtivo(a) : '');
   const id  = sysackNormKey(a.id || '');
   const pat = sysackNormKey(a.pat || '');
+
   return (STATE_AGENTS.list || []).find(x => {
-    const xip = String(x.ip || '').trim();
-    const xhn = sysackNormKey(x.hostname || x.id || '');
-    return (ip && xip && ip === xip) ||
-           (hn && xhn && (hn === xhn || hn.includes(xhn) || xhn.includes(hn))) ||
-           (id && xhn && (id === xhn || id.includes(xhn) || xhn.includes(id))) ||
-           (pat && xhn && xhn.includes(pat));
+    const xip = String(x.ip || x.ipAddress || '').trim();
+    const xhn = sysackNormKey(x.hostname || x.computador || x.nome || x.id || '');
+    const xid = sysackNormKey(x.id || '');
+    const candidatosAtivo = [hn, h2, id, pat].filter(Boolean);
+    const candidatosAg    = [xhn, xid].filter(Boolean);
+
+    if (ip && xip && ip === xip) return true;
+
+    for (const ca of candidatosAtivo) {
+      for (const cg of candidatosAg) {
+        if (ca === cg || ca.includes(cg) || cg.includes(ca)) return true;
+      }
+    }
+
+    // Ex.: PAT 70678 deve casar com hostname RBS-ADSI70678.
+    if (pat && candidatosAg.some(cg => cg.includes(pat))) return true;
+    return false;
   }) || null;
 }
 function sysackUsuariosPrincipaisAtivo(a, ag) {
@@ -1486,7 +1503,7 @@ function sysackUsuariosPrincipaisAtivo(a, ag) {
       if (txt) return txt;
     }
   }
-  return a?.usuarioPrincipal || a?.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioPrincipalLogin || '—';
+  return a?.usuarioPrincipal || a?.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioPrincipalLogin || ag?.usuarioLogado || a?.usuarioLogado || '—';
 }
 function sysackUltimoLoginAtivo(a, ag) {
   return a?.ultimoLoginEm || a?.ultimoLoginData || a?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || a?.updatedAt || '';
@@ -7339,6 +7356,12 @@ function autocompleteEmpregado(inputEl, onSelect) {
 // Cache de agentes online (vem do Banco /agents)
 const STATE_AGENTS = { list: [], listener: null };
 
+function sysackRefreshTelasComAgentes() {
+  try { if (isPageActive('assistencia-remota')) renderAssistenciaRemota(); } catch(e) {}
+  try { if (isPageActive('ativos')) renderAtivos(); } catch(e) {}
+  try { nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length); } catch(e) {}
+}
+
 // Inicia listener Banco para agentes em tempo real
 function startAgentsListener() {
   if (!FB_READY) return;
@@ -7361,8 +7384,7 @@ function startAgentsListener() {
           return { id: d.id, ...data };
         });
         verificarTrocaMonitores(STATE_AGENTS.list);
-        if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
-        nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
+        sysackRefreshTelasComAgentes();
       }, err => {
         console.warn('[Agentes] listener erro:', err.message);
         arPollAgentes();
@@ -7381,8 +7403,7 @@ async function arPollAgentes() {
     const snap = await db.collection('agents').orderBy('lastSeen', 'desc').get();
     STATE_AGENTS._carregou = true;
     STATE_AGENTS.list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
-    nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
+    sysackRefreshTelasComAgentes();
   } catch(e) {
     console.warn('[Agentes] poll SDK erro:', e.message, '— tentando REST direto...');
     try {
@@ -7409,13 +7430,12 @@ async function arPollAgentes() {
           return out;
         });
         console.log('[Agentes] REST direto OK:', STATE_AGENTS.list.length, 'agentes');
-        if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
-        nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
+        sysackRefreshTelasComAgentes();
       }
     } catch(e2) {
       console.warn('[Agentes] REST fallback erro:', e2.message);
       STATE_AGENTS._carregou = true;
-      if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
+      sysackRefreshTelasComAgentes();
     }
   }
 }
@@ -8715,12 +8735,11 @@ function _arEnsureLoaded() {
         return { id: d.id, ...data };
       });
       console.log('[Agentes] Carregados via poll:', STATE_AGENTS.list.length);
-      renderAssistenciaRemota();
-      nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
+      sysackRefreshTelasComAgentes();
     } catch(e) {
       console.warn('[Agentes] poll erro:', e.message);
       STATE_AGENTS._carregou = true; // evita loop infinito
-      renderAssistenciaRemota();
+      sysackRefreshTelasComAgentes();
     }
   }, 300);
 }
