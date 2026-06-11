@@ -27636,13 +27636,24 @@ async function buscarMaquinasPorUsuario() {
   if (body) body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--g400)">🔎 Buscando histórico de login...</div>';
 
   try {
+    // Tenta Cloud Function — falha silenciosa para garantir que o fallback local sempre rode
     let data = null;
-    if (FB_READY && auth?.currentUser) data = await callFunction('getAtivosDoUsuario', { q, de, ate });
-    let ativos = data?.ativos || [];
+    if (FB_READY && auth?.currentUser) {
+      try {
+        data = await callFunction('getAtivosDoUsuario', { q, de, ate });
+      } catch(cfErr) {
+        console.warn('[LoginHist] Cloud Function indisponível, usando busca local:', cfErr.message);
+      }
+    }
+
+    // Carrega histórico local do Firestore (collectionGroup + login_history)
     await sysackCarregarHistoricoLogin(q, de, ate);
+
+    // Usa resultado da CF se veio com dados; caso contrário, fallback local
+    let ativos = data?.ativos || [];
     if (!ativos.length) ativos = filtrarMaquinasPorLoginLocal(q, de, ate);
+
     renderBuscaMaquinasUsuario(ativos, data?.resumo || resumoBuscaLoginLocal(ativos));
-    // Mesmo sem retorno da Cloud Function, aplica o filtro textual na tabela usando /agents + /ativos.
     filtrarTabelaComputadoresPorResultadoLogin(ativos, q);
   } catch(e) {
     console.warn('[LoginHist]', e);
