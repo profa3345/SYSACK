@@ -435,6 +435,81 @@ function firestoreSet(docPath, data) {
 }
 
 // ── Ciclo principal ───────────────────────────────────────────────
+
+function firestoreAddDoc(collectionPath, data) {
+  return new Promise((resolve, reject) => {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}?key=${API_KEY}`;
+    function toFirestore(val) {
+      if (val === null || val === undefined) return { nullValue: null };
+      if (typeof val === 'boolean')  return { booleanValue: val };
+      if (typeof val === 'number' && isFinite(val)) return { doubleValue: val };
+      if (typeof val === 'string')   return { stringValue: val };
+      if (Array.isArray(val)) return { arrayValue: val.length ? { values: val.map(toFirestore) } : {} };
+      if (typeof val === 'object') {
+        const fields = {};
+        for (const [k, v] of Object.entries(val)) if (v !== undefined) fields[k] = toFirestore(v);
+        return { mapValue: { fields } };
+      }
+      return { stringValue: String(val) };
+    }
+    const fields = {};
+    for (const [k, v] of Object.entries(data || {})) if (v !== undefined) fields[k] = toFirestore(v);
+    const body = JSON.stringify({ fields });
+    const urlObj = new URL(url);
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(raw);
+        else reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 200)}`));
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function loginKeyDiario(login) {
+  return String(login || '').trim().toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, '') + '|' + new Date().toISOString().slice(0, 10);
+}
+let _ultimoLoginRegistradoKey = '';
+async function registrarLoginAtivo(docId, dados) {
+  try {
+    const login = String(dados.usuarioLogado || '').trim();
+    if (!login) return;
+    const dia = new Date().toISOString().slice(0, 10);
+    const key = `${docId}|${loginKeyDiario(login)}`;
+    if (_ultimoLoginRegistradoKey === key) return;
+    _ultimoLoginRegistradoKey = key;
+    const item = {
+      ativoId: docId,
+      assetId: docId,
+      hostname: AGENT_ID,
+      computador: AGENT_ID,
+      ip: dados.ip || '',
+      login,
+      loginNorm: login.toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, ''),
+      usuario: login,
+      usuarioLogado: login,
+      data: dados.lastSeen || new Date().toISOString(),
+      dia,
+      origem: 'agent-desktop',
+      versaoAgente: dados.versaoAgente || ''
+    };
+    await firestoreAddDoc(`ativos/${docId}/usuarios_historico`, item).catch(e => log('[LoginHist] usuarios_historico: ' + e.message));
+    await firestoreAddDoc('login_history', item).catch(e => log('[LoginHist] login_history: ' + e.message));
+  } catch(e) {
+    log('[LoginHist] erro ao registrar login: ' + e.message);
+  }
+}
+
 async function reportar() {
   try {
     const cpu    = getCpuUsage();
@@ -845,8 +920,7 @@ async function atualizarAtivoComHostname(dados) {
     const docId = doc.name.split('/').pop();
     const ativoHostname = doc.fields?.hostname?.stringValue || '';
 
-    // Só atualiza se o hostname estiver vazio ou diferente
-    if (ativoHostname === AGENT_ID) return;
+    // Atualiza sempre: mesmo com hostname igual, sessão, usuário e métricas mudam a cada ciclo.
 
     await firestorePatch(`ativos/${docId}`, {
       hostname:          AGENT_ID,
@@ -855,6 +929,8 @@ async function atualizarAtivoComHostname(dados) {
       ultimoAgente:      new Date().toISOString(),
       lastSeen:          dados.lastSeen,
       usuarioLogado:     dados.usuarioLogado || '',
+      usuarioPrincipal:  dados.usuarioLogado || '',
+      usuarioPrincipalLogin: dados.usuarioLogado || '',
       ultimoLoginUsuario:dados.usuarioLogado || '',
       ultimoLoginEm:     dados.lastSeen,
       osNome:            dados.osNome || dados.so || '',
@@ -881,6 +957,7 @@ async function atualizarAtivoComHostname(dados) {
       uptimeH:           dados.uptimeH ?? null,
     });
 
+    await registrarLoginAtivo(docId, dados);
     log(`[OK] Ativo ${docId} atualizado com hostname: ${AGENT_ID}`);
   } catch(e) {
     // Silencioso — não crítico
