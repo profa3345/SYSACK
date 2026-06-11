@@ -291,13 +291,8 @@ async function fsGetDoc(col, id) {
 
 async function getFbFunctions() {
   if (_fbFunctions) return _fbFunctions;
-
-  const _app = window._app || (firebase.apps.length && firebase.apps[0]);
-
-  if (!_app) {
-    throw new Error('Firebase não inicializado');
-  }
-
+  const _app = window._app || (typeof firebase !== 'undefined' && firebase.apps.length && firebase.apps[0]);
+  if (!_app) throw new Error('Firebase não inicializado — chame initBanco() antes de usar Cloud Functions');
   _fbFunctions = _app.functions('us-central1');
   return _fbFunctions;
 }
