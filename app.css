@@ -621,31 +621,6 @@ textarea.form-control{resize:vertical;min-height:80px}
 }
 .sidebar-overlay.open{display:block}
 
-/* ══ BOTÃO PWA INSTALAR ══ */
-#pwa-install-btn{
-  display:none;
-  align-items:center;
-  gap:6px;
-  padding:6px 12px;
-  background:linear-gradient(135deg,#2563EB,#7C3AED);
-  color:#fff !important;
-  border:none;
-  border-radius:20px;
-  font-size:12px;
-  font-weight:700;
-  cursor:pointer;
-  white-space:nowrap;
-  box-shadow:0 2px 10px rgba(37,99,235,.35);
-  transition:all .2s;
-  font-family:'Inter',sans-serif;
-}
-#pwa-install-btn:hover{
-  transform:translateY(-1px);
-  box-shadow:0 4px 16px rgba(37,99,235,.5);
-}
-#pwa-install-btn svg{ flex-shrink:0; }
-#pwa-install-btn .pwa-btn-text{ display:inline; }
-
 @media(max-width:768px){
   :root{--sw:0px}
 
@@ -675,24 +650,8 @@ textarea.form-control{resize:vertical;min-height:80px}
   .bc-seg:not(.cur){display:none}
   .bc-sep:not(:last-of-type){display:none}
 
-  /* Topbar mais compacta — garante que não corte elementos */
-  .topbar{
-    padding:0 10px;
-    gap:6px;
-    height:56px;
-    overflow:visible;
-  }
-  .tb-actions{
-    gap:4px;
-    flex-shrink:0;
-  }
-  /* Botão PWA no mobile: só ícone + texto curto */
-  #pwa-install-btn .pwa-btn-text{ display:none; }
-  #pwa-install-btn{
-    padding:6px 8px;
-    border-radius:8px;
-    gap:0;
-  }
+  /* Topbar mais compacta */
+  .topbar{padding:0 12px;gap:8px}
 
   /* Conteúdo das páginas */
   .page-content{padding:14px !important}
@@ -762,28 +721,6 @@ textarea.form-control{resize:vertical;min-height:80px}
   /* Oculta colunas menos importantes nas tabelas */
   .td-hide-mobile{display:none}
   th.hide-mobile{display:none}
-
-  /* ── Autocomplete de empregados — layout mobile ── */
-  .emp-ac-item{
-    flex-direction:column !important;
-    align-items:flex-start !important;
-    gap:4px !important;
-    padding:10px 14px !important;
-  }
-  .emp-ac-item-right{
-    display:none !important; /* oculta email no mobile; fica só na linha de info */
-  }
-  .emp-ac-item-main{ width:100%; }
-
-  /* Novo chamado — painel lateral colapsa abaixo do formulário */
-  .ch-split{
-    flex-direction:column !important;
-  }
-  .ch-sidebar{
-    width:100% !important;
-    border-left:none !important;
-    border-top:1px solid var(--g200);
-  }
 }
 
 @media(max-width:480px){
@@ -793,11 +730,6 @@ textarea.form-control{resize:vertical;min-height:80px}
   }
   .stat-value{font-size:18px !important}
   .page{padding:12px !important}
-
-  /* Topbar bem compacta */
-  .topbar{ padding:0 8px; gap:4px; }
-  /* Oculta botões menos críticos */
-  #download-client-btn{ display:none !important; }
 }
 .mdm-stat{background:#fff;border:1px solid var(--g200);border-radius:var(--r);padding:12px 14px;text-align:center;transition:all .2s}
 .mdm-stat:hover{box-shadow:var(--shm);transform:translateY(-2px)}
@@ -954,215 +886,9 @@ textarea.form-control{resize:vertical;min-height:80px}
 #ar-table .monitor-cell { white-space: normal; line-height: 1.3; }
 
 
-/* ═══════════════════════════════════════════════
-   Inventário de Software — melhorias SYSACK
-═══════════════════════════════════════════════ */
-.swinv-row { cursor:pointer; transition:background .15s ease; }
-.swinv-row:hover td { background:var(--g50); }
-
-.swinv-software-name {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-weight:700;
-  color:var(--accent);
-}
-
-.swinv-icon {
-  width:24px;
-  height:24px;
-  border-radius:7px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  background:var(--accent-l);
-  flex-shrink:0;
-}
-
-.swinv-sub {
-  margin-top:3px;
-  font-size:10.5px;
-  color:var(--g400);
-}
-
-.swinv-category {
-  display:inline-flex;
-  align-items:center;
-  gap:4px;
-  padding:3px 7px;
-  border-radius:999px;
-  background:var(--g50);
-  border:1px solid var(--g100);
-  color:var(--g600);
-  font-size:11px;
-  font-weight:700;
-  white-space:nowrap;
-}
-
-.swinv-risk {
-  display:inline-flex;
-  align-items:center;
-  gap:4px;
-  padding:3px 8px;
-  border-radius:999px;
-  font-size:11px;
-  font-weight:800;
-  white-space:nowrap;
-}
-
-.swinv-risk-danger {
-  background:var(--danger-l);
-  color:var(--danger);
-}
-
-.swinv-risk-warning {
-  background:var(--warning-l);
-  color:#B45309;
-}
-
-.swinv-risk-success {
-  background:var(--success-l);
-  color:var(--success);
-}
-
-.swinv-risk-info {
-  background:var(--g50);
-  color:var(--g500);
-  border:1px solid var(--g100);
-}
-
-.swinv-count {
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  min-width:28px;
-  height:24px;
-  padding:0 8px;
-  border-radius:999px;
-  background:var(--accent-l);
-  color:var(--accent);
-  font-weight:800;
-}
-
-.swinv-chip-wrap {
-  display:flex;
-  gap:4px;
-  flex-wrap:wrap;
-  align-items:center;
-}
-
-.swinv-machine-chip {
-  font-size:10.5px;
-  background:var(--accent-l);
-  color:var(--accent);
-  border-radius:5px;
-  padding:3px 7px;
-  cursor:pointer;
-  font-weight:700;
-}
-
-.swinv-machine-chip:hover {
-  background:var(--accent);
-  color:#fff;
-}
-
-.swinv-extra {
-  font-size:11px;
-  color:var(--g400);
-}
-
-.swinv-detail-grid {
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:10px;
-  margin-bottom:12px;
-}
-
-.swinv-detail-grid > div {
-  border:1px solid var(--g100);
-  border-radius:10px;
-  padding:10px 12px;
-  background:var(--g50);
-}
-
-.swinv-detail-grid strong {
-  display:block;
-  font-size:16px;
-  color:var(--g900);
-}
-
-.swinv-detail-grid span {
-  display:block;
-  margin-top:3px;
-  font-size:10.5px;
-  color:var(--g400);
-  text-transform:uppercase;
-  letter-spacing:.04em;
-  font-weight:700;
-}
-
-.swinv-alert {
-  border-radius:10px;
-  padding:10px 12px;
-  font-size:12px;
-  font-weight:700;
-  margin-bottom:10px;
-  border:1px solid var(--g100);
-}
-
-.swinv-alert.danger {
-  background:var(--danger-l);
-  color:var(--danger);
-  border-color:rgba(239,68,68,.25);
-}
-
-.swinv-alert.warning {
-  background:var(--warning-l);
-  color:#B45309;
-  border-color:rgba(245,158,11,.25);
-}
-
-.swinv-alert.info {
-  background:var(--accent-l);
-  color:var(--accent);
-  border-color:rgba(37,99,235,.18);
-}
-
-.swinv-modal-row {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  padding:10px 12px;
-  cursor:pointer;
-  border-bottom:1px solid var(--g100);
-  border-radius:8px;
-}
-
-.swinv-modal-row:hover {
-  background:var(--g50);
-}
-
-.swinv-device-dot {
-  width:36px;
-  height:36px;
-  border-radius:9px;
-  background:#F1F5F9;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:18px;
-  flex-shrink:0;
-}
-
-.swinv-device-dot.online {
-  background:#DCFCE7;
-}
-
-[data-theme="dark"] .swinv-category,
-[data-theme="dark"] .swinv-detail-grid > div,
-[data-theme="dark"] .swinv-risk-info {
-  border-color:#334155;
-}
-
-[data-theme="dark"] .swinv-device-dot { background:#334155; }
-[data-theme="dark"] .swinv-device-dot.online { background:rgba(16,185,129,.18); }
+/* SYSACK FIX — autocomplete de empregado no chamado */
+#ch-pq-busca-box{position:relative!important;z-index:3000!important;}
+#ch-pq-resultados{background:#fff!important;z-index:30000!important;max-height:260px!important;overflow-y:auto!important;overflow-x:hidden!important;box-shadow:0 14px 34px rgba(15,23,42,.18)!important;}
+#ch-pq-resultados .emp-ac-item{min-height:58px!important;box-sizing:border-box!important;background:#fff!important;position:relative!important;clear:both!important;}
+#ch-pq-resultados .emp-ac-item:hover{background:#F8FAFC!important;}
+#ch-pq-resultados .emp-ac-item-main{line-height:1.25!important;}

@@ -1456,6 +1456,42 @@ function filtrarAtivosPorTipo(tipos, el) {
   renderAtivos();
 }
 
+
+function sysackNormKey(v) {
+  return String(v || '').trim().toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, '');
+}
+function sysackHostnameAtivo(a) {
+  return String(a?.hostname || a?.computador || a?.nome || a?.desc || a?.id || '').trim();
+}
+function sysackFindAgentForAtivo(a) {
+  if (!a || !window.STATE_AGENTS) return null;
+  const ip  = String(a.ip || '').trim();
+  const hn  = sysackNormKey(sysackHostnameAtivo(a));
+  const id  = sysackNormKey(a.id || '');
+  const pat = sysackNormKey(a.pat || '');
+  return (STATE_AGENTS.list || []).find(x => {
+    const xip = String(x.ip || '').trim();
+    const xhn = sysackNormKey(x.hostname || x.id || '');
+    return (ip && xip && ip === xip) ||
+           (hn && xhn && (hn === xhn || hn.includes(xhn) || xhn.includes(hn))) ||
+           (id && xhn && (id === xhn || id.includes(xhn) || xhn.includes(id))) ||
+           (pat && xhn && xhn.includes(pat));
+  }) || null;
+}
+function sysackUsuariosPrincipaisAtivo(a, ag) {
+  const srcs = [a, ag].filter(Boolean);
+  for (const src of srcs) {
+    if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
+      const txt = src.usuariosPrincipais.map(u => u.nome || u.login || u.loginNorm || u.usuario || u.mat).filter(Boolean).join(', ');
+      if (txt) return txt;
+    }
+  }
+  return a?.usuarioPrincipal || a?.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioPrincipalLogin || '—';
+}
+function sysackUltimoLoginAtivo(a, ag) {
+  return a?.ultimoLoginEm || a?.ultimoLoginData || a?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || a?.updatedAt || '';
+}
+
 function renderAtivos() {
   const q      = (document.getElementById('pat-search')?.value || '').toLowerCase();
   const fSt    = document.getElementById('pat-filter-status')?.value || '';
@@ -1469,7 +1505,7 @@ function renderAtivos() {
     thead.innerHTML = `<tr>
       ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
       <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
-      ${isComp ? '<th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
+      ${isComp ? '<th style="font-size:11px">Usuário logado</th><th style="font-size:11px">Usuário principal</th><th style="font-size:11px">Último login</th><th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
       <th>Ações</th>
     </tr>`;
   }
@@ -1499,7 +1535,10 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
-    if (q && !`${a.pat||''} ${a.desc||''} ${a.area||''} ${a.resp||''} ${a.ip||''} ${a.modelo||''}`.toLowerCase().includes(q)) return false;
+    if (window._filtroLoginAtivoIds?.size || window._filtroLoginAtivoPats?.size) {
+      if (!window._filtroLoginAtivoIds.has(a.id) && !window._filtroLoginAtivoPats.has(a.pat)) return false;
+    }
+    if (q && !`${a.pat||''} ${a.desc||''} ${a.hostname||''} ${a.area||''} ${a.resp||''} ${a.ip||''} ${a.modelo||''} ${a.usuarioLogado||''} ${a.ultimoLoginUsuario||''} ${a.usuarioPrincipal||''} ${(sysackFindAgentForAtivo(a)||{}).usuarioLogado||''} ${(sysackFindAgentForAtivo(a)||{}).usuarioNome||''} ${(sysackFindAgentForAtivo(a)||{}).usuarioMat||''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -1530,10 +1569,7 @@ function renderAtivos() {
 
       <td>${statusAtivoHtml(a.status)}</td>
       <td style="text-align:center">${(()=>{
-        const _ag = (STATE_AGENTS?.list||[]).find(x =>
-          (a.ip && x.ip === a.ip) ||
-          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
-        );
+        const _ag = sysackFindAgentForAtivo(a);
         const _up = _ag?.uptimeH ?? a.uptimeH ?? null;
         if (_up == null) return '<span style="color:var(--g300)">—</span>';
         if (_up >= 24*30) return '<span style="font-size:11px;font-weight:700;color:#059669">' + Math.floor(_up/24/30) + 'm ' + Math.floor(_up/24%30) + 'd</span>';
@@ -1542,28 +1578,33 @@ function renderAtivos() {
       })()}</td>
       ${isComp ? (()=>{
         // Monitor(es) vinculado(s) ao ativo
-        const ag = (STATE_AGENTS?.list||[]).find(x =>
-          (a.ip && x.ip === a.ip) ||
-          (a.hostname && (x.hostname||'').toLowerCase() === (a.hostname||'').toLowerCase())
-        );
+        const ag = sysackFindAgentForAtivo(a);
         const monitores = ag?.monitores?.length
           ? ag.monitores.map(m => escapeHtml(m.nome||m.caption||'Monitor')).join(', ')
           : (a.monitores?.length ? a.monitores.map(m => escapeHtml(m.nome||m.caption||'Monitor')).join(', ') : '—');
         const _soRaw = ag?.osNome || ag?.os || ag?.sistemaOp || a.os || a.sistemaOp || a.osName || '';
         const so = escapeHtml(_soRaw ? _soRaw.replace('Microsoft Windows ','Win ').replace('Windows ','Win ') : '—');
         const ip = a.ip ? `<span style="font-family:monospace;font-size:11px">${escapeHtml(a.ip)}</span>` : '—';
-        return `<td style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${monitores}">${monitores}</td>
+        const usuarioLogado = escapeHtml(ag?.usuarioLogado || ag?.usuarioNome || a.usuarioLogado || a.usuarioNome || a.ultimoLoginUsuario || '—');
+        const usuarioPrincipal = escapeHtml(sysackUsuariosPrincipaisAtivo(a, ag));
+        const ultimoLogin = sysackUltimoLoginAtivo(a, ag);
+        const ultimoLoginFmt = ultimoLogin ? fmtDate(ultimoLogin) : '—';
+        return `<td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${usuarioLogado}">${usuarioLogado}</td>
+        <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${usuarioPrincipal}">${usuarioPrincipal}</td>
+        <td style="font-size:11px">${ultimoLoginFmt}</td>
+        <td style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${monitores}">${monitores}</td>
         <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${so}">${so}</td>
         <td>${ip}</td>`;
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
       <td><div class="flex gap-6">
-        <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')">📜</button>
+        <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')" title="Histórico geral">📜</button>
+        ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirHistoricoUsuariosDoAtivo('${a.id}')" title="Histórico de logins">👥</button>` : ''}
         <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
         <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
         <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="patAbrirBusca()" title="Vincular PAT">🏷️</button>` : ''}
-        ${isComp ? `<button class="btn btn-ghost btn-xs" title="Ver softwares instalados" onclick="(()=>{const _ag=(STATE_AGENTS?.list||[]).find(x=>(a.ip&&x.ip===a.ip)||(a.hostname&&(x.hostname||'').toLowerCase()===(a.hostname||'').toLowerCase()));_ag?swInvVerSoftwaresMaquina(_ag.id):showToast('Agente não conectado — sem dados de software','warning')})()">🗂️</button>` : ''}
+        ${isComp ? `<button class="btn btn-ghost btn-xs" title="Ver softwares instalados" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag?swInvVerSoftwaresMaquina(_ag.id):showToast('Agente não conectado — sem dados de software','warning')})()">🗂️</button>` : ''}
       </div></td>
     </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo — ${tipos.length?'tipo: '+_ativoFiltroTipo:'cadastrado'}</td></tr>`;
   nbUpdate('nb-ativos', lista.length);
@@ -7414,6 +7455,68 @@ function verificarTrocaMonitores(agentes) {
   });
 }
 
+
+// ── Helpers: vincula agente ⇄ ativo e mostra dados de login na aba Computadores/Assistência Remota ──
+function arEncontrarAtivoDoAgente(ag) {
+  if (!ag) return null;
+  const hn = String(ag.hostname || ag.id || '').toLowerCase();
+  const ip = String(ag.ip || '').trim();
+  return (STATE.ativos || []).find(a => {
+    const ahn = String(a.hostname || a.computador || a.nome || a.desc || '').toLowerCase();
+    const aid = String(a.id || '').toLowerCase();
+    return (ip && a.ip === ip) || (hn && (ahn === hn || aid === hn || aid.includes(hn) || hn.includes(aid)));
+  }) || null;
+}
+
+function arListaUsuariosPrincipais(ativo, ag) {
+  const src = ativo || ag || {};
+  if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
+    return src.usuariosPrincipais
+      .map(u => u.nome || u.login || u.loginNorm || u.usuario)
+      .filter(Boolean)
+      .join(', ');
+  }
+  return src.usuarioPrincipal || src.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioLogado || '—';
+}
+
+function arUltimoLoginFmt(ativo, ag) {
+  const dt = ativo?.ultimoLoginEm || ativo?.ultimoLoginData || ativo?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || '';
+  return dt ? fmtDate(dt) : '—';
+}
+
+function arDiasLogadosAno(ativo, ag) {
+  const src = ativo || ag || {};
+  const anoAtual = new Date().getFullYear();
+  if (src.diasLogadosAno != null) return src.diasLogadosAno;
+  if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
+  if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
+    const total = src.usuariosPrincipais
+      .map(u => u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)
+      .reduce((s,n) => s + (Number(n)||0), 0);
+    if (total) return total;
+  }
+  if (Array.isArray(src.dias)) {
+    return new Set(src.dias.filter(d => String(d).startsWith(String(anoAtual)))).size;
+  }
+  return '—';
+}
+
+function abrirHistoricoUsuariosDoAgente(agentId) {
+  const ag = (STATE_AGENTS?.list || []).find(a => a.id === agentId);
+  if (!ag) return showToast('Agente não encontrado', 'warning');
+  const ativo = arEncontrarAtivoDoAgente(ag);
+  if (!ativo) {
+    return showToast('Esse agente ainda não está vinculado a um ativo/PAT. Vincule o PAT para abrir o histórico da máquina.', 'warning', 6000);
+  }
+  abrirHistoricoUsuariosDoAtivo(ativo.id || ativo.pat);
+}
+
+function abrirHistoricoGeralDoAgente(agentId) {
+  const ag = (STATE_AGENTS?.list || []).find(a => a.id === agentId);
+  const ativo = arEncontrarAtivoDoAgente(ag);
+  abrirHistorico((ativo && (ativo.pat || ativo.id)) || agentId);
+}
+
 function renderAssistenciaRemota() {
   const tbody = document.getElementById('ar-tbody');
   if (!tbody) return;
@@ -7444,6 +7547,10 @@ function renderAssistenciaRemota() {
     (a.hostname||'').toLowerCase().includes(q) ||
     (a.ip||'').includes(q) ||
     (a.usuarioLogado||'').toLowerCase().includes(q) ||
+    (a.usuarioPrincipal||'').toLowerCase().includes(q) ||
+    (a.usuarioPrincipalLogin||'').toLowerCase().includes(q) ||
+    (a.ultimoLoginUsuario||'').toLowerCase().includes(q) ||
+    (a.usuarioNome||'').toLowerCase().includes(q) ||
     (a.osNome||'').toLowerCase().includes(q));
   if (fSt) lista = lista.filter(a => a.status === fSt);
   if (fOs) lista = lista.filter(a => (a.osNome||'').includes(fOs));
@@ -7454,7 +7561,7 @@ function renderAssistenciaRemota() {
 
   if (!lista.length) {
     const carregando = !STATE_AGENTS._carregou;
-    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--g400)">
+    tbody.innerHTML = `<tr><td colspan="16" style="text-align:center;padding:40px;color:var(--g400)">
       <div style="font-size:32px;margin-bottom:12px">${carregando ? '⏳' : '🖥️'}</div>
       <div style="font-weight:600;margin-bottom:6px">
         ${carregando ? 'Carregando agentes...' : (agentes.length ? 'Nenhum agente com esses filtros' : 'Nenhum agente instalado')}
@@ -7469,6 +7576,11 @@ function renderAssistenciaRemota() {
     const statusCls = a.status || 'sem-agente';
     const statusCor = {online:'badge-success',offline:'badge-danger',alerta:'badge-warning',critico:'badge-danger'}[a.status] || '';
     const lastSeen  = a.lastSeen ? fmtRelative(new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen)) : '—';
+    const ativoRel = arEncontrarAtivoDoAgente(a);
+    const usuarioLogado = a.usuarioLogado || ativoRel?.usuarioLogado || ativoRel?.ultimoLoginUsuario || '—';
+    const usuarioPrincipal = arListaUsuariosPrincipais(ativoRel, a);
+    const ultimoLogin = arUltimoLoginFmt(ativoRel, a);
+    const diasAno = arDiasLogadosAno(ativoRel, a);
 
     // CPU bar
     const cpuBar = a.cpuPct != null
@@ -7509,7 +7621,10 @@ function renderAssistenciaRemota() {
       </td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
-      <td style="font-size:12px;color:var(--g600)">${escapeHtml(a.usuarioLogado||'—')}</td>
+      <td style="font-size:12px;color:var(--g600);max-width:95px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioLogado)}">${escapeHtml(usuarioLogado)}</td>
+      <td style="font-size:12px;color:var(--g700);max-width:115px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioPrincipal)}">${escapeHtml(usuarioPrincipal)}${ativoRel?.maquinaCompartilhada ? '<span style="font-size:10px;background:#EDE9FE;color:#6D28D9;padding:1px 5px;border-radius:8px;margin-left:4px">comp.</span>' : ''}</td>
+      <td style="font-size:11px;color:var(--g500)">${escapeHtml(ultimoLogin)}</td>
+      <td style="font-size:12px;font-weight:700;color:var(--accent);text-align:center">${escapeHtml(String(diasAno))}</td>
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
@@ -7530,9 +7645,11 @@ function renderAssistenciaRemota() {
       <td>
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
-          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:2px 7px;font-size:12px">📋</button>
+          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações completas da máquina" style="padding:2px 7px;font-size:12px">📋</button>
+          <button class="btn btn-secondary btn-xs" onclick="abrirHistoricoUsuariosDoAgente('${a.id}')" title="Histórico de logins da máquina" style="padding:2px 7px;font-size:12px">👥</button>
+          <button class="btn btn-secondary btn-xs" onclick="abrirHistoricoGeralDoAgente('${a.id}')" title="Histórico geral da máquina" style="padding:2px 7px;font-size:12px">📜</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
-          <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">📋</button>
+          <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">🗂️</button>
         </div>
       </td>
     </tr>`;
@@ -8988,12 +9105,10 @@ async function abrirLinhaDoTempo(ativoId, pat) {
           return '<span style="font-size:10.5px;color:var(--g500)">'+escapeHtml(e[0])+': <strong>'+escapeHtml(String(e[1]))+'</strong></span>';
         }).join(' · ');
       }
-      var chamadoBtn = ev.chamadoId ? '<button class="btn btn-secondary btn-xs" style="margin-top:6px" onclick="abrirDetalheChamado(\''+escapeHtml(String(ev.chamadoId))+'\')">🎫 Abrir chamado '+escapeHtml(String(ev.chamadoId))+'</button>' : '';
       return '<div style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--g100)">'
         +'<div style="font-size:20px;flex-shrink:0;margin-top:2px">'+ico+'</div>'
-        +'<div style="flex:1"><div style="font-weight:700;font-size:13px;color:var(--g900)">'+escapeHtml((ev.evento||'').replace(/-/g,' ').replace(/\b\w/g,function(l){return l.toUpperCase();}))+'</div>'
+        +'<div style="flex:1"><div style="font-weight:700;font-size:13px;color:var(--g900)">'+escapeHtml((ev.evento||'').replace(/-/g,' ').replace(/\w/g,function(l){return l.toUpperCase();}))+'</div>'
         +(dets?'<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">'+dets+'</div>':'')
-        + chamadoBtn
         +'<div style="font-size:10.5px;color:var(--g400);margin-top:4px">'+escapeHtml(ev.usuario)+' · '+data+'</div>'
         +'</div></div>';
     }).join('');
@@ -10680,6 +10795,13 @@ function softLog(msg) {
 
 let _ativoHistoricoId = null;
 
+function abrirHistoricoUsuariosDoAtivo(ativoId) {
+  const ativo = (STATE.ativos || []).find(a => a.id === ativoId || a.pat === ativoId);
+  if (!ativo) return showToast('Ativo não encontrado para abrir histórico de logins', 'warning');
+  window._ativoEditando = ativo;
+  abrirHistoricoUsuarios();
+}
+
 async function abrirHistoricoUsuarios() {
   const ativo = window._ativoEditando || {};
   if (!ativo.id) return;
@@ -10704,12 +10826,49 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
     // Busca subcollection usuarios_historico via Cloud Function
     let usuarios = [];
     if (FB_READY && auth?.currentUser) {
-      const data = await callFunction('getHistoricoUsuarios', { ativoId });
-      usuarios   = data?.usuarios || [];
-      window._sysackLoginEventosAtivo = data?.loginEventos || [];
+      try {
+        const data = await callFunction('getHistoricoUsuarios', { ativoId });
+        usuarios   = data?.usuarios || [];
+      } catch(e) { console.warn('[HistoricoUsuarios] function:', e.message); }
     }
 
-    if (!window._sysackLoginEventosAtivo) window._sysackLoginEventosAtivo = [];
+    // Fallback direto: também lê a coleção global login_history, criada pelo agente/monitor.
+    if (!usuarios.length && FB_READY && db) {
+      try {
+        const byKey = new Map();
+        const addLogin = (x) => {
+          const login = String(x.usuarioNorm || x.loginNorm || x.usuario || x.usuarioLogado || x.login || '').toLowerCase();
+          if (!login) return;
+          const atual = byKey.get(login) || { login, nome: x.usuarioNome || x.nome || x.usuario || login, matricula: x.usuarioMat || '', unidade: x.usuarioSetor || '', dias: [], diasSemana: {} };
+          const dt = x.dataLogin || x.ultimoLogin || x.createdAt || x.updatedAt;
+          if (dt) {
+            const dia = String(x.dia || dt).slice(0,10);
+            atual.dias.push(dia);
+            atual.diasSemana[dia] = true;
+            if (!atual.ultimoLogin || new Date(dt) > new Date(atual.ultimoLogin)) atual.ultimoLogin = dt;
+            if (!atual.primeiroLogin || new Date(dt) < new Date(atual.primeiroLogin)) atual.primeiroLogin = dt;
+          }
+          byKey.set(login, atual);
+        };
+        const ids = [ativoId, ativo?.pat, ativo?.hostname, ativo?.desc].filter(Boolean);
+        for (const id of ids) {
+          try {
+            const snap = await db.collection('login_history').where('assetId','==',id).limit(200).get();
+            snap.docs.forEach(d => addLogin(d.data()));
+          } catch {}
+        }
+        if (!byKey.size) {
+          const host = String(ativo?.hostname || ativo?.desc || ativo?.id || '').toLowerCase();
+          const snap = await db.collection('login_history').limit(500).get();
+          snap.docs.forEach(d => {
+            const x = d.data();
+            const hx = String(x.hostname || x.assetId || '').toLowerCase();
+            if (host && (hx === host || hx.includes(host) || host.includes(hx))) addLogin(x);
+          });
+        }
+        usuarios = [...byKey.values()].map(u => ({ ...u, totalDias: new Set(u.dias || []).size, ativo: true }));
+      } catch(e) { console.warn('[HistoricoUsuarios] fallback:', e.message); }
+    }
 
     if (!usuarios.length) {
       body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)">' +
@@ -10743,7 +10902,6 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
             <th>Primeiro login</th>
             <th>Último login</th>
             <th>Total Dias Logado</th>
-            <th>Dias no ano</th>
             <th>Logins nesta semana</th>
             <th>Status</th>
           </tr></thead>
@@ -10767,9 +10925,6 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
                   <span style="font-size:15px;font-weight:800;color:var(--accent)">${u.totalDias || 0}</span>
                 </td>
                 <td style="text-align:center">
-                  <span style="font-size:13px;font-weight:800;color:var(--g700)">${u.contadorDiasAno || 0}</span>
-                </td>
-                <td style="text-align:center">
                   <span style="font-size:13px;font-weight:700;color:${diasSemAtu >= 2 ? 'var(--success)' : 'var(--g400)'}">${diasSemAtu}</span>
                   ${diasSemAtu >= 2 ? '<span style="font-size:10px;color:var(--success);display:block">&#10003; critério</span>' : ''}
                 </td>
@@ -10785,14 +10940,6 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
             }).join('')}
           </tbody>
         </table>
-      </div>
-      <div style="margin-top:14px">
-        <div style="font-size:12px;font-weight:800;color:var(--g700);margin-bottom:6px">📅 Ocorrências de login registradas</div>
-        ${(() => {
-          const evs = (window._sysackLoginEventosAtivo || []).slice(0,80);
-          if (!evs.length) return '<div style="padding:10px 12px;background:var(--g50);border-radius:8px;color:var(--g400);font-size:12px">Sem ocorrências individuais. O contador por usuário continua disponível acima.</div>';
-          return '<div class="table-wrap"><table><thead><tr><th>Data/hora</th><th>Usuário</th><th>Matrícula</th><th>Setor</th></tr></thead><tbody>' + evs.map(e => '<tr><td style="font-size:12px">' + fmtDate(e.data) + '</td><td><b>' + escapeHtml(e.nome || e.login || '—') + '</b><div style="font-size:11px;color:var(--g400)">' + escapeHtml(e.loginNorm || '') + '</div></td><td>' + escapeHtml(e.mat || '—') + '</td><td>' + escapeHtml(e.setor || '—') + '</td></tr>').join('') + '</tbody></table></div>';
-        })()}
       </div>
       <div style="margin-top:12px;padding:10px 14px;background:var(--g50);border-radius:8px;font-size:12px;color:var(--g500)">
         <strong>Como funciona a atribuição automática:</strong><br>
@@ -27336,12 +27483,66 @@ async function buscarMaquinasPorUsuario() {
   try {
     let data = null;
     if (FB_READY && auth?.currentUser) data = await callFunction('getAtivosDoUsuario', { q, de, ate });
-    const ativos = data?.ativos || [];
-    renderBuscaMaquinasUsuario(ativos, data?.resumo || {});
+    let ativos = data?.ativos || [];
+    if (!ativos.length) ativos = filtrarMaquinasPorLoginLocal(q, de, ate);
+    renderBuscaMaquinasUsuario(ativos, data?.resumo || resumoBuscaLoginLocal(ativos));
+    if (ativos.length) filtrarTabelaComputadoresPorResultadoLogin(ativos);
   } catch(e) {
     console.warn('[LoginHist]', e);
     if (body) body.innerHTML = `<div style="padding:14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:var(--danger);font-size:12.5px">Erro ao buscar: ${escapeHtml(e.message)}</div>`;
   }
+}
+
+
+function _normLoginSYSACK(v) {
+  return String(v || '').trim().toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, '');
+}
+function _dateInRangeSYSACK(v, de, ate) {
+  if (!de && !ate) return true;
+  const d = v ? new Date(v) : null;
+  if (!d || isNaN(d.getTime())) return false;
+  if (de && d < new Date(de + 'T00:00:00')) return false;
+  if (ate && d > new Date(ate + 'T23:59:59')) return false;
+  return true;
+}
+function filtrarMaquinasPorLoginLocal(q, de, ate) {
+  const termo = _normLoginSYSACK(q);
+  const now = new Date();
+  const d7 = new Date(now.getTime() - 7*86400000);
+  const d30 = new Date(now.getTime() - 30*86400000);
+  const d365 = new Date(now.getTime() - 365*86400000);
+  const diasPeriodo = (dias, ini, fim) => (dias || []).filter(x => {
+    const d = new Date(x);
+    return !isNaN(d.getTime()) && d >= ini && d <= fim;
+  }).length;
+  return (STATE.ativos || []).filter(a => {
+    const campos = [a.usuarioLogado, a.ultimoLoginUsuario, a.usuarioPrincipal, a.usuarioPrincipalLogin, a.resp, a.responsavel, a.matriculaResp];
+    if (Array.isArray(a.usuariosPrincipais)) a.usuariosPrincipais.forEach(u => campos.push(u.login, u.loginNorm, u.nome, u.mat));
+    const bateLogin = campos.some(c => _normLoginSYSACK(c).includes(termo) || String(c||'').toLowerCase().includes(String(q||'').toLowerCase()));
+    return bateLogin && _dateInRangeSYSACK(a.ultimoLoginEm || a.updatedAt || a.lastSeen, de, ate);
+  }).map(a => {
+    const dias = Array.isArray(a.diasLogin) ? a.diasLogin : [];
+    const principal = Array.isArray(a.usuariosPrincipais) ? a.usuariosPrincipais.some(u => _normLoginSYSACK(u.loginNorm||u.login||u.nome||u.mat).includes(termo)) : _normLoginSYSACK(a.usuarioPrincipalLogin||a.usuarioPrincipal).includes(termo);
+    return {
+      ativoId: a.id, id: a.id, pat: a.pat || '', desc: a.desc || '', hostname: hostnameFromAtivo(a) || a.hostname || '', ip: a.ip || '', area: a.area || '',
+      ultimoLogin: a.ultimoLoginEm || a.updatedAt || a.lastSeen || null,
+      totalDias: a.totalDiasLogin || dias.length || 0,
+      dias7: diasPeriodo(dias, d7, now), dias30: diasPeriodo(dias, d30, now), dias365: diasPeriodo(dias, d365, now),
+      ehPrincipal: principal, maquinaCompartilhada: !!a.maquinaCompartilhada,
+    };
+  }).sort((a,b) => new Date(b.ultimoLogin||0) - new Date(a.ultimoLogin||0));
+}
+function resumoBuscaLoginLocal(ativos) {
+  return { ultimoHostname: ativos[0]?.hostname || ativos[0]?.pat || '', ultimoLogin: ativos[0]?.ultimoLogin || null, semana: ativos.filter(a=>a.dias7>0).length, mes: ativos.filter(a=>a.dias30>0).length, ano: ativos.filter(a=>a.dias365>0).length };
+}
+function filtrarTabelaComputadoresPorResultadoLogin(ativos) {
+  const ids = new Set(ativos.map(a => a.ativoId || a.id).filter(Boolean));
+  const pats = new Set(ativos.map(a => a.pat).filter(Boolean));
+  const qbox = document.getElementById('pat-search');
+  if (qbox) qbox.value = '';
+  window._filtroLoginAtivoIds = ids;
+  window._filtroLoginAtivoPats = pats;
+  renderAtivos();
 }
 
 function renderBuscaMaquinasUsuario(ativos, resumo) {
@@ -27360,7 +27561,7 @@ function renderBuscaMaquinasUsuario(ativos, resumo) {
       <div class="stat-card"><div class="stat-label">Mês / Ano</div><div class="stat-value">${resumo.mes || 0} / ${resumo.ano || 0}</div></div>
     </div>
     <div class="table-container"><table class="data-table" style="font-size:12px">
-      <thead><tr><th>Máquina</th><th>PAT</th><th>Área</th><th>Último login</th><th>Dias total</th><th>Dias no ano</th><th>Últimos 7/30/365 dias</th><th>Papel</th></tr></thead>
+      <thead><tr><th>Máquina</th><th>PAT</th><th>Área</th><th>Último login</th><th>Dias total</th><th>Últimos 7/30/365 dias</th><th>Papel</th></tr></thead>
       <tbody>${ativos.map(a => `
         <tr>
           <td><b>${escapeHtml(a.hostname || a.desc || a.ativoId)}</b><div style="font-size:11px;color:var(--g400)">${escapeHtml(a.ip || '')}</div></td>
@@ -27368,7 +27569,6 @@ function renderBuscaMaquinasUsuario(ativos, resumo) {
           <td>${escapeHtml(a.area || '—')}</td>
           <td>${fmt(a.ultimoLogin)}</td>
           <td>${a.totalDias || 0}</td>
-          <td>${a.contadorDiasAno || 0}</td>
           <td>${a.dias7 || 0} / ${a.dias30 || 0} / ${a.dias365 || 0}</td>
           <td>${a.ehPrincipal ? '<span class="tag tag-success">Usuário principal</span>' : ''}${a.maquinaCompartilhada ? '<span class="tag tag-warning">Compartilhada</span>' : ''}</td>
         </tr>`).join('')}</tbody>
@@ -27379,6 +27579,9 @@ function limparBuscaMaquinasPorUsuario() {
   ['loginhist-user','loginhist-de','loginhist-ate'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   const body = document.getElementById('loginhist-result');
   if (body) body.innerHTML = '';
+  window._filtroLoginAtivoIds = null;
+  window._filtroLoginAtivoPats = null;
+  renderAtivos?.();
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -29684,3 +29887,296 @@ class SysackWebRTCViewer {
   }
 }
 
+
+
+// ════════════════════════════════════════════════════════════════════════
+// SYSACK PATCH FINAL — RASTREABILIDADE COMPLETA DO COMPUTADOR
+// Implementa painel único por computador com Inventário, Histórico, Logins e Chamados.
+// Também reforça o filtro por login e mantém compatibilidade com os dados já existentes.
+// ════════════════════════════════════════════════════════════════════════
+(function(){
+  if (window.__SYSACK_RASTREABILIDADE_FINAL__) return;
+  window.__SYSACK_RASTREABILIDADE_FINAL__ = true;
+
+  const esc2 = v => (typeof escapeHtml === 'function') ? escapeHtml(String(v ?? '')) : String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt2 = d => {
+    if (!d) return '—';
+    try {
+      const x = d?.toDate ? d.toDate() : (d?.seconds ? new Date(d.seconds*1000) : new Date(d));
+      if (isNaN(x.getTime())) return '—';
+      return x.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    } catch { return '—'; }
+  };
+  const norm2 = v => String(v || '').trim().toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, '');
+  const host2 = a => String(a?.hostname || a?.computador || a?.nome || a?.desc || a?.id || '').trim();
+
+  function ativoDoAgenteSYSACK(ag) {
+    if (!ag) return null;
+    const hn = norm2(ag.hostname || ag.id);
+    const ip = String(ag.ip || '').trim();
+    return (STATE.ativos || []).find(a => {
+      const ah = norm2(host2(a));
+      const aid = norm2(a.id || a.pat);
+      return (ip && String(a.ip||'') === ip) ||
+             (hn && (ah === hn || aid === hn || ah.includes(hn) || hn.includes(ah) || aid.includes(hn) || hn.includes(aid)));
+    }) || null;
+  }
+  window.arEncontrarAtivoDoAgente = ativoDoAgenteSYSACK;
+
+  function chamadosDoComputadorSYSACK(ativo, ag) {
+    const pat = ativo?.pat || '';
+    const id  = ativo?.id  || '';
+    const hn  = norm2(host2(ativo) || ag?.hostname || ag?.id);
+    const ip  = String(ativo?.ip || ag?.ip || '').trim();
+    return (STATE.chamados || []).filter(c => {
+      if (pat && c.pat === pat) return true;
+      if (id && (c.ativoId === id || c.assetId === id || c.computadorId === id)) return true;
+      if (Array.isArray(c.ativosVinculados) && c.ativosVinculados.some(av =>
+        (pat && av.pat === pat) || (id && (av.id === id || av.docId === id || av.ativoId === id)) || (hn && norm2(av.hostname || av.desc || av.nome).includes(hn))
+      )) return true;
+      const texto = `${c.titulo||''} ${c.desc||''} ${c.descricao||''} ${c.hostname||''} ${c.ip||''}`.toLowerCase();
+      if (hn && texto.includes(hn)) return true;
+      if (ip && texto.includes(ip)) return true;
+      if (c.movimentacao && pat && (c.movimentacao.patAntigo === pat || c.movimentacao.patNovo === pat)) return true;
+      return false;
+    }).sort((a,b) => new Date(b.createdAt || b.data || 0) - new Date(a.createdAt || a.data || 0));
+  }
+
+  async function fsGetSubcolecaoSYSACK(path, orderField) {
+    try {
+      if (!window.db) return [];
+      let ref = db.collection(path);
+      if (orderField) ref = ref.orderBy(orderField, 'desc');
+      const snap = await ref.get();
+      return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    } catch (e) {
+      try {
+        const snap = await db.collection(path).get();
+        return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+      } catch { return []; }
+    }
+  }
+
+  async function fsGetLoginHistorySYSACK(ativo, ag) {
+    const out = [];
+    try {
+      if (!window.db) return out;
+      const ids = [ativo?.id, ativo?.pat, ag?.id].filter(Boolean);
+      const hns = [host2(ativo), ag?.hostname, ag?.id].filter(Boolean).map(norm2);
+      for (const id of ids) {
+        try {
+          const snap = await db.collection('login_history').where('assetId','==',id).get();
+          snap.docs.forEach(d => out.push({ id:d.id, ...d.data() }));
+        } catch {}
+      }
+      if (!out.length && hns.length) {
+        try {
+          const snap = await db.collection('login_history').limit(300).get();
+          snap.docs.forEach(d => {
+            const x = { id:d.id, ...d.data() };
+            const hx = norm2(x.hostname || x.computador || x.assetId || '');
+            if (hns.some(h => h && (hx === h || hx.includes(h) || h.includes(hx)))) out.push(x);
+          });
+        } catch {}
+      }
+    } catch {}
+    return out;
+  }
+
+  function usuariosPrincipaisTextoSYSACK(ativo, ag) {
+    const src = ativo || ag || {};
+    if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
+      return src.usuariosPrincipais.map(u => u.nome || u.login || u.loginNorm || u.usuario || u.mat).filter(Boolean).join(', ');
+    }
+    return src.usuarioPrincipal || src.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioLogado || '—';
+  }
+
+  function ultimoLoginSYSACK(ativo, ag) {
+    return ativo?.ultimoLoginEm || ativo?.ultimoLoginData || ativo?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || '';
+  }
+
+  function diasAnoSYSACK(ativo, ag) {
+    const src = ativo || ag || {};
+    if (src.diasLogadosAno != null) return src.diasLogadosAno;
+    if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
+    if (Array.isArray(src.usuariosPrincipais)) {
+      const n = src.usuariosPrincipais.reduce((s,u) => s + (Number(u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)), 0);
+      if (n) return n;
+    }
+    return '—';
+  }
+
+  function buildResumoComputadorSYSACK(ag, ativo) {
+    return `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+        <div class="stat-card"><div class="stat-label">Usuário logado</div><div class="stat-value" style="font-size:16px">${esc2(ag?.usuarioLogado || ativo?.usuarioLogado || '—')}</div></div>
+        <div class="stat-card"><div class="stat-label">Usuário principal</div><div class="stat-value" style="font-size:16px">${esc2(usuariosPrincipaisTextoSYSACK(ativo, ag))}</div></div>
+        <div class="stat-card"><div class="stat-label">Último login</div><div class="stat-value" style="font-size:15px">${esc2(fmt2(ultimoLoginSYSACK(ativo, ag)))}</div></div>
+        <div class="stat-card"><div class="stat-label">Dias logados no ano</div><div class="stat-value">${esc2(String(diasAnoSYSACK(ativo, ag)))}</div></div>
+      </div>`;
+  }
+
+  function linhaEventoSYSACK(e) {
+    const tipo = e.tipo || e.subtipo || 'evento';
+    const icon = ({login:'👤', logout:'🚪', chamado:'🎫', chamado_aberto:'🎫', chamado_atualizado:'🎫', chamado_fechado:'✅', mudanca_faixa_ip:'🚨', alerta_ip:'🚨', troca_monitor:'🖥️', monitor:'🖥️', transferencia:'🚚', troca_responsavel:'👥', mudanca_campo:'✏️', mudanca_local:'📍', troca_area:'🏢', troca_grupo:'🧩', troca_status:'📌'}[tipo] || '•');
+    const data = e.createdAt || e.data || e.detecEm || e.atualizadoEm || e.ultimoLogin || e.dataLogin || e.time;
+    const chamadoId = e.chamadoId || e.idChamado || e.chamado || (String(e.titulo||'').match(/#?([A-Za-z0-9_-]{3,})/)||[])[1];
+    const isChamado = String(tipo).includes('chamado') || String(e.titulo||'').toLowerCase().includes('chamado');
+    return `<div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--g100)">
+      <div style="width:32px;height:32px;border-radius:50%;background:var(--g100);display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon}</div>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:13px;color:var(--g800)">${esc2(e.titulo || e.title || e.label || tipo)}</div>
+        <div style="font-size:12.5px;color:var(--g600);margin-top:3px;white-space:pre-wrap">${esc2(e.desc || e.descricao || e.texto || [e.de,e.para].filter(Boolean).join(' → ') || '')}</div>
+        <div style="font-size:11px;color:var(--g400);margin-top:5px">${esc2(fmt2(data))} · ${esc2(e.autor || e.origem || e.alteradoPor || 'sistema')}</div>
+        ${isChamado && chamadoId ? `<button class="btn btn-primary btn-xs" style="margin-top:7px" onclick="sysackAbrirChamadoVinculado('${esc2(chamadoId)}')">Abrir chamado</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  window.sysackAbrirChamadoVinculado = function(id) {
+    const c = (STATE.chamados || []).find(x => String(x.id) === String(id) || String(x.numero) === String(id));
+    if (!c) return showToast?.('Chamado não encontrado na base carregada', 'warning');
+    if (typeof abrirAtendimento === 'function') return abrirAtendimento(c.id);
+    if (typeof goPage === 'function') goPage('chamados');
+  };
+
+  async function carregarDadosPainelComputadorSYSACK(agentId) {
+    const ag = (STATE_AGENTS?.list || []).find(a => String(a.id) === String(agentId)) || {};
+    const ativo = ativoDoAgenteSYSACK(ag) || (STATE.ativos || []).find(a => String(a.id) === String(agentId) || String(a.pat) === String(agentId)) || null;
+    const ativoId = ativo?.id || agentId;
+    const historico = ativo?.id ? await fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : [];
+    const usuarios = ativo?.id ? await fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/usuarios_historico`, 'ultimoLogin') : [];
+    const loginHistory = await fsGetLoginHistorySYSACK(ativo, ag);
+    const chamados = chamadosDoComputadorSYSACK(ativo, ag);
+    return { ag, ativo, ativoId, historico, usuarios, loginHistory, chamados };
+  }
+
+  function renderInventarioTabSYSACK(ag, ativo) {
+    let inv = {}; try { inv = ag?.inventario ? JSON.parse(ag.inventario) : {}; } catch {}
+    const v = (k, fb='—') => ag?.[k] ?? ativo?.[k] ?? inv?.[k] ?? fb;
+    const monitores = Array.isArray(ag?.monitores) && ag.monitores.length ? ag.monitores.map(m => `${m.nome||m.caption||'Monitor'}${m.serial?' #'+m.serial:''}`).join(' | ') : (ativo?.monitor || '—');
+    const rows = [
+      ['Hostname', v('hostname') || ag?.id || ativo?.id], ['Patrimônio', ativo?.pat || 'Sem patrimônio'], ['IP', v('ip')], ['Área', ativo?.area || v('area')], ['Responsável', ativo?.resp || ativo?.responsavel || '—'],
+      ['Fabricante', v('fabricante') || v('fab')], ['Modelo', v('modelo')], ['Serial', v('serial') || v('serie')], ['Sistema', v('osNome') || v('so')], ['CPU', v('cpuModelo')],
+      ['RAM', v('ramTotalGB') !== '—' ? `${v('ramTotalGB')} GB` : '—'], ['Disco C:', ag?.discoC_livreGB ? `${ag.discoC_livreGB} GB livres` : (ag?.discoC?.freeGB ? `${ag.discoC.freeGB} GB livres de ${ag.discoC.totalGB} GB` : '—')],
+      ['Monitor(es)', monitores], ['Usuário logado', ag?.usuarioLogado || ativo?.usuarioLogado || '—'], ['Usuário principal', usuariosPrincipaisTextoSYSACK(ativo, ag)], ['Último login', fmt2(ultimoLoginSYSACK(ativo, ag))], ['Dias logados no ano', diasAnoSYSACK(ativo, ag)], ['Último contato', fmt2(ag?.lastSeen || ativo?.lastSeen)]
+    ];
+    return '<table style="width:100%;border-collapse:collapse">' + rows.map(([k,v]) => `<tr><td style="padding:6px 0;color:var(--g500);font-size:12px;width:150px;border-bottom:1px solid var(--g100)">${esc2(k)}</td><td style="padding:6px 0;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--g100)">${esc2(v)}</td></tr>`).join('') + '</table>';
+  }
+
+  function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
+    const porUsuario = new Map();
+    usuarios.forEach(u => {
+      const k = norm2(u.loginNorm || u.login || u.usuario || u.nome);
+      if (!k) return;
+      porUsuario.set(k, { login:k, nome:u.nome || u.login || k, ultimo:u.ultimoLogin || u.ate, primeiro:u.desde || u.primeiroLogin, totalDias:u.totalDias || (Array.isArray(u.dias)?u.dias.length:0), diasAno:u.diasLogadosAno || 0, principal:!!u.ehResponsavel, dias:Array.isArray(u.dias)?u.dias:[] });
+    });
+    loginHistory.forEach(l => {
+      const k = norm2(l.usuario || l.login || l.loginNorm || l.usuarioLogado);
+      if (!k) return;
+      const item = porUsuario.get(k) || { login:k, nome:l.usuarioNome || l.nome || k, dias:[], totalDias:0 };
+      const dt = l.dataLogin || l.ultimoLogin || l.createdAt;
+      if (dt && (!item.ultimo || new Date(dt) > new Date(item.ultimo))) item.ultimo = dt;
+      if (dt) item.dias.push(String(dt).slice(0,10));
+      porUsuario.set(k, item);
+    });
+    const ano = String(new Date().getFullYear());
+    const arr = [...porUsuario.values()].map(u => ({...u, diasAno: u.diasAno || new Set((u.dias||[]).filter(d => String(d).startsWith(ano))).size, totalDias: u.totalDias || new Set(u.dias||[]).size})).sort((a,b) => new Date(b.ultimo||0) - new Date(a.ultimo||0));
+    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.</div>';
+    return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Usuário</th><th>Primeiro login</th><th>Último login</th><th>Dias no ano</th><th>Total dias</th><th>Status</th></tr></thead><tbody>${arr.map(u => `<tr><td><b>${esc2(u.nome || u.login)}</b><div style="font-size:11px;color:var(--g400)">${esc2(u.login)}</div></td><td>${esc2(fmt2(u.primeiro))}</td><td>${esc2(fmt2(u.ultimo))}</td><td><b>${esc2(u.diasAno)}</b></td><td>${esc2(u.totalDias)}</td><td>${u.principal ? '<span class="badge badge-info">Principal</span>' : ''}${ativo?.maquinaCompartilhada ? '<span class="badge badge-warning">Compartilhada</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
+  }
+
+  function renderChamadosTabSYSACK(chamados) {
+    if (!chamados.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum chamado vinculado a este computador.</div>';
+    return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Chamado</th><th>Título/Descrição</th><th>Status</th><th>Data</th><th>Ação</th></tr></thead><tbody>${chamados.map(c => `<tr><td><b>${esc2(c.id || c.numero)}</b></td><td>${esc2(c.titulo || c.desc || c.descricao || '—')}</td><td>${esc2(c.status || '—')}</td><td>${esc2(fmt2(c.createdAt || c.data))}</td><td><button class="btn btn-primary btn-xs" onclick="sysackAbrirChamadoVinculado('${esc2(c.id || c.numero)}')">Abrir chamado</button></td></tr>`).join('')}</tbody></table>`;
+  }
+
+  function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chamados, ativo, ag) {
+    const eventos = [];
+    historico.forEach(h => eventos.push(h));
+    usuarios.forEach(u => {
+      if (u.ultimoLogin || u.ate) eventos.push({ tipo:'login', titulo:'Login realizado', desc:`Usuário: ${u.nome || u.login || u.loginNorm || '—'}\nMáquina: ${host2(ativo) || ag?.hostname || ag?.id || '—'}`, createdAt:u.ultimoLogin || u.ate, origem:'usuarios_historico' });
+    });
+    loginHistory.forEach(l => eventos.push({ tipo:'login', titulo:'Login realizado', desc:`Usuário: ${l.usuario || l.login || l.usuarioLogado || '—'}\nMáquina: ${l.hostname || host2(ativo) || ag?.hostname || '—'}`, createdAt:l.dataLogin || l.createdAt, origem:l.origem || 'login_history' }));
+    chamados.forEach(c => eventos.push({ tipo:'chamado', titulo:`Chamado ${c.id || c.numero} ${c.status ? '— '+c.status : ''}`, desc:c.titulo || c.desc || c.descricao || '', createdAt:c.createdAt || c.data, chamadoId:c.id || c.numero, origem:'chamados' }));
+    eventos.sort((a,b) => new Date(b.createdAt || b.data || b.detecEm || b.ultimoLogin || 0) - new Date(a.createdAt || a.data || a.detecEm || a.ultimoLogin || 0));
+    if (!eventos.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum evento no histórico deste computador.</div>';
+    return eventos.map(linhaEventoSYSACK).join('');
+  }
+
+  function ativarTabComputadorSYSACK(tab) {
+    document.querySelectorAll('[data-comp-tab]').forEach(btn => {
+      const on = btn.dataset.compTab === tab;
+      btn.style.color = on ? 'var(--accent)' : 'var(--g500)';
+      btn.style.fontWeight = on ? '800' : '600';
+      btn.style.borderBottom = on ? '2px solid var(--accent)' : '2px solid transparent';
+    });
+    document.querySelectorAll('[data-comp-panel]').forEach(p => p.style.display = p.dataset.compPanel === tab ? '' : 'none');
+  }
+  window.sysackCompTab = ativarTabComputadorSYSACK;
+
+  window.abrirPainelComputadorSYSACK = async function(agentId, tabInicial='inventario') {
+    let overlay = document.getElementById('modal-computador-rastreabilidade');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'modal-computador-rastreabilidade';
+    overlay.className = 'modal-overlay open';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px';
+    overlay.innerHTML = `<div class="modal modal-xl" style="background:#fff;border-radius:16px;max-width:1050px;width:96vw;max-height:90vh;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.35)">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--g100);display:flex;align-items:center;justify-content:space-between">
+        <div><h3 style="margin:0;font-size:18px" id="comp-rast-title">Computador</h3><div style="font-size:12px;color:var(--g400)" id="comp-rast-sub">Carregando...</div></div>
+        <button class="close-btn" onclick="document.getElementById('modal-computador-rastreabilidade').remove()">✕</button>
+      </div>
+      <div id="comp-rast-body" style="padding:18px;overflow:auto;max-height:calc(90vh - 72px)"><div style="padding:30px;text-align:center;color:var(--g400)">Carregando...</div></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const dados = await carregarDadosPainelComputadorSYSACK(agentId);
+    const { ag, ativo, historico, usuarios, loginHistory, chamados } = dados;
+    document.getElementById('comp-rast-title').textContent = ag.hostname || host2(ativo) || agentId;
+    document.getElementById('comp-rast-sub').textContent = `${ativo?.pat ? 'PAT '+ativo.pat+' · ' : ''}${ag.ip || ativo?.ip || ''}`;
+    document.getElementById('comp-rast-body').innerHTML = buildResumoComputadorSYSACK(ag, ativo) + `
+      <div style="display:flex;gap:14px;border-bottom:1px solid var(--g100);margin-bottom:14px">
+        <button data-comp-tab="inventario" onclick="sysackCompTab('inventario')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Inventário</button>
+        <button data-comp-tab="historico" onclick="sysackCompTab('historico')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Histórico</button>
+        <button data-comp-tab="logins" onclick="sysackCompTab('logins')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Logins</button>
+        <button data-comp-tab="chamados" onclick="sysackCompTab('chamados')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Chamados</button>
+      </div>
+      <div data-comp-panel="inventario">${renderInventarioTabSYSACK(ag, ativo)}</div>
+      <div data-comp-panel="historico" style="display:none">${renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chamados, ativo, ag)}</div>
+      <div data-comp-panel="logins" style="display:none">${renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag)}</div>
+      <div data-comp-panel="chamados" style="display:none">${renderChamadosTabSYSACK(chamados)}</div>`;
+    ativarTabComputadorSYSACK(tabInicial);
+  };
+
+  // Compatibilidade: botões atuais passam a abrir o painel completo.
+  window.arAbrirInventario = function(agentId) { abrirPainelComputadorSYSACK(agentId, 'inventario'); };
+  window.abrirHistoricoUsuariosDoAgente = function(agentId) { abrirPainelComputadorSYSACK(agentId, 'logins'); };
+  window.abrirHistoricoGeralDoAgente = function(agentId) { abrirPainelComputadorSYSACK(agentId, 'historico'); };
+
+  // Reforça busca da Assistência Remota por login, usuário principal e último usuário.
+  const _renderAR = window.renderAssistenciaRemota;
+  if (typeof _renderAR === 'function') {
+    window.renderAssistenciaRemota = function() {
+      try { return _renderAR.apply(this, arguments); }
+      finally {
+        // Mantém os botões apontando para o painel unificado mesmo em renders antigos.
+        document.querySelectorAll('button[onclick^="arAbrirInventario("]').forEach(b => b.title = 'Painel completo do computador');
+      }
+    };
+  }
+})();
+
+
+// Correção visual do autocomplete de empregados do chamado: evita itens sobrepostos/embaralhados.
+(function sysackFixAutocompleteChamado(){
+  const css = `
+    #ch-pq-busca-box{position:relative!important;z-index:3000!important;}
+    #ch-pq-resultados{background:#fff!important;z-index:30000!important;max-height:260px!important;overflow-y:auto!important;overflow-x:hidden!important;box-shadow:0 14px 34px rgba(15,23,42,.18)!important;}
+    #ch-pq-resultados .emp-ac-item{min-height:58px!important;box-sizing:border-box!important;background:#fff!important;position:relative!important;clear:both!important;}
+    #ch-pq-resultados .emp-ac-item:hover{background:#F8FAFC!important;}
+    #ch-pq-resultados .emp-ac-item-main{line-height:1.25!important;}
+  `;
+  if (!document.getElementById('sysack-fix-autocomplete-css')) {
+    const st = document.createElement('style'); st.id='sysack-fix-autocomplete-css'; st.textContent=css; document.head.appendChild(st);
+  }
+})();

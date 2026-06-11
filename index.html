@@ -3036,7 +3036,10 @@ window.dispatchEvent(new Event('firebase-ready'));
               <th style="width:90px">Computador</th>
               <th style="width:85px">IP</th>
               <th style="width:115px">Sistema Op.</th>
-              <th style="width:70px">Usuário</th>
+              <th style="width:80px">Usuário logado</th>
+              <th style="width:90px">Usuário principal</th>
+              <th style="width:78px">Último login</th>
+              <th style="width:60px">Dias ano</th>
               <th style="width:46px">CPU</th>
               <th style="width:46px">RAM</th>
               <th style="width:60px">Disco C:</th>
@@ -3048,7 +3051,7 @@ window.dispatchEvent(new Event('firebase-ready'));
               <th style="width:130px">Ações</th>
             </tr></thead>
             <tbody id="ar-tbody">
-              <tr><td colspan="12" style="text-align:center;padding:40px;color:var(--g400)">
+              <tr><td colspan="16" style="text-align:center;padding:40px;color:var(--g400)">
                 <div style="font-size:32px;margin-bottom:12px">🖥️</div>
                 <div style="font-weight:600;margin-bottom:6px">Nenhum agente instalado</div>
                 <div style="font-size:12px">Instale o SYSACK Agent Desktop nos computadores que deseja gerenciar.</div>
@@ -4319,8 +4322,8 @@ window.dispatchEvent(new Event('firebase-ready'));
                      onkeydown="if(event.key==='Escape')document.getElementById('ch-pq-resultados').style.display='none'"
                      autocomplete="off">
               <div id="ch-pq-resultados" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);
-                   background:var(--color-background-primary);border:1px solid var(--g200);border-radius:8px;
-                   max-height:220px;overflow-y:auto;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
+                   background:#fff;border:1px solid var(--g200);border-radius:8px;
+                   max-height:260px;overflow-y:auto;overflow-x:hidden;z-index:30000;box-shadow:0 14px 34px rgba(15,23,42,.18)"></div>
             </div>
             <!-- Card do empregado selecionado -->
             <div id="ch-pq-selecionado" style="display:none;margin-top:10px;background:#fff;border:1px solid var(--g200);border-radius:10px;padding:10px 14px">

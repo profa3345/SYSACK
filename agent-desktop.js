@@ -493,11 +493,8 @@ async function reportar() {
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
     log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user}`);
-    // Atualiza ativo correspondente com hostname (roda apenas uma vez por sessão)
-    if (!global._ativoAtualizado) {
-      global._ativoAtualizado = true;
-      atualizarAtivoComHostname(dados);
-    }
+    // Atualiza o ativo correspondente a cada ciclo: hostname, sessão, inventário e métricas.
+    atualizarAtivoComHostname(dados);
   } catch(e) {
     log(`[ERRO] ${e.message}`);
   }
@@ -852,10 +849,36 @@ async function atualizarAtivoComHostname(dados) {
     if (ativoHostname === AGENT_ID) return;
 
     await firestorePatch(`ativos/${docId}`, {
-      hostname:     AGENT_ID,
-      ip:           ip,
-      status:       'em-uso',
-      ultimoAgente: new Date().toISOString(),
+      hostname:          AGENT_ID,
+      ip:                ip,
+      status:            'em-uso',
+      ultimoAgente:      new Date().toISOString(),
+      lastSeen:          dados.lastSeen,
+      usuarioLogado:     dados.usuarioLogado || '',
+      ultimoLoginUsuario:dados.usuarioLogado || '',
+      ultimoLoginEm:     dados.lastSeen,
+      osNome:            dados.osNome || dados.so || '',
+      so:                dados.so || dados.osNome || '',
+      fabricante:        dados.fabricante || '',
+      modelo:            dados.modelo || '',
+      serial:            dados.serial || '',
+      cpuModelo:         dados.cpuModelo || '',
+      nucleos:           dados.nucleos || '',
+      ramTotalGB:        dados.ramTotalGB ?? null,
+      ramUsadoGB:        dados.ramUsadoGB ?? null,
+      ramPct:            dados.ramPct ?? null,
+      memPct:            dados.memPct ?? null,
+      discoC_livreGB:    dados.discoC_livreGB ?? null,
+      discoC_totalGB:    dados.discoC_totalGB ?? null,
+      discoC_usadoPct:   dados.discoC_usadoPct ?? null,
+      antivirus:         dados.antivirus || '',
+      bitlocker:         dados.bitlocker || '',
+      firewall:          dados.firewall || '',
+      patches:           dados.patches ?? null,
+      monitores:         dados.monitores || [],
+      versaoAgente:      dados.versaoAgente || '',
+      plataforma:        dados.plataforma || '',
+      uptimeH:           dados.uptimeH ?? null,
     });
 
     log(`[OK] Ativo ${docId} atualizado com hostname: ${AGENT_ID}`);
