@@ -1627,7 +1627,7 @@ function sysackTextoUsuariosAtivo(a, ag) {
   return partes.concat(normalizados).join(' ').toLowerCase();
 }
 function sysackUsuarioLogadoAtivo(a, ag) {
-  return ag?.usuarioLogado || ag?.ultimoLoginUsuario || ag?.login || ag?.username || a?.usuarioLogado || a?.ultimoLoginUsuario || a?.login || a?.username || ag?.usuarioNome || a?.usuarioNome || '—';
+  return ag?.usuarioLogado || ag?.usuarioNome || ag?.login || a?.usuarioLogado || a?.usuarioNome || a?.ultimoLoginUsuario || '—';
 }
 
 function renderAtivos() {
@@ -1749,6 +1749,7 @@ function renderAtivos() {
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
       <td><div class="flex gap-6">
+        ${isComp ? `` : ''}
         <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
         <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
         <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
@@ -7478,6 +7479,125 @@ function autocompleteEmpregado(inputEl, onSelect) {
   }, { once: false });
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// SYSACK — Detecção automática de mudanças vindas do agente
+// Não depende de anotação manual do técnico.
+// Detecta: IP, faixa de rede, monitor, hostname/nome, área, grupo, card,
+// responsável e outros campos relevantes quando o agente/ativo muda.
+// ═══════════════════════════════════════════════════════════════
+const SYSACK_AGENT_AUTO_CHANGE_CACHE = window.SYSACK_AGENT_AUTO_CHANGE_CACHE || {};
+window.SYSACK_AGENT_AUTO_CHANGE_CACHE = SYSACK_AGENT_AUTO_CHANGE_CACHE;
+
+function sysackAutoNormValor(v) {
+  if (v === undefined || v === null || v === '') return '';
+  if (Array.isArray(v)) return v.map(x => {
+    if (!x) return '';
+    if (typeof x === 'object') return x.serial || x.nome || x.caption || x.modelo || JSON.stringify(x);
+    return String(x);
+  }).filter(Boolean).join(' | ');
+  if (typeof v === 'object') return v.serial || v.nome || v.caption || v.modelo || JSON.stringify(v);
+  return String(v).trim();
+}
+
+function sysackAutoFaixaIP(ip) {
+  const m = String(ip || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  return m ? `${m[1]}.${m[2]}.${m[3]}.0/24` : '';
+}
+
+function sysackAutoAtivoPorAgente(agent) {
+  if (!agent) return null;
+  const ativos = STATE?.ativos || [];
+  const keys = [
+    agent.ativoId, agent.assetId, agent.pat, agent.serial,
+    agent.hostname, agent.computador, agent.nomeComputador, agent.id, agent.ip
+  ].filter(Boolean).map(x => String(x).toLowerCase());
+
+  return ativos.find(a => {
+    const vals = [a.id, a.pat, a.serial, a.serie, a.hostname, a.computador, a.nomeComputador, a.desc, a.ip]
+      .filter(Boolean).map(x => String(x).toLowerCase());
+    return vals.some(v => keys.includes(v));
+  }) || null;
+}
+
+async function sysackRegistrarMudancaAutomaticaAtivo(ativo, tipo, titulo, desc, extras = {}) {
+  if (!ativo?.id || !FB_READY || !db) return;
+  const dedupKey = `${ativo.id}|${tipo}|${desc}`;
+  const agora = Date.now();
+  if (SYSACK_AGENT_AUTO_CHANGE_CACHE[dedupKey] && agora - SYSACK_AGENT_AUTO_CHANGE_CACHE[dedupKey] < 10 * 60 * 1000) return;
+  SYSACK_AGENT_AUTO_CHANGE_CACHE[dedupKey] = agora;
+
+  const payload = {
+    tipo,
+    evento: tipo,
+    titulo,
+    label: titulo,
+    desc,
+    descricao: desc,
+    origem: 'agent-auto-detect',
+    autor: 'SYSACK Agent',
+    usuario: 'SYSACK Agent',
+    usuarioId: 'agent',
+    dot: extras.dot || 'blue',
+    data: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    ...extras
+  };
+
+  try {
+    await db.collection('ativos').doc(ativo.id).collection('historico').add(payload);
+  } catch(e) {
+    console.warn('[AutoHist] Falha ao gravar histórico automático:', e.message);
+  }
+}
+
+async function sysackDetectarMudancasAutomaticasAgente(agent) {
+  try {
+    const ativo = sysackAutoAtivoPorAgente(agent);
+    if (!ativo) return;
+
+    const pares = [
+      ['ip', 'IP', 'mudanca_ip'],
+      ['hostname', 'Hostname', 'mudanca_hostname'],
+      ['nomeComputador', 'Nome do computador', 'mudanca_nome'],
+      ['area', 'Área', 'mudanca_area'],
+      ['grupo', 'Grupo', 'mudanca_grupo'],
+      ['card', 'Card', 'mudanca_card'],
+      ['responsavel', 'Responsável', 'troca_responsavel'],
+      ['resp', 'Responsável', 'troca_responsavel'],
+      ['monitores', 'Monitor', 'troca_monitor'],
+      ['monitor', 'Monitor', 'troca_monitor']
+    ];
+
+    for (const [campo, label, tipo] of pares) {
+      if (!(campo in agent)) continue;
+      const antes = sysackAutoNormValor(ativo[campo]);
+      const depois = sysackAutoNormValor(agent[campo]);
+      if (!depois || antes === depois) continue;
+      const desc = `${label}: ${antes || '—'} → ${depois}`;
+      await sysackRegistrarMudancaAutomaticaAtivo(ativo, tipo, `${label} alterado automaticamente`, desc, {
+        campo, de: antes || '—', para: depois, dot: tipo === 'troca_monitor' ? 'orange' : 'blue'
+      });
+    }
+
+    const faixaAntes = sysackAutoFaixaIP(ativo.ip);
+    const faixaDepois = sysackAutoFaixaIP(agent.ip);
+    if (faixaAntes && faixaDepois && faixaAntes !== faixaDepois) {
+      const desc = `Faixa de rede: ${faixaAntes} → ${faixaDepois} · IP: ${ativo.ip || '—'} → ${agent.ip || '—'}`;
+      await sysackRegistrarMudancaAutomaticaAtivo(ativo, 'mudanca_faixa_ip', 'Faixa de rede alterada automaticamente', desc, {
+        ipAnterior: ativo.ip || '', ipNovo: agent.ip || '', faixaAnterior: faixaAntes, faixaNova: faixaDepois, dot: 'red'
+      });
+    }
+  } catch(e) {
+    console.warn('[AutoHist] Erro na detecção automática:', e.message);
+  }
+}
+
+async function sysackDetectarMudancasAutomaticasAgentes(lista) {
+  if (!Array.isArray(lista) || !lista.length) return;
+  for (const ag of lista) await sysackDetectarMudancasAutomaticasAgente(ag);
+}
+
 // ════════════════════════════════════════════════════════════
 // ASSISTÊNCIA REMOTA — Computadores
 // Gerencia agentes desktop: inventário, deploy, acesso remoto
@@ -7509,7 +7629,9 @@ function startAgentsListener() {
           return { id: d.id, ...data };
         });
         verificarTrocaMonitores(STATE_AGENTS.list);
-        if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
+        sysackDetectarMudancasAutomaticasAgentes(STATE_AGENTS.list).catch(e => console.warn('[AutoHist]', e.message));
+        sysackDetectarMudancasAutomaticasAgentes(STATE_AGENTS.list).catch(e => console.warn('[AutoHist]', e.message));
+    if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
         if (isPageActive('ativos')) renderAtivos();
         nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
       }, err => {
@@ -11012,7 +11134,7 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
     let usuarios = [];
     if (FB_READY && auth?.currentUser) {
       try {
-        const data = await callFunction('getHistoricoUsuarios', { ativoId, hostname: ativo?.hostname || ativo?.desc || '', ip: ativo?.ip || '' });
+        const data = await callFunction('getHistoricoUsuarios', { ativoId });
         usuarios   = data?.usuarios || [];
       } catch(e) { console.warn('[HistoricoUsuarios] function:', e.message); }
     }
@@ -30290,15 +30412,8 @@ class SysackWebRTCViewer {
     const ativo = ativoDoAgenteSYSACK(ag) || (STATE.ativos || []).find(a => String(a.id) === String(agentId) || String(a.pat) === String(agentId)) || null;
     const ativoId = ativo?.id || agentId;
     const historico = ativo?.id ? await fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : [];
-    let usuarios = ativo?.id ? await fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/usuarios_historico`, 'ultimoLogin') : [];
-    let loginHistory = await fsGetLoginHistorySYSACK(ativo, ag);
-    try {
-      if (typeof callFunction === 'function') {
-        const data = await callFunction('getHistoricoUsuarios', { ativoId: ativo?.id || '', hostname: ag?.hostname || ativo?.hostname || ativo?.desc || ag?.id || '', ip: ag?.ip || ativo?.ip || '' });
-        if (Array.isArray(data?.usuarios) && data.usuarios.length) usuarios = data.usuarios;
-        if (Array.isArray(data?.loginEventos) && data.loginEventos.length) loginHistory = data.loginEventos;
-      }
-    } catch(e) { console.warn('[PainelComputador] getHistoricoUsuarios:', e.message); }
+    const usuarios = ativo?.id ? await fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/usuarios_historico`, 'ultimoLogin') : [];
+    const loginHistory = await fsGetLoginHistorySYSACK(ativo, ag);
     const chamados = chamadosDoComputadorSYSACK(ativo, ag);
     return { ag, ativo, ativoId, historico, usuarios, loginHistory, chamados };
   }
@@ -30317,63 +30432,6 @@ class SysackWebRTCViewer {
   }
 
   
-
-  function renderEditorHistoricoTecnicoSYSACK(ativo, ag) {
-    const ativoId = esc2(ativo?.id || ag?.ativoId || ag?.id || '');
-    const hostname = esc2(ativo?.hostname || ativo?.desc || ag?.hostname || ag?.id || '');
-    return `
-      <div style="margin:0 0 16px 0;padding:14px;border:1px solid var(--g200);border-radius:12px;background:#fff">
-        <div style="font-weight:800;color:var(--g900);margin-bottom:5px">Registrar movimentação / observação técnica</div>
-        <div style="font-size:12px;color:var(--g500);margin-bottom:10px">O registro será salvo no histórico desta máquina.</div>
-        <textarea id="txtHistoricoTecnicoSYSACK" placeholder="Ex.: equipamento movido para outra sala; IP alterado; monitor substituído; card movido para manutenção..." style="width:100%;min-height:74px;border:1px solid var(--g200);border-radius:10px;padding:10px;font-family:inherit;font-size:13px;resize:vertical"></textarea>
-        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-          <select id="tipoHistoricoTecnicoSYSACK" style="border:1px solid var(--g200);border-radius:8px;padding:8px 10px;background:#fff;font-size:12px">
-            <option value="nota_tecnico">Nota técnica</option>
-            <option value="movimentacao">Movimentação</option>
-            <option value="mudanca_ip">Mudança de IP</option>
-            <option value="mudanca_faixa_ip">Mudança de faixa de rede</option>
-            <option value="troca_monitor">Troca de monitor</option>
-            <option value="troca_area">Mudança de área</option>
-            <option value="troca_grupo">Mudança de grupo</option>
-            <option value="mudanca_card">Mudança de card</option>
-            <option value="troca_responsavel">Mudança de responsável</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="salvarHistoricoTecnicoSYSACK('${ativoId}','${hostname}')">Salvar no histórico</button>
-          <span id="histTecnicoStatusSYSACK" style="font-size:12px;color:var(--g500)"></span>
-        </div>
-      </div>`;
-  }
-
-  window.salvarHistoricoTecnicoSYSACK = async function(ativoId, hostname) {
-    const txtEl = document.getElementById('txtHistoricoTecnicoSYSACK');
-    const tipoEl = document.getElementById('tipoHistoricoTecnicoSYSACK');
-    const st = document.getElementById('histTecnicoStatusSYSACK');
-    const texto = (txtEl?.value || '').trim();
-    const tipo = tipoEl?.value || 'nota_tecnico';
-    if (!texto) return showToast?.('Digite uma observação para salvar no histórico.', 'warning');
-    if (st) st.textContent = 'Salvando...';
-    const payload = {
-      ativoId, hostname, tipo,
-      titulo: tipo === 'nota_tecnico' ? 'Nota técnica' : 'Movimentação registrada',
-      desc: texto, descricao: texto,
-      origem: 'manual-tecnico',
-      autor: CURRENT_USER?.nome || CURRENT_USER?.email || 'Técnico',
-      data: new Date().toISOString(), createdAt: new Date().toISOString()
-    };
-    try {
-      if (typeof callFunction === 'function') await callFunction('adicionarNotaHistorico', payload);
-      else if (db && ativoId) await db.collection('ativos').doc(ativoId).collection('historico').add(payload);
-      if (txtEl) txtEl.value = '';
-      if (st) st.textContent = 'Salvo.';
-      showToast?.('Registro salvo no histórico.', 'success');
-      setTimeout(() => { try { abrirPainelComputadorSYSACK(ativoId || hostname, 'historico'); } catch(e){} }, 500);
-    } catch(e) {
-      console.warn('[HistoricoTecnico]', e);
-      if (st) st.textContent = 'Erro.';
-      showToast?.('Erro ao salvar histórico: ' + (e.message || e), 'danger');
-    }
-  };
-
 function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
     const porUsuario = new Map();
     const addDia = (item, dtRaw, diaRaw) => {
@@ -30464,9 +30522,9 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
     eventos.sort((a,b) => new Date(b.createdAt || b.data || b.detecEm || b.ultimoLogin || 0) - new Date(a.createdAt || a.data || a.detecEm || a.ultimoLogin || 0));
 
     if (!eventos.length) {
-      return renderEditorHistoricoTecnicoSYSACK(ativo, ag) + '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhuma mudança técnica registrada para esta máquina.<br><span style="font-size:12px">Esta aba agora mostra somente alterações de IP, faixa de rede, monitor, grupo, área, nome, card, responsável e movimentações.</span></div>';
+      return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhuma mudança técnica registrada para esta máquina.<br><span style="font-size:12px">Esta aba agora mostra somente alterações de IP, faixa de rede, monitor, grupo, área, nome, card, responsável e movimentações.</span></div>';
     }
-    return renderEditorHistoricoTecnicoSYSACK(ativo, ag) + eventos.map(linhaEventoSYSACK).join('');
+    return eventos.map(linhaEventoSYSACK).join('');
   }
 
   function ativarTabComputadorSYSACK(tab) {
@@ -30501,7 +30559,7 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
     document.getElementById('comp-rast-sub').textContent = `${ativo?.pat ? 'PAT '+ativo.pat+' · ' : ''}${ag.ip || ativo?.ip || ''}`;
     document.getElementById('comp-rast-body').innerHTML = buildResumoComputadorSYSACK(ag, ativo) + `
       <div style="display:flex;gap:14px;border-bottom:1px solid var(--g100);margin-bottom:14px">
-        <button data-comp-tab="inventario" onclick="sysackCompTab('inventario')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Informações</button>
+        <button data-comp-tab="inventario" onclick="sysackCompTab('inventario')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Inventário</button>
         <button data-comp-tab="historico" onclick="sysackCompTab('historico')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Histórico</button>
         <button data-comp-tab="logins" onclick="sysackCompTab('logins')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Logins</button>
         <button data-comp-tab="chamados" onclick="sysackCompTab('chamados')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Chamados</button>
