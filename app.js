@@ -7632,78 +7632,27 @@ function arListaUsuariosPrincipais(ativo, ag) {
   return src.usuarioPrincipal || src.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioLogado || '—';
 }
 
-
 function arUltimoLoginFmt(ativo, ag) {
-  const src = ativo || ag || {};
-
-  const candidatos = [
-    src.ultimoLoginEm,
-    src.ultimoLoginData,
-    src.ultimoLogin,
-    src.lastLogin,
-    src.loginAt,
-    src.ultimoLogon
-  ].filter(Boolean);
-
-  if (candidatos.length) {
-    const dt = candidatos[0];
-    return fmtDate(dt);
-  }
-
-  // Busca no cache global de histórico de login
-  try {
-    const hostname = src.hostname || src.computador || src.nomeComputador || ag?.hostname;
-    const eventos = (window.STATE_LOGIN_HISTORY || []).filter(e =>
-      (e.hostname || e.computador || '') === hostname
-    );
-
-    if (eventos.length) {
-      eventos.sort((a,b) => {
-        const da = new Date(a.dataHora || a.timestamp || a.createdAt || 0);
-        const db = new Date(b.dataHora || b.timestamp || b.createdAt || 0);
-        return db - da;
-      });
-
-      const ultimo = eventos[0];
-      const dt = ultimo.dataHora || ultimo.timestamp || ultimo.createdAt;
-      if (dt) return fmtDate(dt);
-    }
-  } catch(e) {}
-
-  return '—';
+  const dt = ativo?.ultimoLoginEm || ativo?.ultimoLoginData || ativo?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || '';
+  return dt ? fmtDate(dt) : '—';
 }
 
 function arDiasLogadosAno(ativo, ag) {
   const src = ativo || ag || {};
   const anoAtual = new Date().getFullYear();
-
   if (src.diasLogadosAno != null) return src.diasLogadosAno;
   if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
-
-  try {
-    const hostname = src.hostname || src.computador || src.nomeComputador || ag?.hostname;
-
-    const eventos = (window.STATE_LOGIN_HISTORY || []).filter(e =>
-      (e.hostname || e.computador || '') === hostname
-    );
-
-    if (eventos.length) {
-      const dias = new Set();
-
-      eventos.forEach(ev => {
-        const dt = new Date(ev.dataHora || ev.timestamp || ev.createdAt || 0);
-        if (!isNaN(dt) && dt.getFullYear() === anoAtual) {
-          dias.add(dt.toISOString().slice(0,10));
-        }
-      });
-
-      return dias.size || '—';
-    }
-  } catch(e) {}
-
+  if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
+    const total = src.usuariosPrincipais
+      .map(u => u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)
+      .reduce((s,n) => s + (Number(n)||0), 0);
+    if (total) return total;
+  }
+  if (Array.isArray(src.dias)) {
+    return new Set(src.dias.filter(d => String(d).startsWith(String(anoAtual)))).size;
+  }
   return '—';
 }
-
 
 function abrirHistoricoUsuariosDoAgente(agentId) {
   const ag = (STATE_AGENTS?.list || []).find(a => a.id === agentId);
@@ -7850,8 +7799,7 @@ function renderAssistenciaRemota() {
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações completas da máquina" style="padding:2px 7px;font-size:12px">📋</button>
-          <button class="btn btn-secondary btn-xs" onclick="abrirHistoricoUsuariosDoAgente('${a.id}')" title="Histórico de logins da máquina" style="padding:2px 7px;font-size:12px">👥</button>
-          <button class="btn btn-secondary btn-xs" onclick="abrirHistoricoGeralDoAgente('${a.id}')" title="Histórico geral da máquina" style="padding:2px 7px;font-size:12px">📜</button>
+          
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
           <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">🗂️</button>
         </div>
