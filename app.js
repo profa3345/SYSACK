@@ -7633,8 +7633,19 @@ function arListaUsuariosPrincipais(ativo, ag) {
 }
 
 function arUltimoLoginFmt(ativo, ag) {
-  const dt = ativo?.ultimoLoginEm || ativo?.ultimoLoginData || ativo?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || '';
-  return dt ? fmtDate(dt) : '—';
+  const src = ativo || ag || {};
+  const direto = src.ultimoLoginEm || src.ultimoLoginData || src.ultimoLogin || src.lastLogin || src.loginAt || src.ultimoLogon || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || '';
+  if (direto) return fmtDate(direto);
+
+  try {
+    const hist = sysackHistoricoInlineDoAtivo(ativo, ag);
+    const datas = hist.map(h => sysackExtrairDataLogin(h)).filter(Boolean)
+      .map(d => new Date(d)).filter(d => !isNaN(d.getTime()))
+      .sort((a,b) => b - a);
+    if (datas.length) return fmtDate(datas[0]);
+  } catch(e) {}
+
+  return '—';
 }
 
 function arDiasLogadosAno(ativo, ag) {
@@ -7642,14 +7653,34 @@ function arDiasLogadosAno(ativo, ag) {
   const anoAtual = new Date().getFullYear();
   if (src.diasLogadosAno != null) return src.diasLogadosAno;
   if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
+  if (src.contadorDiasAno != null) return src.contadorDiasAno;
+  if (src.diasAno != null) return src.diasAno;
+
   if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
     const total = src.usuariosPrincipais
-      .map(u => u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)
+      .map(u => u.diasLogadosAno || u.contadorDiasAno || u.diasAnoAtual || u.totalDias || 0)
       .reduce((s,n) => s + (Number(n)||0), 0);
     if (total) return total;
   }
+
+  const dias = new Set();
+  try {
+    const hist = sysackHistoricoInlineDoAtivo(ativo, ag);
+    hist.forEach(h => {
+      if (Array.isArray(h.dias)) {
+        h.dias.forEach(x => { if (String(x).slice(0,4) === String(anoAtual)) dias.add(String(x).slice(0,10)); });
+      }
+      const data = sysackExtrairDataLogin(h);
+      const d = data ? new Date(data) : null;
+      if (d && !isNaN(d.getTime()) && d.getFullYear() === anoAtual) dias.add(d.toISOString().slice(0,10));
+      if (h.dia && String(h.dia).slice(0,4) === String(anoAtual)) dias.add(String(h.dia).slice(0,10));
+    });
+  } catch(e) {}
+
+  if (dias.size) return dias.size;
+
   if (Array.isArray(src.dias)) {
-    return new Set(src.dias.filter(d => String(d).startsWith(String(anoAtual)))).size;
+    return new Set(src.dias.filter(d => String(d).startsWith(String(anoAtual))).map(d => String(d).slice(0,10))).size || '—';
   }
   return '—';
 }
@@ -7799,7 +7830,6 @@ function renderAssistenciaRemota() {
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações completas da máquina" style="padding:2px 7px;font-size:12px">📋</button>
-          
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
           <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">🗂️</button>
         </div>
@@ -30371,4 +30401,18 @@ class SysackWebRTCViewer {
   if (!document.getElementById('sysack-fix-autocomplete-css')) {
     const st = document.createElement('style'); st.id='sysack-fix-autocomplete-css'; st.textContent=css; document.head.appendChild(st);
   }
+})();
+
+
+// SYSACK PATCH: fallback amigável para analisarAtivo quando a Cloud Function/Gemini falhar.
+(function sysackPatchAnalisarAtivoFallback(){
+  if (typeof window.analisarAtivoPorIA !== 'function') return;
+  const original = window.analisarAtivoPorIA;
+  window.analisarAtivoPorIA = async function(pat) {
+    try { return await original.apply(this, arguments); }
+    catch(e) {
+      console.warn('[SYSACK PATCH] analisarAtivo fallback:', e?.message || e);
+      showToast('IA indisponível no momento. Verifique logs da Cloud Function/Gemini.', 'warning', 6000);
+    }
+  };
 })();
