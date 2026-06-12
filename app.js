@@ -10980,7 +10980,7 @@ async function carregarHistoricoUsuarios(ativoId, ativo) {
     let usuarios = [];
     if (FB_READY && auth?.currentUser) {
       try {
-        const data = await callFunction('getHistoricoUsuarios', { ativoId });
+        const data = await callFunction('getHistoricoUsuarios', { ativoId, hostname: ag?.hostname || ativo?.hostname || ativo?.computador || '', ip: ag?.ip || ativo?.ip || '' });
         usuarios   = data?.usuarios || [];
       } catch(e) { console.warn('[HistoricoUsuarios] function:', e.message); }
     }
@@ -30294,96 +30294,8 @@ class SysackWebRTCViewer {
     chamados.forEach(c => eventos.push({ tipo:'chamado', titulo:`Chamado ${c.id || c.numero} ${c.status ? '— '+c.status : ''}`, desc:c.titulo || c.desc || c.descricao || '', createdAt:c.createdAt || c.data, chamadoId:c.id || c.numero, origem:'chamados' }));
     eventos.sort((a,b) => new Date(b.createdAt || b.data || b.detecEm || b.ultimoLogin || 0) - new Date(a.createdAt || a.data || a.detecEm || a.ultimoLogin || 0));
     if (!eventos.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum evento no histórico deste computador.</div>';
-    return renderNotaTecnicaHistoricoSYSACK(ativo, ag) + eventos.map(linhaEventoSYSACK).join('');
+    return eventos.map(linhaEventoSYSACK).join('');
   }
-
-  
-function renderNotaTecnicaHistoricoSYSACK(ativo, ag) {
-    const ativoId = esc2((ativo && ativo.id) || (ag && ag.ativoId) || (ag && ag.id) || '');
-    const hostname = esc2((ativo && (ativo.hostname || ativo.computador || ativo.desc)) || (ag && ag.hostname) || '');
-
-    return `
-      <div style="margin:0 0 16px 0;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--card)">
-        <div style="font-weight:800;margin-bottom:6px;color:var(--g900)">Registrar movimentação / anotação técnica</div>
-        <div style="font-size:12px;color:var(--g500);margin-bottom:10px">
-          Use este campo para registrar mudança de IP, faixa de rede, monitor, área, grupo, nome, card, responsável, movimentação física ou qualquer observação técnica da máquina.
-        </div>
-        <textarea id="nota-historico-maquina" placeholder="Ex.: Máquina movida para a sala X; monitor alterado; IP atualizado; card movido para manutenção..." 
-          style="width:100%;min-height:74px;border:1px solid var(--border);border-radius:10px;padding:10px;font-family:inherit;font-size:13px;resize:vertical;background:var(--bg);color:var(--g900)"></textarea>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
-          <select id="tipo-nota-historico-maquina" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg);color:var(--g800);font-size:12px">
-            <option value="nota_tecnico">Nota técnica</option>
-            <option value="movimentacao">Movimentação</option>
-            <option value="mudanca_ip">Mudança de IP</option>
-            <option value="mudanca_faixa_ip">Mudança de faixa de rede</option>
-            <option value="troca_monitor">Troca de monitor</option>
-            <option value="troca_area">Mudança de área</option>
-            <option value="troca_grupo">Mudança de grupo</option>
-            <option value="mudanca_card">Mudança de card</option>
-            <option value="troca_responsavel">Mudança de responsável</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="salvarNotaHistoricoMaquinaSYSACK('${ativoId}','${hostname}')">Salvar no histórico</button>
-          <span id="nota-historico-status" style="font-size:12px;color:var(--g500)"></span>
-        </div>
-      </div>
-    `;
-  }
-
-async function salvarNotaHistoricoMaquinaSYSACK(ativoId, hostname) {
-    const txtEl = document.getElementById('nota-historico-maquina');
-    const tipoEl = document.getElementById('tipo-nota-historico-maquina');
-    const statusEl = document.getElementById('nota-historico-status');
-
-    const texto = (txtEl?.value || '').trim();
-    const tipo = tipoEl?.value || 'nota_tecnico';
-
-    if (!texto) {
-      showToast('Digite uma observação para salvar no histórico.', 'warning');
-      return;
-    }
-
-    if (statusEl) statusEl.textContent = 'Salvando...';
-
-    const payload = {
-      ativoId,
-      hostname,
-      tipo,
-      desc: texto,
-      descricao: texto,
-      titulo: tipo === 'nota_tecnico' ? 'Nota técnica' : 'Movimentação registrada',
-      origem: 'tecnico',
-      autor: (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.email)) || 'Técnico',
-      createdAt: new Date().toISOString(),
-      data: new Date().toISOString()
-    };
-
-    try {
-      if (typeof callFunction === 'function') {
-        await callFunction('adicionarNotaHistorico', payload);
-      } else if (window._db && ativoId) {
-        await window._db.collection('ativos').doc(ativoId).collection('historico').add(payload);
-      } else {
-        throw new Error('Banco não disponível');
-      }
-
-      if (txtEl) txtEl.value = '';
-      if (statusEl) statusEl.textContent = 'Salvo.';
-      showToast('Registro salvo no histórico da máquina.', 'success');
-
-      setTimeout(() => {
-        try {
-          abrirDetalhesComputadorSYSACK(ativoId || hostname);
-        } catch(e) {
-          location.reload();
-        }
-      }, 700);
-    } catch(e) {
-      console.warn('[Historico] Falha ao salvar nota:', e);
-      if (statusEl) statusEl.textContent = 'Erro ao salvar.';
-      showToast('Não foi possível salvar no histórico: ' + (e.message || e), 'danger');
-    }
-  }
-
 
   function ativarTabComputadorSYSACK(tab) {
     document.querySelectorAll('[data-comp-tab]').forEach(btn => {
