@@ -7632,60 +7632,24 @@ function arListaUsuariosPrincipais(ativo, ag) {
   return src.usuarioPrincipal || src.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioLogado || '—';
 }
 
-
 function arUltimoLoginFmt(ativo, ag) {
-  const src = ativo || ag || {};
-  const direto = src.ultimoLoginEm || src.ultimoLoginData || src.ultimoLogin || src.lastLogin ||
-                 ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || '';
-  if (direto) return fmtDate(direto);
-
-  try {
-    const hist = sysackHistoricoInlineDoAtivo(ativo, ag);
-    const datas = hist.map(h => sysackExtrairDataLogin(h)).filter(Boolean)
-      .map(d => d?.toDate ? d.toDate() : (d?.seconds ? new Date(d.seconds*1000) : new Date(d)))
-      .filter(d => !isNaN(d.getTime()))
-      .sort((a,b) => b - a);
-    return datas.length ? fmtDate(datas[0]) : '—';
-  } catch(e) {
-    return '—';
-  }
+  const dt = ativo?.ultimoLoginEm || ativo?.ultimoLoginData || ativo?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || '';
+  return dt ? fmtDate(dt) : '—';
 }
 
 function arDiasLogadosAno(ativo, ag) {
   const src = ativo || ag || {};
-  const anoAtual = String(new Date().getFullYear());
-
-  if (src.diasLogadosAno != null && src.diasLogadosAno !== '') return src.diasLogadosAno;
-  if (src.diasLogadosAnoAtual != null && src.diasLogadosAnoAtual !== '') return src.diasLogadosAnoAtual;
-
+  const anoAtual = new Date().getFullYear();
+  if (src.diasLogadosAno != null) return src.diasLogadosAno;
+  if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
   if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
     const total = src.usuariosPrincipais
-      .map(u => u.diasLogadosAno || u.contadorDiasAno || u.diasAnoAtual || u.totalDias || 0)
+      .map(u => u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)
       .reduce((s,n) => s + (Number(n)||0), 0);
     if (total) return total;
   }
-
-  try {
-    const hist = sysackHistoricoInlineDoAtivo(ativo, ag);
-    const dias = new Set();
-    hist.forEach(h => {
-      const dtRaw = sysackExtrairDataLogin(h);
-      const diaRaw = h?.dia || '';
-      if (String(diaRaw).startsWith(anoAtual)) {
-        dias.add(String(diaRaw).slice(0,10));
-        return;
-      }
-      if (!dtRaw) return;
-      const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
-      if (!isNaN(dt.getTime()) && String(dt.getFullYear()) === anoAtual) {
-        dias.add(dt.toISOString().slice(0,10));
-      }
-    });
-    if (dias.size) return dias.size;
-  } catch(e) {}
-
   if (Array.isArray(src.dias)) {
-    return new Set(src.dias.filter(d => String(d).startsWith(anoAtual))).size || '—';
+    return new Set(src.dias.filter(d => String(d).startsWith(String(anoAtual)))).size;
   }
   return '—';
 }
@@ -7835,6 +7799,8 @@ function renderAssistenciaRemota() {
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações completas da máquina" style="padding:2px 7px;font-size:12px">📋</button>
+          <button class="btn btn-secondary btn-xs" onclick="abrirHistoricoUsuariosDoAgente('${a.id}')" title="Histórico de logins da máquina" style="padding:2px 7px;font-size:12px">👥</button>
+          <button class="btn btn-secondary btn-xs" onclick="abrirHistoricoGeralDoAgente('${a.id}')" title="Histórico geral da máquina" style="padding:2px 7px;font-size:12px">📜</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
           <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">🗂️</button>
         </div>
@@ -30224,30 +30190,10 @@ class SysackWebRTCViewer {
 
   function diasAnoSYSACK(ativo, ag) {
     const src = ativo || ag || {};
-    const ano = String(new Date().getFullYear());
-
-    if (src.diasLogadosAno != null && src.diasLogadosAno !== '') return src.diasLogadosAno;
-    if (src.diasLogadosAnoAtual != null && src.diasLogadosAnoAtual !== '') return src.diasLogadosAnoAtual;
-
-    const loginHistory = sysackHistoricoInlineDoAtivo(ativo, ag);
-    const dias = new Set();
-
-    loginHistory.forEach(l => {
-      const diaRaw = l?.dia || '';
-      if (String(diaRaw).startsWith(ano)) {
-        dias.add(String(diaRaw).slice(0,10));
-        return;
-      }
-      const dtRaw = l?.dataLogin || l?.data || l?.ultimoLogin || l?.createdAt || l?.timestamp || l?.updatedAt || '';
-      if (!dtRaw) return;
-      const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
-      if (!isNaN(dt.getTime()) && String(dt.getFullYear()) === ano) dias.add(dt.toISOString().slice(0,10));
-    });
-
-    if (dias.size) return dias.size;
-
+    if (src.diasLogadosAno != null) return src.diasLogadosAno;
+    if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
     if (Array.isArray(src.usuariosPrincipais)) {
-      const n = src.usuariosPrincipais.reduce((s,u) => s + (Number(u.diasLogadosAno || u.contadorDiasAno || u.diasAnoAtual || u.totalDias || 0)), 0);
+      const n = src.usuariosPrincipais.reduce((s,u) => s + (Number(u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)), 0);
       if (n) return n;
     }
     return '—';
@@ -30311,62 +30257,25 @@ class SysackWebRTCViewer {
     return '<table style="width:100%;border-collapse:collapse">' + rows.map(([k,v]) => `<tr><td style="padding:6px 0;color:var(--g500);font-size:12px;width:150px;border-bottom:1px solid var(--g100)">${esc2(k)}</td><td style="padding:6px 0;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--g100)">${esc2(v)}</td></tr>`).join('') + '</table>';
   }
 
-  
-function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
+  function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
     const porUsuario = new Map();
-    const addDia = (item, dtRaw, diaRaw) => {
-      if (!item.dias) item.dias = [];
-      if (diaRaw) {
-        item.dias.push(String(diaRaw).slice(0,10));
-      } else if (dtRaw) {
-        const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
-        if (!isNaN(dt.getTime())) item.dias.push(dt.toISOString().slice(0,10));
-      }
-    };
-
     usuarios.forEach(u => {
-      const k = norm2(u.loginNorm || u.login || u.usuario || u.usuarioLogado || u.nome);
+      const k = norm2(u.loginNorm || u.login || u.usuario || u.nome);
       if (!k) return;
-      const dias = Array.isArray(u.dias) ? u.dias : [];
-      porUsuario.set(k, {
-        login:k,
-        nome:u.nome || u.usuarioNome || u.login || k,
-        ultimo:u.ultimoLogin || u.ate || u.dataLogin || u.data || u.createdAt,
-        primeiro:u.desde || u.primeiroLogin || u.dataLogin || u.data || u.createdAt,
-        totalDias:u.totalDias || dias.length || 0,
-        diasAno:u.diasLogadosAno || u.contadorDiasAno || 0,
-        principal:!!u.ehResponsavel,
-        dias:[...dias]
-      });
+      porUsuario.set(k, { login:k, nome:u.nome || u.login || k, ultimo:u.ultimoLogin || u.ate, primeiro:u.desde || u.primeiroLogin, totalDias:u.totalDias || (Array.isArray(u.dias)?u.dias.length:0), diasAno:u.diasLogadosAno || 0, principal:!!u.ehResponsavel, dias:Array.isArray(u.dias)?u.dias:[] });
     });
-
     loginHistory.forEach(l => {
-      const k = norm2(l.usuario || l.login || l.loginNorm || l.usuarioLogado || l.username);
+      const k = norm2(l.usuario || l.login || l.loginNorm || l.usuarioLogado);
       if (!k) return;
-      const item = porUsuario.get(k) || { login:k, nome:l.usuarioNome || l.nome || l.usuario || l.login || k, dias:[], totalDias:0 };
-      const dt = l.dataLogin || l.data || l.ultimoLogin || l.createdAt || l.timestamp || l.updatedAt;
-      if (dt) {
-        const dtObj = dt?.toDate ? dt.toDate() : (dt?.seconds ? new Date(dt.seconds*1000) : new Date(dt));
-        if (!isNaN(dtObj.getTime())) {
-          if (!item.ultimo || dtObj > new Date(item.ultimo)) item.ultimo = dtObj.toISOString();
-          if (!item.primeiro || dtObj < new Date(item.primeiro)) item.primeiro = dtObj.toISOString();
-        }
-      }
-      addDia(item, dt, l.dia);
+      const item = porUsuario.get(k) || { login:k, nome:l.usuarioNome || l.nome || k, dias:[], totalDias:0 };
+      const dt = l.dataLogin || l.ultimoLogin || l.createdAt;
+      if (dt && (!item.ultimo || new Date(dt) > new Date(item.ultimo))) item.ultimo = dt;
+      if (dt) item.dias.push(String(dt).slice(0,10));
       porUsuario.set(k, item);
     });
-
     const ano = String(new Date().getFullYear());
-    const arr = [...porUsuario.values()]
-      .map(u => {
-        const diasUnicos = new Set((u.dias||[]).filter(Boolean).map(d => String(d).slice(0,10)));
-        const diasAno = u.diasAno || [...diasUnicos].filter(d => d.startsWith(ano)).length;
-        return {...u, diasAno, totalDias: u.totalDias || diasUnicos.size};
-      })
-      .sort((a,b) => new Date(b.ultimo||0) - new Date(a.ultimo||0));
-
-    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.<br><span style="font-size:12px">Verifique se o agente atualizado já executou um novo ciclo de coleta.</span></div>';
-
+    const arr = [...porUsuario.values()].map(u => ({...u, diasAno: u.diasAno || new Set((u.dias||[]).filter(d => String(d).startsWith(ano))).size, totalDias: u.totalDias || new Set(u.dias||[]).size})).sort((a,b) => new Date(b.ultimo||0) - new Date(a.ultimo||0));
+    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.</div>';
     return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Usuário</th><th>Primeiro login</th><th>Último login</th><th>Dias no ano</th><th>Total dias</th><th>Status</th></tr></thead><tbody>${arr.map(u => `<tr><td><b>${esc2(u.nome || u.login)}</b><div style="font-size:11px;color:var(--g400)">${esc2(u.login)}</div></td><td>${esc2(fmt2(u.primeiro))}</td><td>${esc2(fmt2(u.ultimo))}</td><td><b>${esc2(u.diasAno)}</b></td><td>${esc2(u.totalDias)}</td><td>${u.principal ? '<span class="badge badge-info">Principal</span>' : ''}${ativo?.maquinaCompartilhada ? '<span class="badge badge-warning">Compartilhada</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
   }
 
@@ -30375,37 +30284,106 @@ function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
     return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Chamado</th><th>Título/Descrição</th><th>Status</th><th>Data</th><th>Ação</th></tr></thead><tbody>${chamados.map(c => `<tr><td><b>${esc2(c.id || c.numero)}</b></td><td>${esc2(c.titulo || c.desc || c.descricao || '—')}</td><td>${esc2(c.status || '—')}</td><td>${esc2(fmt2(c.createdAt || c.data))}</td><td><button class="btn btn-primary btn-xs" onclick="sysackAbrirChamadoVinculado('${esc2(c.id || c.numero)}')">Abrir chamado</button></td></tr>`).join('')}</tbody></table>`;
   }
 
-  
-function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chamados, ativo, ag) {
-    const TIPOS_MAQUINA = [
-      'mudanca_faixa_ip','alerta_ip','troca_monitor','monitor','monitor_movido',
-      'transferencia','movimentacao','troca_responsavel','mudanca_campo','mudanca_local',
-      'troca_area','troca_grupo','troca_status','mudanca_ip','mudanca_hostname',
-      'mudanca_nome','mudanca_card','card_movido','patrimonio','inventario','nota_tecnico'
-    ];
-
+  function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chamados, ativo, ag) {
     const eventos = [];
-    historico.forEach(h => {
-      const tipo = String(h.tipo || h.subtipo || '').toLowerCase();
-      const titulo = String(h.titulo || h.label || '').toLowerCase();
-      const origem = String(h.origem || '').toLowerCase();
-
-      // A aba Histórico NÃO mostra chamados nem logins.
-      if (tipo.includes('chamado') || titulo.includes('chamado') || origem.includes('chamado')) return;
-      if (tipo.includes('login') || tipo.includes('logout') || origem.includes('login')) return;
-
-      // Mostra apenas mudanças técnicas/administrativas da máquina.
-      const permitido = TIPOS_MAQUINA.some(t => tipo.includes(t) || titulo.includes(t.replaceAll('_',' ')));
-      if (permitido || h.campo || h.de || h.para || h.desc || h.descricao) eventos.push(h);
+    historico.forEach(h => eventos.push(h));
+    usuarios.forEach(u => {
+      if (u.ultimoLogin || u.ate) eventos.push({ tipo:'login', titulo:'Login realizado', desc:`Usuário: ${u.nome || u.login || u.loginNorm || '—'}\nMáquina: ${host2(ativo) || ag?.hostname || ag?.id || '—'}`, createdAt:u.ultimoLogin || u.ate, origem:'usuarios_historico' });
     });
-
+    loginHistory.forEach(l => eventos.push({ tipo:'login', titulo:'Login realizado', desc:`Usuário: ${l.usuario || l.login || l.usuarioLogado || '—'}\nMáquina: ${l.hostname || host2(ativo) || ag?.hostname || '—'}`, createdAt:l.dataLogin || l.createdAt, origem:l.origem || 'login_history' }));
+    chamados.forEach(c => eventos.push({ tipo:'chamado', titulo:`Chamado ${c.id || c.numero} ${c.status ? '— '+c.status : ''}`, desc:c.titulo || c.desc || c.descricao || '', createdAt:c.createdAt || c.data, chamadoId:c.id || c.numero, origem:'chamados' }));
     eventos.sort((a,b) => new Date(b.createdAt || b.data || b.detecEm || b.ultimoLogin || 0) - new Date(a.createdAt || a.data || a.detecEm || a.ultimoLogin || 0));
-
-    if (!eventos.length) {
-      return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhuma mudança técnica registrada para esta máquina.<br><span style="font-size:12px">Esta aba agora mostra somente alterações de IP, faixa de rede, monitor, grupo, área, nome, card, responsável e movimentações.</span></div>';
-    }
-    return eventos.map(linhaEventoSYSACK).join('');
+    if (!eventos.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum evento no histórico deste computador.</div>';
+    return renderNotaTecnicaHistoricoSYSACK(ativo, ag) + eventos.map(linhaEventoSYSACK).join('');
   }
+
+  
+function renderNotaTecnicaHistoricoSYSACK(ativo, ag) {
+    const ativoId = esc2((ativo && ativo.id) || (ag && ag.ativoId) || (ag && ag.id) || '');
+    const hostname = esc2((ativo && (ativo.hostname || ativo.computador || ativo.desc)) || (ag && ag.hostname) || '');
+
+    return `
+      <div style="margin:0 0 16px 0;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--card)">
+        <div style="font-weight:800;margin-bottom:6px;color:var(--g900)">Registrar movimentação / anotação técnica</div>
+        <div style="font-size:12px;color:var(--g500);margin-bottom:10px">
+          Use este campo para registrar mudança de IP, faixa de rede, monitor, área, grupo, nome, card, responsável, movimentação física ou qualquer observação técnica da máquina.
+        </div>
+        <textarea id="nota-historico-maquina" placeholder="Ex.: Máquina movida para a sala X; monitor alterado; IP atualizado; card movido para manutenção..." 
+          style="width:100%;min-height:74px;border:1px solid var(--border);border-radius:10px;padding:10px;font-family:inherit;font-size:13px;resize:vertical;background:var(--bg);color:var(--g900)"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <select id="tipo-nota-historico-maquina" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--bg);color:var(--g800);font-size:12px">
+            <option value="nota_tecnico">Nota técnica</option>
+            <option value="movimentacao">Movimentação</option>
+            <option value="mudanca_ip">Mudança de IP</option>
+            <option value="mudanca_faixa_ip">Mudança de faixa de rede</option>
+            <option value="troca_monitor">Troca de monitor</option>
+            <option value="troca_area">Mudança de área</option>
+            <option value="troca_grupo">Mudança de grupo</option>
+            <option value="mudanca_card">Mudança de card</option>
+            <option value="troca_responsavel">Mudança de responsável</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="salvarNotaHistoricoMaquinaSYSACK('${ativoId}','${hostname}')">Salvar no histórico</button>
+          <span id="nota-historico-status" style="font-size:12px;color:var(--g500)"></span>
+        </div>
+      </div>
+    `;
+  }
+
+async function salvarNotaHistoricoMaquinaSYSACK(ativoId, hostname) {
+    const txtEl = document.getElementById('nota-historico-maquina');
+    const tipoEl = document.getElementById('tipo-nota-historico-maquina');
+    const statusEl = document.getElementById('nota-historico-status');
+
+    const texto = (txtEl?.value || '').trim();
+    const tipo = tipoEl?.value || 'nota_tecnico';
+
+    if (!texto) {
+      showToast('Digite uma observação para salvar no histórico.', 'warning');
+      return;
+    }
+
+    if (statusEl) statusEl.textContent = 'Salvando...';
+
+    const payload = {
+      ativoId,
+      hostname,
+      tipo,
+      desc: texto,
+      descricao: texto,
+      titulo: tipo === 'nota_tecnico' ? 'Nota técnica' : 'Movimentação registrada',
+      origem: 'tecnico',
+      autor: (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.email)) || 'Técnico',
+      createdAt: new Date().toISOString(),
+      data: new Date().toISOString()
+    };
+
+    try {
+      if (typeof callFunction === 'function') {
+        await callFunction('adicionarNotaHistorico', payload);
+      } else if (window._db && ativoId) {
+        await window._db.collection('ativos').doc(ativoId).collection('historico').add(payload);
+      } else {
+        throw new Error('Banco não disponível');
+      }
+
+      if (txtEl) txtEl.value = '';
+      if (statusEl) statusEl.textContent = 'Salvo.';
+      showToast('Registro salvo no histórico da máquina.', 'success');
+
+      setTimeout(() => {
+        try {
+          abrirDetalhesComputadorSYSACK(ativoId || hostname);
+        } catch(e) {
+          location.reload();
+        }
+      }, 700);
+    } catch(e) {
+      console.warn('[Historico] Falha ao salvar nota:', e);
+      if (statusEl) statusEl.textContent = 'Erro ao salvar.';
+      showToast('Não foi possível salvar no histórico: ' + (e.message || e), 'danger');
+    }
+  }
+
 
   function ativarTabComputadorSYSACK(tab) {
     document.querySelectorAll('[data-comp-tab]').forEach(btn => {
