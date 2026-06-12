@@ -434,77 +434,6 @@ function firestoreSet(docPath, data) {
   });
 }
 
-
-function firestoreRunQuery(collectionId, field, value, limit = 1) {
-  return new Promise((resolve, reject) => {
-    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${API_KEY}`;
-    const body = JSON.stringify({
-      structuredQuery: {
-        from: [{ collectionId }],
-        where: {
-          fieldFilter: {
-            field: { fieldPath: field },
-            op: 'EQUAL',
-            value: { stringValue: String(value || '') }
-          }
-        },
-        limit
-      }
-    });
-
-    const urlObj = new URL(url);
-    const req = https.request({
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: 'POST',
-      rejectUnauthorized: false,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-    }, res => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => {
-        try { resolve(JSON.parse(raw)); }
-        catch (e) { resolve([]); }
-      });
-    });
-
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-function normalizarLoginAgent(valor) {
-  return String(valor || '')
-    .toLowerCase()
-    .split('\\\\').pop()
-    .split('/').pop()
-    .split('@')[0]
-    .trim();
-}
-
-async function localizarAtivoPorDados(dados) {
-  const tentativas = [
-    ['ativos', 'ip', dados.ip],
-    ['ativos', 'hostname', AGENT_ID],
-    ['ativos', 'computador', AGENT_ID],
-    ['ativos', 'nomeComputador', AGENT_ID],
-    ['ativos', 'serial', dados.serial],
-  ].filter(t => t[2]);
-
-  for (const [collectionId, field, value] of tentativas) {
-    try {
-      const result = await firestoreRunQuery(collectionId, field, value, 1);
-      const doc = Array.isArray(result) ? result.find(r => r.document)?.document : null;
-      if (doc) return { id: doc.name.split('/').pop(), fields: doc.fields || {}, matchField: field };
-    } catch(e) {
-      log(`[Ativo] Falha busca por ${field}: ${e.message}`);
-    }
-  }
-
-  return null;
-}
-
 // ── Ciclo principal ───────────────────────────────────────────────
 
 function firestoreAddDoc(collectionPath, data) {
@@ -547,12 +476,67 @@ function firestoreAddDoc(collectionPath, data) {
   });
 }
 
+
+function normalizarLoginAgent(valor) {
+  return String(valor || '')
+    .toLowerCase()
+    .split('\\').pop()
+    .split('/').pop()
+    .split('@')[0]
+    .trim();
+}
+
+function firestoreRunQuery(collectionId, field, value, limit = 1) {
+  return new Promise((resolve, reject) => {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${API_KEY}`;
+    const body = JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId }],
+        where: { fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: { stringValue: String(value || '') } } },
+        limit
+      }
+    });
+    const urlObj = new URL(url);
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve([]); } });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function localizarAtivoPorDados(dados) {
+  const tentativas = [
+    ['ativos', 'ip', dados.ip],
+    ['ativos', 'hostname', AGENT_ID],
+    ['ativos', 'computador', AGENT_ID],
+    ['ativos', 'nomeComputador', AGENT_ID],
+    ['ativos', 'serial', dados.serial],
+    ['ativos', 'serie', dados.serial],
+  ].filter(t => t[2]);
+  for (const [collectionId, field, value] of tentativas) {
+    try {
+      const result = await firestoreRunQuery(collectionId, field, value, 1);
+      const row = Array.isArray(result) ? result.find(r => r.document) : null;
+      if (row?.document) return { id: row.document.name.split('/').pop(), fields: row.document.fields || {}, matchField: field };
+    } catch(e) { log(`[Ativo] Falha busca por ${field}: ${e.message}`); }
+  }
+  return null;
+}
+
 function loginKeyDiario(login) {
   return normalizarLoginAgent(login) + '|' + new Date().toISOString().slice(0, 10);
 }
-
 let _ultimoLoginRegistradoKey = '';
-
 async function registrarLoginAtivo(docId, dados) {
   try {
     const login = String(dados.usuarioLogado || '').trim();
@@ -563,9 +547,6 @@ async function registrarLoginAtivo(docId, dados) {
     const dia = agora.slice(0, 10);
     const ativoId = docId || AGENT_ID;
     const key = `${ativoId}|${loginKeyDiario(login)}`;
-
-    // Evita repetir o mesmo login várias vezes no mesmo dia para o mesmo usuário/máquina.
-    // Se trocar o usuário, grava novo evento.
     if (_ultimoLoginRegistradoKey === key) return;
     _ultimoLoginRegistradoKey = key;
 
@@ -595,34 +576,25 @@ async function registrarLoginAtivo(docId, dados) {
       versaoAgente: dados.versaoAgente || ''
     };
 
-    // Coleção global usada para pesquisa por login em todo o SYSACK.
-    await firestoreAddDoc('login_history', item)
-      .catch(e => log('[LoginHist] login_history: ' + e.message));
+    await firestoreAddDoc('login_history', item).catch(e => log('[LoginHist] login_history: ' + e.message));
 
-    // Subcoleções usadas no painel detalhado da máquina.
     if (docId) {
-      await firestoreAddDoc(`ativos/${docId}/usuarios_historico`, item)
-        .catch(e => log('[LoginHist] usuarios_historico: ' + e.message));
-
-      await firestoreAddDoc(`ativos/${docId}/login_eventos`, item)
-        .catch(e => log('[LoginHist] login_eventos: ' + e.message));
-
+      await firestoreAddDoc(`ativos/${docId}/usuarios_historico`, item).catch(e => log('[LoginHist] usuarios_historico: ' + e.message));
+      await firestoreAddDoc(`ativos/${docId}/login_eventos`, item).catch(e => log('[LoginHist] login_eventos: ' + e.message));
       await firestorePatch(`ativos/${docId}`, {
         ultimoLoginEm: agora,
         ultimoLoginUsuario: login,
         usuarioLogado: login,
         usuarioPrincipal: login,
         usuarioPrincipalLogin: login,
-        diasLogadosAno: 1,
       }).catch(e => log('[LoginHist] patch ativo login: ' + e.message));
     }
 
-    // Também deixa um rastro no documento do agente, mesmo se o ativo ainda não estiver vinculado.
     await firestorePatch(`agents/${AGENT_ID}`, {
       ultimoLoginEm: agora,
       ultimoLoginUsuario: login,
       usuarioLogado: login,
-      loginHistoryStatus: docId ? 'vinculado_ao_ativo' : 'sem_ativo_vinculado',
+      loginHistoryStatus: docId ? 'vinculado_ao_ativo' : 'sem_ativo_vinculado'
     }).catch(() => {});
 
     log(`[LoginHist] Registrado login ${loginNorm} em ${ativoId}`);
@@ -630,7 +602,6 @@ async function registrarLoginAtivo(docId, dados) {
     log('[LoginHist] erro ao registrar login: ' + e.message);
   }
 }
-
 
 async function reportar() {
   try {
@@ -1000,15 +971,13 @@ async function atualizarAtivoComHostname(dados) {
   try {
     const encontrado = await localizarAtivoPorDados(dados);
 
-    if (!encontrado || !encontrado.id) {
-      // Mesmo sem encontrar ativo por IP/hostname/serial, grava histórico global para a aba Logins conseguir recuperar depois.
+    if (!encontrado?.id) {
       await registrarLoginAtivo(null, dados);
       log(`[Ativo] Nenhum ativo vinculado encontrado para ${AGENT_ID}/${dados.ip || 'sem IP'} — login salvo globalmente`);
       return;
     }
 
     const docId = encontrado.id;
-
     await firestorePatch(`ativos/${docId}`, {
       hostname:          AGENT_ID,
       computador:        AGENT_ID,
@@ -1052,7 +1021,6 @@ async function atualizarAtivoComHostname(dados) {
     log('[Ativo] Erro ao atualizar ativo/login: ' + e.message);
   }
 }
-
 
 // ── Cloudflare Tunnel — acesso remoto seguro ─────────────────────
 const { spawn } = require('child_process');
