@@ -7632,27 +7632,78 @@ function arListaUsuariosPrincipais(ativo, ag) {
   return src.usuarioPrincipal || src.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioLogado || '—';
 }
 
+
 function arUltimoLoginFmt(ativo, ag) {
-  const dt = ativo?.ultimoLoginEm || ativo?.ultimoLoginData || ativo?.ultimoLogin || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || '';
-  return dt ? fmtDate(dt) : '—';
+  const src = ativo || ag || {};
+
+  const candidatos = [
+    src.ultimoLoginEm,
+    src.ultimoLoginData,
+    src.ultimoLogin,
+    src.lastLogin,
+    src.loginAt,
+    src.ultimoLogon
+  ].filter(Boolean);
+
+  if (candidatos.length) {
+    const dt = candidatos[0];
+    return fmtDate(dt);
+  }
+
+  // Busca no cache global de histórico de login
+  try {
+    const hostname = src.hostname || src.computador || src.nomeComputador || ag?.hostname;
+    const eventos = (window.STATE_LOGIN_HISTORY || []).filter(e =>
+      (e.hostname || e.computador || '') === hostname
+    );
+
+    if (eventos.length) {
+      eventos.sort((a,b) => {
+        const da = new Date(a.dataHora || a.timestamp || a.createdAt || 0);
+        const db = new Date(b.dataHora || b.timestamp || b.createdAt || 0);
+        return db - da;
+      });
+
+      const ultimo = eventos[0];
+      const dt = ultimo.dataHora || ultimo.timestamp || ultimo.createdAt;
+      if (dt) return fmtDate(dt);
+    }
+  } catch(e) {}
+
+  return '—';
 }
 
 function arDiasLogadosAno(ativo, ag) {
   const src = ativo || ag || {};
   const anoAtual = new Date().getFullYear();
+
   if (src.diasLogadosAno != null) return src.diasLogadosAno;
   if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
-  if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
-    const total = src.usuariosPrincipais
-      .map(u => u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)
-      .reduce((s,n) => s + (Number(n)||0), 0);
-    if (total) return total;
-  }
-  if (Array.isArray(src.dias)) {
-    return new Set(src.dias.filter(d => String(d).startsWith(String(anoAtual)))).size;
-  }
+
+  try {
+    const hostname = src.hostname || src.computador || src.nomeComputador || ag?.hostname;
+
+    const eventos = (window.STATE_LOGIN_HISTORY || []).filter(e =>
+      (e.hostname || e.computador || '') === hostname
+    );
+
+    if (eventos.length) {
+      const dias = new Set();
+
+      eventos.forEach(ev => {
+        const dt = new Date(ev.dataHora || ev.timestamp || ev.createdAt || 0);
+        if (!isNaN(dt) && dt.getFullYear() === anoAtual) {
+          dias.add(dt.toISOString().slice(0,10));
+        }
+      });
+
+      return dias.size || '—';
+    }
+  } catch(e) {}
+
   return '—';
 }
+
 
 function abrirHistoricoUsuariosDoAgente(agentId) {
   const ag = (STATE_AGENTS?.list || []).find(a => a.id === agentId);
