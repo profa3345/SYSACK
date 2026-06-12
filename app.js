@@ -7632,29 +7632,31 @@ function arListaUsuariosPrincipais(ativo, ag) {
   return src.usuarioPrincipal || src.usuarioPrincipalLogin || ag?.usuarioPrincipal || ag?.usuarioLogado || '—';
 }
 
+
 function arUltimoLoginFmt(ativo, ag) {
   const src = ativo || ag || {};
-  const direto = src.ultimoLoginEm || src.ultimoLoginData || src.ultimoLogin || src.lastLogin || src.loginAt || src.ultimoLogon || ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || '';
+  const direto = src.ultimoLoginEm || src.ultimoLoginData || src.ultimoLogin || src.lastLogin ||
+                 ag?.ultimoLoginEm || ag?.ultimoLoginData || ag?.ultimoLogin || ag?.lastLogin || ag?.lastSeen || '';
   if (direto) return fmtDate(direto);
 
   try {
     const hist = sysackHistoricoInlineDoAtivo(ativo, ag);
     const datas = hist.map(h => sysackExtrairDataLogin(h)).filter(Boolean)
-      .map(d => new Date(d)).filter(d => !isNaN(d.getTime()))
+      .map(d => d?.toDate ? d.toDate() : (d?.seconds ? new Date(d.seconds*1000) : new Date(d)))
+      .filter(d => !isNaN(d.getTime()))
       .sort((a,b) => b - a);
-    if (datas.length) return fmtDate(datas[0]);
-  } catch(e) {}
-
-  return '—';
+    return datas.length ? fmtDate(datas[0]) : '—';
+  } catch(e) {
+    return '—';
+  }
 }
 
 function arDiasLogadosAno(ativo, ag) {
   const src = ativo || ag || {};
-  const anoAtual = new Date().getFullYear();
-  if (src.diasLogadosAno != null) return src.diasLogadosAno;
-  if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
-  if (src.contadorDiasAno != null) return src.contadorDiasAno;
-  if (src.diasAno != null) return src.diasAno;
+  const anoAtual = String(new Date().getFullYear());
+
+  if (src.diasLogadosAno != null && src.diasLogadosAno !== '') return src.diasLogadosAno;
+  if (src.diasLogadosAnoAtual != null && src.diasLogadosAnoAtual !== '') return src.diasLogadosAnoAtual;
 
   if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
     const total = src.usuariosPrincipais
@@ -7663,24 +7665,27 @@ function arDiasLogadosAno(ativo, ag) {
     if (total) return total;
   }
 
-  const dias = new Set();
   try {
     const hist = sysackHistoricoInlineDoAtivo(ativo, ag);
+    const dias = new Set();
     hist.forEach(h => {
-      if (Array.isArray(h.dias)) {
-        h.dias.forEach(x => { if (String(x).slice(0,4) === String(anoAtual)) dias.add(String(x).slice(0,10)); });
+      const dtRaw = sysackExtrairDataLogin(h);
+      const diaRaw = h?.dia || '';
+      if (String(diaRaw).startsWith(anoAtual)) {
+        dias.add(String(diaRaw).slice(0,10));
+        return;
       }
-      const data = sysackExtrairDataLogin(h);
-      const d = data ? new Date(data) : null;
-      if (d && !isNaN(d.getTime()) && d.getFullYear() === anoAtual) dias.add(d.toISOString().slice(0,10));
-      if (h.dia && String(h.dia).slice(0,4) === String(anoAtual)) dias.add(String(h.dia).slice(0,10));
+      if (!dtRaw) return;
+      const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
+      if (!isNaN(dt.getTime()) && String(dt.getFullYear()) === anoAtual) {
+        dias.add(dt.toISOString().slice(0,10));
+      }
     });
+    if (dias.size) return dias.size;
   } catch(e) {}
 
-  if (dias.size) return dias.size;
-
   if (Array.isArray(src.dias)) {
-    return new Set(src.dias.filter(d => String(d).startsWith(String(anoAtual))).map(d => String(d).slice(0,10))).size || '—';
+    return new Set(src.dias.filter(d => String(d).startsWith(anoAtual))).size || '—';
   }
   return '—';
 }
@@ -30219,10 +30224,30 @@ class SysackWebRTCViewer {
 
   function diasAnoSYSACK(ativo, ag) {
     const src = ativo || ag || {};
-    if (src.diasLogadosAno != null) return src.diasLogadosAno;
-    if (src.diasLogadosAnoAtual != null) return src.diasLogadosAnoAtual;
+    const ano = String(new Date().getFullYear());
+
+    if (src.diasLogadosAno != null && src.diasLogadosAno !== '') return src.diasLogadosAno;
+    if (src.diasLogadosAnoAtual != null && src.diasLogadosAnoAtual !== '') return src.diasLogadosAnoAtual;
+
+    const loginHistory = sysackHistoricoInlineDoAtivo(ativo, ag);
+    const dias = new Set();
+
+    loginHistory.forEach(l => {
+      const diaRaw = l?.dia || '';
+      if (String(diaRaw).startsWith(ano)) {
+        dias.add(String(diaRaw).slice(0,10));
+        return;
+      }
+      const dtRaw = l?.dataLogin || l?.data || l?.ultimoLogin || l?.createdAt || l?.timestamp || l?.updatedAt || '';
+      if (!dtRaw) return;
+      const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
+      if (!isNaN(dt.getTime()) && String(dt.getFullYear()) === ano) dias.add(dt.toISOString().slice(0,10));
+    });
+
+    if (dias.size) return dias.size;
+
     if (Array.isArray(src.usuariosPrincipais)) {
-      const n = src.usuariosPrincipais.reduce((s,u) => s + (Number(u.diasLogadosAno || u.diasAnoAtual || u.totalDias || 0)), 0);
+      const n = src.usuariosPrincipais.reduce((s,u) => s + (Number(u.diasLogadosAno || u.contadorDiasAno || u.diasAnoAtual || u.totalDias || 0)), 0);
       if (n) return n;
     }
     return '—';
@@ -30286,25 +30311,62 @@ class SysackWebRTCViewer {
     return '<table style="width:100%;border-collapse:collapse">' + rows.map(([k,v]) => `<tr><td style="padding:6px 0;color:var(--g500);font-size:12px;width:150px;border-bottom:1px solid var(--g100)">${esc2(k)}</td><td style="padding:6px 0;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--g100)">${esc2(v)}</td></tr>`).join('') + '</table>';
   }
 
-  function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
+  
+function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
     const porUsuario = new Map();
+    const addDia = (item, dtRaw, diaRaw) => {
+      if (!item.dias) item.dias = [];
+      if (diaRaw) {
+        item.dias.push(String(diaRaw).slice(0,10));
+      } else if (dtRaw) {
+        const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
+        if (!isNaN(dt.getTime())) item.dias.push(dt.toISOString().slice(0,10));
+      }
+    };
+
     usuarios.forEach(u => {
-      const k = norm2(u.loginNorm || u.login || u.usuario || u.nome);
+      const k = norm2(u.loginNorm || u.login || u.usuario || u.usuarioLogado || u.nome);
       if (!k) return;
-      porUsuario.set(k, { login:k, nome:u.nome || u.login || k, ultimo:u.ultimoLogin || u.ate, primeiro:u.desde || u.primeiroLogin, totalDias:u.totalDias || (Array.isArray(u.dias)?u.dias.length:0), diasAno:u.diasLogadosAno || 0, principal:!!u.ehResponsavel, dias:Array.isArray(u.dias)?u.dias:[] });
+      const dias = Array.isArray(u.dias) ? u.dias : [];
+      porUsuario.set(k, {
+        login:k,
+        nome:u.nome || u.usuarioNome || u.login || k,
+        ultimo:u.ultimoLogin || u.ate || u.dataLogin || u.data || u.createdAt,
+        primeiro:u.desde || u.primeiroLogin || u.dataLogin || u.data || u.createdAt,
+        totalDias:u.totalDias || dias.length || 0,
+        diasAno:u.diasLogadosAno || u.contadorDiasAno || 0,
+        principal:!!u.ehResponsavel,
+        dias:[...dias]
+      });
     });
+
     loginHistory.forEach(l => {
-      const k = norm2(l.usuario || l.login || l.loginNorm || l.usuarioLogado);
+      const k = norm2(l.usuario || l.login || l.loginNorm || l.usuarioLogado || l.username);
       if (!k) return;
-      const item = porUsuario.get(k) || { login:k, nome:l.usuarioNome || l.nome || k, dias:[], totalDias:0 };
-      const dt = l.dataLogin || l.ultimoLogin || l.createdAt;
-      if (dt && (!item.ultimo || new Date(dt) > new Date(item.ultimo))) item.ultimo = dt;
-      if (dt) item.dias.push(String(dt).slice(0,10));
+      const item = porUsuario.get(k) || { login:k, nome:l.usuarioNome || l.nome || l.usuario || l.login || k, dias:[], totalDias:0 };
+      const dt = l.dataLogin || l.data || l.ultimoLogin || l.createdAt || l.timestamp || l.updatedAt;
+      if (dt) {
+        const dtObj = dt?.toDate ? dt.toDate() : (dt?.seconds ? new Date(dt.seconds*1000) : new Date(dt));
+        if (!isNaN(dtObj.getTime())) {
+          if (!item.ultimo || dtObj > new Date(item.ultimo)) item.ultimo = dtObj.toISOString();
+          if (!item.primeiro || dtObj < new Date(item.primeiro)) item.primeiro = dtObj.toISOString();
+        }
+      }
+      addDia(item, dt, l.dia);
       porUsuario.set(k, item);
     });
+
     const ano = String(new Date().getFullYear());
-    const arr = [...porUsuario.values()].map(u => ({...u, diasAno: u.diasAno || new Set((u.dias||[]).filter(d => String(d).startsWith(ano))).size, totalDias: u.totalDias || new Set(u.dias||[]).size})).sort((a,b) => new Date(b.ultimo||0) - new Date(a.ultimo||0));
-    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.</div>';
+    const arr = [...porUsuario.values()]
+      .map(u => {
+        const diasUnicos = new Set((u.dias||[]).filter(Boolean).map(d => String(d).slice(0,10)));
+        const diasAno = u.diasAno || [...diasUnicos].filter(d => d.startsWith(ano)).length;
+        return {...u, diasAno, totalDias: u.totalDias || diasUnicos.size};
+      })
+      .sort((a,b) => new Date(b.ultimo||0) - new Date(a.ultimo||0));
+
+    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.<br><span style="font-size:12px">Verifique se o agente atualizado já executou um novo ciclo de coleta.</span></div>';
+
     return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Usuário</th><th>Primeiro login</th><th>Último login</th><th>Dias no ano</th><th>Total dias</th><th>Status</th></tr></thead><tbody>${arr.map(u => `<tr><td><b>${esc2(u.nome || u.login)}</b><div style="font-size:11px;color:var(--g400)">${esc2(u.login)}</div></td><td>${esc2(fmt2(u.primeiro))}</td><td>${esc2(fmt2(u.ultimo))}</td><td><b>${esc2(u.diasAno)}</b></td><td>${esc2(u.totalDias)}</td><td>${u.principal ? '<span class="badge badge-info">Principal</span>' : ''}${ativo?.maquinaCompartilhada ? '<span class="badge badge-warning">Compartilhada</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
   }
 
@@ -30313,16 +30375,35 @@ class SysackWebRTCViewer {
     return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Chamado</th><th>Título/Descrição</th><th>Status</th><th>Data</th><th>Ação</th></tr></thead><tbody>${chamados.map(c => `<tr><td><b>${esc2(c.id || c.numero)}</b></td><td>${esc2(c.titulo || c.desc || c.descricao || '—')}</td><td>${esc2(c.status || '—')}</td><td>${esc2(fmt2(c.createdAt || c.data))}</td><td><button class="btn btn-primary btn-xs" onclick="sysackAbrirChamadoVinculado('${esc2(c.id || c.numero)}')">Abrir chamado</button></td></tr>`).join('')}</tbody></table>`;
   }
 
-  function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chamados, ativo, ag) {
+  
+function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chamados, ativo, ag) {
+    const TIPOS_MAQUINA = [
+      'mudanca_faixa_ip','alerta_ip','troca_monitor','monitor','monitor_movido',
+      'transferencia','movimentacao','troca_responsavel','mudanca_campo','mudanca_local',
+      'troca_area','troca_grupo','troca_status','mudanca_ip','mudanca_hostname',
+      'mudanca_nome','mudanca_card','card_movido','patrimonio','inventario','nota_tecnico'
+    ];
+
     const eventos = [];
-    historico.forEach(h => eventos.push(h));
-    usuarios.forEach(u => {
-      if (u.ultimoLogin || u.ate) eventos.push({ tipo:'login', titulo:'Login realizado', desc:`Usuário: ${u.nome || u.login || u.loginNorm || '—'}\nMáquina: ${host2(ativo) || ag?.hostname || ag?.id || '—'}`, createdAt:u.ultimoLogin || u.ate, origem:'usuarios_historico' });
+    historico.forEach(h => {
+      const tipo = String(h.tipo || h.subtipo || '').toLowerCase();
+      const titulo = String(h.titulo || h.label || '').toLowerCase();
+      const origem = String(h.origem || '').toLowerCase();
+
+      // A aba Histórico NÃO mostra chamados nem logins.
+      if (tipo.includes('chamado') || titulo.includes('chamado') || origem.includes('chamado')) return;
+      if (tipo.includes('login') || tipo.includes('logout') || origem.includes('login')) return;
+
+      // Mostra apenas mudanças técnicas/administrativas da máquina.
+      const permitido = TIPOS_MAQUINA.some(t => tipo.includes(t) || titulo.includes(t.replaceAll('_',' ')));
+      if (permitido || h.campo || h.de || h.para || h.desc || h.descricao) eventos.push(h);
     });
-    loginHistory.forEach(l => eventos.push({ tipo:'login', titulo:'Login realizado', desc:`Usuário: ${l.usuario || l.login || l.usuarioLogado || '—'}\nMáquina: ${l.hostname || host2(ativo) || ag?.hostname || '—'}`, createdAt:l.dataLogin || l.createdAt, origem:l.origem || 'login_history' }));
-    chamados.forEach(c => eventos.push({ tipo:'chamado', titulo:`Chamado ${c.id || c.numero} ${c.status ? '— '+c.status : ''}`, desc:c.titulo || c.desc || c.descricao || '', createdAt:c.createdAt || c.data, chamadoId:c.id || c.numero, origem:'chamados' }));
+
     eventos.sort((a,b) => new Date(b.createdAt || b.data || b.detecEm || b.ultimoLogin || 0) - new Date(a.createdAt || a.data || a.detecEm || a.ultimoLogin || 0));
-    if (!eventos.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum evento no histórico deste computador.</div>';
+
+    if (!eventos.length) {
+      return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhuma mudança técnica registrada para esta máquina.<br><span style="font-size:12px">Esta aba agora mostra somente alterações de IP, faixa de rede, monitor, grupo, área, nome, card, responsável e movimentações.</span></div>';
+    }
     return eventos.map(linhaEventoSYSACK).join('');
   }
 
@@ -30401,18 +30482,4 @@ class SysackWebRTCViewer {
   if (!document.getElementById('sysack-fix-autocomplete-css')) {
     const st = document.createElement('style'); st.id='sysack-fix-autocomplete-css'; st.textContent=css; document.head.appendChild(st);
   }
-})();
-
-
-// SYSACK PATCH: fallback amigável para analisarAtivo quando a Cloud Function/Gemini falhar.
-(function sysackPatchAnalisarAtivoFallback(){
-  if (typeof window.analisarAtivoPorIA !== 'function') return;
-  const original = window.analisarAtivoPorIA;
-  window.analisarAtivoPorIA = async function(pat) {
-    try { return await original.apply(this, arguments); }
-    catch(e) {
-      console.warn('[SYSACK PATCH] analisarAtivo fallback:', e?.message || e);
-      showToast('IA indisponível no momento. Verifique logs da Cloud Function/Gemini.', 'warning', 6000);
-    }
-  };
 })();

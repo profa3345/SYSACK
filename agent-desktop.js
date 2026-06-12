@@ -476,20 +476,6 @@ function firestoreAddDoc(collectionPath, data) {
   });
 }
 
-
-const LOGIN_STATE_FILE = path.join(__dirname, 'login_state.json');
-let _loginState = {};
-try { _loginState = JSON.parse(fs.readFileSync(LOGIN_STATE_FILE, 'utf8')); } catch(e) { _loginState = {}; }
-function salvarLoginState() {
-  try { fs.writeFileSync(LOGIN_STATE_FILE, JSON.stringify(_loginState, null, 2), 'utf8'); } catch(e) {}
-}
-function normalizarLoginSYSACK(login) {
-  return String(login || '').trim().toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, '');
-}
-function docIdSeguroSYSACK(v) {
-  return normalizarLoginSYSACK(v).replace(/[^a-z0-9_-]/g, '_').slice(0, 80) || 'usuario';
-}
-
 function loginKeyDiario(login) {
   return String(login || '').trim().toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, '') + '|' + new Date().toISOString().slice(0, 10);
 }
@@ -498,69 +484,33 @@ async function registrarLoginAtivo(docId, dados) {
   try {
     const login = String(dados.usuarioLogado || '').trim();
     if (!login) return;
-
-    const nowIso = dados.lastSeen || new Date().toISOString();
-    const dia = new Date(nowIso).toISOString().slice(0, 10);
-    const loginNorm = normalizarLoginSYSACK(login);
-    const userDocId = docIdSeguroSYSACK(loginNorm);
-    const stateKey = `${docId}|${loginNorm}`;
-
-    if (!_loginState[stateKey]) _loginState[stateKey] = { dias: [] };
-    if (!_loginState[stateKey].dias.includes(dia)) _loginState[stateKey].dias.push(dia);
-    _loginState[stateKey].dias = _loginState[stateKey].dias.slice(-400);
-    salvarLoginState();
-
-    const anoAtual = new Date(nowIso).getFullYear();
-    const diasAno = _loginState[stateKey].dias.filter(d => String(d).slice(0,4) === String(anoAtual)).length;
-
-    const resumoUsuario = {
+    const dia = new Date().toISOString().slice(0, 10);
+    const key = `${docId}|${loginKeyDiario(login)}`;
+    if (_ultimoLoginRegistradoKey === key) return;
+    _ultimoLoginRegistradoKey = key;
+    const item = {
       ativoId: docId,
       assetId: docId,
       hostname: AGENT_ID,
       computador: AGENT_ID,
       ip: dados.ip || '',
       login,
-      loginNorm,
+      loginNorm: login.toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, ''),
       usuario: login,
       usuarioLogado: login,
-      ultimoLogin: nowIso,
-      ultimoLoginEm: nowIso,
-      data: nowIso,
+      data: dados.lastSeen || new Date().toISOString(),
+      dataLogin: dados.lastSeen || new Date().toISOString(),
+      createdAt: dados.lastSeen || new Date().toISOString(),
+      updatedAt: dados.lastSeen || new Date().toISOString(),
+      timestamp: dados.lastSeen || new Date().toISOString(),
+      ultimoLogin: dados.lastSeen || new Date().toISOString(),
       dia,
-      dias: _loginState[stateKey].dias,
-      totalDias: _loginState[stateKey].dias.length,
-      contadorDiasAno: diasAno,
-      diasLogadosAno: diasAno,
-      ehResponsavel: true,
       origem: 'agent-desktop',
+      tipo: 'login',
       versaoAgente: dados.versaoAgente || ''
     };
-
-    // Documento consolidado por usuário na máquina.
-    await firestoreSet(`ativos/${docId}/usuarios_historico/${userDocId}`, resumoUsuario)
-      .catch(e => log('[LoginHist] usuarios_historico resumo: ' + e.message));
-
-    // Evento diário/subsequente. Evita repetir o mesmo login no mesmo dia em excesso.
-    const key = `${docId}|${loginNorm}|${dia}`;
-    if (_ultimoLoginRegistradoKey !== key) {
-      _ultimoLoginRegistradoKey = key;
-      await firestoreAddDoc(`ativos/${docId}/login_eventos`, resumoUsuario)
-        .catch(e => log('[LoginHist] login_eventos: ' + e.message));
-      await firestoreAddDoc('login_history', resumoUsuario)
-        .catch(e => log('[LoginHist] login_history: ' + e.message));
-    }
-
-    // Também reforça os campos diretos no ativo, usados pela Assistência Remota.
-    await firestorePatch(`ativos/${docId}`, {
-      usuarioLogado: login,
-      usuarioPrincipal: login,
-      usuarioPrincipalLogin: login,
-      ultimoLoginUsuario: login,
-      ultimoLoginEm: nowIso,
-      ultimoLoginData: nowIso,
-      diasLogadosAno: diasAno,
-      contadorDiasAno: diasAno
-    }).catch(() => {});
+    await firestoreAddDoc(`ativos/${docId}/usuarios_historico`, item).catch(e => log('[LoginHist] usuarios_historico: ' + e.message));
+    await firestoreAddDoc('login_history', item).catch(e => log('[LoginHist] login_history: ' + e.message));
   } catch(e) {
     log('[LoginHist] erro ao registrar login: ' + e.message);
   }
