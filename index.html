@@ -3521,8 +3521,8 @@ window.dispatchEvent(new Event('firebase-ready'));
               <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--g200);border-radius:8px;cursor:pointer">
                 <input type="radio" name="ar-install-method" value="script" checked style="margin-top:3px">
                 <div>
-                  <div style="font-weight:700;font-size:13px">Script PowerShell (recomendado)</div>
-                  <div style="font-size:12px;color:var(--g400)">Execute como Administrador no PC alvo. Instala Node.js se necessario.</div>
+                  <div style="font-weight:700;font-size:13px">Instalador BAT corrigido (recomendado)</div>
+                  <div style="font-size:12px;color:var(--g400)">Baixe e execute como Administrador no PC alvo. Instala/atualiza o agente em C:\SYSACK\agent.js.</div>
                 </div>
               </label>
               <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--g200);border-radius:8px;cursor:pointer">
@@ -3537,8 +3537,8 @@ window.dispatchEvent(new Event('firebase-ready'));
 
           <div style="background:#0F172A;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:#94A3B8;margin-bottom:12px">
             <div style="color:#64748B;margin-bottom:6px"># Execute como Administrador:</div>
-            <div style="color:#10B981">Invoke-WebRequest -Uri "https://sysack.vercel.app/install-agent.ps1" -OutFile install.ps1</div>
-            <div style="color:#10B981">.\install.ps1 -Install</div>
+            <div style="color:#10B981">Invoke-WebRequest -Uri "https://sysack.vercel.app/Instalar-SYSACK-Agent.bat" -OutFile "$env:TEMP\Instalar-SYSACK-Agent.bat"</div>
+            <div style="color:#10B981">Start-Process "$env:TEMP\Instalar-SYSACK-Agent.bat" -Verb RunAs</div>
           </div>
 
           <div style="font-size:12px;color:var(--g400)">

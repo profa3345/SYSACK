@@ -1749,7 +1749,8 @@ function renderAtivos() {
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
       <td><div class="flex gap-6">
-        ${isComp ? `` : ''}
+        <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')" title="Histórico geral">📜</button>
+        ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirHistoricoUsuariosDoAtivo('${a.id}')" title="Histórico de logins">👥</button>` : ''}
         <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
         <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
         <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
@@ -7479,125 +7480,6 @@ function autocompleteEmpregado(inputEl, onSelect) {
   }, { once: false });
 }
 
-
-// ═══════════════════════════════════════════════════════════════
-// SYSACK — Detecção automática de mudanças vindas do agente
-// Não depende de anotação manual do técnico.
-// Detecta: IP, faixa de rede, monitor, hostname/nome, área, grupo, card,
-// responsável e outros campos relevantes quando o agente/ativo muda.
-// ═══════════════════════════════════════════════════════════════
-const SYSACK_AGENT_AUTO_CHANGE_CACHE = window.SYSACK_AGENT_AUTO_CHANGE_CACHE || {};
-window.SYSACK_AGENT_AUTO_CHANGE_CACHE = SYSACK_AGENT_AUTO_CHANGE_CACHE;
-
-function sysackAutoNormValor(v) {
-  if (v === undefined || v === null || v === '') return '';
-  if (Array.isArray(v)) return v.map(x => {
-    if (!x) return '';
-    if (typeof x === 'object') return x.serial || x.nome || x.caption || x.modelo || JSON.stringify(x);
-    return String(x);
-  }).filter(Boolean).join(' | ');
-  if (typeof v === 'object') return v.serial || v.nome || v.caption || v.modelo || JSON.stringify(v);
-  return String(v).trim();
-}
-
-function sysackAutoFaixaIP(ip) {
-  const m = String(ip || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  return m ? `${m[1]}.${m[2]}.${m[3]}.0/24` : '';
-}
-
-function sysackAutoAtivoPorAgente(agent) {
-  if (!agent) return null;
-  const ativos = STATE?.ativos || [];
-  const keys = [
-    agent.ativoId, agent.assetId, agent.pat, agent.serial,
-    agent.hostname, agent.computador, agent.nomeComputador, agent.id, agent.ip
-  ].filter(Boolean).map(x => String(x).toLowerCase());
-
-  return ativos.find(a => {
-    const vals = [a.id, a.pat, a.serial, a.serie, a.hostname, a.computador, a.nomeComputador, a.desc, a.ip]
-      .filter(Boolean).map(x => String(x).toLowerCase());
-    return vals.some(v => keys.includes(v));
-  }) || null;
-}
-
-async function sysackRegistrarMudancaAutomaticaAtivo(ativo, tipo, titulo, desc, extras = {}) {
-  if (!ativo?.id || !FB_READY || !db) return;
-  const dedupKey = `${ativo.id}|${tipo}|${desc}`;
-  const agora = Date.now();
-  if (SYSACK_AGENT_AUTO_CHANGE_CACHE[dedupKey] && agora - SYSACK_AGENT_AUTO_CHANGE_CACHE[dedupKey] < 10 * 60 * 1000) return;
-  SYSACK_AGENT_AUTO_CHANGE_CACHE[dedupKey] = agora;
-
-  const payload = {
-    tipo,
-    evento: tipo,
-    titulo,
-    label: titulo,
-    desc,
-    descricao: desc,
-    origem: 'agent-auto-detect',
-    autor: 'SYSACK Agent',
-    usuario: 'SYSACK Agent',
-    usuarioId: 'agent',
-    dot: extras.dot || 'blue',
-    data: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    ...extras
-  };
-
-  try {
-    await db.collection('ativos').doc(ativo.id).collection('historico').add(payload);
-  } catch(e) {
-    console.warn('[AutoHist] Falha ao gravar histórico automático:', e.message);
-  }
-}
-
-async function sysackDetectarMudancasAutomaticasAgente(agent) {
-  try {
-    const ativo = sysackAutoAtivoPorAgente(agent);
-    if (!ativo) return;
-
-    const pares = [
-      ['ip', 'IP', 'mudanca_ip'],
-      ['hostname', 'Hostname', 'mudanca_hostname'],
-      ['nomeComputador', 'Nome do computador', 'mudanca_nome'],
-      ['area', 'Área', 'mudanca_area'],
-      ['grupo', 'Grupo', 'mudanca_grupo'],
-      ['card', 'Card', 'mudanca_card'],
-      ['responsavel', 'Responsável', 'troca_responsavel'],
-      ['resp', 'Responsável', 'troca_responsavel'],
-      ['monitores', 'Monitor', 'troca_monitor'],
-      ['monitor', 'Monitor', 'troca_monitor']
-    ];
-
-    for (const [campo, label, tipo] of pares) {
-      if (!(campo in agent)) continue;
-      const antes = sysackAutoNormValor(ativo[campo]);
-      const depois = sysackAutoNormValor(agent[campo]);
-      if (!depois || antes === depois) continue;
-      const desc = `${label}: ${antes || '—'} → ${depois}`;
-      await sysackRegistrarMudancaAutomaticaAtivo(ativo, tipo, `${label} alterado automaticamente`, desc, {
-        campo, de: antes || '—', para: depois, dot: tipo === 'troca_monitor' ? 'orange' : 'blue'
-      });
-    }
-
-    const faixaAntes = sysackAutoFaixaIP(ativo.ip);
-    const faixaDepois = sysackAutoFaixaIP(agent.ip);
-    if (faixaAntes && faixaDepois && faixaAntes !== faixaDepois) {
-      const desc = `Faixa de rede: ${faixaAntes} → ${faixaDepois} · IP: ${ativo.ip || '—'} → ${agent.ip || '—'}`;
-      await sysackRegistrarMudancaAutomaticaAtivo(ativo, 'mudanca_faixa_ip', 'Faixa de rede alterada automaticamente', desc, {
-        ipAnterior: ativo.ip || '', ipNovo: agent.ip || '', faixaAnterior: faixaAntes, faixaNova: faixaDepois, dot: 'red'
-      });
-    }
-  } catch(e) {
-    console.warn('[AutoHist] Erro na detecção automática:', e.message);
-  }
-}
-
-async function sysackDetectarMudancasAutomaticasAgentes(lista) {
-  if (!Array.isArray(lista) || !lista.length) return;
-  for (const ag of lista) await sysackDetectarMudancasAutomaticasAgente(ag);
-}
-
 // ════════════════════════════════════════════════════════════
 // ASSISTÊNCIA REMOTA — Computadores
 // Gerencia agentes desktop: inventário, deploy, acesso remoto
@@ -7629,9 +7511,7 @@ function startAgentsListener() {
           return { id: d.id, ...data };
         });
         verificarTrocaMonitores(STATE_AGENTS.list);
-        sysackDetectarMudancasAutomaticasAgentes(STATE_AGENTS.list).catch(e => console.warn('[AutoHist]', e.message));
-        sysackDetectarMudancasAutomaticasAgentes(STATE_AGENTS.list).catch(e => console.warn('[AutoHist]', e.message));
-    if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
+        if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
         if (isPageActive('ativos')) renderAtivos();
         nbUpdate('nb-agentes-online', STATE_AGENTS.list.filter(a => a.status === 'online').length);
       }, err => {
@@ -11407,64 +11287,7 @@ function copiarCmdInstall() {
   navigator.clipboard.writeText(cmd).then(() => showToast('Comando copiado!', 'success', 2000));
 }
 
-function baixarInstaladorAgente() {
-  // Instalador .bat — não precisa de assinatura digital, compatível com domínio CESAN
-  const linhas = [
-    '@echo off',
-    'chcp 65001 > nul',
-    'echo ============================================',
-    'echo  SYSACK Agent Desktop - Instalador v2.1',
-    'echo ============================================',
-    'echo.',
-    'net session >nul 2>&1',
-    'if %errorLevel% neq 0 (',
-    '    echo ERRO: Execute como Administrador.',
-    '    echo Clique com botao direito e selecione "Executar como administrador"',
-    '    pause & exit /b 1',
-    ')',
-    'set INSTALL_DIR=C:\\SYSACK',
-    'set SERVICE_NAME=SYSACKAgentDesktop',
-    'echo [1/5] Verificando Node.js...',
-    'node --version >nul 2>&1',
-    'if %errorLevel% neq 0 (',
-    '    echo Baixando Node.js v20...',
-    '    powershell -Command "Invoke-WebRequest -Uri https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi -OutFile $env:TEMP\\node-setup.msi -UseBasicParsing"',
-    '    msiexec /i "%TEMP%\\node-setup.msi" /quiet /norestart',
-    '    del "%TEMP%\\node-setup.msi" /f /q',
-    ') else ( echo Node.js ja instalado. )',
-    'echo [2/5] Criando diretorios...',
-    'if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"',
-    'echo [3/5] Criando configuracao...',
-    'echo {"name":"sysack-agent-desktop","version":"2.1.0","main":"agent.js","dependencies":{"ws":"8.16.0"}} > "%INSTALL_DIR%\\package.json"',
-    'echo {"firebaseProjectId":"sysack-829e2","agentId":"%COMPUTERNAME%","webSocketPort":9000,"softwareIntervalHours":6} > "%INSTALL_DIR%\\config.json"',
-    "echo [3b/5] Baixando agente SYSACK...",
-    "powershell -Command \"(New-Object Net.WebClient).DownloadFile('https://sysack.vercel.app/agent-desktop.js', $env:TEMP + '\\sysack-agent.js')\"",
-    "copy /y \"%TEMP%\\sysack-agent.js\" \"%INSTALL_DIR%\\agent.js\" >nul",
-    'echo [4/5] Instalando dependencias npm...',
-    'cd /d "%INSTALL_DIR%" && call npm install --production --silent',
-    'echo [5/5] Registrando servico Windows...',
-    'sc query %SERVICE_NAME% >nul 2>&1 && (net stop %SERVICE_NAME% >nul 2>&1 & sc delete %SERVICE_NAME% >nul 2>&1 & timeout /t 2 /nobreak >nul)',
-    "echo @echo off > C:\\SYSACK\\start.bat",
-    "echo node C:\\SYSACK\\agent.js >> C:\\SYSACK\\start.bat",
-    "schtasks /create /tn \"SYSACK-Agent\" /tr \"C:\\SYSACK\\start.bat\" /sc onstart /ru SYSTEM /f",
-    "schtasks /run /tn \"SYSACK-Agent\"",
-    "echo Agente iniciado via Task Scheduler.",
-    "sc delete SYSACKAgentDesktop >nul 2>&1",
-    'echo ============================================',
-    'echo  Instalacao concluida! %COMPUTERNAME%',
-    'echo  aparecera no SYSACK em ~30 segundos.',
-    'echo ============================================',
-    'pause',
-  ];
-  const script = linhas.join('\r\n');
-  const blob = new Blob([script], { type:'text/plain;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = 'Instalar-SYSACK-Agent.bat'; a.click();
-  URL.revokeObjectURL(url);
-  showToast('Instalador baixado! Clique com botao direito → Executar como administrador.', 'success', 5000);
-  closeModal('modal-ar-download');
-}
+function baixarInstaladorAgente(){ baixarInstaladorSYSACKCorrigido(); }
 
 function copiarLinkInstalacao() {
   const link = document.getElementById('install-link-url')?.value;
@@ -30603,3 +30426,16 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
     const st = document.createElement('style'); st.id='sysack-fix-autocomplete-css'; st.textContent=css; document.head.appendChild(st);
   }
 })();
+
+
+// SYSACK - URL correta do instalador do agente
+window.SYSACK_AGENT_INSTALLER_URL = '/Instalar-SYSACK-Agent.bat';
+
+function baixarInstaladorSYSACKCorrigido() {
+  const a = document.createElement('a');
+  a.href = window.SYSACK_AGENT_INSTALLER_URL;
+  a.download = 'Instalar-SYSACK-Agent.bat';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
