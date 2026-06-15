@@ -434,171 +434,7 @@ function firestoreSet(docPath, data) {
   });
 }
 
-
-function agenteFaixaIP(ip) {
-  const m = String(ip || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  return m ? `${m[1]}.${m[2]}.${m[3]}.0/24` : '';
-}
-
-function agenteValorHist(v) {
-  if (v === undefined || v === null || v === '') return '—';
-  if (Array.isArray(v)) return v.map(x => {
-    if (!x) return '';
-    if (typeof x === 'object') return x.serial || x.nome || x.caption || x.modelo || JSON.stringify(x);
-    return String(x);
-  }).filter(Boolean).join(', ') || '—';
-  if (typeof v === 'object') return v.serial || v.nome || v.caption || v.modelo || JSON.stringify(v);
-  return String(v);
-}
-
-async function registrarHistoricoAutomaticoAgente(docId, antes, depois) {
-  if (!docId || !antes || !depois) return;
-
-  const campos = [
-    ['ip', 'IP', 'mudanca_ip'],
-    ['hostname', 'Hostname', 'mudanca_hostname'],
-    ['computador', 'Computador', 'mudanca_nome'],
-    ['nomeComputador', 'Nome do computador', 'mudanca_nome'],
-    ['area', 'Área', 'mudanca_area'],
-    ['grupo', 'Grupo', 'mudanca_grupo'],
-    ['card', 'Card', 'mudanca_card'],
-    ['responsavel', 'Responsável', 'troca_responsavel'],
-    ['resp', 'Responsável', 'troca_responsavel'],
-    ['monitores', 'Monitores', 'troca_monitor']
-  ];
-
-  for (const [campo, label, tipo] of campos) {
-    if (!(campo in depois)) continue;
-    const a = agenteValorHist(antes[campo]);
-    const d = agenteValorHist(depois[campo]);
-    if (a === d || d === '—') continue;
-
-    await firestoreAddDoc(`ativos/${docId}/historico`, {
-      tipo,
-      evento: tipo,
-      titulo: `${label} alterado automaticamente`,
-      label: `${label} alterado automaticamente`,
-      desc: `${label}: ${a} → ${d}`,
-      descricao: `${label}: ${a} → ${d}`,
-      campo,
-      de: a,
-      para: d,
-      origem: 'agent-auto-detect',
-      autor: 'SYSACK Agent',
-      usuario: 'SYSACK Agent',
-      usuarioId: 'agent',
-      data: new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    }).catch(e => log('[AutoHist] ' + e.message));
-  }
-
-  const faixaAntes = agenteFaixaIP(antes.ip);
-  const faixaDepois = agenteFaixaIP(depois.ip);
-  if (faixaAntes && faixaDepois && faixaAntes !== faixaDepois) {
-    await firestoreAddDoc(`ativos/${docId}/historico`, {
-      tipo: 'mudanca_faixa_ip',
-      evento: 'mudanca_faixa_ip',
-      titulo: 'Faixa de rede alterada automaticamente',
-      label: 'Faixa de rede alterada automaticamente',
-      desc: `Faixa de rede: ${faixaAntes} → ${faixaDepois} · IP: ${antes.ip || '—'} → ${depois.ip || '—'}`,
-      descricao: `Faixa de rede: ${faixaAntes} → ${faixaDepois} · IP: ${antes.ip || '—'} → ${depois.ip || '—'}`,
-      ipAnterior: antes.ip || '',
-      ipNovo: depois.ip || '',
-      faixaAnterior: faixaAntes,
-      faixaNova: faixaDepois,
-      origem: 'agent-auto-detect',
-      autor: 'SYSACK Agent',
-      usuario: 'SYSACK Agent',
-      usuarioId: 'agent',
-      data: new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    }).catch(e => log('[AutoHist] ' + e.message));
-  }
-}
-
-
 // ── Ciclo principal ───────────────────────────────────────────────
-
-function firestoreAddDoc(collectionPath, data) {
-  return new Promise((resolve, reject) => {
-    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}?key=${API_KEY}`;
-    function toFirestore(val) {
-      if (val === null || val === undefined) return { nullValue: null };
-      if (typeof val === 'boolean')  return { booleanValue: val };
-      if (typeof val === 'number' && isFinite(val)) return { doubleValue: val };
-      if (typeof val === 'string')   return { stringValue: val };
-      if (Array.isArray(val)) return { arrayValue: val.length ? { values: val.map(toFirestore) } : {} };
-      if (typeof val === 'object') {
-        const fields = {};
-        for (const [k, v] of Object.entries(val)) if (v !== undefined) fields[k] = toFirestore(v);
-        return { mapValue: { fields } };
-      }
-      return { stringValue: String(val) };
-    }
-    const fields = {};
-    for (const [k, v] of Object.entries(data || {})) if (v !== undefined) fields[k] = toFirestore(v);
-    const body = JSON.stringify({ fields });
-    const urlObj = new URL(url);
-    const req = https.request({
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: 'POST',
-      rejectUnauthorized: false,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-    }, res => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(raw);
-        else reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 200)}`));
-      });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-function loginKeyDiario(login) {
-  return String(login || '').trim().toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, '') + '|' + new Date().toISOString().slice(0, 10);
-}
-let _ultimoLoginRegistradoKey = '';
-async function registrarLoginAtivo(docId, dados) {
-  try {
-    const login = String(dados.usuarioLogado || '').trim();
-    if (!login) return;
-    const dia = new Date().toISOString().slice(0, 10);
-    const key = `${docId}|${loginKeyDiario(login)}`;
-    if (_ultimoLoginRegistradoKey === key) return;
-    _ultimoLoginRegistradoKey = key;
-    const item = {
-      ativoId: docId,
-      assetId: docId,
-      hostname: AGENT_ID,
-      computador: AGENT_ID,
-      ip: dados.ip || '',
-      login,
-      loginNorm: login.toLowerCase().replace(/^.*\\/, '').replace(/^.*\//, '').replace(/@.*$/, ''),
-      usuario: login,
-      usuarioLogado: login,
-      data: dados.lastSeen || new Date().toISOString(),
-      dataLogin: dados.lastSeen || new Date().toISOString(),
-      createdAt: dados.lastSeen || new Date().toISOString(),
-      updatedAt: dados.lastSeen || new Date().toISOString(),
-      timestamp: dados.lastSeen || new Date().toISOString(),
-      ultimoLogin: dados.lastSeen || new Date().toISOString(),
-      dia,
-      origem: 'agent-desktop',
-      tipo: 'login',
-      versaoAgente: dados.versaoAgente || ''
-    };
-    await firestoreAddDoc(`ativos/${docId}/usuarios_historico`, item).catch(e => log('[LoginHist] usuarios_historico: ' + e.message));
-    await firestoreAddDoc('login_history', item).catch(e => log('[LoginHist] login_history: ' + e.message));
-  } catch(e) {
-    log('[LoginHist] erro ao registrar login: ' + e.message);
-  }
-}
-
 async function reportar() {
   try {
     const cpu    = getCpuUsage();
@@ -657,8 +493,11 @@ async function reportar() {
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
     log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user}`);
-    // Atualiza o ativo correspondente a cada ciclo: hostname, sessão, inventário e métricas.
-    atualizarAtivoComHostname(dados);
+    // Atualiza ativo correspondente com hostname (roda apenas uma vez por sessão)
+    if (!global._ativoAtualizado) {
+      global._ativoAtualizado = true;
+      atualizarAtivoComHostname(dados);
+    }
   } catch(e) {
     log(`[ERRO] ${e.message}`);
   }
@@ -871,42 +710,249 @@ async function firestorePatch(docPath, data) {
   });
 }
 
+// ════════════════════════════════════════════════════════════════
+// RELAY FIREBASE REALTIME DATABASE — push em tempo real
+// Substitui polling de 3s por SSE persistente na porta 443 HTTPS.
+// Zero dependências npm — usa apenas https nativo do Node.js.
+// Latência: ~100–200ms vs 2–6s do Firestore polling anterior.
+// ════════════════════════════════════════════════════════════════
+
+const RTDB_HOST = 'sysack-829e2-default-rtdb.firebaseio.com';
+
+let _rtdbListeners = new Map(); // sessaoId → req
+let _sessoesAtivas = new Set(); // sessoes com listener ativo
+
+// Abre conexão SSE persistente e chama callback a cada comando recebido
+function rtdbListen(sessaoId, callback) {
+  rtdbUnlisten(sessaoId);
+
+  const req = https.request({
+    hostname: RTDB_HOST,
+    path:     `/relay/${sessaoId}/cmd.json?auth=${API_KEY}`,
+    method:   'GET',
+    rejectUnauthorized: false,
+    headers: { 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache' },
+  }, res => {
+    log(`[RTDB] Listener SSE ativo — sessão ${sessaoId} (HTTP ${res.statusCode})`);
+    let ultimoTs = 0;
+    let buf = '';
+
+    res.on('data', chunk => {
+      buf += chunk.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      let event = '', data = '';
+      for (const line of lines) {
+        if (line.startsWith('event: '))     { event = line.slice(7).trim(); }
+        else if (line.startsWith('data: ')) { data  = line.slice(6).trim(); }
+        else if (line === '' && event && data) {
+          if (event === 'put' || event === 'patch') {
+            try {
+              const val = JSON.parse(data)?.data;
+              if (val && val.ts && val.ts > ultimoTs && val.payload) {
+                ultimoTs = val.ts;
+                callback(val.payload);
+              }
+            } catch(e) {}
+          }
+          event = ''; data = '';
+        }
+      }
+    });
+
+    res.on('end', () => {
+      log(`[RTDB] SSE encerrado — sessão ${sessaoId}`);
+      _rtdbListeners.delete(sessaoId);
+      if (_sessoesAtivas.has(sessaoId)) {
+        setTimeout(() => { if (_sessoesAtivas.has(sessaoId)) rtdbListen(sessaoId, callback); }, 5000);
+      }
+    });
+
+    res.on('error', e => log('[RTDB] SSE erro: ' + e.message));
+  });
+
+  req.setTimeout(0);
+  req.on('error', e => {
+    log('[RTDB] Conexão falhou: ' + e.message);
+    if (_sessoesAtivas.has(sessaoId)) {
+      setTimeout(() => { if (_sessoesAtivas.has(sessaoId)) rtdbListen(sessaoId, callback); }, 10000);
+    }
+  });
+  req.end();
+  _rtdbListeners.set(sessaoId, req);
+}
+
+function rtdbUnlisten(sessaoId) {
+  const req = _rtdbListeners.get(sessaoId);
+  if (req) { try { req.destroy(); } catch(e) {} }
+  _rtdbListeners.delete(sessaoId);
+}
+
+// Escreve dados no RTDB via REST (PUT)
+function rtdbEscrever(rtdbPath, data) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(data);
+    const req  = https.request({
+      hostname: RTDB_HOST,
+      path:     `/${rtdbPath}.json?auth=${API_KEY}`,
+      method:   'PUT',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => res.statusCode < 300 ? resolve() : reject(new Error('HTTP ' + res.statusCode)));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// Processa comando recebido via RTDB e escreve resposta de volta
+async function processarComandoRtdb(sessaoId, msg) {
+  if (!msg || !msg.tipo) return;
+  log(`[RTDB] Sessão ${sessaoId} — tipo: ${msg.tipo}`);
+
+  let resposta = {};
+  try {
+    if (msg.tipo === 'ping') {
+      resposta = { tipo: 'pong', ts: Date.now(), hostname: AGENT_ID };
+
+    } else if (msg.tipo === 'exec') {
+      const cmd = msg.cmd || '';
+      try {
+        const out = execSync(
+          'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + cmd.replace(/"/g, '\\"') + '"',
+          { timeout: 15000, windowsHide: true }
+        ).toString();
+        resposta = { tipo: 'result', stdout: out, cmd };
+      } catch(e) {
+        resposta = { tipo: 'result', stderr: e.stderr?.toString() || '', erro: e.message, cmd };
+      }
+
+    } else if (msg.tipo === 'screenshot') {
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms,System.Drawing',
+        '$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds',
+        '$b=New-Object System.Drawing.Bitmap($s.Width,$s.Height)',
+        '$g=[System.Drawing.Graphics]::FromImage($b)',
+        '$g.CopyFromScreen($s.Location,[System.Drawing.Point]::Empty,$s.Size)',
+        '$ms=New-Object System.IO.MemoryStream',
+        '$enc=New-Object System.Drawing.Imaging.EncoderParameters(1)',
+        '$enc.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality,[long]55)',
+        '$jpg=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{$_.MimeType -eq "image/jpeg"}',
+        '$b.Save($ms,$jpg,$enc)',
+        '[Convert]::ToBase64String($ms.ToArray())',
+      ].join(';');
+      const psFile = path.join(__dirname, '_sc_rtdb.ps1');
+      fs.writeFileSync(psFile, ps);
+      const b64 = execSync(
+        'powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
+        { timeout: 25000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }
+      ).toString().trim();
+      try { fs.unlinkSync(psFile); } catch(e) {}
+      resposta = { tipo: 'screenshot', data: b64 };
+
+    } else if (msg.tipo === 'metrics') {
+      const mem = getMemoryInfo();
+      const discos = getDiskInfo();
+      const discoC = discos.find(d => d.drive === 'C:') || {};
+      resposta = {
+        tipo:    'metrics',
+        cpu:     getCpuUsage(),
+        mem:     mem.pct,
+        disk:    discoC.pct || 0,
+        uptime:  Math.floor(getUptime() / 3600),
+        usuario: getLoggedUser(),
+      };
+
+    } else {
+      resposta = { tipo: 'error', msg: 'tipo desconhecido: ' + msg.tipo };
+    }
+  } catch(e) {
+    resposta = { tipo: 'error', msg: e.message };
+  }
+
+  // Escreve resposta — técnico recebe em <200ms via onValue
+  try {
+    await rtdbEscrever(`relay/${sessaoId}/resp`, {
+      payload: resposta,
+      ts:      Date.now(),
+      agentId: AGENT_ID,
+    });
+  } catch(e) {
+    log('[RTDB] Erro ao gravar resposta: ' + e.message);
+  }
+}
+
+function iniciarRelayRtdb(sessaoId) {
+  if (_sessoesAtivas.has(sessaoId)) return;
+  _sessoesAtivas.add(sessaoId);
+  log(`[RTDB] Iniciando relay para sessão ${sessaoId}`);
+  rtdbListen(sessaoId, msg => processarComandoRtdb(sessaoId, msg));
+}
+
+function encerrarRelayRtdb(sessaoId) {
+  _sessoesAtivas.delete(sessaoId);
+  rtdbUnlisten(sessaoId);
+  // Remove dados da sessão do RTDB
+  rtdbEscrever(`relay/${sessaoId}`, null).catch(() => {});
+  log(`[RTDB] Relay encerrado — sessão ${sessaoId}`);
+}
+
+// ════════════════════════════════════════════════════════════════
+// executarComando — Firestore (recebe sessaoId e inicia RTDB relay)
+// pollComandos    — poll 5s só para iniciar/encerrar sessões
+// ════════════════════════════════════════════════════════════════
+
 async function executarComando(doc) {
   const fields = doc.document?.fields || {};
-  const getId = f => f?.stringValue || '';
-  const id       = doc.document?.name?.split('/').pop();
-  const tipo     = getId(fields.tipo);
-  const dados    = (() => { try { return JSON.parse(getId(fields.dados) || '{}'); } catch { return {}; } })();
-  const agentId  = getId(fields.agentId);
+  const getId  = f => f?.stringValue || '';
+  const id     = doc.document?.name?.split('/').pop();
+  const tipo   = getId(fields.tipo);
+  const dados  = (() => { try { return JSON.parse(getId(fields.dados) || '{}'); } catch { return {}; } })();
+  const aId    = getId(fields.agentId);
 
-  if (agentId !== AGENT_ID) return;
+  if (aId !== AGENT_ID) return;
 
-  // Marca como processando IMEDIATAMENTE para não processar duas vezes
+  // Marca imediatamente para não processar duas vezes
   await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
 
   // Verifica token de segurança
   const tokenRecebido = getId(fields.token);
   if (!tokenRecebido || tokenRecebido !== 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9') {
-    // Token inválido ou ausente (comando antigo) — descarta silenciosamente
     await firestorePatch('agent_commands/' + id, { status: 'descartado' }).catch(() => {});
     return;
   }
 
-  log('[Relay] Comando recebido: ' + tipo);
-
-  // Marca como processando
+  log('[Relay] Comando Firestore: ' + tipo);
   await firestorePatch('agent_commands/' + id, { status: 'executando' }).catch(() => {});
 
+  const sessaoId = dados.sessaoId || '';
+
+  if (tipo === 'iniciar_acesso_remoto' || tipo === 'usar_firebase_relay') {
+    // A partir daqui todos os comandos vão pelo RTDB (push em tempo real)
+    if (sessaoId) iniciarRelayRtdb(sessaoId);
+    await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: 'rtdb-relay-ativo' }).catch(() => {});
+    return;
+  }
+
+  if (tipo === 'encerrar_acesso_remoto') {
+    if (sessaoId) encerrarRelayRtdb(sessaoId);
+    await firestorePatch('agent_commands/' + id, { status: 'concluido' }).catch(() => {});
+    return;
+  }
+
+  // Comandos legados via Firestore (compatibilidade com agentes antigos)
   let resultado = '';
   try {
-    if (tipo === 'iniciar_acesso_remoto' || tipo === 'usar_firebase_relay') {
-      resultado = JSON.stringify({ ok: true, porta: 9000, hostname: AGENT_ID });
-
-    } else if (tipo === 'powershell') {
+    if (tipo === 'powershell') {
       const cmd = dados.cmd || '';
-      const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + cmd.replace(/"/g, '\\"') + '"',
-        { timeout: 15000, windowsHide: true }).toString();
-      resultado = out;
+      resultado = execSync(
+        'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + cmd.replace(/"/g, '\\"') + '"',
+        { timeout: 15000, windowsHide: true }
+      ).toString();
 
     } else if (tipo === 'screenshot') {
       const ps = [
@@ -925,8 +971,6 @@ async function executarComando(doc) {
         { timeout: 20000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).toString().trim();
       try { fs.unlinkSync(psFile); } catch(e) {}
 
-    } else if (tipo === 'encerrar_acesso_remoto') {
-      resultado = 'ok';
     } else {
       resultado = 'tipo desconhecido: ' + tipo;
     }
@@ -934,22 +978,21 @@ async function executarComando(doc) {
     resultado = '[ERRO] ' + e.message;
   }
 
-  // Grava resultado de volta
-  const sessaoId = dados.sessaoId || '';
   if (sessaoId) {
     await firestorePatch('sessoes_remotas/' + sessaoId + '/relay/resposta', {
-      resultado, tipo, ts: new Date().toISOString(), agentId: AGENT_ID
+      resultado, tipo, ts: new Date().toISOString(), agentId: AGENT_ID,
     }).catch(() => {});
   }
   await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: resultado.slice(0, 500) }).catch(() => {});
 }
 
-// Poll de comandos a cada 3 segundos
+// Poll Firestore — somente para receber "iniciar_acesso_remoto" com sessaoId
+// Intervalo de 5s (era 3s) — depois que o relay RTDB inicia, não é mais usado
 async function pollComandos() {
   try {
     const docs = await firestoreQuery('agent_commands', [
       ['agentId', 'EQUAL', AGENT_ID],
-      ['status', 'EQUAL', 'pendente']
+      ['status',  'EQUAL', 'pendente']
     ]);
     if (Array.isArray(docs)) {
       for (const doc of docs) {
@@ -959,7 +1002,7 @@ async function pollComandos() {
   } catch(e) {}
 }
 
-setInterval(pollComandos, 3000);
+setInterval(pollComandos, 5000);
 
 
 // ── Atualiza ativo correspondente com hostname ────────────────────
@@ -1009,44 +1052,16 @@ async function atualizarAtivoComHostname(dados) {
     const docId = doc.name.split('/').pop();
     const ativoHostname = doc.fields?.hostname?.stringValue || '';
 
-    // Atualiza sempre: mesmo com hostname igual, sessão, usuário e métricas mudam a cada ciclo.
+    // Só atualiza se o hostname estiver vazio ou diferente
+    if (ativoHostname === AGENT_ID) return;
 
     await firestorePatch(`ativos/${docId}`, {
-      hostname:          AGENT_ID,
-      ip:                ip,
-      status:            'em-uso',
-      ultimoAgente:      new Date().toISOString(),
-      lastSeen:          dados.lastSeen,
-      usuarioLogado:     dados.usuarioLogado || '',
-      usuarioPrincipal:  dados.usuarioLogado || '',
-      usuarioPrincipalLogin: dados.usuarioLogado || '',
-      ultimoLoginUsuario:dados.usuarioLogado || '',
-      ultimoLoginEm:     dados.lastSeen,
-      osNome:            dados.osNome || dados.so || '',
-      so:                dados.so || dados.osNome || '',
-      fabricante:        dados.fabricante || '',
-      modelo:            dados.modelo || '',
-      serial:            dados.serial || '',
-      cpuModelo:         dados.cpuModelo || '',
-      nucleos:           dados.nucleos || '',
-      ramTotalGB:        dados.ramTotalGB ?? null,
-      ramUsadoGB:        dados.ramUsadoGB ?? null,
-      ramPct:            dados.ramPct ?? null,
-      memPct:            dados.memPct ?? null,
-      discoC_livreGB:    dados.discoC_livreGB ?? null,
-      discoC_totalGB:    dados.discoC_totalGB ?? null,
-      discoC_usadoPct:   dados.discoC_usadoPct ?? null,
-      antivirus:         dados.antivirus || '',
-      bitlocker:         dados.bitlocker || '',
-      firewall:          dados.firewall || '',
-      patches:           dados.patches ?? null,
-      monitores:         dados.monitores || [],
-      versaoAgente:      dados.versaoAgente || '',
-      plataforma:        dados.plataforma || '',
-      uptimeH:           dados.uptimeH ?? null,
+      hostname:     AGENT_ID,
+      ip:           ip,
+      status:       'em-uso',
+      ultimoAgente: new Date().toISOString(),
     });
 
-    await registrarLoginAtivo(docId, dados);
     log(`[OK] Ativo ${docId} atualizado com hostname: ${AGENT_ID}`);
   } catch(e) {
     // Silencioso — não crítico
