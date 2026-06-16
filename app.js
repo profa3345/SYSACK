@@ -1295,6 +1295,29 @@ function isPageActive(pageId) {
 
 // ─── SINGLE goPage + renderPage — NO PATCHES, NO RECURSION ───
 function goPage(id) {
+  // Verifica moduloPerms — bloqueia se o módulo estiver oculto para este usuário
+  const u = SESSION_USER || CURRENT_USER;
+  if (u?.moduloPerms && Object.keys(u.moduloPerms).length > 0 && !['admin','gestor'].includes(u.role)) {
+    // Mapeamento inverso page→moduloId (mesma tabela de aplicarModuloPermsMenu)
+    const P2M = {ativos:'ativos',computadores:'ativos',notebooks:'ativos',servidores:'ativos',monitores:'ativos',
+      patrimonio:'patrimonio',movimentacoes:'movimentacoes',chamados:'chamados',aprovacoes:'aprovacoes',
+      'assistencia-remota':'assistencia-remota',terceirizada:'terceirizada',osd:'osd',
+      'monitor-rede':'monitor-rede',switches:'switches',impressoras:'impressoras',mdm:'smartphones',
+      topologia:'topologia',redes:'monitor-rede',firewalls:'monitor-rede',telecom:'telecom',
+      empregados:'empregados',relatorios:'relatorios',documentos:'relatorios',capacidade:'capacidade',
+      wsus:'wsus','compliance-cis':'compliance-cis','audit-logs':'audit-logs','grupos-alerta':'grupos-alerta',
+      alertas:'grupos-alerta','mapa-ativos':'ativos','mudancas-itil':'chamados',descarte:'ativos',
+      reuso:'ativos','santa-clara':'ativos',mobiliario:'ativos',apps:'ativos',
+      'self-service':'chamados',lembretes:'chamados',kb:'chamados',pesquisas:'relatorios',
+      'exec-dashboard':'exec-dashboard','ai-dashboard':'ai-dashboard',dashboard:'dashboard',
+    };
+    const moduloId = P2M[id];
+    if (moduloId && u.moduloPerms[moduloId] === '') {
+      showToast('⛔ Acesso não permitido a este módulo.', 'warning', 3000);
+      return;
+    }
+  }
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-i').forEach(n => n.classList.remove('active'));
   const page = document.getElementById('page-' + id);
@@ -3525,9 +3548,16 @@ function loginSuccess(user, showWelcome = true) {
     iniciarWatcherIP?.();
     iniciarWatcherAlertasIA?.();
     startAgentsListener();
-    // Mostra "Gestão de Contas" no menu apenas para admins
+    // Mostra "Gestão de Contas" no menu apenas para admins ou quem tem permissão especial
     const navUsuarios = document.getElementById('nav-usuarios');
-    if (navUsuarios) navUsuarios.style.display = isAdmin() ? '' : 'none';
+    if (navUsuarios) {
+      const podeGerenciar = isAdmin() || user?.permsEspeciais?.podeGestarContas === true;
+      navUsuarios.style.display = podeGerenciar ? '' : 'none';
+    }
+
+    // Aplica moduloPerms ao menu lateral: oculta itens sem acesso
+    aplicarModuloPermsMenu(user);
+
     document.dispatchEvent(new Event('sysack-login'));
   }
 
@@ -3551,6 +3581,88 @@ function loginSuccess(user, showWelcome = true) {
       }
     }, 300);
   }
+}
+
+// ─── Aplica moduloPerms ao menu lateral ──────────────────────
+// Módulos com '' (sem acesso) ficam ocultos. Admin vê tudo.
+function aplicarModuloPermsMenu(user) {
+  // Admin e gestor sem moduloPerms configurado: vê tudo
+  const perms = user?.moduloPerms || {};
+  const hasCustomPerms = Object.keys(perms).length > 0;
+  const isAdminOrGestor = ['admin', 'gestor'].includes(user?.role || '');
+
+  // Mapeamento data-page → id do módulo GC
+  const PAGE_TO_MODULO = {
+    'dashboard':        'dashboard',
+    'exec-dashboard':   'exec-dashboard',
+    'ai-dashboard':     'ai-dashboard',
+    'ativos':           'ativos',
+    'computadores':     'ativos',
+    'notebooks':        'ativos',
+    'servidores':       'ativos',
+    'monitores':        'ativos',
+    'patrimonio':       'patrimonio',
+    'movimentacoes':    'movimentacoes',
+    'chamados':         'chamados',
+    'aprovacoes':       'aprovacoes',
+    'assistencia-remota':'assistencia-remota',
+    'terceirizada':     'terceirizada',
+    'osd':              'osd',
+    'monitor-rede':     'monitor-rede',
+    'switches':         'switches',
+    'impressoras':      'impressoras',
+    'mdm':              'smartphones',
+    'topologia':        'topologia',
+    'redes':            'monitor-rede',
+    'firewalls':        'monitor-rede',
+    'telecom':          'telecom',
+    'empregados':       'empregados',
+    'relatorios':       'relatorios',
+    'documentos':       'relatorios',
+    'capacidade':       'capacidade',
+    'wsus':             'wsus',
+    'compliance-cis':   'compliance-cis',
+    'audit-logs':       'audit-logs',
+    'grupos-alerta':    'grupos-alerta',
+    'alertas':          'grupos-alerta',
+    'mapa-ativos':      'ativos',
+    'mudancas-itil':    'chamados',
+    'descarte':         'ativos',
+    'reuso':            'ativos',
+    'santa-clara':      'ativos',
+    'mobiliario':       'ativos',
+    'apps':             'ativos',
+    'self-service':     'chamados',
+    'lembretes':        'chamados',
+    'kb':               'chamados',
+    'pesquisas':        'relatorios',
+  };
+
+  // Se admin/gestor sem perms customizadas, garante tudo visível
+  if (isAdminOrGestor && !hasCustomPerms) {
+    document.querySelectorAll('.nav-i[data-page], .nav-i.nav-sub[data-page]').forEach(el => {
+      el.style.display = '';
+    });
+    return;
+  }
+
+  // Aplica ocultar por módulo
+  document.querySelectorAll('.nav-i[data-page], .nav-i.nav-sub[data-page]').forEach(el => {
+    const page = el.getAttribute('data-page');
+    if (!page) return;
+    const moduloId = PAGE_TO_MODULO[page];
+    if (!moduloId) return; // páginas sem mapeamento ficam visíveis
+
+    if (hasCustomPerms) {
+      const nivel = perms[moduloId] || '';
+      // '' = oculto, qualquer outro valor = visível
+      el.style.display = nivel ? '' : 'none';
+    }
+  });
+
+  console.log('[Menu] Permissões aplicadas — role:', user?.role,
+    '| módulos visíveis:', Object.values(perms).filter(Boolean).length,
+    '/', Object.keys(perms).length);
 }
 
 // ─── Logout ──────────────────────────────────────────────────
@@ -28531,7 +28643,9 @@ let _gcEmpSel      = null;
 
 // ── Tabela principal ─────────────────────────────────────────
 async function renderUsuarios() {
-  if (!isAdmin()) { showToast('Acesso restrito a administradores', 'danger'); goPage('dashboard'); return; }
+  const u = SESSION_USER || CURRENT_USER;
+  const temAcesso = isAdmin() || u?.permsEspeciais?.podeGestarContas === true;
+  if (!temAcesso) { showToast('Acesso restrito a administradores', 'danger'); goPage('dashboard'); return; }
 
   let usuarios = [];
   try {
@@ -28729,7 +28843,7 @@ function gcSelecionarRole(role) {
     if (r===role) { el.style.borderColor=rolesCores[r]; el.style.background=rolesCores[r]+'18'; }
     else { el.style.borderColor='var(--g200)'; el.style.background=''; }
   });
-  // Defaults por role
+  // Defaults por role — módulos e permissões especiais
   const defs = {
     admin:     Object.fromEntries(GC_MODULOS.map(m=>[m.id,'rwd'])),
     gestor:    Object.fromEntries(GC_MODULOS.map(m=>[m.id,['audit-logs','compliance-cis'].includes(m.id)?'r':'rw'])),
@@ -28737,7 +28851,15 @@ function gcSelecionarRole(role) {
     mdm_admin: {smartphones:'rwd','assistencia-remota':'rw',dashboard:'r'},
     viewer:    Object.fromEntries(GC_MODULOS.map(m=>[m.id,'r'])),
   };
+  const defEsp = {
+    admin:     { podeAtualizarClientes:true, podeInstalarAgente:true, podeEncerrarSessao:true, podeGestarContas:true },
+    gestor:    { podeAtualizarClientes:true, podeInstalarAgente:true, podeEncerrarSessao:false, podeGestarContas:false },
+    tecnico:   { podeAtualizarClientes:false, podeInstalarAgente:true, podeEncerrarSessao:false, podeGestarContas:false },
+    mdm_admin: { podeAtualizarClientes:false, podeInstalarAgente:false, podeEncerrarSessao:false, podeGestarContas:false },
+    viewer:    {},
+  };
   if (!Object.values(_gcModPerms).some(Boolean)) _gcModPerms = {...(defs[role]||{})};
+  if (!Object.keys(_gcPermsEsp).length) _gcPermsEsp = {...(defEsp[role]||{})};
   gcRenderModulos();
 }
 
