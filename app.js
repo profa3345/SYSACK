@@ -30166,33 +30166,40 @@ class SysackWebRTCViewer {
   }
 
   function diasAnoSYSACK(ativo, ag) {
-    const src = ativo || ag || {};
     const ano = String(new Date().getFullYear());
-
-    if (src.diasLogadosAno != null && src.diasLogadosAno !== '') return src.diasLogadosAno;
-    if (src.diasLogadosAnoAtual != null && src.diasLogadosAnoAtual !== '') return src.diasLogadosAnoAtual;
-
+    // Fontes prioritárias: campo direto no ativo ou agente
+    for (const src of [ativo, ag].filter(Boolean)) {
+      for (const k of ['diasLogadosAno','diasLogadosAnoAtual','diasAnoAtual','contadorDiasAno','totalDias']) {
+        if (src[k] != null && src[k] !== '' && src[k] !== 0) return src[k];
+      }
+    }
+    // Soma de usuários principais
+    for (const src of [ativo, ag].filter(Boolean)) {
+      if (Array.isArray(src.usuariosPrincipais) && src.usuariosPrincipais.length) {
+        const n = src.usuariosPrincipais.reduce((s,u) =>
+          s + (Number(u.diasLogadosAno || u.contadorDiasAno || u.diasAnoAtual || u.totalDias || 0)), 0);
+        if (n) return n;
+      }
+    }
+    // Calcula contando dias únicos no histório inline
     const loginHistory = sysackHistoricoInlineDoAtivo(ativo, ag);
     const dias = new Set();
-
     loginHistory.forEach(l => {
-      const diaRaw = l?.dia || '';
-      if (String(diaRaw).startsWith(ano)) {
-        dias.add(String(diaRaw).slice(0,10));
-        return;
-      }
-      const dtRaw = l?.dataLogin || l?.data || l?.ultimoLogin || l?.createdAt || l?.timestamp || l?.updatedAt || '';
+      // Campo "dia" explícito
+      if (l?.dia && String(l.dia).startsWith(ano)) { dias.add(String(l.dia).slice(0,10)); return; }
+      // Extrai data de qualquer campo de data
+      const dtRaw = l?.dataLogin || l?.data || l?.date || l?.dia || l?.loginAt ||
+                    l?.ultimoLogin || l?.createdAt || l?.timestamp || l?.updatedAt || '';
       if (!dtRaw) return;
-      const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
-      if (!isNaN(dt.getTime()) && String(dt.getFullYear()) === ano) dias.add(dt.toISOString().slice(0,10));
+      try {
+        const dt = dtRaw?.toDate ? dtRaw.toDate()
+                  : dtRaw?.seconds ? new Date(dtRaw.seconds*1000)
+                  : new Date(dtRaw);
+        if (!isNaN(dt.getTime()) && String(dt.getFullYear()) === ano)
+          dias.add(dt.toISOString().slice(0,10));
+      } catch {}
     });
-
     if (dias.size) return dias.size;
-
-    if (Array.isArray(src.usuariosPrincipais)) {
-      const n = src.usuariosPrincipais.reduce((s,u) => s + (Number(u.diasLogadosAno || u.contadorDiasAno || u.diasAnoAtual || u.totalDias || 0)), 0);
-      if (n) return n;
-    }
     return '—';
   }
 
@@ -30208,15 +30215,21 @@ class SysackWebRTCViewer {
 
   function linhaEventoSYSACK(e) {
     const tipo = e.tipo || e.subtipo || 'evento';
-    const icon = ({login:'👤', logout:'🚪', chamado:'🎫', chamado_aberto:'🎫', chamado_atualizado:'🎫', chamado_fechado:'✅', mudanca_faixa_ip:'🚨', alerta_ip:'🚨', troca_monitor:'🖥️', monitor:'🖥️', transferencia:'🚚', troca_responsavel:'👥', mudanca_campo:'✏️', mudanca_local:'📍', troca_area:'🏢', troca_grupo:'🧩', troca_status:'📌'}[tipo] || '•');
+    const isObs = tipo === 'observacao' || tipo === 'obs_tecnico' || tipo === 'nota_tecnico';
+    const icon = ({login:'👤', logout:'🚪', chamado:'🎫', chamado_aberto:'🎫', chamado_atualizado:'🎫', chamado_fechado:'✅',
+      mudanca_faixa_ip:'🚨', alerta_ip:'🚨', troca_monitor:'🖥️', monitor:'🖥️', transferencia:'🚚',
+      troca_responsavel:'👥', mudanca_campo:'✏️', mudanca_local:'📍', troca_area:'🏢', troca_grupo:'🧩',
+      troca_status:'📌', observacao:'📝', obs_tecnico:'📝', nota_tecnico:'📝'}[tipo] || '•');
     const data = e.createdAt || e.data || e.detecEm || e.atualizadoEm || e.ultimoLogin || e.dataLogin || e.time;
     const chamadoId = e.chamadoId || e.idChamado || e.chamado || (String(e.titulo||'').match(/#?([A-Za-z0-9_-]{3,})/)||[])[1];
     const isChamado = String(tipo).includes('chamado') || String(e.titulo||'').toLowerCase().includes('chamado');
-    return `<div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--g100)">
-      <div style="width:32px;height:32px;border-radius:50%;background:var(--g100);display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon}</div>
+    const bgIcon = isObs ? '#EFF6FF' : 'var(--g100)';
+    const conteudo = e.observacao || e.desc || e.descricao || e.texto || [e.de,e.para].filter(Boolean).join(' → ') || '';
+    return `<div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--g100)${isObs ? ';background:linear-gradient(90deg,#f0f9ff 0%,transparent 100%);border-radius:8px;padding:12px 10px;margin:2px 0' : ''}">
+      <div style="width:32px;height:32px;border-radius:50%;background:${bgIcon};display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon}</div>
       <div style="flex:1">
         <div style="font-weight:700;font-size:13px;color:var(--g800)">${esc2(e.titulo || e.title || e.label || tipo)}</div>
-        <div style="font-size:12.5px;color:var(--g600);margin-top:3px;white-space:pre-wrap">${esc2(e.desc || e.descricao || e.texto || [e.de,e.para].filter(Boolean).join(' → ') || '')}</div>
+        ${conteudo ? `<div style="font-size:12.5px;color:var(--g600);margin-top:3px;white-space:pre-wrap${isObs ? ';background:#fff;padding:8px 10px;border-radius:6px;border-left:3px solid var(--accent);margin-top:6px' : ''}">${esc2(conteudo)}</div>` : ''}
         <div style="font-size:11px;color:var(--g400);margin-top:5px">${esc2(fmt2(data))} · ${esc2(e.autor || e.origem || e.alteradoPor || 'sistema')}</div>
         ${isChamado && chamadoId ? `<button class="btn btn-primary btn-xs" style="margin-top:7px" onclick="sysackAbrirChamadoVinculado('${esc2(chamadoId)}')">Abrir chamado</button>` : ''}
       </div>
@@ -30308,7 +30321,7 @@ function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
       })
       .sort((a,b) => new Date(b.ultimo||0) - new Date(a.ultimo||0));
 
-    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.<br><span style="font-size:12px">Verifique se o agente atualizado já executou um novo ciclo de coleta.</span></div>';
+    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.<br><span style="font-size:12px">Os dados de login são coletados pelo agente SYSACK a cada ciclo. Se a máquina tiver agente instalado e ativo, os dados aparecerão no próximo ciclo de sincronização (±60s).</span></div>';
 
     return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Usuário</th><th>Primeiro login</th><th>Último login</th><th>Dias no ano</th><th>Total dias</th><th>Status</th></tr></thead><tbody>${arr.map(u => `<tr><td><b>${esc2(u.nome || u.login)}</b><div style="font-size:11px;color:var(--g400)">${esc2(u.login)}</div></td><td>${esc2(fmt2(u.primeiro))}</td><td>${esc2(fmt2(u.ultimo))}</td><td><b>${esc2(u.diasAno)}</b></td><td>${esc2(u.totalDias)}</td><td>${u.principal ? '<span class="badge badge-info">Principal</span>' : ''}${ativo?.maquinaCompartilhada ? '<span class="badge badge-warning">Compartilhada</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
   }
@@ -30324,7 +30337,8 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
       'mudanca_faixa_ip','alerta_ip','troca_monitor','monitor','monitor_movido',
       'transferencia','movimentacao','troca_responsavel','mudanca_campo','mudanca_local',
       'troca_area','troca_grupo','troca_status','mudanca_ip','mudanca_hostname',
-      'mudanca_nome','mudanca_card','card_movido','patrimonio','inventario','nota_tecnico'
+      'mudanca_nome','mudanca_card','card_movido','patrimonio','inventario',
+      'nota_tecnico','observacao','obs_tecnico'
     ];
 
     const eventos = [];
@@ -30337,18 +30351,90 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
       if (tipo.includes('chamado') || titulo.includes('chamado') || origem.includes('chamado')) return;
       if (tipo.includes('login') || tipo.includes('logout') || origem.includes('login')) return;
 
-      // Mostra apenas mudanças técnicas/administrativas da máquina.
+      // Mostra mudanças técnicas/administrativas + observações do técnico.
       const permitido = TIPOS_MAQUINA.some(t => tipo.includes(t) || titulo.includes(t.replaceAll('_',' ')));
-      if (permitido || h.campo || h.de || h.para || h.desc || h.descricao) eventos.push(h);
+      if (permitido || h.campo || h.de || h.para || h.desc || h.descricao || h.observacao) eventos.push(h);
     });
 
     eventos.sort((a,b) => new Date(b.createdAt || b.data || b.detecEm || b.ultimoLogin || 0) - new Date(a.createdAt || a.data || a.detecEm || a.ultimoLogin || 0));
 
+    const ativoId = ativo?.id || ag?.id || '';
+    const btnObs = ativoId ? `<button class="btn btn-primary btn-xs" style="margin-left:auto" onclick="sysackAbrirModalObservacao('${esc2(ativoId)}')">+ Observação</button>` : '';
+
+    const cabecalho = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <span style="font-size:12px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px">Linha do tempo</span>
+      ${btnObs}
+    </div>`;
+
     if (!eventos.length) {
-      return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhuma mudança técnica registrada para esta máquina.<br><span style="font-size:12px">Esta aba agora mostra somente alterações de IP, faixa de rede, monitor, grupo, área, nome, card, responsável e movimentações.</span></div>';
+      return cabecalho + '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhuma mudança técnica registrada para esta máquina.<br><span style="font-size:12px">Esta aba mostra alterações de IP, faixa de rede, monitor, grupo, área, nome, card, responsável, movimentações e observações do técnico.</span></div>';
     }
-    return eventos.map(linhaEventoSYSACK).join('');
+    return cabecalho + eventos.map(linhaEventoSYSACK).join('');
   }
+
+  // ── Modal de observação do técnico ─────────────────────────────
+  window.sysackAbrirModalObservacao = function(ativoId) {
+    let m = document.getElementById('modal-obs-tecnico');
+    if (m) m.remove();
+    m = document.createElement('div');
+    m.id = 'modal-obs-tecnico';
+    m.className = 'modal-overlay open';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:13000;display:flex;align-items:center;justify-content:center;padding:24px';
+    m.innerHTML = `
+      <div style="background:#fff;border-radius:16px;width:100%;max-width:540px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--g100);display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <h3 style="margin:0;font-size:16px">📝 Nova Observação</h3>
+            <div style="font-size:12px;color:var(--g400);margin-top:2px">Registrar observação permanente no histórico desta máquina</div>
+          </div>
+          <button style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--g400);line-height:1" onclick="document.getElementById('modal-obs-tecnico').remove()">✕</button>
+        </div>
+        <div style="padding:20px">
+          <label style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.4px">Observação</label>
+          <textarea id="obs-tecnico-texto" rows="5"
+            placeholder="Descreva a observação, ocorrência, intervenção realizada, estado do equipamento, peças substituídas, configurações alteradas..."
+            style="width:100%;margin-top:6px;padding:10px;border:1.5px solid var(--g200);border-radius:8px;font-size:13px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5"></textarea>
+          <div style="background:#F0F9FF;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:12px;color:#0369A1">
+            <b>💡 Esta observação ficará registrada permanentemente</b> no histórico desta máquina, visível para toda a equipe técnica.
+          </div>
+          <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
+            <button class="btn btn-ghost" onclick="document.getElementById('modal-obs-tecnico').remove()">Cancelar</button>
+            <button class="btn btn-primary" id="btn-salvar-obs" onclick="sysackSalvarObservacao('${esc2(ativoId)}')">💾 Salvar observação</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    setTimeout(() => document.getElementById('obs-tecnico-texto')?.focus(), 80);
+  };
+
+  window.sysackSalvarObservacao = async function(ativoId) {
+    const texto = (document.getElementById('obs-tecnico-texto')?.value || '').trim();
+    if (!texto) { showToast?.('Digite uma observação antes de salvar.', 'warning'); return; }
+    const btn = document.getElementById('btn-salvar-obs');
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    try {
+      await sysackHistoricoPathAdd('ativos', ativoId, {
+        tipo:       'observacao',
+        titulo:     '📝 Observação do técnico',
+        desc:       texto,
+        observacao: texto,
+        autor:      CURRENT_USER?.nome || CURRENT_USER?.email || 'técnico',
+        origem:     'tecnico-manual',
+        createdAt:  new Date().toISOString(),
+        data:       new Date().toISOString(),
+      });
+      document.getElementById('modal-obs-tecnico')?.remove();
+      showToast?.('✅ Observação registrada com sucesso!', 'success', 4000);
+      // Recarrega o painel para exibir a nova observação imediatamente
+      const titleEl = document.getElementById('comp-rast-title');
+      const agentId = titleEl?.dataset?.agentId || ativoId;
+      if (typeof abrirPainelComputadorSYSACK === 'function')
+        setTimeout(() => abrirPainelComputadorSYSACK(agentId, 'historico'), 500);
+    } catch(e) {
+      showToast?.('Erro ao salvar observação: ' + (e.message || e), 'danger');
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar observação'; }
+    }
+  };
 
   function ativarTabComputadorSYSACK(tab) {
     document.querySelectorAll('[data-comp-tab]').forEach(btn => {
@@ -30378,7 +30464,7 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
     document.body.appendChild(overlay);
     const dados = await carregarDadosPainelComputadorSYSACK(agentId);
     const { ag, ativo, historico, usuarios, loginHistory, chamados } = dados;
-    document.getElementById('comp-rast-title').textContent = ag.hostname || host2(ativo) || agentId;
+    const titleEl2 = document.getElementById('comp-rast-title'); titleEl2.textContent = ag.hostname || host2(ativo) || agentId; titleEl2.dataset.agentId = agentId;
     document.getElementById('comp-rast-sub').textContent = `${ativo?.pat ? 'PAT '+ativo.pat+' · ' : ''}${ag.ip || ativo?.ip || ''}`;
     document.getElementById('comp-rast-body').innerHTML = buildResumoComputadorSYSACK(ag, ativo) + `
       <div style="display:flex;gap:14px;border-bottom:1px solid var(--g100);margin-bottom:14px">
