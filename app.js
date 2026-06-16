@@ -194,6 +194,7 @@ const FIREBASE_CONFIG = {
   authDomain: "sysack-829e2.firebaseapp.com",
   projectId: "sysack-829e2",
   storageBucket: "sysack-829e2.firebasestorage.app",
+  databaseURL: "https://sysack-829e2-default-rtdb.firebaseio.com",
   messagingSenderId: "364185694349",
   appId: "1:364185694349:web:cc2e9123fe72726cc5f2c4",
   measurementId: "G-K4CKJJW92X"
@@ -8135,7 +8136,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   let _reconnects  = 0;
   let _modoConexao = 'detectando';  // 'local' | 'firebase' | 'detectando'
   let _fbRelay     = null;          // listener Banco Realtime para relay
-  const FB_RELAY_PATH = 'sessoes_remotas/' + sessaoId + '/relay';
+  const RTDB_RELAY_PATH = 'relay/' + sessaoId;
 
   // ── Detecção automática de rede ──────────────────────────────
   // 1. Tenta WebSocket direto (rede interna) com timeout de 3s
@@ -8349,41 +8350,49 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       });
   }
 
+  function rvGetRtdb() {
+    try {
+      if (typeof firebase !== 'undefined' && firebase.database) return firebase.database();
+    } catch(e) {}
+    return null;
+  }
+
   function rvEscutarRespostasBanco() {
-    // Poll de respostas do agente no Banco a cada 1 segundo
-    // (Banco Realtime DB seria melhor, mas Banco funciona)
-    let lastSeq = 0;
-
-    const pollInterval = setInterval(async () => {
-      if (_modoConexao !== 'firebase') {
-        clearInterval(pollInterval);
-        return;
-      }
-      try {
-        // Lê resposta mais recente do agente para esta sessão
-        const respDoc = await fsGet('sessoes_remotas', sessaoId + '/relay/resposta');
-        if (respDoc && respDoc.seq > lastSeq) {
-          lastSeq = respDoc.seq;
-          rvProcessarMensagem(respDoc.payload);
-        }
-      } catch {}
-    }, 1000);
-
-    _fbRelay = () => clearInterval(pollInterval);
+    const rtdb = rvGetRtdb();
+    if (!rtdb) {
+      rvShellLog('[SYSACK] Firebase Database não carregado no navegador.', '#EF4444');
+      return;
+    }
+    let lastTs = 0;
+    const ref = rtdb.ref(RTDB_RELAY_PATH + '/resp');
+    const handler = snap => {
+      const val = snap.val();
+      if (!val || !val.payload || !val.ts || val.ts <= lastTs) return;
+      lastTs = val.ts;
+      rvProcessarMensagem(val.payload);
+    };
+    ref.on('value', handler, err => rvShellLog('[SYSACK] Erro lendo relay RTDB: ' + err.message, '#EF4444'));
+    _fbRelay = () => ref.off('value', handler);
   }
 
   function rvEnviarViaBanco(msg) {
-    // Envia comando para o agente via Banco (relay)
-    return db?.collection('sessoes_remotas').doc(sessaoId).update({
-      relay_cmd: JSON.stringify(msg),
-      relay_seq: Date.now(),
-    }).catch(() => {});
+    const rtdb = rvGetRtdb();
+    if (!rtdb) return Promise.resolve();
+    const payload = { ...msg, tipo: msg.tipo || msg.type, type: msg.type || msg.tipo };
+    return rtdb.ref(RTDB_RELAY_PATH + '/cmd').set({
+      payload,
+      ts: Date.now(),
+      tecnicoUid: SESSION_USER?.uid || CURRENT_USER?.uid || ''
+    }).catch(e => rvShellLog('[SYSACK] Erro enviando comando RTDB: ' + e.message, '#EF4444'));
   }
 
   // ── Processador de mensagens (unifica local e Banco) ──────
   function rvProcessarMensagem(rawData) {
     try {
       const d = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+      d.tipo = d.tipo || d.type;
+      if (d.type === 'output' && !d.tipo) d.tipo = 'result';
+      if (d.type === 'output') d.stdout = d.data || '';
 
       // Detecta métricas embutidas no resultado do shell
       if (d.tipo === 'result' && d.stdout?.startsWith('METRICS:')) {
@@ -8407,7 +8416,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── Envio unificado (local ou Banco) ─────────────────────
   function rvSend(obj) {
     if (_modoConexao === 'local' && _ws?.readyState === 1) {
-      _ws.send(JSON.stringify(obj));
+      _ws.send(JSON.stringify({ ...obj, type: obj.type || obj.tipo, tipo: obj.tipo || obj.type }));
     } else if (_modoConexao === 'firebase') {
       rvEnviarViaBanco(obj);
     } else {
@@ -8923,6 +8932,23 @@ function arInstalarAgente() {
 // ════════════════════════════════════════════════════════════
 // ATUALIZAR CLIENTE — auto-update remoto para todos os agentes
 // ════════════════════════════════════════════════════════════
+function getAgentDesktopUpdateUrl() {
+  const override = (window.SYSACK_AGENT_UPDATE_URL || '').trim();
+  if (override) return override;
+  const base = (location.origin && location.origin.startsWith('http'))
+    ? location.origin
+    : 'https://sysack.vercel.app';
+  return base.replace(/\/$/, '') + '/agent-desktop.js';
+}
+
+function preencherUrlAtualizacaoCliente(forcar = false) {
+  const el = document.getElementById('upd-url');
+  if (!el) return;
+  const url = getAgentDesktopUpdateUrl();
+  if (forcar || !el.value || el.value.includes('raw.githubusercontent.com/sua-org')) el.value = url;
+  el.placeholder = url;
+}
+
 function arAtualizarClientes() {
   const u = SESSION_USER || CURRENT_USER;
   const temPermissao = u && (
@@ -8935,6 +8961,7 @@ function arAtualizarClientes() {
   const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
   if (!online.length) return showToast('Nenhum agente online para atualizar.','warning');
   openModal('modal-atualizar-cliente');
+  preencherUrlAtualizacaoCliente(true);
   const versaoAtual = online.map(a=>a.versaoAgente||a.version||'2.1.0').sort().reverse()[0]||'2.1.0';
   const pts = versaoAtual.split('.').map(Number); pts[2]=(pts[2]||0)+1;
   const ev = document.getElementById('upd-versao'); if(ev && !ev.value) ev.value=pts.join('.');

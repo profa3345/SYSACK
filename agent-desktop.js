@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1
+ * SYSACK Agent Desktop v2.1.2
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -504,7 +504,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1.2] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -577,11 +577,23 @@ function wsSend(socket, data) {
   try {
     const str = JSON.stringify(data);
     const buf = Buffer.from(str);
-    const frame = Buffer.allocUnsafe(2 + buf.length);
-    frame[0] = 0x81; // FIN + text opcode
-    frame[1] = buf.length;
-    buf.copy(frame, 2);
-    socket.write(frame);
+    let header;
+    if (buf.length < 126) {
+      header = Buffer.allocUnsafe(2);
+      header[0] = 0x81;
+      header[1] = buf.length;
+    } else if (buf.length < 65536) {
+      header = Buffer.allocUnsafe(4);
+      header[0] = 0x81;
+      header[1] = 126;
+      header.writeUInt16BE(buf.length, 2);
+    } else {
+      header = Buffer.allocUnsafe(10);
+      header[0] = 0x81;
+      header[1] = 127;
+      header.writeBigUInt64BE(BigInt(buf.length), 2);
+    }
+    socket.write(Buffer.concat([header, buf]));
   } catch(e) {}
 }
 
