@@ -8199,14 +8199,17 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     // 3. Sem rota WS disponível — tenta relay Firebase RTDB (funciona em qualquer rede)
     rvShellLog('[SYSACK] Tentativa 1: WebSocket local (' + wsIp + ':9000) — ' + (paginaHttps ? 'bloqueado (HTTPS)' : 'falhou'), '#EF4444');
     rvShellLog('[SYSACK] Tentativa 2: Cloudflare Tunnel — ' + (tunnelUrl ? 'indisponível' : 'não configurado'), '#EF4444');
-    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase RTDB...', '#F59E0B');
+    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase/Firestore...', '#F59E0B');
     _modoConexao = 'firebase';
     rvMostrarBannerConexao('firebase');
     rvConnectBanco();
   }
 
   function rvTestarConexaoLocal() {
-    // Tenta abrir WebSocket com timeout de 3 segundos
+    // Em página HTTPS (Vercel), o navegador bloqueia ws:// por Mixed Content.
+    // Não tenta WebSocket local para evitar erro visual e queda falsa.
+    if (location.protocol === 'https:') return Promise.resolve(false);
+    // Tenta abrir WebSocket com timeout de 3 segundos somente em HTTP/interno.
     return new Promise(resolve => {
       if (!wsIp || wsIp === 'localhost' || wsIp === '127.0.0.1') {
         resolve(false);
@@ -8266,6 +8269,11 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   window.rvRetentarLocal = async () => {
+    if (location.protocol === 'https:') {
+      showToast('Rede local direta usa ws:// e é bloqueada em HTTPS. Mantendo relay Firebase/Firestore.', 'warning', 5000);
+      rvSb('HTTPS detectado — usando relay via Banco.');
+      return;
+    }
     rvSb('Tentando reconectar via rede interna...');
     const ok = await rvTestarConexaoLocal();
     if (ok) {
@@ -8334,13 +8342,13 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     arEnviarComando(agentId, 'usar_firebase_relay', { sessaoId }, 'Relay Banco iniciado pelo técnico')
       .then(() => {
         rvSetStatus('firebase', 'Via internet 📡');
-        rvSb('Relay Banco ativo — latência ~300-600ms');
+        rvSb('Relay Banco ativo — comandos via Firestore');
 
         // Escuta respostas do agente no Banco
         rvEscutarRespostasBanco();
 
         // Avisa que screenshot será mais lenta
-        rvShellLog('[SYSACK] Conectado via internet (Banco Relay)', '#F59E0B');
+        rvShellLog('[SYSACK] Conectado via internet (Banco Relay Firestore)', '#F59E0B');
         rvShellLog('[SYSACK] Captura de tela disponível, mas mais lenta que via rede interna.', '#64748B');
         rvShellLog('[SYSACK] Use "↺ Tentar rede local" se estiver na mesma rede do PC alvo.', '#64748B');
       })
@@ -8350,6 +8358,9 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       });
   }
 
+  // Relay via Firestore: funciona no Vercel/HTTPS sem Mixed Content e sem depender de RTDB público.
+  // O agente recebe comandos em /agent_commands e grava respostas em:
+  // /sessoes_remotas/{sessaoId}/relay/resposta
   function rvGetRtdb() {
     try {
       if (typeof firebase !== 'undefined' && firebase.database) return firebase.database();
@@ -8358,32 +8369,64 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   function rvEscutarRespostasBanco() {
-    const rtdb = rvGetRtdb();
-    if (!rtdb) {
-      rvShellLog('[SYSACK] Firebase Database não carregado no navegador.', '#EF4444');
+    if (!db) {
+      rvShellLog('[SYSACK] Firestore não carregado no navegador.', '#EF4444');
       return;
     }
-    let lastTs = 0;
-    const ref = rtdb.ref(RTDB_RELAY_PATH + '/resp');
-    const handler = snap => {
-      const val = snap.val();
-      if (!val || !val.payload || !val.ts || val.ts <= lastTs) return;
-      lastTs = val.ts;
-      rvProcessarMensagem(val.payload);
-    };
-    ref.on('value', handler, err => rvShellLog('[SYSACK] Erro lendo relay RTDB: ' + err.message, '#EF4444'));
-    _fbRelay = () => ref.off('value', handler);
+    let lastTs = '';
+    const ref = db.collection('sessoes_remotas').doc(sessaoId).collection('relay').doc('resposta');
+    const unsub = ref.onSnapshot(snap => {
+      if (!snap.exists) return;
+      const val = snap.data() || {};
+      const ts = String(val.ts || val.updatedAt || '');
+      if (ts && ts === lastTs) return;
+      lastTs = ts;
+
+      const tipo = val.tipo || val.payload?.tipo || val.payload?.type || '';
+      const resultado = val.resultado || val.stdout || val.payload?.stdout || '';
+
+      if (val.payload) {
+        rvProcessarMensagem(val.payload);
+      } else if (tipo === 'screenshot') {
+        rvProcessarMensagem({ tipo:'screenshot', data: resultado });
+      } else {
+        rvProcessarMensagem({ tipo:'result', stdout: resultado, stderr: val.stderr || '', erro: val.erro || '' });
+      }
+    }, err => rvShellLog('[SYSACK] Erro lendo relay Firestore: ' + err.message, '#EF4444'));
+    _fbRelay = unsub;
   }
 
-  function rvEnviarViaBanco(msg) {
-    const rtdb = rvGetRtdb();
-    if (!rtdb) return Promise.resolve();
-    const payload = { ...msg, tipo: msg.tipo || msg.type, type: msg.type || msg.tipo };
-    return rtdb.ref(RTDB_RELAY_PATH + '/cmd').set({
-      payload,
-      ts: Date.now(),
-      tecnicoUid: SESSION_USER?.uid || CURRENT_USER?.uid || ''
-    }).catch(e => rvShellLog('[SYSACK] Erro enviando comando RTDB: ' + e.message, '#EF4444'));
+  async function rvEnviarViaBanco(msg) {
+    const tipoMsg = msg.tipo || msg.type;
+    let tipo = tipoMsg;
+    let dados = { ...msg, sessaoId };
+
+    // O agente legado entende powershell, screenshot e atualizar_agente.
+    if (tipoMsg === 'exec') {
+      tipo = 'powershell';
+      dados = { cmd: msg.cmd || '', sessaoId };
+    } else if (tipoMsg === 'screenshot') {
+      tipo = 'screenshot';
+      dados = { sessaoId };
+    } else if (tipoMsg === 'metrics') {
+      tipo = 'powershell';
+      dados = { cmd: msg.cmd || '', sessaoId };
+    }
+
+    const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
+    try {
+      await fsAdd('agent_commands', {
+        agentId,
+        tipo,
+        dados: JSON.stringify(dados),
+        token: TOKEN,
+        status: 'pendente',
+        criadoEm: new Date().toISOString(),
+        criadoPor: SESSION_USER?.uid || CURRENT_USER?.uid || '',
+      });
+    } catch(e) {
+      rvShellLog('[SYSACK] Erro enviando comando Firestore: ' + e.message, '#EF4444');
+    }
   }
 
   // ── Processador de mensagens (unifica local e Banco) ──────
@@ -8991,11 +9034,11 @@ async function executarAtualizacaoCliente() {
   const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
   let ok=0,erro=0;
   try {
-    await fsSet('agent_updates/'+versao.replace(/\./g,'_'),{
+    await fsSet('agent_updates', versao.replace(/\./g,'_'),{
       versao,url, publicadoPor:SESSION_USER?.nome||SESSION_USER?.email||'admin',
       publicadoEm:new Date().toISOString(), alvos, totalAgentes:lista.length,
     });
-    updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
+    updLog(`✓ Metadados gravados em /agent_updates/${versao.replace(/\./g,'_')}`);
     for (const ag of lista) {
       try {
         await fsAdd('agent_commands',{
