@@ -1055,8 +1055,6 @@ window.dispatchEvent(new Event('firebase-ready'));
       <button class="btn btn-primary" onclick="gcAbrirNovoAD()">+ Ativar Usuário do AD</button>
     </div>
   </div>
-
-  <!-- KPIs -->
   <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px">
     <div class="stat-card" style="border-left:3px solid #DC2626"><div class="stat-value" id="gu-kpi-total">—</div><div class="stat-label">Total</div></div>
     <div class="stat-card" style="border-left:3px solid #7C3AED"><div class="stat-value" id="gu-kpi-admin">—</div><div class="stat-label">Admins</div></div>
@@ -1064,37 +1062,24 @@ window.dispatchEvent(new Event('firebase-ready'));
     <div class="stat-card" style="border-left:3px solid #059669"><div class="stat-value" id="gu-kpi-tecnico">—</div><div class="stat-label">Técnicos</div></div>
     <div class="stat-card" style="border-left:3px solid #D97706"><div class="stat-value" id="gu-kpi-viewer">—</div><div class="stat-label">Visualizadores</div></div>
   </div>
-
-  <!-- Busca e filtros -->
   <div class="flex gap-8 mb-16" style="flex-wrap:wrap">
-    <input class="form-control" id="gu-busca" placeholder="🔍 Buscar por nome, e-mail ou login AD..."
-           style="max-width:360px;flex:1" oninput="renderUsuarios()">
+    <input class="form-control" id="gu-busca" placeholder="🔍 Buscar por nome, e-mail ou login AD..." style="max-width:360px;flex:1" oninput="renderUsuarios()">
     <select class="form-control" id="gu-filtro-role" style="max-width:180px" onchange="renderUsuarios()">
       <option value="">Todos os perfis</option>
-      <option value="admin">Admin</option>
-      <option value="gestor">Gestor</option>
-      <option value="tecnico">Técnico</option>
-      <option value="mdm_admin">MDM Admin</option>
+      <option value="admin">Admin</option><option value="gestor">Gestor</option>
+      <option value="tecnico">Técnico</option><option value="mdm_admin">MDM Admin</option>
       <option value="viewer">Visualizador</option>
     </select>
     <select class="form-control" id="gu-filtro-origem" style="max-width:180px" onchange="renderUsuarios()">
       <option value="">Todas as origens</option>
-      <option value="ad">Usuários AD</option>
-      <option value="local">Usuários locais</option>
+      <option value="ad">Usuários AD</option><option value="local">Usuários locais</option>
     </select>
   </div>
-
-  <!-- Tabela de usuários -->
   <div class="table-container">
     <table class="data-table">
       <thead><tr>
-        <th>Usuário / AD</th>
-        <th>E-mail / Login</th>
-        <th>Perfil</th>
-        <th>Autenticação</th>
-        <th>Permissões por módulo</th>
-        <th>Último acesso</th>
-        <th>Ações</th>
+        <th>Usuário / AD</th><th>E-mail / Login</th><th>Perfil</th>
+        <th>Autenticação</th><th>Permissões por módulo</th><th>Último acesso</th><th>Ações</th>
       </tr></thead>
       <tbody id="gu-tabela-body">
         <tr><td colspan="7" style="text-align:center;padding:32px;color:var(--g400)">Carregando...</td></tr>
@@ -1106,22 +1091,20 @@ window.dispatchEvent(new Event('firebase-ready'));
 <!-- MODAL: ATIVAR / EDITAR USUÁRIO DO AD -->
 <div class="modal-overlay" id="modal-gc-usuario">
   <div class="modal" style="max-width:780px;max-height:90vh;overflow-y:auto">
-    <div class="modal-header" style="background:#1E293B;color:#fff;border-radius:10px 10px 0 0;position:sticky;top:0;z-index:1">
+    <div class="modal-header" style="background:#1E293B;color:#fff;border-radius:10px 10px 0 0;position:sticky;top:0;z-index:2">
       <div>
         <h3 style="color:#fff;margin:0" id="gc-modal-titulo">Ativar Usuário do AD</h3>
-        <p style="color:rgba(255,255,255,.5);font-size:12px;margin:4px 0 0" id="gc-modal-sub">Selecione um empregado e configure seu acesso ao SYSACK</p>
+        <p style="color:rgba(255,255,255,.5);font-size:12px;margin:4px 0 0" id="gc-modal-sub">Selecione um empregado e configure seu acesso</p>
       </div>
       <button class="close-btn" onclick="closeModal('modal-gc-usuario')" style="color:rgba(255,255,255,.5)">✕</button>
     </div>
     <div class="modal-body" style="padding:20px">
-
-      <!-- Seletor de empregado AD -->
+      <!-- 1. Empregado -->
       <div id="gc-bloco-empregado" style="margin-bottom:20px">
         <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">1. Selecionar Empregado do AD</div>
         <div style="position:relative">
-          <input class="form-control" id="gc-emp-busca" placeholder="🔍 Nome, matrícula ou login AD..."
-            oninput="gcBuscarEmpregado(this.value)" autocomplete="off">
-          <div id="gc-emp-resultados" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.1)"></div>
+          <input class="form-control" id="gc-emp-busca" placeholder="🔍 Nome, matrícula ou login AD..." oninput="gcBuscarEmpregado(this.value)" autocomplete="off">
+          <div id="gc-emp-resultados" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.12)"></div>
         </div>
         <div id="gc-emp-selecionado" style="display:none;background:#EFF6FF;border:2px solid var(--accent);border-radius:10px;padding:12px;margin-top:8px">
           <div style="display:flex;align-items:center;justify-content:space-between">
@@ -1132,103 +1115,58 @@ window.dispatchEvent(new Event('firebase-ready'));
             </div>
             <button onclick="gcLimparEmpregado()" style="background:none;border:none;cursor:pointer;color:var(--g400);font-size:18px">✕</button>
           </div>
-          <input type="hidden" id="gc-emp-mat">
-          <input type="hidden" id="gc-emp-login">
-          <input type="hidden" id="gc-emp-email-ad">
+          <input type="hidden" id="gc-emp-mat"><input type="hidden" id="gc-emp-login"><input type="hidden" id="gc-emp-email-ad">
         </div>
       </div>
-
-      <!-- Perfil de acesso -->
+      <!-- 2. Role -->
       <div style="margin-bottom:20px">
         <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">2. Perfil de Acesso (Role)</div>
         <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
-          <label id="gc-role-card-admin" class="gc-role-card" onclick="gcSelecionarRole('admin')" style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s">
-            <div style="font-size:22px">👑</div>
-            <div style="font-size:12px;font-weight:700;margin-top:4px;color:#7C3AED">Admin</div>
-            <div style="font-size:10px;color:var(--g400);margin-top:2px">Tudo</div>
-          </label>
-          <label id="gc-role-card-gestor" class="gc-role-card" onclick="gcSelecionarRole('gestor')" style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s">
-            <div style="font-size:22px">🏢</div>
-            <div style="font-size:12px;font-weight:700;margin-top:4px;color:#2563EB">Gestor</div>
-            <div style="font-size:10px;color:var(--g400);margin-top:2px">Aprova/exec</div>
-          </label>
-          <label id="gc-role-card-tecnico" class="gc-role-card" onclick="gcSelecionarRole('tecnico')" style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s">
-            <div style="font-size:22px">🔧</div>
-            <div style="font-size:12px;font-weight:700;margin-top:4px;color:#059669">Técnico</div>
-            <div style="font-size:10px;color:var(--g400);margin-top:2px">Opera</div>
-          </label>
-          <label id="gc-role-card-mdm_admin" class="gc-role-card" onclick="gcSelecionarRole('mdm_admin')" style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s">
-            <div style="font-size:22px">📱</div>
-            <div style="font-size:12px;font-weight:700;margin-top:4px;color:#D97706">MDM Admin</div>
-            <div style="font-size:10px;color:var(--g400);margin-top:2px">Disp. móveis</div>
-          </label>
-          <label id="gc-role-card-viewer" class="gc-role-card" onclick="gcSelecionarRole('viewer')" style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s">
-            <div style="font-size:22px">👁️</div>
-            <div style="font-size:12px;font-weight:700;margin-top:4px;color:#6B7280">Visualizador</div>
-            <div style="font-size:10px;color:var(--g400);margin-top:2px">Leitura</div>
-          </label>
+          <label id="gc-role-card-admin"    onclick="gcSelecionarRole('admin')"     style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s"><div style="font-size:22px">👑</div><div style="font-size:12px;font-weight:700;margin-top:4px;color:#7C3AED">Admin</div><div style="font-size:10px;color:var(--g400);margin-top:2px">Tudo</div></label>
+          <label id="gc-role-card-gestor"   onclick="gcSelecionarRole('gestor')"    style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s"><div style="font-size:22px">🏢</div><div style="font-size:12px;font-weight:700;margin-top:4px;color:#2563EB">Gestor</div><div style="font-size:10px;color:var(--g400);margin-top:2px">Aprova</div></label>
+          <label id="gc-role-card-tecnico"  onclick="gcSelecionarRole('tecnico')"   style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s"><div style="font-size:22px">🔧</div><div style="font-size:12px;font-weight:700;margin-top:4px;color:#059669">Técnico</div><div style="font-size:10px;color:var(--g400);margin-top:2px">Opera</div></label>
+          <label id="gc-role-card-mdm_admin" onclick="gcSelecionarRole('mdm_admin')" style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s"><div style="font-size:22px">📱</div><div style="font-size:12px;font-weight:700;margin-top:4px;color:#D97706">MDM Admin</div><div style="font-size:10px;color:var(--g400);margin-top:2px">Móveis</div></label>
+          <label id="gc-role-card-viewer"   onclick="gcSelecionarRole('viewer')"    style="border:2px solid var(--g200);border-radius:10px;padding:12px;cursor:pointer;text-align:center;transition:.15s"><div style="font-size:22px">👁️</div><div style="font-size:12px;font-weight:700;margin-top:4px;color:#6B7280">Visualizador</div><div style="font-size:10px;color:var(--g400);margin-top:2px">Leitura</div></label>
         </div>
         <input type="hidden" id="gc-role-sel" value="viewer">
       </div>
-
-      <!-- Autenticação -->
+      <!-- 3. Autenticação -->
       <div style="margin-bottom:20px">
         <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">3. Autenticação</div>
         <div style="display:flex;gap:12px;flex-wrap:wrap">
           <label id="gc-auth-card-ad" onclick="gcSelecionarAuth('ad')" style="flex:1;min-width:200px;border:2px solid var(--accent);border-radius:10px;padding:14px;cursor:pointer;background:#EFF6FF">
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:36px;height:36px;background:#2563EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏢</div>
-              <div>
-                <div style="font-weight:700;font-size:13px;color:#1D4ED8">Usar senha do AD</div>
-                <div style="font-size:11.5px;color:var(--g500);margin-top:2px">Login com a mesma senha do Windows/Outlook</div>
-              </div>
+              <div><div style="font-weight:700;font-size:13px;color:#1D4ED8">Usar senha do AD</div><div style="font-size:11.5px;color:var(--g500);margin-top:2px">Mesma senha do Windows/Outlook</div></div>
             </div>
           </label>
           <label id="gc-auth-card-local" onclick="gcSelecionarAuth('local')" style="flex:1;min-width:200px;border:2px solid var(--g200);border-radius:10px;padding:14px;cursor:pointer">
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:36px;height:36px;background:var(--g100);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🔑</div>
-              <div>
-                <div style="font-weight:700;font-size:13px">Senha específica do SYSACK</div>
-                <div style="font-size:11.5px;color:var(--g500);margin-top:2px">Define uma senha diferente da do AD</div>
-              </div>
+              <div><div style="font-weight:700;font-size:13px">Senha específica do SYSACK</div><div style="font-size:11.5px;color:var(--g500);margin-top:2px">Senha diferente do AD</div></div>
             </div>
           </label>
         </div>
         <input type="hidden" id="gc-auth-tipo" value="ad">
         <div id="gc-senha-bloco" style="display:none;margin-top:12px;padding:12px;background:var(--g50);border-radius:8px;border:1px solid var(--g200)">
-          <div class="form-group" style="margin-bottom:10px">
-            <label class="form-label req">Senha do SYSACK</label>
-            <input class="form-control" id="gc-senha" type="password" placeholder="Mínimo 8 caracteres">
-          </div>
-          <div class="form-group" style="margin-bottom:0">
-            <label class="form-label req">Confirmar senha</label>
-            <input class="form-control" id="gc-senha-conf" type="password" placeholder="Repita a senha">
-          </div>
+          <div class="form-group" style="margin-bottom:10px"><label class="form-label req">Senha do SYSACK</label><input class="form-control" id="gc-senha" type="password" placeholder="Mínimo 8 caracteres"></div>
+          <div class="form-group" style="margin-bottom:0"><label class="form-label req">Confirmar senha</label><input class="form-control" id="gc-senha-conf" type="password" placeholder="Repita a senha"></div>
         </div>
       </div>
-
-      <!-- Permissões por módulo (Cards/checkboxes) -->
+      <!-- 4. Módulos -->
       <div>
         <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">4. Acesso por Módulo</div>
-        <div style="font-size:11.5px;color:var(--g400);margin-bottom:12px">Cada usuário vê apenas os módulos marcados. O nível de acesso determina o que pode fazer dentro de cada um.</div>
-
-        <!-- Legenda dos níveis -->
-        <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#DBEAFE;border:2px solid #2563EB;border-radius:3px;display:inline-block"></span> <span style="color:#2563EB;font-weight:600">R</span> Somente leitura</div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#D1FAE5;border:2px solid #059669;border-radius:3px;display:inline-block"></span> <span style="color:#059669;font-weight:600">RW</span> Leitura + Escrita/Movimentação</div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#FEE2E2;border:2px solid #DC2626;border-radius:3px;display:inline-block"></span> <span style="color:#DC2626;font-weight:600">RWD</span> Leitura + Escrita + Exclusão</div>
+        <div style="font-size:11.5px;color:var(--g400);margin-bottom:10px">Cada usuário vê apenas os módulos marcados. O nível define o que pode fazer.</div>
+        <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#DBEAFE;border:2px solid #2563EB;border-radius:3px;display:inline-block"></span><span style="color:#2563EB;font-weight:600">R</span> Somente leitura</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#D1FAE5;border:2px solid #059669;border-radius:3px;display:inline-block"></span><span style="color:#059669;font-weight:600">RW</span> Leitura + Escrita/Mov.</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#FEE2E2;border:2px solid #DC2626;border-radius:3px;display:inline-block"></span><span style="color:#DC2626;font-weight:600">RWD</span> Leitura + Escrita + Exclusão</div>
         </div>
-
-        <div id="gc-modulos-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px">
-          <!-- preenchido dinamicamente por gcRenderModulos() -->
-        </div>
+        <div id="gc-modulos-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px"></div>
       </div>
     </div>
-
     <div class="modal-footer" style="position:sticky;bottom:0;background:#fff;border-top:1px solid var(--g200);z-index:1">
-      <div style="font-size:11.5px;color:var(--g400);flex:1">
-        <span id="gc-contagem-modulos">0 módulos selecionados</span>
-      </div>
+      <div style="font-size:11.5px;color:var(--g400);flex:1"><span id="gc-contagem-modulos">0 módulos selecionados</span></div>
       <button class="btn btn-ghost" onclick="closeModal('modal-gc-usuario')">Cancelar</button>
       <button class="btn btn-primary" id="gc-btn-salvar" onclick="gcSalvarUsuario()">💾 Salvar Acesso</button>
     </div>
@@ -1475,24 +1413,62 @@ window.dispatchEvent(new Event('firebase-ready'));
       </div>
     </div>
 
+    <!-- MODAL: ATUALIZAR CLIENTE (auto-update remoto) -->
+    <div class="modal-overlay" id="modal-atualizar-cliente">
+      <div class="modal" style="max-width:580px">
+        <div class="modal-header" style="background:#1E3A5F;color:#fff;border-radius:10px 10px 0 0">
+          <div><h3 style="color:#fff;margin:0">🔄 Atualizar Cliente — Auto-Update</h3><p style="color:rgba(255,255,255,.6);font-size:12px;margin:4px 0 0">Envia novo agent-desktop.js para todos os agentes online sem reinstalar</p></div>
+          <button class="close-btn" onclick="closeModal('modal-atualizar-cliente')" style="color:rgba(255,255,255,.5)">✕</button>
+        </div>
+        <div class="modal-body">
+          <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#1E40AF;display:flex;align-items:center;gap:10px">
+            <span style="font-size:20px">🖥️</span>
+            <div><span style="font-weight:700" id="upd-qtd-online">0</span> agente(s) online serão atualizados.<br><span style="font-size:11.5px;color:#3B82F6">Cada máquina aplica a atualização no próximo ciclo (≤5s) e reinicia automaticamente.</span></div>
+          </div>
+          <div id="upd-status-bar" style="display:none"></div>
+          <div class="form-group">
+            <label class="form-label req">URL do novo <code>agent-desktop.js</code></label>
+            <input class="form-control" id="upd-url" type="url" placeholder="https://raw.githubusercontent.com/sua-org/sysack/main/agent-desktop.js" style="font-family:monospace;font-size:12px">
+            <div style="font-size:11.5px;color:var(--g400);margin-top:4px">GitHub raw, Firebase Storage ou qualquer URL HTTPS pública.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label req">Número da versão</label>
+            <input class="form-control" id="upd-versao" type="text" placeholder="ex: 2.1.1" style="width:160px">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Aplicar em</label>
+            <select class="form-control" id="upd-agentes" style="width:240px">
+              <option value="online">Somente agentes online agora</option>
+              <option value="todos">Todos (online + offline ao reconectar)</option>
+            </select>
+          </div>
+          <div id="upd-log" style="display:none;margin-top:12px">
+            <div style="font-size:11.5px;font-weight:700;color:var(--g600);margin-bottom:4px">Log de envio</div>
+            <pre id="upd-log-body" style="background:#0F172A;color:#94A3B8;border-radius:8px;padding:12px;font-size:11px;max-height:140px;overflow-y:auto;margin:0;white-space:pre-wrap;font-family:monospace"></pre>
+          </div>
+          <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-top:14px;font-size:12px;color:#92400E">
+            ⚠️ O arquivo antigo é salvo como <code>agent-desktop.backup.js</code> em cada máquina. O Windows Service Manager reinicia o serviço automaticamente.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-atualizar-cliente')">Cancelar</button>
+          <button class="btn btn-primary" id="btn-upd-exec" onclick="executarAtualizacaoCliente()">🚀 Enviar Atualização</button>
+        </div>
+      </div>
+    </div>
+
     <!-- MODAL: MIGRAR COMPUTADOR PARA TERCEIRIZADA -->
     <div class="modal-overlay" id="modal-terc-migrar">
       <div class="modal" style="max-width:660px">
         <div class="modal-header" style="background:#92400E;color:#fff;border-radius:10px 10px 0 0">
-          <div>
-            <h3 style="color:#fff;margin:0">🖥️ Migrar Computador para Terceirizada</h3>
-            <p style="color:rgba(255,255,255,.6);font-size:12px;margin:4px 0 0">Selecione a máquina e registre o envio para manutenção externa — histórico gravado automaticamente</p>
-          </div>
+          <div><h3 style="color:#fff;margin:0">🖥️ Migrar Computador para Terceirizada</h3><p style="color:rgba(255,255,255,.6);font-size:12px;margin:4px 0 0">Registra envio para manutenção externa — histórico gravado automaticamente</p></div>
           <button class="close-btn" onclick="closeModal('modal-terc-migrar')" style="color:rgba(255,255,255,.5)">✕</button>
         </div>
         <div class="modal-body">
-
-          <!-- Busca de computador -->
           <div style="margin-bottom:18px">
             <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">1. Selecionar Computador</div>
             <div style="position:relative">
-              <input class="form-control" id="terc-mig-busca" placeholder="🔍 Hostname, PAT, IP ou nome do usuário..."
-                oninput="tercBuscarComputador(this.value)" autocomplete="off">
+              <input class="form-control" id="terc-mig-busca" placeholder="🔍 Hostname, PAT, IP ou nome do usuário..." oninput="tercBuscarComputador(this.value)" autocomplete="off">
               <div id="terc-mig-resultados" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--g200);border-radius:0 0 8px 8px;max-height:240px;overflow-y:auto;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.1)"></div>
             </div>
             <div id="terc-mig-selecionado" style="display:none;background:#FFFBEB;border:2px solid #D97706;border-radius:10px;padding:12px;margin-top:8px">
@@ -1504,54 +1480,30 @@ window.dispatchEvent(new Event('firebase-ready'));
                 </div>
                 <button onclick="tercLimparComputador()" style="background:none;border:none;cursor:pointer;color:var(--g400);font-size:18px;margin-left:8px">✕</button>
               </div>
-              <input type="hidden" id="terc-mig-ativo-id">
-              <input type="hidden" id="terc-mig-pat">
+              <input type="hidden" id="terc-mig-ativo-id"><input type="hidden" id="terc-mig-pat">
             </div>
           </div>
-
-          <!-- Dados do envio -->
           <div style="margin-bottom:16px">
             <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">2. Dados do Envio</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label req">Técnico da Terceirizada</label>
-                <select class="form-control" id="terc-mig-tecnico">
-                  <option value="">Selecione o técnico...</option>
-                </select>
-              </div>
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label req">Chamado vinculado</label>
-                <input class="form-control" id="terc-mig-chamado" placeholder="Ex: CH-0042">
-              </div>
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label req">Data de envio</label>
-                <input class="form-control" type="date" id="terc-mig-data-envio">
-              </div>
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label">Prazo estimado (dias úteis)</label>
-                <input class="form-control" type="number" id="terc-mig-prazo" value="10" min="1" max="60">
-              </div>
+              <div class="form-group" style="margin-bottom:0"><label class="form-label req">Técnico da Terceirizada</label><select class="form-control" id="terc-mig-tecnico"><option value="">Selecione...</option></select></div>
+              <div class="form-group" style="margin-bottom:0"><label class="form-label req">Chamado vinculado</label><input class="form-control" id="terc-mig-chamado" placeholder="Ex: CH-0042"></div>
+              <div class="form-group" style="margin-bottom:0"><label class="form-label req">Data de envio</label><input class="form-control" type="date" id="terc-mig-data-envio"></div>
+              <div class="form-group" style="margin-bottom:0"><label class="form-label">Prazo estimado (dias úteis)</label><input class="form-control" type="number" id="terc-mig-prazo" value="10" min="1" max="60"></div>
             </div>
           </div>
-
-          <!-- Motivo / Defeito -->
           <div class="form-group" style="margin-bottom:14px">
             <label class="form-label req">Motivo / Defeito relatado</label>
-            <textarea class="form-control" id="terc-mig-motivo" rows="3"
-              placeholder="Descreva o problema que levou ao envio para manutenção externa..."></textarea>
+            <textarea class="form-control" id="terc-mig-motivo" rows="3" placeholder="Descreva o problema que levou ao envio para manutenção externa..."></textarea>
           </div>
-
-          <!-- Aviso histórico -->
-          <div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400E;display:flex;gap:8px;align-items:flex-start">
+          <div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400E;display:flex;gap:8px">
             <span style="font-size:16px;flex-shrink:0">📋</span>
-            <div>
-              <strong>Registro automático no histórico:</strong> Esta movimentação será registrada no histórico da máquina com data, técnico, chamado e motivo. O status do ativo será alterado para <strong>Na Terceirizada</strong>.
-            </div>
+            <div><strong>Registro automático:</strong> Movimentação gravada no histórico da máquina. Status alterado para <strong>Na Terceirizada</strong>.</div>
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="closeModal('modal-terc-migrar')">Cancelar</button>
-          <button class="btn btn-primary" style="background:#92400E;border-color:#92400E" onclick="tercConfirmarMigracao()">📤 Confirmar Envio para Terceirizada</button>
+          <button class="btn btn-primary" style="background:#92400E;border-color:#92400E" onclick="tercConfirmarMigracao()">📤 Confirmar Envio</button>
         </div>
       </div>
     </div>
@@ -3205,6 +3157,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="flex gap-8">
           <span id="ar-last-update" style="font-size:11px;color:var(--g400);align-self:center"></span>
           <button class="btn btn-ghost btn-sm" onclick="renderAssistenciaRemota()">↺ Atualizar</button>
+          <button class="btn btn-warning btn-sm" id="btn-atualizar-cliente" onclick="arAtualizarClientes()" title="Envia auto-update para todos os agentes online">🔄 Atualizar Cliente</button>
           <button class="btn btn-secondary btn-sm" onclick="arInstalarAgente()">⬇️ Instalar Agente</button>
         </div>
       </div>
