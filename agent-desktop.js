@@ -740,7 +740,7 @@ function rtdbListen(sessaoId, callback) {
 
   const req = https.request({
     hostname: RTDB_HOST,
-    path:     `/relay/${sessaoId}/cmd.json`,
+    path:     `/relay/${sessaoId}/cmd.json?auth=${API_KEY}`,
     method:   'GET',
     rejectUnauthorized: false,
     headers: { 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache' },
@@ -806,7 +806,7 @@ function rtdbEscrever(rtdbPath, data) {
     const body = JSON.stringify(data);
     const req  = https.request({
       hostname: RTDB_HOST,
-      path:     `/${rtdbPath}.json`,
+      path:     `/${rtdbPath}.json?auth=${API_KEY}`,
       method:   'PUT',
       rejectUnauthorized: false,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },

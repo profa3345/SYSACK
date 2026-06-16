@@ -3340,73 +3340,83 @@ async function _fazerLoginInterno() {
       ]);
       const fbUser = cred.user;
 
-      // 1. Tenta custom claims (token JWT — mais seguro, não pode ser alterado pelo cliente)
+      // 1. Tenta custom claims; se não houver, usa EXCLUSIVAMENTE Firestore /users/{uid}
       let claimsRole = null;
       try {
-        const idTokenResult = await fbUser.getIdTokenResult(true); // força refresh
+        const idTokenResult = await fbUser.getIdTokenResult(true);
         claimsRole = idTokenResult.claims?.role || null;
         if (claimsRole) console.log('[Auth] Role via custom claim:', claimsRole);
       } catch (_) {}
 
-      // 2. Fallback: busca perfil no Banco /users/{uid}
-      let profile = { nome: fbUser.displayName || emailNorm, role: claimsRole || 'viewer', uid: fbUser.uid };
-      try {
-        const snap = await fsGet('users', fbUser.uid);
-        if (snap) {
-          Object.assign(profile, snap);
-          // Custom claim tem prioridade sobre Banco (mais seguro)
-          if (claimsRole) profile.role = claimsRole;
-        } else {
-          // Tenta buscar por email (usuários criados antes de ter uid)
-          try {
-            const emailSnap = await db.collection('users')
-              .where('email', '==', fbUser.email).limit(1).get();
-            if (!emailSnap.empty) {
-              const ud = { id: emailSnap.docs[0].id, ...emailSnap.docs[0].data() };
-              Object.assign(profile, ud);
-              if (claimsRole) profile.role = claimsRole;
-              console.log('[Auth] Role via /users email lookup:', profile.role);
-            }
-          } catch(_) {}
-        }
-      } catch (_) {}
+      let profile = null;
 
-      // 3b. Fallback LOCAL_USERS quando Firestore não tem role configurada
-      // Cobre o período inicial antes de criar os docs /users/{uid} no Firestore
-      if (!claimsRole && (!profile.role || profile.role === 'viewer')) {
-        const loginKey   = (fbUser.email || emailNorm).replace(/@.*$/, '');
-        const loginEmail = fbUser.email || emailNorm;
-        const localUser  = LOCAL_USERS[loginKey]
-                        || LOCAL_USERS[loginEmail]
-                        || LOCAL_USERS[emailNorm]
-                        || LOCAL_USERS[emailNorm.replace(/@.*$/, '')]
-                        || null;
-        if (localUser && localUser.role && localUser.role !== 'viewer') {
-          profile.role        = localUser.role;
-          profile.permissions = localUser.permissions || permissionsForRole(localUser.role);
-          if (!profile.nome || profile.nome === emailNorm) profile.nome = localUser.nome || profile.nome;
-          console.log('[Auth] ✓ Role via Firestore /users/{uid}:', profile.role, 'para', loginEmail);
-          // Auto-cria doc no Firestore — resolve permanentemente nas próximas sessões
-          if (FB_READY && db) {
-            db.collection('users').doc(fbUser.uid).set({
-              nome:        localUser.nome || profile.nome,
-              email:       fbUser.email,
-              login:       loginKey,
-              role:        localUser.role,
-              authTipo:    'ad',
-              permissions: localUser.permissions || permissionsForRole(localUser.role),
-              moduloPerms: localUser.moduloPerms || {},
-              uid:         fbUser.uid,
-              createdAt:   new Date(),
-              criadoPor:   'auto-bootstrap',
-            }, { merge: true })
-            .then(() => console.log('[Auth] ✓ /users/'+fbUser.uid+' criado — próximos logins sem fallback.'))
-            .catch(e => console.warn('[Auth] Não criou doc users:', e.message));
-          }
-        } else {
-          console.warn('[Auth] Sem role privilegiada em claims/users/LOCAL_USERS — mantendo viewer. Email:', fbUser.email);
+      // 2. Firestore /users/{uid} é a fonte oficial de autorização.
+      // Não usar LOCAL_USERS aqui, para não rebaixar admin/gestor para viewer.
+      try {
+        if (typeof sysackEnsureUserDoc === 'function') {
+          await sysackEnsureUserDoc(fbUser);
         }
+
+        if (typeof sysackGetUserProfileFromFirestore === 'function') {
+          profile = await sysackGetUserProfileFromFirestore(fbUser);
+        }
+
+        if (!profile && db) {
+          const snap = await db.collection('users').doc(fbUser.uid).get();
+          if (snap.exists) profile = { uid: fbUser.uid, email: fbUser.email, ...snap.data() };
+        }
+
+        // Compatibilidade: usuários antigos criados por e-mail/login
+        if ((!profile || !profile.role || profile.role === 'viewer') && db) {
+          const emailSnap = await db.collection('users')
+            .where('email', '==', fbUser.email).limit(1).get();
+
+          if (!emailSnap.empty) {
+            const docRef = emailSnap.docs[0];
+            profile = { uid: fbUser.uid, id: docRef.id, ...docRef.data() };
+            console.log('[Auth] Role via /users email lookup:', profile.role);
+
+            // Copia para /users/{uid} para os próximos logins
+            if (docRef.id !== fbUser.uid) {
+              db.collection('users').doc(fbUser.uid).set({
+                ...profile,
+                uid: fbUser.uid,
+                email: fbUser.email,
+                migradoDe: docRef.id,
+                atualizadoEm: new Date()
+              }, { merge: true }).catch(e => console.warn('[Auth] Não migrou usuário por email:', e.message));
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Auth] Falha ao carregar role em /users/{uid}:', e.message || e);
       }
+
+      if (!profile) {
+        profile = {
+          uid: fbUser.uid,
+          email: fbUser.email,
+          nome: fbUser.displayName || emailNorm,
+          role: 'viewer',
+          ativo: true
+        };
+      }
+
+      // Custom claim tem prioridade quando existir.
+      if (claimsRole) profile.role = claimsRole;
+
+      if (profile.ativo === false || profile.role === 'bloqueado') {
+        setLoginLoading(false);
+        showLoginError('Usuário bloqueado ou inativo no SYSACK.');
+        console.warn('[Auth] Usuário bloqueado/inativo:', fbUser.email);
+        return;
+      }
+
+      if (typeof sysackApplyUserProfile === 'function') {
+        sysackApplyUserProfile(profile);
+      }
+
+      console.log('[Auth] ✓ Role final via Firestore /users/{uid}:', profile.role, 'para', fbUser.email);
 
       // 3. Garante que viewer não acessa admin mesmo se Banco for adulterado
       const VALID_ROLES = ['admin','gestor','tecnico','mdm_admin','viewer'];
@@ -8255,6 +8265,13 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   function rvTestarConexaoLocal() {
+    // Em página HTTPS/Vercel o navegador bloqueia ws:// por Mixed Content.
+    // Portanto NÃO tenta rede local; mantém o Relay Firebase/RTDB.
+    if (location.protocol === 'https:' && String(_wsLocal || '').startsWith('ws://')) {
+      rvShellLog?.('[SYSACK] WebSocket local ws:// bloqueado em HTTPS — usando Relay Firebase.', '#F59E0B');
+      return Promise.resolve(false);
+    }
+
     // Tenta abrir WebSocket com timeout de 3 segundos
     return new Promise(resolve => {
       if (!wsIp || wsIp === 'localhost' || wsIp === '127.0.0.1') {
@@ -8262,11 +8279,12 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         return;
       }
       let resolvido = false;
+      let ws = null;
       const timer = setTimeout(() => {
-        if (!resolvido) { resolvido = true; ws.close(); resolve(false); }
+        if (!resolvido) { resolvido = true; try { ws && ws.close(); } catch(_) {} resolve(false); }
       }, 3000);
 
-      const ws = new WebSocket(_wsLocal);
+      ws = new WebSocket(_wsLocal);
       ws.onopen  = () => {
         if (!resolvido) {
           resolvido = true;
@@ -8306,7 +8324,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     } else {
       banner.style.cssText = 'background:#D97706;color:#fff;padding:4px 16px;font-size:11px;font-weight:600;text-align:center;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:8px';
       banner.innerHTML = '<span>📡</span> <span>Conectado via internet (Banco Relay) — PC não encontrado na rede local</span>' +
-        '<button onclick="rvRetentarLocal()" style="background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:5px;padding:2px 10px;cursor:pointer;font-size:11px;margin-left:8px">↺ Tentar rede local</button>';
+        '<button onclick="rvRetentarLocal()" style="background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:5px;padding:2px 10px;cursor:pointer;font-size:11px;margin-left:8px">↺ Verificar rede local</button>';
     }
 
     // Insere após a topbar
@@ -8315,6 +8333,14 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   window.rvRetentarLocal = async () => {
+    if (location.protocol === 'https:' && String(_wsLocal || '').startsWith('ws://')) {
+      rvSb('Página HTTPS: rede local ws:// bloqueada. Mantendo Relay Firebase.');
+      rvShellLog?.('[SYSACK] Botão Tentar rede local ignorado em HTTPS — use Relay Firebase ou configure WSS.', '#F59E0B');
+      showToast('Rede local ws:// é bloqueada em HTTPS. Mantendo Relay Firebase.', 'warning', 5000);
+      _modoConexao = 'firebase';
+      rvMostrarBannerConexao('firebase');
+      return;
+    }
     rvSb('Tentando reconectar via rede interna...');
     const ok = await rvTestarConexaoLocal();
     if (ok) {
@@ -8334,7 +8360,17 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── WebSocket direto (rede interna) ──────────────────────────
   function rvConnect(url) {
     _wsUrl = url || _wsLocal;
-    rvSb('Conectando via rede interna a ' + wsIp + ':' + wsPort + '...');
+
+    if (location.protocol === 'https:' && String(_wsUrl || '').startsWith('ws://')) {
+      rvShellLog?.('[SYSACK] rvConnect bloqueou ws:// em HTTPS — usando Relay Firebase.', '#F59E0B');
+      _modoConexao = 'firebase';
+      rvSetStatus('firebase', 'Banco Relay');
+      rvMostrarBannerConexao('firebase');
+      rvConnectBanco();
+      return;
+    }
+
+    rvSb((_wsUrl || '').startsWith('wss://') ? 'Conectando via túnel seguro...' : 'Conectando via rede interna a ' + wsIp + ':' + wsPort + '...');
     _ws = new WebSocket(_wsUrl);
 
     _ws.onopen = () => {
