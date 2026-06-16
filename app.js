@@ -8864,146 +8864,6 @@ function arInstalarAgente() {
   openModal('modal-ar-download');
 }
 
-// ════════════════════════════════════════════════════════════
-// ATUALIZAR CLIENTE — envia auto-update para todos os agentes
-// Fluxo:
-//   1. Admin clica "Atualizar Cliente"
-//   2. Modal pede URL do novo agent-desktop.js + versão
-//   3. Cloud Function grava doc em /agent_updates/{versao}
-//   4. Insere agent_commands pendente para cada agente online
-//   5. Cada agente (pollComandos) recebe tipo='atualizar_agente',
-//      baixa o arquivo, substitui agent-desktop.js e reinicia.
-// ════════════════════════════════════════════════════════════
-
-function arAtualizarClientes() {
-  if (!SESSION_USER || !['admin', 'gestor'].includes(SESSION_USER.role)) {
-    showToast('⛔ Acesso restrito: somente admin/gestor pode enviar atualizações.', 'error');
-    return;
-  }
-
-  const online = (STATE_AGENTS.list || []).filter(a => a.status === 'online');
-  if (!online.length) {
-    showToast('Nenhum agente online para atualizar.', 'warning');
-    return;
-  }
-
-  openModal('modal-atualizar-cliente');
-
-  // Pré-preenche versão sugerida (incrementa patch da versão atual mais alta)
-  const versaoAtual = online.map(a => a.versaoAgente || a.version || '2.1.0')
-    .sort().reverse()[0] || '2.1.0';
-  const partes = versaoAtual.split('.').map(Number);
-  partes[2] = (partes[2] || 0) + 1;
-  const versaoSugerida = partes.join('.');
-
-  const elVersao = document.getElementById('upd-versao');
-  const elOnline = document.getElementById('upd-qtd-online');
-  if (elVersao && !elVersao.value) elVersao.value = versaoSugerida;
-  if (elOnline) elOnline.textContent = online.length;
-
-  document.getElementById('upd-log-body').innerHTML = '';
-  document.getElementById('upd-log').style.display = 'none';
-  document.getElementById('upd-status-bar').style.display = 'none';
-}
-
-async function executarAtualizacaoCliente() {
-  const url     = (document.getElementById('upd-url')?.value     || '').trim();
-  const versao  = (document.getElementById('upd-versao')?.value  || '').trim();
-  const agentes = (document.getElementById('upd-agentes')?.value || 'online');
-
-  if (!url)    return showToast('Informe a URL do novo agent-desktop.js', 'warning');
-  if (!versao) return showToast('Informe o número da versão', 'warning');
-
-  // Valida URL básica
-  try { new URL(url); } catch { return showToast('URL inválida', 'warning'); }
-
-  const online = (STATE_AGENTS.list || []).filter(a => a.status === 'online');
-  const todos  = STATE_AGENTS.list || [];
-  const alvos  = agentes === 'todos' ? todos : online;
-
-  if (!alvos.length) return showToast('Nenhum agente disponível', 'warning');
-
-  const btn = document.getElementById('btn-upd-exec');
-  btn.disabled = true;
-  btn.textContent = 'Enviando...';
-  document.getElementById('upd-log').style.display = '';
-  updLog(`Iniciando atualização para versão ${versao}...`);
-  updLog(`Alvos: ${alvos.length} agente(s) ${agentes === 'todos' ? '(todos)' : 'online'}`);
-  showUpdStatus('info', 'Enviando comandos...');
-
-  const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
-  let ok = 0, erro = 0;
-
-  try {
-    // 1. Grava metadados da atualização no Firestore (referência histórica)
-    await fsSet('agent_updates/' + versao.replace(/\./g, '_'), {
-      versao,
-      url,
-      publicadoPor: SESSION_USER?.nome || SESSION_USER?.email || 'admin',
-      publicadoEm:  new Date().toISOString(),
-      alvos:        agentes,
-      totalAgentes: alvos.length,
-    });
-    updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
-
-    // 2. Envia um agent_command para cada agente alvo
-    for (const ag of alvos) {
-      try {
-        await fsAdd('agent_commands', {
-          agentId:   ag.id,
-          tipo:      'atualizar_agente',
-          dados:     JSON.stringify({ url, versao }),
-          token:     TOKEN,
-          status:    'pendente',
-          criadoEm:  new Date().toISOString(),
-          criadoPor: SESSION_USER?.uid || '',
-        });
-        updLog(`→ Comando enviado para ${ag.hostname || ag.id}`);
-        ok++;
-      } catch(e) {
-        updLog(`✗ Falha ao enviar para ${ag.hostname || ag.id}: ${e.message}`);
-        erro++;
-      }
-    }
-
-    const msg = `✅ ${ok} agente(s) notificado(s)${erro ? ` • ${erro} erro(s)` : ''}. Cada máquina aplicará a atualização no próximo ciclo de poll (≤5s).`;
-    showUpdStatus(erro ? 'warning' : 'success', msg);
-    updLog(msg);
-    showToast(`Atualização v${versao} enviada para ${ok} agente(s)!`, 'success', 5000);
-
-    // Atualiza o label do botão principal com a nova versão
-    setTimeout(() => renderAssistenciaRemota(), 1000);
-
-  } catch(e) {
-    showUpdStatus('danger', 'Erro: ' + e.message);
-    updLog('ERRO: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🚀 Enviar Atualização';
-  }
-}
-
-function updLog(msg) {
-  const el = document.getElementById('upd-log-body');
-  if (!el) return;
-  const ts = new Date().toLocaleTimeString('pt-BR');
-  el.innerHTML += `<span style="color:#64748B">[${ts}]</span> ${escapeHtml(msg)}\n`;
-  el.scrollTop = el.scrollHeight;
-}
-
-function showUpdStatus(tipo, msg) {
-  const el = document.getElementById('upd-status-bar');
-  if (!el) return;
-  const cores = {
-    success: '#F0FDF4;color:#166534;border:1px solid #BBF7D0',
-    danger:  '#FEF2F2;color:#991B1B;border:1px solid #FECACA',
-    warning: '#FFFBEB;color:#92400E;border:1px solid #FDE68A',
-    info:    '#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE',
-  };
-  el.style.cssText = `display:block;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:500;background:${cores[tipo] || cores.info}`;
-  el.textContent = msg;
-}
-
 // ── INICIALIZAÇÃO ─────────────────────────────────────────────
 // Inicia listener quando o usuário faz login
 function initAgentsListener() {
@@ -28310,6 +28170,55 @@ const PERM_LABEL = {
 };
 
 // ── Renderiza página de usuários ──────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// GESTÃO DE CONTAS — v2: Usuários do AD com permissões por módulo
+// Coleção Firestore: /users/{uid}
+//   campos novos: authTipo ('ad'|'local'), moduloPerms: { [modulo]: 'r'|'rw'|'rwd'|'' }
+//   campos existentes mantidos: role, nome, email, login, permissions, etc.
+// ════════════════════════════════════════════════════════════════════════
+
+// ── Definição dos módulos do sistema ─────────────────────────
+const GC_MODULOS = [
+  { id:'dashboard',         icon:'📊', nome:'Dashboard',            grupo:'Visão Geral' },
+  { id:'exec-dashboard',    icon:'📈', nome:'Dashboard Executivo',  grupo:'Visão Geral' },
+  { id:'ai-dashboard',      icon:'🤖', nome:'IA & Insights',        grupo:'Visão Geral' },
+  { id:'ativos',            icon:'🖥️', nome:'Gestão de Ativos',     grupo:'Patrimônio' },
+  { id:'patrimonio',        icon:'🏷️', nome:'Gestão Patrimonial',   grupo:'Patrimônio' },
+  { id:'chamados',          icon:'🎫', nome:'Chamados',             grupo:'Operações' },
+  { id:'assistencia-remota',icon:'🖱️', nome:'Assistência Remota',   grupo:'Operações' },
+  { id:'monitor-rede',      icon:'🌐', nome:'Monitor de Rede',      grupo:'Operações' },
+  { id:'switches',          icon:'🔌', nome:'Switches & Roteadores', grupo:'Infraestrutura' },
+  { id:'impressoras',       icon:'🖨️', nome:'Gestão de Impressoras', grupo:'Infraestrutura' },
+  { id:'smartphones',       icon:'📱', nome:'Smartphones / MDM',   grupo:'Infraestrutura' },
+  { id:'terceirizada',      icon:'🏭', nome:'Empresa Terceirizada', grupo:'Operações' },
+  { id:'empregados',        icon:'👥', nome:'Empregados & Ausências',grupo:'RH' },
+  { id:'relatorios',        icon:'📋', nome:'Relatórios',           grupo:'Análise' },
+  { id:'capacidade',        icon:'📉', nome:'Relatório Capacidade', grupo:'Análise' },
+  { id:'wsus',              icon:'🩹', nome:'Patches (WSUS)',       grupo:'Segurança' },
+  { id:'compliance-cis',    icon:'🛡️', nome:'Compliance CIS',       grupo:'Segurança' },
+  { id:'audit-logs',        icon:'📜', nome:'Logs de Auditoria',    grupo:'Segurança' },
+  { id:'movimentacoes',     icon:'↔️', nome:'Movimentações',        grupo:'Patrimônio' },
+  { id:'aprovacoes',        icon:'✅', nome:'Aprovações',           grupo:'Operações' },
+  { id:'telecom',           icon:'📞', nome:'Gestão Telecom',       grupo:'Infraestrutura' },
+  { id:'topologia',         icon:'🗺️', nome:'Topologia de Rede',    grupo:'Infraestrutura' },
+  { id:'osd',               icon:'💿', nome:'Deploy de SO (OSD)',   grupo:'Operações' },
+  { id:'grupos-alerta',     icon:'🔔', nome:'Grupos de Alerta',     grupo:'Configuração' },
+];
+
+const GC_NIVEL_OPTS = [
+  { val: '',    label: '— Sem acesso —',                cor: '#9CA3AF', bg: '#F9FAFB' },
+  { val: 'r',   label: 'R — Somente leitura',           cor: '#2563EB', bg: '#DBEAFE' },
+  { val: 'rw',  label: 'RW — Leitura e Escrita/Mov.',  cor: '#059669', bg: '#D1FAE5' },
+  { val: 'rwd', label: 'RWD — Leitura, Escrita e Excl.',cor: '#DC2626', bg: '#FEE2E2' },
+];
+
+let _gcEditandoUid = null;   // uid em edição (null = novo)
+let _gcRoleSel     = 'viewer';
+let _gcAuthTipo    = 'ad';
+let _gcModPerms    = {};     // { modulo_id: 'r'|'rw'|'rwd'|'' }
+let _gcEmpSel      = null;   // { mat, login, email, nome, setor }
+
+// ── Renderiza a tabela de usuários ───────────────────────────
 async function renderUsuarios() {
   if (!isAdmin()) {
     showToast('Acesso restrito a administradores', 'danger');
@@ -28317,26 +28226,22 @@ async function renderUsuarios() {
     return;
   }
 
-  // Carrega usuários do Firestore
   let usuarios = [];
   try {
     if (FB_READY && db) {
       const snap = await db.collection('users').get();
       usuarios = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     }
-  } catch(e) {
-    console.warn('[Usuários]', e.message);
-  }
+  } catch(e) { console.warn('[GC]', e.message); }
 
-  // Mescla com LOCAL_USERS para mostrar usuários de fallback
-  const locais = Object.values(LOCAL_USERS).filter(u => u.email);
+  // Mescla usuários locais (fallback)
+  const locais = Object.values(LOCAL_USERS || {}).filter(u => u.email);
   for (const lu of locais) {
-    if (!usuarios.some(u => u.email === lu.email || u.uid === lu.uid)) {
+    if (!usuarios.some(u => u.email === lu.email || u.uid === lu.uid))
       usuarios.push({ ...lu, id: lu.uid, _local: true });
-    }
   }
 
-  // Deduplica por email
+  // Deduplica
   const visto = new Set();
   usuarios = usuarios.filter(u => {
     const key = (u.email || u.id || '').toLowerCase();
@@ -28347,56 +28252,71 @@ async function renderUsuarios() {
 
   // KPIs
   const count = r => usuarios.filter(u => u.role === r).length;
-  sv('gu-kpi-total',   usuarios.length);
-  sv('gu-kpi-admin',   count('admin'));
-  sv('gu-kpi-gestor',  count('gestor'));
-  sv('gu-kpi-tecnico', count('tecnico'));
-  sv('gu-kpi-viewer',  count('viewer') + count('mdm_admin'));
+  sv('gu-kpi-total',  usuarios.length);
+  sv('gu-kpi-admin',  count('admin'));
+  sv('gu-kpi-gestor', count('gestor'));
+  sv('gu-kpi-tecnico',count('tecnico'));
+  sv('gu-kpi-viewer', count('viewer') + count('mdm_admin'));
 
   // Filtros
-  const q    = (document.getElementById('gu-busca')?.value || '').toLowerCase();
-  const role = document.getElementById('gu-filtro-role')?.value || '';
+  const q       = (document.getElementById('gu-busca')?.value       || '').toLowerCase();
+  const fRole   = document.getElementById('gu-filtro-role')?.value   || '';
+  const fOrigem = document.getElementById('gu-filtro-origem')?.value || '';
   let lista = usuarios;
-  if (q)    lista = lista.filter(u =>
-    (u.nome ||'').toLowerCase().includes(q) ||
+  if (q)       lista = lista.filter(u =>
+    (u.nome||'').toLowerCase().includes(q) ||
     (u.email||'').toLowerCase().includes(q) ||
-    (u.login||'').toLowerCase().includes(q)
-  );
-  if (role) lista = lista.filter(u => u.role === role);
+    (u.login||'').toLowerCase().includes(q));
+  if (fRole)   lista = lista.filter(u => u.role === fRole);
+  if (fOrigem === 'ad')    lista = lista.filter(u => u.authTipo === 'ad' || u.lastLoginAD);
+  if (fOrigem === 'local') lista = lista.filter(u => !u.authTipo || u.authTipo === 'local');
   lista.sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
 
   const tbody = document.getElementById('gu-tabela-body');
   if (!tbody) return;
-
   if (!lista.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--g400)">Nenhum usuário encontrado</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--g400)">
+      Nenhum usuário encontrado
+      <br><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="gcAbrirNovoAD()">+ Ativar primeiro usuário do AD</button>
+    </td></tr>`;
     return;
   }
 
   tbody.innerHTML = lista.map(u => {
     const ini  = (u.nome||'?').split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
     const rl   = ROLE_LABEL[u.role] || { label: u.role || '—', cor:'#6B7280', bg:'#F9FAFB' };
-    const perms= Object.entries(u.permissions || {})
-      .filter(([,v]) => v)
-      .map(([k]) => PERM_LABEL[k] || k)
-      .join(' · ') || '—';
     const ultimo = u.lastLogin
       ? new Date(u.lastLogin?.seconds ? u.lastLogin.seconds*1000 : u.lastLogin).toLocaleDateString('pt-BR')
       : '—';
-    const adBadge = u.lastLoginAD
-      ? `<span style="font-size:9px;background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;
-           padding:1px 6px;border-radius:8px;font-weight:700">AD</span>` : '';
+    const adBadge  = (u.authTipo === 'ad' || u.lastLoginAD)
+      ? `<span style="font-size:9px;background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;padding:1px 6px;border-radius:8px;font-weight:700">AD</span>` : '';
     const bloqBadge = u.bloqueado
-      ? `<span style="font-size:9px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;
-           padding:1px 6px;border-radius:8px;font-weight:700">BLOQUEADO</span>` : '';
+      ? `<span style="font-size:9px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;padding:1px 6px;border-radius:8px;font-weight:700">BLOQUEADO</span>` : '';
+
+    // Resumo de módulos com acesso
+    const mods = u.moduloPerms || {};
+    const modCount = Object.values(mods).filter(v => v).length;
+    const modSummary = modCount
+      ? `<span style="font-size:10.5px;color:var(--g500)">${modCount} módulo(s)</span>
+         <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px">
+           ${Object.entries(mods).filter(([,v])=>v).slice(0,5).map(([k,v]) => {
+             const nivelCor = {r:'#2563EB',rw:'#059669',rwd:'#DC2626'}[v]||'#6B7280';
+             const nivelBg  = {r:'#DBEAFE',rw:'#D1FAE5',rwd:'#FEE2E2'}[v]||'#F9FAFB';
+             const mod = GC_MODULOS.find(m=>m.id===k);
+             return `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:${nivelBg};color:${nivelCor};font-weight:600">${mod?.icon||''} ${mod?.nome||k} (${v.toUpperCase()})</span>`;
+           }).join('')}
+           ${modCount > 5 ? `<span style="font-size:10px;color:var(--g400)">+${modCount-5}</span>` : ''}
+         </div>`
+      : `<span style="font-size:11px;color:var(--g300)">Nenhum módulo liberado</span>`;
+
+    const authLabel = u.authTipo === 'ad'
+      ? '<span style="font-size:11px;color:#2563EB;font-weight:600">🏢 Senha do AD</span>'
+      : '<span style="font-size:11px;color:#6B7280;font-weight:600">🔑 Senha SYSACK</span>';
 
     return `<tr style="${u.bloqueado ? 'opacity:.6' : ''}">
       <td>
         <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:36px;height:36px;border-radius:50%;background:${rl.cor}22;color:${rl.cor};
-                      display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">
-            ${escapeHtml(ini)}
-          </div>
+          <div style="width:36px;height:36px;border-radius:50%;background:${rl.cor}22;color:${rl.cor};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">${escapeHtml(ini)}</div>
           <div>
             <div style="display:flex;align-items:center;gap:5px">
               <span style="font-weight:700;font-size:13px">${escapeHtml(u.nome||'—')}</span>
@@ -28411,20 +28331,18 @@ async function renderUsuarios() {
         ${u.login ? `<div style="font-size:10.5px;color:var(--accent);font-family:monospace;font-weight:600">${escapeHtml(u.login)}</div>` : ''}
       </td>
       <td>
-        <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;
-                     background:${rl.bg};color:${rl.cor}">
-          ${escapeHtml(rl.label)}
-        </span>
+        <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:${rl.bg};color:${rl.cor}">${escapeHtml(rl.label)}</span>
       </td>
-      <td style="font-size:11px;color:var(--g500);max-width:200px">${escapeHtml(perms)}</td>
+      <td>${authLabel}</td>
+      <td style="max-width:300px">${modSummary}</td>
       <td style="font-size:12px;color:var(--g400)">${escapeHtml(ultimo)}</td>
       <td>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-xs" onclick="editarUsuario('${escapeHtml(u.id||u.uid||'')}')">✏️ Editar</button>
+          <button class="btn btn-ghost btn-xs" onclick="gcEditarUsuario('${escapeHtml(u.id||u.uid||'')}')">✏️ Editar</button>
           ${u.id !== (CURRENT_USER?.uid||'') ? `
           <button class="btn btn-ghost btn-xs" style="color:${u.bloqueado?'#16A34A':'var(--danger)'}"
                   onclick="toggleBloquearUsuario('${escapeHtml(u.id||u.uid||'')}','${escapeHtml(u.nome||'')}',${!!u.bloqueado})"
-                  title="${u.bloqueado?'Desbloquear':'Bloquear'} acesso">
+                  title="${u.bloqueado?'Desbloquear':'Bloquear'}">
             ${u.bloqueado ? '🔓' : '🔒'}
           </button>
           <button class="btn btn-ghost btn-xs" style="color:var(--danger)"
@@ -28435,73 +28353,32 @@ async function renderUsuarios() {
   }).join('');
 }
 
-// ── Modal: Novo / Editar usuário ──────────────────────────────────────────
-function abrirNovoUsuario(uid = null) {
-  const u = uid ? [...Object.values(LOCAL_USERS)].find(x => x.uid === uid) : null;
+// ── Abre modal para ativar novo usuário do AD ─────────────────
+function gcAbrirNovoAD() {
+  _gcEditandoUid = null;
+  _gcRoleSel     = 'viewer';
+  _gcAuthTipo    = 'ad';
+  _gcModPerms    = {};
+  _gcEmpSel      = null;
 
-  document.getElementById('modal-novo-usuario')?.remove();
+  document.getElementById('gc-modal-titulo').textContent = 'Ativar Usuário do AD';
+  document.getElementById('gc-modal-sub').textContent    = 'Selecione um empregado e configure seu acesso ao SYSACK';
+  document.getElementById('gc-bloco-empregado').style.display = '';
+  document.getElementById('gc-emp-busca').value    = '';
+  document.getElementById('gc-emp-resultados').style.display = 'none';
+  document.getElementById('gc-emp-selecionado').style.display = 'none';
+  document.getElementById('gc-senha-bloco').style.display = 'none';
+  document.getElementById('gc-btn-salvar').textContent = '💾 Salvar Acesso';
 
-  const html = `
-  <div class="modal-overlay open" id="modal-novo-usuario" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:480px">
-      <div class="modal-header">
-        <h3>${uid ? '✏️ Editar Usuário' : '+ Novo Usuário'}</h3>
-        <button class="close-btn" onclick="document.getElementById('modal-novo-usuario').remove()">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label req">Nome completo</label>
-          <input class="form-control" id="gu-nome" value="${escapeHtml(u?.nome||'')}" placeholder="Nome do usuário">
-        </div>
-        <div class="form-group">
-          <label class="form-label req">E-mail</label>
-          <input class="form-control" id="gu-email" type="email" value="${escapeHtml(u?.email||'')}"
-                 placeholder="usuario@cesan.com.br" ${uid ? 'readonly style="opacity:.6"' : ''}>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Login de rede (opcional)</label>
-          <input class="form-control" id="gu-login" value="${escapeHtml(u?.login||'')}" placeholder="nome.sobrenome">
-        </div>
-        <div class="form-group">
-          <label class="form-label req">Perfil de acesso</label>
-          <select class="form-control" id="gu-role">
-            ${Object.entries(ROLE_LABEL).map(([v,r]) =>
-              `<option value="${v}" ${u?.role===v?'selected':''}>${r.label}</option>`
-            ).join('')}
-          </select>
-        </div>
-        ${!uid ? `
-        <div class="form-group">
-          <label class="form-label req">Senha inicial</label>
-          <input class="form-control" id="gu-senha" type="password" placeholder="Mínimo 8 caracteres">
-        </div>` : ''}
-        <div class="form-group">
-          <label class="form-label" style="font-size:12px;font-weight:700;margin-bottom:8px">Permissões especiais</label>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            ${Object.entries(PERM_LABEL).map(([k,l]) => `
-            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
-              <input type="checkbox" id="gu-perm-${k}" ${u?.permissions?.[k]?'checked':''}
-                     style="accent-color:var(--accent)">
-              ${escapeHtml(l.replace('✓ ',''))}
-            </label>`).join('')}
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="document.getElementById('modal-novo-usuario').remove()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarUsuario('${uid||''}')">
-          💾 ${uid ? 'Salvar Alterações' : 'Criar Usuário'}
-        </button>
-      </div>
-    </div>
-  </div>`;
-
-  document.body.insertAdjacentHTML('beforeend', html);
-  setTimeout(() => document.getElementById('gu-nome')?.focus(), 100);
+  gcSelecionarRole('viewer');
+  gcSelecionarAuth('ad');
+  gcRenderModulos();
+  openModal('modal-gc-usuario');
 }
 
-async function editarUsuario(uid) {
-  // Carrega do Firestore primeiro
+// ── Editar usuário existente ──────────────────────────────────
+async function gcEditarUsuario(uid) {
+  if (!uid) return;
   let u = null;
   try {
     if (FB_READY && db) {
@@ -28509,71 +28386,279 @@ async function editarUsuario(uid) {
       if (doc.exists) u = { id: doc.id, ...doc.data() };
     }
   } catch {}
-  // Fallback para LOCAL_USERS
-  if (!u) u = Object.values(LOCAL_USERS).find(x => x.uid === uid);
+  if (!u) u = Object.values(LOCAL_USERS||{}).find(x => x.uid === uid);
   if (!u) return showToast('Usuário não encontrado', 'danger');
 
-  document.getElementById('modal-novo-usuario')?.remove();
-  abrirNovoUsuario(uid);
+  _gcEditandoUid = uid;
+  _gcRoleSel     = u.role || 'viewer';
+  _gcAuthTipo    = u.authTipo || 'ad';
+  _gcModPerms    = { ...(u.moduloPerms || {}) };
+  _gcEmpSel      = { mat: u.mat||'', login: u.login||'', email: u.email||'', nome: u.nome||'' };
 
-  // Preenche após abrir (aguarda DOM)
-  setTimeout(() => {
-    const set = (id, val) => { const el = document.getElementById(id); if(el) el.value = val||''; };
-    set('gu-nome',  u.nome  || '');
-    set('gu-email', u.email || '');
-    set('gu-login', u.login || '');
-    set('gu-role',  u.role  || 'viewer');
-    Object.keys(PERM_LABEL).forEach(k => {
-      const cb = document.getElementById(`gu-perm-${k}`);
-      if (cb) cb.checked = !!(u.permissions?.[k]);
-    });
-  }, 100);
+  document.getElementById('gc-modal-titulo').textContent = `✏️ Editar: ${u.nome||'Usuário'}`;
+  document.getElementById('gc-modal-sub').textContent    = `Login: ${u.login||u.email||'—'} · Role: ${u.role||'—'}`;
+  document.getElementById('gc-bloco-empregado').style.display = 'none'; // não troca o empregado em edição
+
+  gcSelecionarRole(_gcRoleSel);
+  gcSelecionarAuth(_gcAuthTipo);
+  gcRenderModulos();
+  document.getElementById('gc-btn-salvar').textContent = '💾 Salvar Alterações';
+  openModal('modal-gc-usuario');
 }
 
-async function salvarUsuario(uid) {
-  const nome  = document.getElementById('gu-nome')?.value?.trim();
-  const email = document.getElementById('gu-email')?.value?.trim();
-  const login = document.getElementById('gu-login')?.value?.trim();
-  const role  = document.getElementById('gu-role')?.value;
-  const senha = document.getElementById('gu-senha')?.value;
+// ── Busca empregados do AD (STATE.empregados) ─────────────────
+function gcBuscarEmpregado(q) {
+  const res = document.getElementById('gc-emp-resultados');
+  if (!q || q.length < 2) { res.style.display = 'none'; return; }
 
-  if (!nome)  return showToast('Informe o nome', 'danger');
-  if (!email) return showToast('Informe o e-mail', 'danger');
-  if (!uid && (!senha || senha.length < 8))
-    return showToast('Senha mínima de 8 caracteres', 'danger');
+  const emps = (STATE.empregados || []).filter(e =>
+    (e.nome||'').toLowerCase().includes(q.toLowerCase()) ||
+    (e.mat||'').includes(q) ||
+    (e.login||'').toLowerCase().includes(q.toLowerCase())
+  ).slice(0, 12);
 
-  const perms = {};
-  Object.keys(PERM_LABEL).forEach(k => {
-    perms[k] = !!(document.getElementById(`gu-perm-${k}`)?.checked);
-  });
-
-  const dados = { nome, email, login, role, permissions: perms, updatedAt: new Date() };
-
-  try {
-    if (FB_READY && db) {
-      if (uid) {
-        await db.collection('users').doc(uid).set(dados, { merge: true });
-      } else {
-        // Novo usuário: hash da senha
-        const hash = await _sha256(senha);
-        const novoRef = await db.collection('users').add({
-          ...dados,
-          _hash: hash,
-          createdAt: new Date(),
-          criadoPor: CURRENT_USER?.nome || '',
-        });
-        showToast(`✓ Usuário ${nome} criado com sucesso`, 'success');
-      }
-      if (uid) showToast(`✓ ${nome} atualizado`, 'success');
-    }
-  } catch(e) {
-    showToast('Erro: ' + e.message, 'danger');
+  if (!emps.length) {
+    res.innerHTML = `<div style="padding:12px;color:var(--g400);font-size:13px;text-align:center">Nenhum empregado encontrado</div>`;
+    res.style.display = '';
     return;
   }
 
-  document.getElementById('modal-novo-usuario')?.remove();
-  renderUsuarios();
+  res.innerHTML = emps.map(e => `
+    <div onclick="gcSelecionarEmpregado('${escapeHtml(e.mat||'')}','${escapeHtml(e.nome||'')}','${escapeHtml(e.login||'')}','${escapeHtml(e.email||'')}','${escapeHtml(e.setor||'')}')"
+         style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--g100);transition:background .1s"
+         onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+      <div style="font-weight:600;font-size:13px">${escapeHtml(e.nome||'—')}</div>
+      <div style="font-size:11px;color:var(--g500);margin-top:1px">
+        Mat: ${escapeHtml(e.mat||'—')} · Login: <span style="font-family:monospace;color:var(--accent)">${escapeHtml(e.login||'—')}</span> · ${escapeHtml(e.setor||'—')}
+      </div>
+    </div>`).join('');
+  res.style.display = '';
 }
+
+function gcSelecionarEmpregado(mat, nome, login, email, setor) {
+  _gcEmpSel = { mat, nome, login, email, setor };
+  document.getElementById('gc-emp-busca').value = nome;
+  document.getElementById('gc-emp-resultados').style.display = 'none';
+  document.getElementById('gc-emp-selecionado').style.display = '';
+  document.getElementById('gc-sel-nome').textContent = nome;
+  document.getElementById('gc-sel-info').textContent = `Mat: ${mat} · Login: ${login} · ${setor}`;
+  document.getElementById('gc-emp-mat').value       = mat;
+  document.getElementById('gc-emp-login').value     = login;
+  document.getElementById('gc-emp-email-ad').value  = email;
+}
+
+function gcLimparEmpregado() {
+  _gcEmpSel = null;
+  document.getElementById('gc-emp-busca').value = '';
+  document.getElementById('gc-emp-selecionado').style.display = 'none';
+  document.getElementById('gc-emp-resultados').style.display  = 'none';
+}
+
+// ── Seleciona Role com visual de cards ───────────────────────
+function gcSelecionarRole(role) {
+  _gcRoleSel = role;
+  document.getElementById('gc-role-sel').value = role;
+  ['admin','gestor','tecnico','mdm_admin','viewer'].forEach(r => {
+    const el = document.getElementById('gc-role-card-' + r);
+    if (!el) return;
+    if (r === role) {
+      const cor = {admin:'#7C3AED',gestor:'#2563EB',tecnico:'#059669',mdm_admin:'#D97706',viewer:'#6B7280'}[r];
+      el.style.borderColor = cor;
+      el.style.background  = cor + '15';
+    } else {
+      el.style.borderColor = 'var(--g200)';
+      el.style.background  = '';
+    }
+  });
+
+  // Aplica permissões padrão da role nos módulos (não apaga customizações existentes)
+  const defaultMods = {
+    admin:     GC_MODULOS.map(m => [m.id, 'rwd']),
+    gestor:    GC_MODULOS.map(m => [m.id, m.id === 'audit-logs' ? 'r' : 'rw']),
+    tecnico:   GC_MODULOS.filter(m => !['exec-dashboard','ai-dashboard','compliance-cis','audit-logs','grupos-alerta'].includes(m.id)).map(m=>[m.id,'rw']),
+    mdm_admin: [['smartphones','rwd'],['assistencia-remota','rw'],['dashboard','r']],
+    viewer:    GC_MODULOS.map(m => [m.id, 'r']),
+  };
+  const defaults = Object.fromEntries(defaultMods[role] || []);
+  // Só aplica se _gcModPerms estiver vazio (novo usuário)
+  if (!Object.values(_gcModPerms).some(Boolean)) {
+    _gcModPerms = { ...defaults };
+  }
+  gcRenderModulos();
+}
+
+// ── Seleciona tipo de autenticação ────────────────────────────
+function gcSelecionarAuth(tipo) {
+  _gcAuthTipo = tipo;
+  document.getElementById('gc-auth-tipo').value = tipo;
+  const cardAd    = document.getElementById('gc-auth-card-ad');
+  const cardLocal = document.getElementById('gc-auth-card-local');
+  const senhaBloco = document.getElementById('gc-senha-bloco');
+  if (tipo === 'ad') {
+    cardAd.style.borderColor    = 'var(--accent)';
+    cardAd.style.background     = '#EFF6FF';
+    cardLocal.style.borderColor = 'var(--g200)';
+    cardLocal.style.background  = '';
+    senhaBloco.style.display    = 'none';
+  } else {
+    cardAd.style.borderColor    = 'var(--g200)';
+    cardAd.style.background     = '';
+    cardLocal.style.borderColor = '#059669';
+    cardLocal.style.background  = '#F0FDF4';
+    senhaBloco.style.display    = '';
+  }
+}
+
+// ── Renderiza grid de módulos com seletores de nível ─────────
+function gcRenderModulos() {
+  const grid = document.getElementById('gc-modulos-grid');
+  if (!grid) return;
+
+  // Agrupa por grupo
+  const grupos = {};
+  GC_MODULOS.forEach(m => {
+    if (!grupos[m.grupo]) grupos[m.grupo] = [];
+    grupos[m.grupo].push(m);
+  });
+
+  let html = '';
+  for (const [grupo, mods] of Object.entries(grupos)) {
+    html += `<div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;padding:4px 0;border-bottom:1px solid var(--g100);margin-bottom:2px">${grupo}</div>`;
+    mods.forEach(m => {
+      const val = _gcModPerms[m.id] || '';
+      const nivelAtual = GC_NIVEL_OPTS.find(n => n.val === val) || GC_NIVEL_OPTS[0];
+      html += `
+        <div style="background:${val ? nivelAtual.bg : '#F9FAFB'};border:1px solid ${val ? nivelAtual.cor+'66' : 'var(--g200)'};border-radius:10px;padding:10px 12px;transition:.15s">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+              <span style="font-size:18px;flex-shrink:0">${m.icon}</span>
+              <span style="font-size:12.5px;font-weight:600;color:var(--g800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(m.nome)}</span>
+            </div>
+            <select onchange="gcSetModPerm('${m.id}',this.value)"
+              style="font-size:11.5px;padding:3px 6px;border:1px solid ${val ? nivelAtual.cor : 'var(--g300)'};border-radius:6px;background:${val ? '#fff' : 'var(--g50)'};color:${nivelAtual.cor};font-weight:700;cursor:pointer;flex-shrink:0;max-width:180px">
+              ${GC_NIVEL_OPTS.map(n =>
+                `<option value="${n.val}" style="color:${n.cor};background:${n.bg}" ${val===n.val?'selected':''}>${n.label}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>`;
+    });
+  }
+
+  grid.innerHTML = html;
+  gcAtualizarContagemModulos();
+}
+
+function gcSetModPerm(modId, nivel) {
+  _gcModPerms[modId] = nivel;
+  gcRenderModulos();
+}
+
+function gcAtualizarContagemModulos() {
+  const count = Object.values(_gcModPerms).filter(Boolean).length;
+  const el = document.getElementById('gc-contagem-modulos');
+  if (el) el.textContent = `${count} módulo(s) com acesso configurado`;
+}
+
+// ── Salva usuário no Firestore ────────────────────────────────
+async function gcSalvarUsuario() {
+  const authTipo = _gcAuthTipo;
+  const role     = _gcRoleSel || 'viewer';
+
+  // Resolve dados do empregado
+  let nome, login, email, mat;
+  if (_gcEditandoUid) {
+    // Edição: pega do estado
+    nome  = _gcEmpSel?.nome  || '';
+    login = _gcEmpSel?.login || '';
+    email = _gcEmpSel?.email || '';
+    mat   = _gcEmpSel?.mat   || '';
+  } else {
+    // Novo: exige empregado selecionado
+    if (!_gcEmpSel) return showToast('Selecione um empregado do AD', 'warning');
+    nome  = _gcEmpSel.nome;
+    login = _gcEmpSel.login;
+    email = _gcEmpSel.email || (login + '@cesan.com.br');
+    mat   = _gcEmpSel.mat;
+  }
+
+  if (!nome)  return showToast('Empregado sem nome', 'warning');
+  if (!email) return showToast('Empregado sem e-mail — verifique o cadastro AD', 'warning');
+
+  // Validação de senha local
+  let hashSenha = null;
+  if (authTipo === 'local') {
+    const s1 = document.getElementById('gc-senha')?.value || '';
+    const s2 = document.getElementById('gc-senha-conf')?.value || '';
+    if (!_gcEditandoUid && s1.length < 8)   return showToast('Senha mínima de 8 caracteres', 'warning');
+    if (s1 && s1 !== s2)                     return showToast('As senhas não conferem', 'warning');
+    if (s1) hashSenha = await _sha256(s1);
+  }
+
+  const btn = document.getElementById('gc-btn-salvar');
+  btn.disabled = true;
+  btn.textContent = 'Salvando...';
+
+  try {
+    const dados = {
+      nome,
+      email,
+      login,
+      mat,
+      role,
+      authTipo,
+      moduloPerms: _gcModPerms,
+      permissions: permissionsForRole(role),
+      updatedAt:   new Date(),
+      updatedBy:   CURRENT_USER?.nome || '',
+      ativo:       true,
+    };
+    if (hashSenha) dados._hash = hashSenha;
+
+    if (_gcEditandoUid) {
+      // Edição
+      if (FB_READY && db) {
+        await db.collection('users').doc(_gcEditandoUid).set(dados, { merge: true });
+      }
+      showToast(`✓ ${nome} atualizado com sucesso`, 'success');
+      auditLog('USER_UPDATE', 'users', _gcEditandoUid, 'user', { nome, role, authTipo });
+    } else {
+      // Novo usuário — verifica duplicata
+      const snap = await db.collection('users')
+        .where('email', '==', email).limit(1).get();
+      if (!snap.empty) {
+        btn.disabled = false; btn.textContent = '💾 Salvar Acesso';
+        return showToast(`Já existe um usuário com o e-mail ${email}`, 'warning');
+      }
+      const ref = await db.collection('users').add({
+        ...dados,
+        createdAt: new Date(),
+        criadoPor: CURRENT_USER?.nome || '',
+        lastLogin: null,
+      });
+      showToast(`✓ Acesso de ${nome} ativado no SYSACK`, 'success');
+      auditLog('USER_CREATE', 'users', ref.id, 'user', { nome, role, authTipo });
+    }
+
+    closeModal('modal-gc-usuario');
+    renderUsuarios();
+  } catch(e) {
+    showToast('Erro ao salvar: ' + e.message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Salvar Acesso';
+  }
+}
+
+// ── Mantém compatibilidade com funções antigas ────────────────
+function abrirNovoUsuario(uid = null) {
+  if (uid) gcEditarUsuario(uid);
+  else gcAbrirNovoAD();
+}
+
+async function salvarUsuario(uid) { await gcSalvarUsuario(); }
+
+async function editarUsuario(uid) { await gcEditarUsuario(uid); }
 
 async function excluirUsuario(uid, nome) {
   if (!confirm(`Excluir o usuário "${nome}"?\n\nEsta ação não pode ser desfeita.`)) return;
@@ -28581,11 +28666,227 @@ async function excluirUsuario(uid, nome) {
   try {
     if (FB_READY && db) await db.collection('users').doc(uid).delete();
     showToast(`✓ ${nome} removido`, 'success');
+    auditLog('USER_DELETE', 'users', uid, 'user', { nome });
     renderUsuarios();
+  } catch(e) { showToast('Erro: ' + e.message, 'danger'); }
+}
+
+// Fecha dropdown de busca de empregado ao clicar fora
+document.addEventListener('click', e => {
+  const busca = document.getElementById('gc-emp-busca');
+  const res   = document.getElementById('gc-emp-resultados');
+  if (res && busca && !busca.contains(e.target) && !res.contains(e.target)) {
+    res.style.display = 'none';
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════
+// TERCEIRIZADA — Migrar Computador
+// ════════════════════════════════════════════════════════════════════════
+
+let _tercAtivoSel = null; // ativo selecionado no modal de migração
+
+function tercAbrirMigrarComputador() {
+  _tercAtivoSel = null;
+  document.getElementById('terc-mig-busca').value = '';
+  document.getElementById('terc-mig-resultados').style.display = 'none';
+  document.getElementById('terc-mig-selecionado').style.display = 'none';
+  document.getElementById('terc-mig-chamado').value = '';
+  document.getElementById('terc-mig-motivo').value  = '';
+  document.getElementById('terc-mig-prazo').value   = '10';
+
+  // Data de envio: hoje
+  const hoje = new Date().toISOString().split('T')[0];
+  document.getElementById('terc-mig-data-envio').value = hoje;
+
+  // Popula técnicos da terceirizada
+  const sel = document.getElementById('terc-mig-tecnico');
+  const tecTerceirizados = (STATE.tecnicos || []).filter(t =>
+    t.empresa === 'terceirizada' || (t.empresa||'').toLowerCase().includes('terc'));
+  sel.innerHTML = '<option value="">Selecione o técnico...</option>' +
+    tecTerceirizados.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.nome)} — ${escapeHtml(t.empresa||'Terceirizada')}</option>`).join('') +
+    (tecTerceirizados.length === 0 ? '<option value="externo">Técnico externo (não cadastrado)</option>' : '');
+
+  openModal('modal-terc-migrar');
+}
+
+function tercBuscarComputador(q) {
+  const res = document.getElementById('terc-mig-resultados');
+  if (!q || q.length < 2) { res.style.display = 'none'; return; }
+
+  // Busca em ativos (computadores, notebooks, workstations)
+  const tiposComp = ['computador','notebook','laptop','workstation','desktop','servidor','server'];
+  const ativos = (STATE.ativos || []).filter(a => {
+    const tipoMatch = tiposComp.some(t => (a.tipo||'').toLowerCase().includes(t));
+    const qNorm = q.toLowerCase();
+    const textMatch =
+      (a.hostname||'').toLowerCase().includes(qNorm) ||
+      (a.pat||'').includes(qNorm) ||
+      (a.ip||'').includes(qNorm) ||
+      (a.desc||'').toLowerCase().includes(qNorm) ||
+      (a.resp||'').toLowerCase().includes(qNorm) ||
+      (a.usuarioLogado||'').toLowerCase().includes(qNorm);
+    return tipoMatch && textMatch;
+  }).slice(0, 15);
+
+  if (!ativos.length) {
+    res.innerHTML = `<div style="padding:12px;color:var(--g400);font-size:13px;text-align:center">Nenhum computador encontrado</div>`;
+    res.style.display = '';
+    return;
+  }
+
+  res.innerHTML = ativos.map(a => {
+    const statusCor = {ativo:'#059669',disponivel:'#2563EB',manut:'#D97706',terceirizada:'#DC2626'}[a.status]||'#6B7280';
+    return `<div onclick="tercSelecionarComputador('${escapeHtml(a.id)}')"
+      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--g100)"
+      onmouseover="this.style.background='#FFFBEB'" onmouseout="this.style.background=''">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-weight:700;font-size:13px">${escapeHtml(a.hostname||a.desc||'—')}</div>
+        <span style="font-size:10px;font-weight:700;color:${statusCor};padding:1px 6px;border-radius:6px;background:${statusCor}15">${a.status||'—'}</span>
+      </div>
+      <div style="font-size:11px;color:var(--g500);margin-top:2px">
+        PAT: <strong>${escapeHtml(a.pat||'—')}</strong> · IP: ${escapeHtml(a.ip||'—')} · ${escapeHtml(a.resp||a.area||'—')}
+      </div>
+    </div>`;
+  }).join('');
+  res.style.display = '';
+}
+
+function tercSelecionarComputador(ativoId) {
+  const a = (STATE.ativos || []).find(x => x.id === ativoId);
+  if (!a) return;
+  _tercAtivoSel = a;
+
+  document.getElementById('terc-mig-busca').value = a.hostname || a.desc || '';
+  document.getElementById('terc-mig-resultados').style.display = 'none';
+  document.getElementById('terc-mig-ativo-id').value = a.id;
+  document.getElementById('terc-mig-pat').value      = a.pat || '';
+  document.getElementById('terc-mig-sel-nome').textContent = `${a.pat ? 'PAT-'+a.pat+' — ' : ''}${a.hostname || a.desc || '—'}`;
+  document.getElementById('terc-mig-sel-detalhes').innerHTML = `
+    <div style="background:#fff;border-radius:6px;padding:6px 8px;border:1px solid #FDE68A">
+      <div style="font-size:10px;color:var(--g400)">IP</div>
+      <div style="font-size:12px;font-weight:600;font-family:monospace">${escapeHtml(a.ip||'—')}</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;padding:6px 8px;border:1px solid #FDE68A">
+      <div style="font-size:10px;color:var(--g400)">Usuário</div>
+      <div style="font-size:12px;font-weight:600">${escapeHtml(a.resp||a.usuarioLogado||'—')}</div>
+    </div>
+    <div style="background:#fff;border-radius:6px;padding:6px 8px;border:1px solid #FDE68A">
+      <div style="font-size:10px;color:var(--g400)">Tipo</div>
+      <div style="font-size:12px;font-weight:600">${escapeHtml(a.tipo||'—')}</div>
+    </div>`;
+  document.getElementById('terc-mig-selecionado').style.display = '';
+}
+
+function tercLimparComputador() {
+  _tercAtivoSel = null;
+  document.getElementById('terc-mig-busca').value = '';
+  document.getElementById('terc-mig-selecionado').style.display = 'none';
+  document.getElementById('terc-mig-resultados').style.display  = 'none';
+}
+
+async function tercConfirmarMigracao() {
+  if (!_tercAtivoSel) return showToast('Selecione um computador', 'warning');
+
+  const tecnicoId  = document.getElementById('terc-mig-tecnico')?.value;
+  const chamadoId  = document.getElementById('terc-mig-chamado')?.value?.trim();
+  const dataEnvio  = document.getElementById('terc-mig-data-envio')?.value;
+  const prazo      = parseInt(document.getElementById('terc-mig-prazo')?.value || '10');
+  const motivo     = document.getElementById('terc-mig-motivo')?.value?.trim();
+
+  if (!tecnicoId)  return showToast('Selecione o técnico da terceirizada', 'warning');
+  if (!chamadoId)  return showToast('Informe o número do chamado', 'warning');
+  if (!dataEnvio)  return showToast('Informe a data de envio', 'warning');
+  if (!motivo)     return showToast('Descreva o motivo/defeito', 'warning');
+
+  const ativo = _tercAtivoSel;
+  const tecnico = (STATE.tecnicos||[]).find(t => t.id === tecnicoId);
+  const tecNome = tecnico?.nome || tecnicoId;
+
+  const btn = document.querySelector('#modal-terc-migrar .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Registrando...'; }
+
+  try {
+    const agora = new Date().toISOString();
+    const autor  = CURRENT_USER?.nome || SESSION_USER?.nome || 'Sistema';
+
+    // 1. Cria registro na coleção terceirizadaAtivos
+    const tercRef = await fsAdd('terceirizadaAtivos', {
+      pat:           ativo.pat || '',
+      ativo:         ativo.hostname || ativo.desc || ativo.pat || '',
+      ativoId:       ativo.id,
+      dataEnvio:     dataEnvio,
+      diasUteis:     0,
+      tecnicoTerc:   tecnicoId,
+      tecnicoNome:   tecNome,
+      chamadoId,
+      prazoEstimado: prazo,
+      motivo,
+      retornado:     false,
+      registradoEm:  agora,
+      registradoPor: autor,
+    });
+
+    // 2. Atualiza status do ativo para "terceirizada"
+    const statusAnterior = ativo.status;
+    if (FB_READY && db) {
+      await db.collection('ativos').doc(ativo.id).update({
+        status:        'terceirizada',
+        statusAnterior: statusAnterior,
+        updatedAt:     agora,
+      });
+    }
+    // Atualiza STATE local
+    const idx = (STATE.ativos||[]).findIndex(a => a.id === ativo.id);
+    if (idx >= 0) { STATE.ativos[idx].status = 'terceirizada'; STATE.ativos[idx].statusAnterior = statusAnterior; }
+
+    // 3. Registra no histórico do ativo (coleção historico subcollection ou campo)
+    const histItem = {
+      tipo:        'Envio para Terceirizada',
+      evento:      'envio_terceirizada',
+      titulo:      `Enviado para Empresa Terceirizada — ${tecNome}`,
+      desc:        `Chamado: ${chamadoId} · Motivo: ${motivo} · Prazo estimado: ${prazo} dias úteis`,
+      descricao:   `Chamado: ${chamadoId} · Motivo: ${motivo} · Prazo estimado: ${prazo} dias úteis`,
+      dot:         'orange',
+      cor:         'orange',
+      data:        new Date(dataEnvio).toLocaleDateString('pt-BR'),
+      dataIso:     dataEnvio,
+      autor,
+      autorUid:    CURRENT_USER?.uid || '',
+      tecnicoTerc: tecNome,
+      chamadoId,
+      statusAnterior,
+      createdAt:   agora,
+    };
+
+    if (FB_READY && db) {
+      await db.collection('ativos').doc(ativo.id).collection('historico').add(histItem);
+    }
+
+    // 4. Audit log
+    auditLog('TERC_ENVIO', 'terceirizadaAtivos', tercRef?.id || ativo.id, 'ativo', {
+      pat: ativo.pat, ativo: ativo.hostname||ativo.desc, tecnicoTerc: tecNome, chamadoId, motivo
+    });
+
+    showToast(`✅ ${ativo.pat ? 'PAT-'+ativo.pat : ativo.hostname||'Ativo'} registrado na Terceirizada!`, 'success', 5000);
+    closeModal('modal-terc-migrar');
+    renderTerceirizada?.();
+    renderAtivos?.();
+
   } catch(e) {
-    showToast('Erro: ' + e.message, 'danger');
+    showToast('Erro ao registrar: ' + e.message, 'danger');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Confirmar Envio para Terceirizada'; }
   }
 }
+
+// Fecha dropdown ao clicar fora
+document.addEventListener('click', e => {
+  const busca = document.getElementById('terc-mig-busca');
+  const res   = document.getElementById('terc-mig-resultados');
+  if (res && busca && !busca.contains(e.target) && !res.contains(e.target))
+    res.style.display = 'none';
+});
 
 
 // ════════════════════════════════════════════════════════════════════════
