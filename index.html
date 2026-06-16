@@ -2997,6 +2997,7 @@ window.dispatchEvent(new Event('firebase-ready'));
         <div class="flex gap-8">
           <span id="ar-last-update" style="font-size:11px;color:var(--g400);align-self:center"></span>
           <button class="btn btn-ghost btn-sm" onclick="renderAssistenciaRemota()">↺ Atualizar</button>
+          <button class="btn btn-warning btn-sm" id="btn-atualizar-cliente" onclick="arAtualizarClientes()" title="Envia comando de auto-update para todos os agentes online">🔄 Atualizar Cliente</button>
           <button class="btn btn-secondary btn-sm" onclick="arInstalarAgente()">⬇️ Instalar Agente</button>
         </div>
       </div>
@@ -3565,6 +3566,75 @@ window.dispatchEvent(new Event('firebase-ready'));
           <button class="btn btn-ghost" onclick="closeModal('modal-ar-download')">Fechar</button>
           <button class="btn btn-secondary" onclick="copiarCmdInstall()">Copiar Comando</button>
           <button class="btn btn-primary" onclick="baixarInstaladorAgente()">Baixar Instalador</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: ATUALIZAR CLIENTE (auto-update remoto) -->
+    <div class="modal-overlay" id="modal-atualizar-cliente">
+      <div class="modal" style="max-width:580px">
+        <div class="modal-header" style="background:#1E3A5F;color:#fff;border-radius:10px 10px 0 0">
+          <div>
+            <h3 style="color:#fff;margin:0">🔄 Atualizar Cliente — Auto-Update Remoto</h3>
+            <p style="color:rgba(255,255,255,.6);font-size:12px;margin:4px 0 0">Envia o novo agent-desktop.js para todos os agentes online sem reinstalar</p>
+          </div>
+          <button class="close-btn" onclick="closeModal('modal-atualizar-cliente')" style="color:rgba(255,255,255,.5)">✕</button>
+        </div>
+        <div class="modal-body">
+
+          <!-- Info de alvo -->
+          <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#1E40AF;display:flex;align-items:center;gap:10px">
+            <span style="font-size:20px">🖥️</span>
+            <div>
+              <span style="font-weight:700" id="upd-qtd-online">0</span> agente(s) online serão atualizados.<br>
+              <span style="font-size:11.5px;color:#3B82F6">Cada máquina aplicará a atualização no próximo ciclo de poll (≤5s) e reiniciará o serviço automaticamente.</span>
+            </div>
+          </div>
+
+          <!-- Status bar (hidden until action) -->
+          <div id="upd-status-bar" style="display:none"></div>
+
+          <!-- URL do novo agent -->
+          <div class="form-group">
+            <label class="form-label">URL do novo <code>agent-desktop.js</code> <span style="color:#EF4444">*</span></label>
+            <input class="form-control" id="upd-url" type="url"
+              placeholder="https://raw.githubusercontent.com/sua-org/sysack/main/agent-desktop.js"
+              style="font-family:monospace;font-size:12px">
+            <div style="font-size:11.5px;color:var(--g400);margin-top:4px">
+              Pode ser GitHub raw, Firebase Storage, ou qualquer URL HTTPS pública.
+            </div>
+          </div>
+
+          <!-- Versão -->
+          <div class="form-group">
+            <label class="form-label">Número da versão <span style="color:#EF4444">*</span></label>
+            <input class="form-control" id="upd-versao" type="text" placeholder="ex: 2.1.1" style="width:160px">
+          </div>
+
+          <!-- Alvos -->
+          <div class="form-group">
+            <label class="form-label">Aplicar em</label>
+            <select class="form-control" id="upd-agentes" style="width:220px">
+              <option value="online">Somente agentes online agora</option>
+              <option value="todos">Todos (online + offline ao reconectar)</option>
+            </select>
+          </div>
+
+          <!-- Log -->
+          <div id="upd-log" style="display:none;margin-top:12px">
+            <div style="font-size:11.5px;font-weight:700;color:var(--g600);margin-bottom:4px">Log de envio</div>
+            <pre id="upd-log-body" style="background:#0F172A;color:#94A3B8;border-radius:8px;padding:12px;font-size:11px;max-height:160px;overflow-y:auto;margin:0;white-space:pre-wrap;font-family:monospace"></pre>
+          </div>
+
+          <!-- Aviso -->
+          <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-top:14px;font-size:12px;color:#92400E">
+            ⚠️ <strong>Atenção:</strong> O arquivo antigo é salvo automaticamente como <code>agent-desktop.backup.js</code> em cada máquina.
+            O serviço será reiniciado pelo Windows Service Manager (NSSM/SC) após a substituição.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeModal('modal-atualizar-cliente')">Cancelar</button>
+          <button class="btn btn-primary" id="btn-upd-exec" onclick="executarAtualizacaoCliente()">🚀 Enviar Atualização</button>
         </div>
       </div>
     </div>

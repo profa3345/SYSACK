@@ -8864,6 +8864,146 @@ function arInstalarAgente() {
   openModal('modal-ar-download');
 }
 
+// ════════════════════════════════════════════════════════════
+// ATUALIZAR CLIENTE — envia auto-update para todos os agentes
+// Fluxo:
+//   1. Admin clica "Atualizar Cliente"
+//   2. Modal pede URL do novo agent-desktop.js + versão
+//   3. Cloud Function grava doc em /agent_updates/{versao}
+//   4. Insere agent_commands pendente para cada agente online
+//   5. Cada agente (pollComandos) recebe tipo='atualizar_agente',
+//      baixa o arquivo, substitui agent-desktop.js e reinicia.
+// ════════════════════════════════════════════════════════════
+
+function arAtualizarClientes() {
+  if (!SESSION_USER || !['admin', 'gestor'].includes(SESSION_USER.role)) {
+    showToast('⛔ Acesso restrito: somente admin/gestor pode enviar atualizações.', 'error');
+    return;
+  }
+
+  const online = (STATE_AGENTS.list || []).filter(a => a.status === 'online');
+  if (!online.length) {
+    showToast('Nenhum agente online para atualizar.', 'warning');
+    return;
+  }
+
+  openModal('modal-atualizar-cliente');
+
+  // Pré-preenche versão sugerida (incrementa patch da versão atual mais alta)
+  const versaoAtual = online.map(a => a.versaoAgente || a.version || '2.1.0')
+    .sort().reverse()[0] || '2.1.0';
+  const partes = versaoAtual.split('.').map(Number);
+  partes[2] = (partes[2] || 0) + 1;
+  const versaoSugerida = partes.join('.');
+
+  const elVersao = document.getElementById('upd-versao');
+  const elOnline = document.getElementById('upd-qtd-online');
+  if (elVersao && !elVersao.value) elVersao.value = versaoSugerida;
+  if (elOnline) elOnline.textContent = online.length;
+
+  document.getElementById('upd-log-body').innerHTML = '';
+  document.getElementById('upd-log').style.display = 'none';
+  document.getElementById('upd-status-bar').style.display = 'none';
+}
+
+async function executarAtualizacaoCliente() {
+  const url     = (document.getElementById('upd-url')?.value     || '').trim();
+  const versao  = (document.getElementById('upd-versao')?.value  || '').trim();
+  const agentes = (document.getElementById('upd-agentes')?.value || 'online');
+
+  if (!url)    return showToast('Informe a URL do novo agent-desktop.js', 'warning');
+  if (!versao) return showToast('Informe o número da versão', 'warning');
+
+  // Valida URL básica
+  try { new URL(url); } catch { return showToast('URL inválida', 'warning'); }
+
+  const online = (STATE_AGENTS.list || []).filter(a => a.status === 'online');
+  const todos  = STATE_AGENTS.list || [];
+  const alvos  = agentes === 'todos' ? todos : online;
+
+  if (!alvos.length) return showToast('Nenhum agente disponível', 'warning');
+
+  const btn = document.getElementById('btn-upd-exec');
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+  document.getElementById('upd-log').style.display = '';
+  updLog(`Iniciando atualização para versão ${versao}...`);
+  updLog(`Alvos: ${alvos.length} agente(s) ${agentes === 'todos' ? '(todos)' : 'online'}`);
+  showUpdStatus('info', 'Enviando comandos...');
+
+  const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
+  let ok = 0, erro = 0;
+
+  try {
+    // 1. Grava metadados da atualização no Firestore (referência histórica)
+    await fsSet('agent_updates/' + versao.replace(/\./g, '_'), {
+      versao,
+      url,
+      publicadoPor: SESSION_USER?.nome || SESSION_USER?.email || 'admin',
+      publicadoEm:  new Date().toISOString(),
+      alvos:        agentes,
+      totalAgentes: alvos.length,
+    });
+    updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
+
+    // 2. Envia um agent_command para cada agente alvo
+    for (const ag of alvos) {
+      try {
+        await fsAdd('agent_commands', {
+          agentId:   ag.id,
+          tipo:      'atualizar_agente',
+          dados:     JSON.stringify({ url, versao }),
+          token:     TOKEN,
+          status:    'pendente',
+          criadoEm:  new Date().toISOString(),
+          criadoPor: SESSION_USER?.uid || '',
+        });
+        updLog(`→ Comando enviado para ${ag.hostname || ag.id}`);
+        ok++;
+      } catch(e) {
+        updLog(`✗ Falha ao enviar para ${ag.hostname || ag.id}: ${e.message}`);
+        erro++;
+      }
+    }
+
+    const msg = `✅ ${ok} agente(s) notificado(s)${erro ? ` • ${erro} erro(s)` : ''}. Cada máquina aplicará a atualização no próximo ciclo de poll (≤5s).`;
+    showUpdStatus(erro ? 'warning' : 'success', msg);
+    updLog(msg);
+    showToast(`Atualização v${versao} enviada para ${ok} agente(s)!`, 'success', 5000);
+
+    // Atualiza o label do botão principal com a nova versão
+    setTimeout(() => renderAssistenciaRemota(), 1000);
+
+  } catch(e) {
+    showUpdStatus('danger', 'Erro: ' + e.message);
+    updLog('ERRO: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚀 Enviar Atualização';
+  }
+}
+
+function updLog(msg) {
+  const el = document.getElementById('upd-log-body');
+  if (!el) return;
+  const ts = new Date().toLocaleTimeString('pt-BR');
+  el.innerHTML += `<span style="color:#64748B">[${ts}]</span> ${escapeHtml(msg)}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function showUpdStatus(tipo, msg) {
+  const el = document.getElementById('upd-status-bar');
+  if (!el) return;
+  const cores = {
+    success: '#F0FDF4;color:#166534;border:1px solid #BBF7D0',
+    danger:  '#FEF2F2;color:#991B1B;border:1px solid #FECACA',
+    warning: '#FFFBEB;color:#92400E;border:1px solid #FDE68A',
+    info:    '#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE',
+  };
+  el.style.cssText = `display:block;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:500;background:${cores[tipo] || cores.info}`;
+  el.textContent = msg;
+}
+
 // ── INICIALIZAÇÃO ─────────────────────────────────────────────
 // Inicia listener quando o usuário faz login
 function initAgentsListener() {

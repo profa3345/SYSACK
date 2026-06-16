@@ -867,6 +867,60 @@ async function processarComandoRtdb(sessaoId, msg) {
         usuario: getLoggedUser(),
       };
 
+    } else if (msg.tipo === 'atualizar_agente') {
+      // ── AUTO-UPDATE via RTDB ───────────────────────────────────────
+      const urlNova    = msg.url    || '';
+      const versaoNova = msg.versao || '';
+      if (!urlNova) throw new Error('URL do novo agente não informada');
+
+      log(`[UPDATE/RTDB] Iniciando atualização para v${versaoNova} via ${urlNova}`);
+
+      const novoConteudo = await new Promise((resolve, reject) => {
+        const urlObj = new URL(urlNova);
+        const mod = urlNova.startsWith('https') ? require('https') : require('http');
+        const req = mod.get({
+          hostname: urlObj.hostname,
+          path:     urlObj.pathname + urlObj.search,
+          headers:  { 'User-Agent': 'SYSACK-Agent/auto-update' },
+          rejectUnauthorized: false,
+        }, res => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            const r2 = mod.get(res.headers.location, res2 => {
+              let d = '';
+              res2.on('data', c => d += c);
+              res2.on('end', () => res2.statusCode === 200 ? resolve(d) : reject(new Error('HTTP ' + res2.statusCode)));
+            });
+            r2.on('error', reject); r2.end();
+            return;
+          }
+          if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
+          let d = '';
+          res.on('data', c => d += c);
+          res.on('end', () => resolve(d));
+        });
+        req.on('error', reject);
+        req.setTimeout(30000, () => { req.destroy(); reject(new Error('Timeout download')); });
+        req.end();
+      });
+
+      if (!novoConteudo || novoConteudo.length < 1000)
+        throw new Error('Arquivo baixado parece inválido');
+
+      const selfPath   = path.join(__dirname, 'agent-desktop.js');
+      const backupPath = path.join(__dirname, 'agent-desktop.backup.js');
+      try { fs.copyFileSync(selfPath, backupPath); } catch(e) {}
+      fs.writeFileSync(selfPath, novoConteudo, 'utf8');
+      log(`[UPDATE/RTDB] Arquivo substituído (${novoConteudo.length} bytes). Reiniciando em 2s...`);
+
+      resposta = { tipo: 'update_ok', versao: versaoNova, agentId: AGENT_ID };
+
+      await firestorePatch('agents/' + AGENT_ID, {
+        versaoAgente:      versaoNova,
+        ultimaAtualizacao: new Date().toISOString(),
+      }).catch(() => {});
+
+      setTimeout(() => process.exit(0), 2000);
+
     } else {
       resposta = { tipo: 'error', msg: 'tipo desconhecido: ' + msg.tipo };
     }
@@ -953,6 +1007,68 @@ async function executarComando(doc) {
         'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + cmd.replace(/"/g, '\\"') + '"',
         { timeout: 15000, windowsHide: true }
       ).toString();
+
+    } else if (tipo === 'atualizar_agente') {
+      // ── AUTO-UPDATE ────────────────────────────────────────────────
+      // Baixa o novo agent-desktop.js, substitui o atual e reinicia.
+      const urlNovo    = dados.url    || '';
+      const versaoNova = dados.versao || '';
+      if (!urlNovo) throw new Error('URL do novo agente não informada');
+
+      log(`[UPDATE] Iniciando atualização para v${versaoNova} via ${urlNovo}`);
+
+      // Baixa o arquivo novo
+      const novoConteudo = await new Promise((resolve, reject) => {
+        const urlObj = new URL(urlNovo);
+        const mod = urlNovo.startsWith('https') ? require('https') : require('http');
+        const req = mod.get({
+          hostname: urlObj.hostname,
+          path:     urlObj.pathname + urlObj.search,
+          headers:  { 'User-Agent': 'SYSACK-Agent/auto-update' },
+          rejectUnauthorized: false,
+        }, res => {
+          // Suporte a redirect simples (1 hop)
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            const r2 = mod.get(res.headers.location, res2 => {
+              let d = '';
+              res2.on('data', c => d += c);
+              res2.on('end', () => res2.statusCode === 200 ? resolve(d) : reject(new Error('HTTP ' + res2.statusCode)));
+            });
+            r2.on('error', reject); r2.end();
+            return;
+          }
+          if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
+          let d = '';
+          res.on('data', c => d += c);
+          res.on('end', () => resolve(d));
+        });
+        req.on('error', reject);
+        req.setTimeout(30000, () => { req.destroy(); reject(new Error('Timeout download')); });
+        req.end();
+      });
+
+      if (!novoConteudo || novoConteudo.length < 1000)
+        throw new Error('Arquivo baixado parece inválido (muito pequeno ou vazio)');
+
+      // Backup do arquivo atual
+      const selfPath   = path.join(__dirname, 'agent-desktop.js');
+      const backupPath = path.join(__dirname, 'agent-desktop.backup.js');
+      try { fs.copyFileSync(selfPath, backupPath); } catch(e) {}
+
+      // Substitui o arquivo em disco
+      fs.writeFileSync(selfPath, novoConteudo, 'utf8');
+      log(`[UPDATE] Arquivo substituído (${novoConteudo.length} bytes). Reiniciando em 2s...`);
+
+      resultado = `Atualização v${versaoNova} aplicada com sucesso. Reiniciando serviço.`;
+
+      // Registra a nova versão no Firestore antes de sair
+      await firestorePatch('agents/' + AGENT_ID, {
+        versaoAgente:      versaoNova,
+        ultimaAtualizacao: new Date().toISOString(),
+      }).catch(() => {});
+
+      // Sai — o Windows Service Manager (NSSM/SC) reinicia automaticamente
+      setTimeout(() => process.exit(0), 2000);
 
     } else if (tipo === 'screenshot') {
       const ps = [
