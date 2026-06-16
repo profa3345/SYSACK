@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 202606161450 -->
+<!-- build: 202605202023 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1153,16 +1153,17 @@ window.dispatchEvent(new Event('firebase-ready'));
           <div class="form-group" style="margin-bottom:0"><label class="form-label req">Confirmar senha</label><input class="form-control" id="gc-senha-conf" type="password" placeholder="Repita a senha"></div>
         </div>
       </div>
-      <!-- 4. Módulos -->
+      <!-- 4. Módulos e Permissões -->
       <div>
-        <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">4. Acesso por Módulo</div>
-        <div style="font-size:11.5px;color:var(--g400);margin-bottom:10px">Cada usuário vê apenas os módulos marcados. O nível define o que pode fazer.</div>
-        <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#DBEAFE;border:2px solid #2563EB;border-radius:3px;display:inline-block"></span><span style="color:#2563EB;font-weight:600">R</span> Somente leitura</div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#D1FAE5;border:2px solid #059669;border-radius:3px;display:inline-block"></span><span style="color:#059669;font-weight:600">RW</span> Leitura + Escrita/Mov.</div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#FEE2E2;border:2px solid #DC2626;border-radius:3px;display:inline-block"></span><span style="color:#DC2626;font-weight:600">RWD</span> Leitura + Escrita + Exclusão</div>
+        <div style="font-size:12px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">4. Visibilidade de Módulos e Permissões</div>
+        <div style="font-size:11.5px;color:var(--g400);margin-bottom:10px">Módulos sem acesso ficam <strong>ocultos do menu</strong>. O nível define o que o usuário pode fazer dentro de cada módulo.</div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;background:#F8FAFC;border-radius:8px;padding:10px 12px;border:1px solid var(--g100)">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#F9FAFB;border:2px solid #D1D5DB;border-radius:3px;display:inline-block;opacity:.5"></span><span style="color:#9CA3AF;font-weight:600">🔒 Oculto</span> — não aparece no menu</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#DBEAFE;border:2px solid #2563EB;border-radius:3px;display:inline-block"></span><span style="color:#2563EB;font-weight:600">R</span> Visível + somente leitura</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#D1FAE5;border:2px solid #059669;border-radius:3px;display:inline-block"></span><span style="color:#059669;font-weight:600">RW</span> Visível + leitura e escrita</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11.5px"><span style="width:14px;height:14px;background:#FEE2E2;border:2px solid #DC2626;border-radius:3px;display:inline-block"></span><span style="color:#DC2626;font-weight:600">RWD</span> Visível + acesso total</div>
         </div>
-        <div id="gc-modulos-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px"></div>
+        <div id="gc-modulos-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:8px"></div>
       </div>
     </div>
     <div class="modal-footer" style="position:sticky;bottom:0;background:#fff;border-top:1px solid var(--g200);z-index:1">
@@ -1428,7 +1429,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <div id="upd-status-bar" style="display:none"></div>
           <div class="form-group">
             <label class="form-label req">URL do novo <code>agent-desktop.js</code></label>
-            <input class="form-control" id="upd-url" type="url" placeholder="https://sysack.vercel.app/agent-desktop.js" value="https://sysack.vercel.app/agent-desktop.js" style="font-family:monospace;font-size:12px">
+            <input class="form-control" id="upd-url" type="url" placeholder="https://raw.githubusercontent.com/sua-org/sysack/main/agent-desktop.js" style="font-family:monospace;font-size:12px">
             <div style="font-size:11.5px;color:var(--g400);margin-top:4px">GitHub raw, Firebase Storage ou qualquer URL HTTPS pública.</div>
           </div>
           <div class="form-group">
@@ -6495,7 +6496,7 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
   // VAPID Key para FCM push notifications
   window.FCM_VAPID_KEY = 'BK-q97NzBrt0PeUBA7uB2VFe_ijxe3pDdI7P1OSyPVGJKhDLYfMGplwZrfE6vlNicTP7TOd0QWB7Q09sO6FGTJA';
 </script>
-<script src="app.js?v=20260616-relay-firestore-fix"></script>
+<script src="app.js"></script>
 
 <!-- Modal: Menu do Usuário -->
 <div class="modal-overlay" id="modal-usuario-menu" onclick="if(event.target===this)closeModal('modal-usuario-menu')">

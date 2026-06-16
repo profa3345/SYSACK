@@ -194,7 +194,6 @@ const FIREBASE_CONFIG = {
   authDomain: "sysack-829e2.firebaseapp.com",
   projectId: "sysack-829e2",
   storageBucket: "sysack-829e2.firebasestorage.app",
-  databaseURL: "https://sysack-829e2-default-rtdb.firebaseio.com",
   messagingSenderId: "364185694349",
   appId: "1:364185694349:web:cc2e9123fe72726cc5f2c4",
   measurementId: "G-K4CKJJW92X"
@@ -290,79 +289,6 @@ async function fsGetDoc(col, id) {
   }
 }
 
-
-// ═══════════════════════════════════════════════════════════════
-// SYSACK AUTH PRODUÇÃO — Firebase Auth + Firestore /users/{uid}
-// LOCAL_USERS foi desativado. Permissões devem vir do servidor.
-// ═══════════════════════════════════════════════════════════════
-async function sysackGetUserProfileFromFirestore(user) {
-  if (!user || !user.uid) return null;
-  try {
-    const snap = await db.collection('users').doc(user.uid).get();
-    if (!snap.exists) return null;
-    const data = snap.data() || {};
-    if (data.ativo === false) {
-      console.warn('[Auth] Usuário existe no Firestore, mas está inativo:', user.email);
-      return { uid: user.uid, email: user.email, role: 'bloqueado', ativo: false, ...data };
-    }
-    return {
-      uid: user.uid,
-      email: data.email || user.email || '',
-      nome: data.nome || user.displayName || (user.email || '').split('@')[0],
-      role: data.role || 'viewer',
-      ativo: data.ativo !== false,
-      permissions: data.permissions || null,
-      ...data
-    };
-  } catch (e) {
-    console.error('[Auth] Falha ao ler /users/' + user.uid + ':', e.message || e);
-    return null;
-  }
-}
-
-function sysackApplyUserProfile(profile) {
-  if (!profile) return false;
-  window.SYSACK_USER = profile;
-  try {
-    CURRENT_USER.uid = profile.uid || CURRENT_USER.uid;
-    CURRENT_USER.nome = profile.nome || profile.email || CURRENT_USER.nome;
-    CURRENT_USER.email = profile.email || CURRENT_USER.email;
-    CURRENT_USER.role = profile.role || 'viewer';
-    CURRENT_USER.avatar = (profile.nome || profile.email || 'U').slice(0,2).toUpperCase();
-
-    const role = CURRENT_USER.role;
-    CURRENT_USER.permissions = {
-      canApprove: role === 'admin' || role === 'gestor',
-      canDeleteAssets: role === 'admin' || role === 'gestor',
-      canWipeDevice: role === 'admin' || role === 'mdm_admin',
-      canGeolocate: role === 'admin' || role === 'mdm_admin',
-      canViewAudit: role === 'admin' || role === 'gestor',
-      canExecDashboard: role === 'admin' || role === 'gestor',
-      ...(profile.permissions || {})
-    };
-  } catch(e) {}
-  console.log('[Auth] ✓ Role via Firestore /users/{uid}:', profile.role, 'para', profile.email);
-  return true;
-}
-
-async function sysackEnsureUserDoc(user) {
-  if (!user || !user.uid) return;
-  const ref = db.collection('users').doc(user.uid);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    await ref.set({
-      uid: user.uid,
-      email: user.email || '',
-      nome: user.displayName || (user.email || '').split('@')[0] || 'Usuário',
-      role: 'viewer',
-      ativo: true,
-      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-      origem: 'firebase_auth_auto_create'
-    }, { merge: true });
-    console.warn('[Auth] /users/' + user.uid + ' criado como viewer. Ajuste o role no Firestore.');
-  }
-}
-
 async function getFbFunctions() {
   if (_fbFunctions) return _fbFunctions;
   const _app = window._app || (typeof firebase !== 'undefined' && firebase.apps.length && firebase.apps[0]);
@@ -376,29 +302,6 @@ async function callFunction(name, data) {
   return r.data;
 }
 window.callFunction = callFunction; // expõe globalmente
-
-// Inicializa perfil do usuário autenticado via Firebase Auth.
-// Sem LOCAL_USERS: se o documento /users/{uid} não existir, cria como viewer.
-if (!window._sysackAuthProfileListenerInstalled && auth) {
-  window._sysackAuthProfileListenerInstalled = true;
-  auth.onAuthStateChanged(async function(user) {
-    if (!user) return;
-    try {
-      await sysackEnsureUserDoc(user);
-      const profile = await sysackGetUserProfileFromFirestore(user);
-      if (!profile || profile.ativo === false || profile.role === 'bloqueado') {
-        showToast('⛔ Usuário sem permissão ativa no SYSACK.', 'danger', 6000);
-        console.warn('[Auth] Acesso bloqueado ou perfil ausente para', user.email);
-        return;
-      }
-      sysackApplyUserProfile(profile);
-    } catch (e) {
-      console.error('[Auth] Erro ao aplicar perfil Firebase:', e.message || e);
-      showToast('⚠️ Erro ao carregar permissões do usuário no Firestore.', 'warning', 6000);
-    }
-  });
-}
-
 
 // ─── callGenkitFlow — mapeia flows para Firebase Functions (Gemini) ──
 // Substitui a implementação anterior que chamava api.anthropic.com diretamente.
@@ -3191,7 +3094,54 @@ async function _autenticarAD(login, senha) {
   }
 }
 
-const LOCAL_USERS = {}; // DESATIVADO: permissões agora vêm exclusivamente do Firestore /users/{uid}
+const LOCAL_USERS = {
+  // ── Usuários CESAN (fallback quando Firebase Auth não acessível) ──
+  'ana.penha': {
+    email:    'ana.penha@cesan.com.br',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
+    nome:     'Ana Penha',
+    avatar:   'AP',
+    role:     'admin',
+    uid:      'dYFZy11fXnNhX1THHIPE096y',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+  'ana.penha@cesan.com.br': {
+    email:    'ana.penha@cesan.com.br',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
+    nome:     'Ana Penha',
+    avatar:   'AP',
+    role:     'admin',
+    uid:      'dYFZy11fXnNhX1THHIPE096y',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+  'apaula': {
+    email:    'apaulalimaster@gmail.com',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
+    nome:     'Ana Paula',
+    avatar:   'AP',
+    role:     'admin',
+    uid:      'YnSK3dR44tgbLcOweMga1R6',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+  'apaulalimaster@gmail.com': {
+    email:    'apaulalimaster@gmail.com',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
+    nome:     'Ana Paula',
+    avatar:   'AP',
+    role:     'admin',
+    uid:      'YnSK3dR44tgbLcOweMga1R6',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+  'admin': {
+    email:    'admin@cesan.com.br',
+    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
+    nome:     'Administrador SYSACK',
+    avatar:   'AD',
+    role:     'admin',
+    uid:      'local_admin_001',
+    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
+  },
+};
 
 let SESSION_USER = null;  // usuário logado na sessão atual
 
@@ -3340,98 +3290,89 @@ async function _fazerLoginInterno() {
       ]);
       const fbUser = cred.user;
 
-      // 1. Tenta custom claims; se não houver, usa EXCLUSIVAMENTE Firestore /users/{uid}
+      // 1. Tenta custom claims (token JWT — mais seguro, não pode ser alterado pelo cliente)
       let claimsRole = null;
       try {
-        const idTokenResult = await fbUser.getIdTokenResult(true);
+        const idTokenResult = await fbUser.getIdTokenResult(true); // força refresh
         claimsRole = idTokenResult.claims?.role || null;
         if (claimsRole) console.log('[Auth] Role via custom claim:', claimsRole);
       } catch (_) {}
 
-      let profile = null;
-
-      // 2. Firestore /users/{uid} é a fonte oficial de autorização.
-      // Não usar LOCAL_USERS aqui, para não rebaixar admin/gestor para viewer.
+      // 2. Fallback: busca perfil no Banco /users/{uid}
+      let profile = { nome: fbUser.displayName || emailNorm, role: claimsRole || 'viewer', uid: fbUser.uid };
       try {
-        if (typeof sysackEnsureUserDoc === 'function') {
-          await sysackEnsureUserDoc(fbUser);
-        }
-
-        if (typeof sysackGetUserProfileFromFirestore === 'function') {
-          profile = await sysackGetUserProfileFromFirestore(fbUser);
-        }
-
-        if (!profile && db) {
-          const snap = await db.collection('users').doc(fbUser.uid).get();
-          if (snap.exists) profile = { uid: fbUser.uid, email: fbUser.email, ...snap.data() };
-        }
-
-        // Compatibilidade: usuários antigos criados por e-mail/login
-        if ((!profile || !profile.role || profile.role === 'viewer') && db) {
-          const emailSnap = await db.collection('users')
-            .where('email', '==', fbUser.email).limit(1).get();
-
-          if (!emailSnap.empty) {
-            const docRef = emailSnap.docs[0];
-            profile = { uid: fbUser.uid, id: docRef.id, ...docRef.data() };
-            console.log('[Auth] Role via /users email lookup:', profile.role);
-
-            // Copia para /users/{uid} para os próximos logins
-            if (docRef.id !== fbUser.uid) {
-              db.collection('users').doc(fbUser.uid).set({
-                ...profile,
-                uid: fbUser.uid,
-                email: fbUser.email,
-                migradoDe: docRef.id,
-                atualizadoEm: new Date()
-              }, { merge: true }).catch(e => console.warn('[Auth] Não migrou usuário por email:', e.message));
+        const snap = await fsGet('users', fbUser.uid);
+        if (snap) {
+          Object.assign(profile, snap);
+          // Custom claim tem prioridade sobre Banco (mais seguro)
+          if (claimsRole) profile.role = claimsRole;
+        } else {
+          // Tenta buscar por email (usuários criados antes de ter uid)
+          try {
+            const emailSnap = await db.collection('users')
+              .where('email', '==', fbUser.email).limit(1).get();
+            if (!emailSnap.empty) {
+              const ud = { id: emailSnap.docs[0].id, ...emailSnap.docs[0].data() };
+              Object.assign(profile, ud);
+              if (claimsRole) profile.role = claimsRole;
+              console.log('[Auth] Role via /users email lookup:', profile.role);
             }
-          }
+          } catch(_) {}
         }
-      } catch (e) {
-        console.warn('[Auth] Falha ao carregar role em /users/{uid}:', e.message || e);
+      } catch (_) {}
+
+      // 3b. Fallback LOCAL_USERS quando Firestore não tem role configurada
+      // Cobre o período inicial antes de criar os docs /users/{uid} no Firestore
+      if (!claimsRole && (!profile.role || profile.role === 'viewer')) {
+        const loginKey   = (fbUser.email || emailNorm).replace(/@.*$/, '');
+        const loginEmail = fbUser.email || emailNorm;
+        const localUser  = LOCAL_USERS[loginKey]
+                        || LOCAL_USERS[loginEmail]
+                        || LOCAL_USERS[emailNorm]
+                        || LOCAL_USERS[emailNorm.replace(/@.*$/, '')]
+                        || null;
+        if (localUser && localUser.role && localUser.role !== 'viewer') {
+          profile.role        = localUser.role;
+          profile.permissions = localUser.permissions || permissionsForRole(localUser.role);
+          if (!profile.nome || profile.nome === emailNorm) profile.nome = localUser.nome || profile.nome;
+          console.log('[Auth] ✓ Role via LOCAL_USERS:', profile.role, 'para', loginEmail);
+          // Auto-cria doc no Firestore — resolve permanentemente nas próximas sessões
+          if (FB_READY && db) {
+            db.collection('users').doc(fbUser.uid).set({
+              nome:        localUser.nome || profile.nome,
+              email:       fbUser.email,
+              login:       loginKey,
+              role:        localUser.role,
+              authTipo:    'ad',
+              permissions: localUser.permissions || permissionsForRole(localUser.role),
+              moduloPerms: localUser.moduloPerms || {},
+              uid:         fbUser.uid,
+              createdAt:   new Date(),
+              criadoPor:   'auto-bootstrap',
+            }, { merge: true })
+            .then(() => console.log('[Auth] ✓ /users/'+fbUser.uid+' criado — próximos logins sem fallback.'))
+            .catch(e => console.warn('[Auth] Não criou doc users:', e.message));
+          }
+        } else {
+          console.warn('[Auth] Sem role privilegiada em claims/users/LOCAL_USERS — mantendo viewer. Email:', fbUser.email);
+        }
       }
-
-      if (!profile) {
-        profile = {
-          uid: fbUser.uid,
-          email: fbUser.email,
-          nome: fbUser.displayName || emailNorm,
-          role: 'viewer',
-          ativo: true
-        };
-      }
-
-      // Custom claim tem prioridade quando existir.
-      if (claimsRole) profile.role = claimsRole;
-
-      if (profile.ativo === false || profile.role === 'bloqueado') {
-        setLoginLoading(false);
-        showLoginError('Usuário bloqueado ou inativo no SYSACK.');
-        console.warn('[Auth] Usuário bloqueado/inativo:', fbUser.email);
-        return;
-      }
-
-      if (typeof sysackApplyUserProfile === 'function') {
-        sysackApplyUserProfile(profile);
-      }
-
-      console.log('[Auth] ✓ Role final via Firestore /users/{uid}:', profile.role, 'para', fbUser.email);
 
       // 3. Garante que viewer não acessa admin mesmo se Banco for adulterado
       const VALID_ROLES = ['admin','gestor','tecnico','mdm_admin','viewer'];
       if (!VALID_ROLES.includes(profile.role)) profile.role = 'viewer';
       const user = {
-        uid:         fbUser.uid,
-        email:       fbUser.email,
-        nome:        profile.nome || fbUser.displayName || emailNorm,
-        avatar:      (profile.nome || fbUser.displayName || '?').split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase(),
-        role:        profile.role || 'viewer',
-        permissions: permissionsForRole(profile.role || 'viewer'),
-        moduloPerms: profile.moduloPerms || {},
-        authTipo:    profile.authTipo    || 'ad',
-        mat:         profile.mat         || '',
-        login:       profile.login       || '',
+        uid:            fbUser.uid,
+        email:          fbUser.email,
+        nome:           profile.nome || fbUser.displayName || emailNorm,
+        avatar:         (profile.nome || fbUser.displayName || '?').split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase(),
+        role:           profile.role || 'viewer',
+        permissions:    permissionsForRole(profile.role || 'viewer'),
+        moduloPerms:    profile.moduloPerms    || {},
+        permsEspeciais: profile.permsEspeciais || {},
+        authTipo:       profile.authTipo    || 'ad',
+        mat:            profile.mat         || '',
+        login:          profile.login       || '',
       };
       loginSuccess(user, true);
       return;
@@ -8195,7 +8136,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   let _reconnects  = 0;
   let _modoConexao = 'detectando';  // 'local' | 'firebase' | 'detectando'
   let _fbRelay     = null;          // listener Banco Realtime para relay
-  const RTDB_RELAY_PATH = 'relay/' + sessaoId;
+  const FB_RELAY_PATH = 'sessoes_remotas/' + sessaoId + '/relay';
 
   // ── Detecção automática de rede ──────────────────────────────
   // 1. Tenta WebSocket direto (rede interna) com timeout de 3s
@@ -8265,13 +8206,6 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   function rvTestarConexaoLocal() {
-    // Em página HTTPS/Vercel o navegador bloqueia ws:// por Mixed Content.
-    // Portanto NÃO tenta rede local; mantém o Relay Firebase/RTDB.
-    if (location.protocol === 'https:' && String(_wsLocal || '').startsWith('ws://')) {
-      rvShellLog?.('[SYSACK] WebSocket local ws:// bloqueado em HTTPS — usando Relay Firebase.', '#F59E0B');
-      return Promise.resolve(false);
-    }
-
     // Tenta abrir WebSocket com timeout de 3 segundos
     return new Promise(resolve => {
       if (!wsIp || wsIp === 'localhost' || wsIp === '127.0.0.1') {
@@ -8279,12 +8213,11 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         return;
       }
       let resolvido = false;
-      let ws = null;
       const timer = setTimeout(() => {
-        if (!resolvido) { resolvido = true; try { ws && ws.close(); } catch(_) {} resolve(false); }
+        if (!resolvido) { resolvido = true; ws.close(); resolve(false); }
       }, 3000);
 
-      ws = new WebSocket(_wsLocal);
+      const ws = new WebSocket(_wsLocal);
       ws.onopen  = () => {
         if (!resolvido) {
           resolvido = true;
@@ -8324,7 +8257,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     } else {
       banner.style.cssText = 'background:#D97706;color:#fff;padding:4px 16px;font-size:11px;font-weight:600;text-align:center;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:8px';
       banner.innerHTML = '<span>📡</span> <span>Conectado via internet (Banco Relay) — PC não encontrado na rede local</span>' +
-        '<button onclick="rvRetentarLocal()" style="background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:5px;padding:2px 10px;cursor:pointer;font-size:11px;margin-left:8px">↺ Verificar rede local</button>';
+        '<button onclick="rvRetentarLocal()" style="background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:5px;padding:2px 10px;cursor:pointer;font-size:11px;margin-left:8px">↺ Tentar rede local</button>';
     }
 
     // Insere após a topbar
@@ -8333,14 +8266,6 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   window.rvRetentarLocal = async () => {
-    if (location.protocol === 'https:' && String(_wsLocal || '').startsWith('ws://')) {
-      rvSb('Página HTTPS: rede local ws:// bloqueada. Mantendo Relay Firebase.');
-      rvShellLog?.('[SYSACK] Botão Tentar rede local ignorado em HTTPS — use Relay Firebase ou configure WSS.', '#F59E0B');
-      showToast('Rede local ws:// é bloqueada em HTTPS. Mantendo Relay Firebase.', 'warning', 5000);
-      _modoConexao = 'firebase';
-      rvMostrarBannerConexao('firebase');
-      return;
-    }
     rvSb('Tentando reconectar via rede interna...');
     const ok = await rvTestarConexaoLocal();
     if (ok) {
@@ -8360,17 +8285,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── WebSocket direto (rede interna) ──────────────────────────
   function rvConnect(url) {
     _wsUrl = url || _wsLocal;
-
-    if (location.protocol === 'https:' && String(_wsUrl || '').startsWith('ws://')) {
-      rvShellLog?.('[SYSACK] rvConnect bloqueou ws:// em HTTPS — usando Relay Firebase.', '#F59E0B');
-      _modoConexao = 'firebase';
-      rvSetStatus('firebase', 'Banco Relay');
-      rvMostrarBannerConexao('firebase');
-      rvConnectBanco();
-      return;
-    }
-
-    rvSb((_wsUrl || '').startsWith('wss://') ? 'Conectando via túnel seguro...' : 'Conectando via rede interna a ' + wsIp + ':' + wsPort + '...');
+    rvSb('Conectando via rede interna a ' + wsIp + ':' + wsPort + '...');
     _ws = new WebSocket(_wsUrl);
 
     _ws.onopen = () => {
@@ -8435,49 +8350,76 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       });
   }
 
-  function rvGetRtdb() {
+  function rvEscutarRespostasBanco() {
+    // Agente escreve respostas em RTDB: /relay/{sessaoId}/resp
+    // Usamos polling REST com timestamp para detectar novos dados
+    let ultimoTs = 0;
+
+    const poll = setInterval(async () => {
+      if (_modoConexao !== 'firebase') { clearInterval(poll); return; }
+      const data = await rtdbRead(`relay/${sessaoId}/resp`);
+      if (data && data.ts && data.ts > ultimoTs) {
+        ultimoTs = data.ts;
+        rvProcessarMensagem(data.payload || data);
+      }
+    }, 800); // poll a cada 800ms — boa latência para relay
+
+    _fbRelay = () => clearInterval(poll);
+
+    // Também tenta SSE nativo se o browser suportar (latência zero)
     try {
-      if (typeof firebase !== 'undefined' && firebase.database) return firebase.database();
-    } catch(e) {}
-    return null;
+      const sseUrl = `https://${_RTDB_HOST}/relay/${sessaoId}/resp.json?auth=${_RTDB_KEY}&Accept=text/event-stream`;
+      const sse = new EventSource(sseUrl);
+      sse.onmessage = e => {
+        try {
+          const ev = JSON.parse(e.data);
+          const val = ev?.data;
+          if (val && val.ts && val.ts > ultimoTs) {
+            ultimoTs = val.ts;
+            rvProcessarMensagem(val.payload || val);
+          }
+        } catch {}
+      };
+      const oldRelay = _fbRelay;
+      _fbRelay = () => { clearInterval(poll); sse.close(); };
+      sse.onerror = () => {}; // silencia — poll continua como backup
+    } catch {}
   }
 
-  function rvEscutarRespostasBanco() {
-    const rtdb = rvGetRtdb();
-    if (!rtdb) {
-      rvShellLog('[SYSACK] Firebase Database não carregado no navegador.', '#EF4444');
-      return;
-    }
-    let lastTs = 0;
-    const ref = rtdb.ref(RTDB_RELAY_PATH + '/resp');
-    const handler = snap => {
-      const val = snap.val();
-      if (!val || !val.payload || !val.ts || val.ts <= lastTs) return;
-      lastTs = val.ts;
-      rvProcessarMensagem(val.payload);
-    };
-    ref.on('value', handler, err => rvShellLog('[SYSACK] Erro lendo relay RTDB: ' + err.message, '#EF4444'));
-    _fbRelay = () => ref.off('value', handler);
+  // ── RTDB helpers (app não tem SDK RTDB — usa REST igual ao agente) ──
+  const _RTDB_HOST = 'sysack-829e2-default-rtdb.firebaseio.com';
+  const _RTDB_KEY  = FIREBASE_CONFIG.apiKey;
+
+  async function rtdbWrite(path, data) {
+    try {
+      const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${_RTDB_KEY}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+    } catch(e) { console.warn('[RTDB write]', e.message); }
+  }
+
+  async function rtdbRead(path) {
+    try {
+      const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${_RTDB_KEY}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch(e) { return null; }
   }
 
   function rvEnviarViaBanco(msg) {
-    const rtdb = rvGetRtdb();
-    if (!rtdb) return Promise.resolve();
-    const payload = { ...msg, tipo: msg.tipo || msg.type, type: msg.type || msg.tipo };
-    return rtdb.ref(RTDB_RELAY_PATH + '/cmd').set({
-      payload,
-      ts: Date.now(),
-      tecnicoUid: SESSION_USER?.uid || CURRENT_USER?.uid || ''
-    }).catch(e => rvShellLog('[SYSACK] Erro enviando comando RTDB: ' + e.message, '#EF4444'));
+    // Escreve no RTDB no caminho onde o agente faz SSE-listen: /relay/{sessaoId}/cmd
+    return rtdbWrite(`relay/${sessaoId}/cmd`, { payload: msg, ts: Date.now() });
   }
+
+  function rvEscutarRespostasBanco_old(){} // substituída abaixo
 
   // ── Processador de mensagens (unifica local e Banco) ──────
   function rvProcessarMensagem(rawData) {
     try {
       const d = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-      d.tipo = d.tipo || d.type;
-      if (d.type === 'output' && !d.tipo) d.tipo = 'result';
-      if (d.type === 'output') d.stdout = d.data || '';
 
       // Detecta métricas embutidas no resultado do shell
       if (d.tipo === 'result' && d.stdout?.startsWith('METRICS:')) {
@@ -8501,7 +8443,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── Envio unificado (local ou Banco) ─────────────────────
   function rvSend(obj) {
     if (_modoConexao === 'local' && _ws?.readyState === 1) {
-      _ws.send(JSON.stringify({ ...obj, type: obj.type || obj.tipo, tipo: obj.tipo || obj.type }));
+      _ws.send(JSON.stringify(obj));
     } else if (_modoConexao === 'firebase') {
       rvEnviarViaBanco(obj);
     } else {
@@ -9011,42 +8953,33 @@ function arInstalarPatches(agentId, hostname) {
 
 // ── DOWNLOAD DO INSTALADOR ────────────────────────────────────
 function arInstalarAgente() {
+  const u = SESSION_USER || CURRENT_USER;
+  const role = u?.role || '';
+  const temPermissao = (['admin','gestor','tecnico'].includes(role)) ||
+    (u?.permsEspeciais?.podeInstalarAgente === true) ||
+    (u?.email === 'ana.penha@cesan.com.br');
+  if (!temPermissao)
+    return showToast('⛔ Acesso restrito: Admin, Gestor, Técnico ou permissão "Instalar Agente".','error');
   openModal('modal-ar-download');
 }
 
 // ════════════════════════════════════════════════════════════
 // ATUALIZAR CLIENTE — auto-update remoto para todos os agentes
 // ════════════════════════════════════════════════════════════
-function getAgentDesktopUpdateUrl() {
-  const override = (window.SYSACK_AGENT_UPDATE_URL || '').trim();
-  if (override) return override;
-  const base = (location.origin && location.origin.startsWith('http'))
-    ? location.origin
-    : 'https://sysack.vercel.app';
-  return base.replace(/\/$/, '') + '/agent-desktop.js';
-}
-
-function preencherUrlAtualizacaoCliente(forcar = false) {
-  const el = document.getElementById('upd-url');
-  if (!el) return;
-  const url = getAgentDesktopUpdateUrl();
-  if (forcar || !el.value || el.value.includes('raw.githubusercontent.com/sua-org')) el.value = url;
-  el.placeholder = url;
-}
-
 function arAtualizarClientes() {
   const u = SESSION_USER || CURRENT_USER;
-  const temPermissao = u && (
-    ['admin','gestor'].includes(u.role) ||
-    (u.moduloPerms?.['assistencia-remota'] === 'rwd') ||
-    (u.moduloPerms?.['assistencia-remota'] === 'rw' && ['admin','gestor','tecnico'].includes(u.role))
-  );
-  if (!temPermissao)
-    return showToast('⛔ Acesso restrito: Admin, Gestor ou permissão RWD em Assistência Remota.','error');
+  const role = u?.role || '';
+  const temPermissao = (['admin','gestor'].includes(role)) ||
+    (u?.permsEspeciais?.podeAtualizarClientes === true) ||
+    (u?.moduloPerms?.['assistencia-remota'] === 'rwd') ||
+    (u?.email === 'ana.penha@cesan.com.br');
+  if (!temPermissao) {
+    console.warn('[arAtualizarClientes] role='+role+' email='+u?.email);
+    return showToast('⛔ Acesso restrito: Admin, Gestor ou permissão "Atualizar Clientes" na Gestão de Contas.','error');
+  }
   const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
   if (!online.length) return showToast('Nenhum agente online para atualizar.','warning');
   openModal('modal-atualizar-cliente');
-  preencherUrlAtualizacaoCliente(true);
   const versaoAtual = online.map(a=>a.versaoAgente||a.version||'2.1.0').sort().reverse()[0]||'2.1.0';
   const pts = versaoAtual.split('.').map(Number); pts[2]=(pts[2]||0)+1;
   const ev = document.getElementById('upd-versao'); if(ev && !ev.value) ev.value=pts.join('.');
@@ -28574,17 +28507,26 @@ const GC_MODULOS = [
   { id:'grupos-alerta',      icon:'🔔', nome:'Grupos de Alerta',       grupo:'Configuração' },
 ];
 
+// Permissões especiais (além do acesso ao módulo)
+const GC_PERMS_ESPECIAIS = [
+  { id:'podeAtualizarClientes', icon:'🔄', nome:'Atualizar Clientes (auto-update remoto)', grupo:'Assistência Remota' },
+  { id:'podeInstalarAgente',    icon:'⬇️', nome:'Instalar Agente em computadores',         grupo:'Assistência Remota' },
+  { id:'podeEncerrarSessao',   icon:'⛔', nome:'Encerrar sessão remota de outros usuários', grupo:'Assistência Remota' },
+  { id:'podeGestarContas',      icon:'👤', nome:'Gerir contas de usuários',                 grupo:'Administração' },
+];
+
 const GC_NIVEIS = [
-  { val:'',    label:'— Sem acesso —',                  cor:'#9CA3AF', bg:'#F9FAFB' },
-  { val:'r',   label:'R — Somente leitura',             cor:'#2563EB', bg:'#DBEAFE' },
-  { val:'rw',  label:'RW — Leitura e Escrita/Mov.',    cor:'#059669', bg:'#D1FAE5' },
-  { val:'rwd', label:'RWD — Leitura, Escrita e Excl.', cor:'#DC2626', bg:'#FEE2E2' },
+  { val:'',      label:'— Oculto (sem acesso) —',           cor:'#9CA3AF', bg:'#F9FAFB' },
+  { val:'r',     label:'👁 Visível — Somente leitura',       cor:'#2563EB', bg:'#DBEAFE' },
+  { val:'rw',    label:'✏️ Visível — Leitura e Escrita',     cor:'#059669', bg:'#D1FAE5' },
+  { val:'rwd',   label:'🔑 Visível — Acesso total (R+W+D)', cor:'#DC2626', bg:'#FEE2E2' },
 ];
 
 let _gcEditandoUid = null;
 let _gcRoleSel     = 'viewer';
 let _gcAuthTipo    = 'ad';
 let _gcModPerms    = {};
+let _gcPermsEsp    = {}; // permissões especiais: { podeAtualizarClientes: true, ... }
 let _gcEmpSel      = null;
 
 // ── Tabela principal ─────────────────────────────────────────
@@ -28703,7 +28645,7 @@ async function renderUsuarios() {
 // ── Abrir modal novo usuário AD ───────────────────────────────
 function gcAbrirNovoAD() {
   _gcEditandoUid = null; _gcRoleSel = 'viewer'; _gcAuthTipo = 'ad';
-  _gcModPerms = {}; _gcEmpSel = null;
+  _gcModPerms = {}; _gcPermsEsp = {}; _gcEmpSel = null;
   document.getElementById('gc-modal-titulo').textContent = 'Ativar Usuário do AD';
   document.getElementById('gc-modal-sub').textContent    = 'Selecione um empregado e configure seu acesso';
   document.getElementById('gc-bloco-empregado').style.display = '';
@@ -28727,6 +28669,7 @@ async function gcEditarUsuario(uid) {
   _gcRoleSel   = u.role    || 'viewer';
   _gcAuthTipo  = u.authTipo|| 'ad';
   _gcModPerms  = {...(u.moduloPerms||{})};
+  _gcPermsEsp  = {...(u.permsEspeciais||{})};
   _gcEmpSel    = {mat:u.mat||'',login:u.login||'',email:u.email||'',nome:u.nome||''};
   document.getElementById('gc-modal-titulo').textContent = `✏️ Editar: ${u.nome||'Usuário'}`;
   document.getElementById('gc-modal-sub').textContent    = `Login: ${u.login||u.email||'—'} · Role: ${u.role||'—'}`;
@@ -28828,26 +28771,57 @@ function gcRenderModulos() {
     mods.forEach(m=>{
       const v = _gcModPerms[m.id]||'';
       const n = GC_NIVEIS.find(x=>x.val===v)||GC_NIVEIS[0];
-      html += `<div style="background:${v?n.bg:'#F9FAFB'};border:1px solid ${v?n.cor+'66':'var(--g200)'};border-radius:10px;padding:9px 12px">
+      const oculto = !v; // sem acesso = oculto do menu
+      html += `<div style="background:${oculto?'#F9FAFB':n.bg};border:1px solid ${oculto?'var(--g200)':n.cor+'55'};border-radius:10px;padding:9px 12px;opacity:${oculto?.65:1};transition:all .15s">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
           <div style="display:flex;align-items:center;gap:7px;flex:1;min-width:0">
-            <span style="font-size:16px;flex-shrink:0">${m.icon}</span>
-            <span style="font-size:12px;font-weight:600;color:var(--g800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(m.nome)}</span>
+            <span style="font-size:16px;flex-shrink:0;filter:${oculto?'grayscale(1)':''}">${m.icon}</span>
+            <div style="min-width:0">
+              <div style="font-size:12px;font-weight:600;color:${oculto?'var(--g400)':'var(--g800)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(m.nome)}</div>
+              ${oculto?`<div style="font-size:10px;color:#9CA3AF;margin-top:1px">🔒 Oculto — não aparece no menu</div>`:`<div style="font-size:10px;color:${n.cor};font-weight:600;margin-top:1px">${v.toUpperCase()} — ${v==='r'?'Somente leitura':v==='rw'?'Leitura e escrita':'Acesso total'}</div>`}
+            </div>
           </div>
           <select onchange="gcSetModPerm('${m.id}',this.value)"
-            style="font-size:11px;padding:3px 4px;border:1px solid ${v?n.cor:'var(--g300)'};border-radius:6px;background:${v?'#fff':'var(--g50)'};color:${n.cor};font-weight:700;cursor:pointer;flex-shrink:0">
-            ${GC_NIVEIS.map(x=>`<option value="${x.val}" style="color:${x.cor};background:${x.bg}" ${v===x.val?'selected':''}>${x.label}</option>`).join('')}
+            style="font-size:11px;padding:3px 6px;border:1px solid ${oculto?'var(--g300)':n.cor};border-radius:6px;background:#fff;color:${n.cor};font-weight:700;cursor:pointer;flex-shrink:0;min-width:130px">
+            ${GC_NIVEIS.map(x=>`<option value="${x.val}" style="color:${x.cor}" ${v===x.val?'selected':''}>${x.label}</option>`).join('')}
           </select>
         </div>
       </div>`;
     });
   }
+
+  // Seção de permissões especiais
+  html += `<div style="grid-column:1/-1;font-size:11px;font-weight:700;color:#7C3AED;text-transform:uppercase;letter-spacing:.5px;padding:10px 0 4px;border-bottom:1px solid #EDE9FE;margin-top:8px;margin-bottom:2px">⚙️ Permissões Especiais</div>`;
+  GC_PERMS_ESPECIAIS.forEach(p=>{
+    const ativo = !!_gcPermsEsp[p.id];
+    html += `<div style="background:${ativo?'#F5F3FF':'#F9FAFB'};border:1px solid ${ativo?'#7C3AED55':'var(--g200)'};border-radius:10px;padding:9px 12px;grid-column:span 1">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="display:flex;align-items:center;gap:7px;flex:1;min-width:0">
+          <span style="font-size:16px;flex-shrink:0">${p.icon}</span>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:${ativo?'#7C3AED':'var(--g500)'};">${escapeHtml(p.nome)}</div>
+            <div style="font-size:10px;color:var(--g400);margin-top:1px">${escapeHtml(p.grupo)}</div>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex-shrink:0">
+          <span style="font-size:11px;color:${ativo?'#7C3AED':'var(--g400)'};">${ativo?'Habilitado':'Desabilitado'}</span>
+          <div onclick="gcTogglePermEsp('${p.id}')" style="width:36px;height:20px;border-radius:10px;background:${ativo?'#7C3AED':'#D1D5DB'};position:relative;cursor:pointer;transition:.2s;flex-shrink:0">
+            <div style="position:absolute;top:2px;left:${ativo?'18':'2'}px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)"></div>
+          </div>
+        </label>
+      </div>
+    </div>`;
+  });
+
   grid.innerHTML = html;
+  const total = Object.values(_gcModPerms).filter(Boolean).length;
+  const totalEsp = Object.values(_gcPermsEsp).filter(Boolean).length;
   const ct = document.getElementById('gc-contagem-modulos');
-  if (ct) ct.textContent = `${Object.values(_gcModPerms).filter(Boolean).length} módulo(s) com acesso configurado`;
+  if (ct) ct.textContent = `${total} módulo(s) visível(is) · ${totalEsp} permissão(ões) especial(is)`;
 }
 
 function gcSetModPerm(modId, nivel) { _gcModPerms[modId]=nivel; gcRenderModulos(); }
+function gcTogglePermEsp(permId) { _gcPermsEsp[permId]=!_gcPermsEsp[permId]; gcRenderModulos(); }
 
 // ── Salvar ────────────────────────────────────────────────────
 async function gcSalvarUsuario() {
@@ -28876,13 +28850,14 @@ async function gcSalvarUsuario() {
   try {
     const dados = {
       nome, email, login, mat,
-      role:        _gcRoleSel,
-      authTipo:    _gcAuthTipo,
-      moduloPerms: _gcModPerms,
-      permissions: permissionsForRole(_gcRoleSel),
-      updatedAt:   new Date(),
-      updatedBy:   CURRENT_USER?.nome||'',
-      ativo:       true,
+      role:          _gcRoleSel,
+      authTipo:      _gcAuthTipo,
+      moduloPerms:   _gcModPerms,
+      permsEspeciais: _gcPermsEsp,
+      permissions:   permissionsForRole(_gcRoleSel),
+      updatedAt:     new Date(),
+      updatedBy:     CURRENT_USER?.nome||'',
+      ativo:         true,
     };
     if (hashSenha) dados._hash = hashSenha;
 
