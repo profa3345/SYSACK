@@ -290,6 +290,79 @@ async function fsGetDoc(col, id) {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// SYSACK AUTH PRODUÇÃO — Firebase Auth + Firestore /users/{uid}
+// LOCAL_USERS foi desativado. Permissões devem vir do servidor.
+// ═══════════════════════════════════════════════════════════════
+async function sysackGetUserProfileFromFirestore(user) {
+  if (!user || !user.uid) return null;
+  try {
+    const snap = await db.collection('users').doc(user.uid).get();
+    if (!snap.exists) return null;
+    const data = snap.data() || {};
+    if (data.ativo === false) {
+      console.warn('[Auth] Usuário existe no Firestore, mas está inativo:', user.email);
+      return { uid: user.uid, email: user.email, role: 'bloqueado', ativo: false, ...data };
+    }
+    return {
+      uid: user.uid,
+      email: data.email || user.email || '',
+      nome: data.nome || user.displayName || (user.email || '').split('@')[0],
+      role: data.role || 'viewer',
+      ativo: data.ativo !== false,
+      permissions: data.permissions || null,
+      ...data
+    };
+  } catch (e) {
+    console.error('[Auth] Falha ao ler /users/' + user.uid + ':', e.message || e);
+    return null;
+  }
+}
+
+function sysackApplyUserProfile(profile) {
+  if (!profile) return false;
+  window.SYSACK_USER = profile;
+  try {
+    CURRENT_USER.uid = profile.uid || CURRENT_USER.uid;
+    CURRENT_USER.nome = profile.nome || profile.email || CURRENT_USER.nome;
+    CURRENT_USER.email = profile.email || CURRENT_USER.email;
+    CURRENT_USER.role = profile.role || 'viewer';
+    CURRENT_USER.avatar = (profile.nome || profile.email || 'U').slice(0,2).toUpperCase();
+
+    const role = CURRENT_USER.role;
+    CURRENT_USER.permissions = {
+      canApprove: role === 'admin' || role === 'gestor',
+      canDeleteAssets: role === 'admin' || role === 'gestor',
+      canWipeDevice: role === 'admin' || role === 'mdm_admin',
+      canGeolocate: role === 'admin' || role === 'mdm_admin',
+      canViewAudit: role === 'admin' || role === 'gestor',
+      canExecDashboard: role === 'admin' || role === 'gestor',
+      ...(profile.permissions || {})
+    };
+  } catch(e) {}
+  console.log('[Auth] ✓ Role via Firestore /users/{uid}:', profile.role, 'para', profile.email);
+  return true;
+}
+
+async function sysackEnsureUserDoc(user) {
+  if (!user || !user.uid) return;
+  const ref = db.collection('users').doc(user.uid);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    await ref.set({
+      uid: user.uid,
+      email: user.email || '',
+      nome: user.displayName || (user.email || '').split('@')[0] || 'Usuário',
+      role: 'viewer',
+      ativo: true,
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+      origem: 'firebase_auth_auto_create'
+    }, { merge: true });
+    console.warn('[Auth] /users/' + user.uid + ' criado como viewer. Ajuste o role no Firestore.');
+  }
+}
+
 async function getFbFunctions() {
   if (_fbFunctions) return _fbFunctions;
   const _app = window._app || (typeof firebase !== 'undefined' && firebase.apps.length && firebase.apps[0]);
@@ -303,6 +376,29 @@ async function callFunction(name, data) {
   return r.data;
 }
 window.callFunction = callFunction; // expõe globalmente
+
+// Inicializa perfil do usuário autenticado via Firebase Auth.
+// Sem LOCAL_USERS: se o documento /users/{uid} não existir, cria como viewer.
+if (!window._sysackAuthProfileListenerInstalled && auth) {
+  window._sysackAuthProfileListenerInstalled = true;
+  auth.onAuthStateChanged(async function(user) {
+    if (!user) return;
+    try {
+      await sysackEnsureUserDoc(user);
+      const profile = await sysackGetUserProfileFromFirestore(user);
+      if (!profile || profile.ativo === false || profile.role === 'bloqueado') {
+        showToast('⛔ Usuário sem permissão ativa no SYSACK.', 'danger', 6000);
+        console.warn('[Auth] Acesso bloqueado ou perfil ausente para', user.email);
+        return;
+      }
+      sysackApplyUserProfile(profile);
+    } catch (e) {
+      console.error('[Auth] Erro ao aplicar perfil Firebase:', e.message || e);
+      showToast('⚠️ Erro ao carregar permissões do usuário no Firestore.', 'warning', 6000);
+    }
+  });
+}
+
 
 // ─── callGenkitFlow — mapeia flows para Firebase Functions (Gemini) ──
 // Substitui a implementação anterior que chamava api.anthropic.com diretamente.
@@ -3095,54 +3191,7 @@ async function _autenticarAD(login, senha) {
   }
 }
 
-const LOCAL_USERS = {
-  // ── Usuários CESAN (fallback quando Firebase Auth não acessível) ──
-  'ana.penha': {
-    email:    'ana.penha@cesan.com.br',
-    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
-    nome:     'Ana Penha',
-    avatar:   'AP',
-    role:     'admin',
-    uid:      'dYFZy11fXnNhX1THHIPE096y',
-    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
-  },
-  'ana.penha@cesan.com.br': {
-    email:    'ana.penha@cesan.com.br',
-    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
-    nome:     'Ana Penha',
-    avatar:   'AP',
-    role:     'admin',
-    uid:      'dYFZy11fXnNhX1THHIPE096y',
-    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
-  },
-  'apaula': {
-    email:    'apaulalimaster@gmail.com',
-    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
-    nome:     'Ana Paula',
-    avatar:   'AP',
-    role:     'admin',
-    uid:      'YnSK3dR44tgbLcOweMga1R6',
-    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
-  },
-  'apaulalimaster@gmail.com': {
-    email:    'apaulalimaster@gmail.com',
-    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
-    nome:     'Ana Paula',
-    avatar:   'AP',
-    role:     'admin',
-    uid:      'YnSK3dR44tgbLcOweMga1R6',
-    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
-  },
-  'admin': {
-    email:    'admin@cesan.com.br',
-    _hash:    'f0030afd623a7a1fccb5533a54701000b1cc82e977acf85e112d56b9793b6abc',
-    nome:     'Administrador SYSACK',
-    avatar:   'AD',
-    role:     'admin',
-    uid:      'local_admin_001',
-    permissions: { canApprove: true, canDeleteAssets: true, canWipeDevice: true, canGeolocate: true, canViewAudit: true, canExecDashboard: true },
-  },
-};
+const LOCAL_USERS = {}; // DESATIVADO: permissões agora vêm exclusivamente do Firestore /users/{uid}
 
 let SESSION_USER = null;  // usuário logado na sessão atual
 
@@ -3336,7 +3385,7 @@ async function _fazerLoginInterno() {
           profile.role        = localUser.role;
           profile.permissions = localUser.permissions || permissionsForRole(localUser.role);
           if (!profile.nome || profile.nome === emailNorm) profile.nome = localUser.nome || profile.nome;
-          console.log('[Auth] ✓ Role via LOCAL_USERS:', profile.role, 'para', loginEmail);
+          console.log('[Auth] ✓ Role via Firestore /users/{uid}:', profile.role, 'para', loginEmail);
           // Auto-cria doc no Firestore — resolve permanentemente nas próximas sessões
           if (FB_READY && db) {
             db.collection('users').doc(fbUser.uid).set({
@@ -8199,17 +8248,14 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     // 3. Sem rota WS disponível — tenta relay Firebase RTDB (funciona em qualquer rede)
     rvShellLog('[SYSACK] Tentativa 1: WebSocket local (' + wsIp + ':9000) — ' + (paginaHttps ? 'bloqueado (HTTPS)' : 'falhou'), '#EF4444');
     rvShellLog('[SYSACK] Tentativa 2: Cloudflare Tunnel — ' + (tunnelUrl ? 'indisponível' : 'não configurado'), '#EF4444');
-    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase/Firestore...', '#F59E0B');
+    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase RTDB...', '#F59E0B');
     _modoConexao = 'firebase';
     rvMostrarBannerConexao('firebase');
     rvConnectBanco();
   }
 
   function rvTestarConexaoLocal() {
-    // Em página HTTPS (Vercel), o navegador bloqueia ws:// por Mixed Content.
-    // Não tenta WebSocket local para evitar erro visual e queda falsa.
-    if (location.protocol === 'https:') return Promise.resolve(false);
-    // Tenta abrir WebSocket com timeout de 3 segundos somente em HTTP/interno.
+    // Tenta abrir WebSocket com timeout de 3 segundos
     return new Promise(resolve => {
       if (!wsIp || wsIp === 'localhost' || wsIp === '127.0.0.1') {
         resolve(false);
@@ -8269,11 +8315,6 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   window.rvRetentarLocal = async () => {
-    if (location.protocol === 'https:') {
-      showToast('Rede local direta usa ws:// e é bloqueada em HTTPS. Mantendo relay Firebase/Firestore.', 'warning', 5000);
-      rvSb('HTTPS detectado — usando relay via Banco.');
-      return;
-    }
     rvSb('Tentando reconectar via rede interna...');
     const ok = await rvTestarConexaoLocal();
     if (ok) {
@@ -8342,13 +8383,13 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     arEnviarComando(agentId, 'usar_firebase_relay', { sessaoId }, 'Relay Banco iniciado pelo técnico')
       .then(() => {
         rvSetStatus('firebase', 'Via internet 📡');
-        rvSb('Relay Banco ativo — comandos via Firestore');
+        rvSb('Relay Banco ativo — latência ~300-600ms');
 
         // Escuta respostas do agente no Banco
         rvEscutarRespostasBanco();
 
         // Avisa que screenshot será mais lenta
-        rvShellLog('[SYSACK] Conectado via internet (Banco Relay Firestore)', '#F59E0B');
+        rvShellLog('[SYSACK] Conectado via internet (Banco Relay)', '#F59E0B');
         rvShellLog('[SYSACK] Captura de tela disponível, mas mais lenta que via rede interna.', '#64748B');
         rvShellLog('[SYSACK] Use "↺ Tentar rede local" se estiver na mesma rede do PC alvo.', '#64748B');
       })
@@ -8358,9 +8399,6 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       });
   }
 
-  // Relay via Firestore: funciona no Vercel/HTTPS sem Mixed Content e sem depender de RTDB público.
-  // O agente recebe comandos em /agent_commands e grava respostas em:
-  // /sessoes_remotas/{sessaoId}/relay/resposta
   function rvGetRtdb() {
     try {
       if (typeof firebase !== 'undefined' && firebase.database) return firebase.database();
@@ -8369,64 +8407,32 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   function rvEscutarRespostasBanco() {
-    if (!db) {
-      rvShellLog('[SYSACK] Firestore não carregado no navegador.', '#EF4444');
+    const rtdb = rvGetRtdb();
+    if (!rtdb) {
+      rvShellLog('[SYSACK] Firebase Database não carregado no navegador.', '#EF4444');
       return;
     }
-    let lastTs = '';
-    const ref = db.collection('sessoes_remotas').doc(sessaoId).collection('relay').doc('resposta');
-    const unsub = ref.onSnapshot(snap => {
-      if (!snap.exists) return;
-      const val = snap.data() || {};
-      const ts = String(val.ts || val.updatedAt || '');
-      if (ts && ts === lastTs) return;
-      lastTs = ts;
-
-      const tipo = val.tipo || val.payload?.tipo || val.payload?.type || '';
-      const resultado = val.resultado || val.stdout || val.payload?.stdout || '';
-
-      if (val.payload) {
-        rvProcessarMensagem(val.payload);
-      } else if (tipo === 'screenshot') {
-        rvProcessarMensagem({ tipo:'screenshot', data: resultado });
-      } else {
-        rvProcessarMensagem({ tipo:'result', stdout: resultado, stderr: val.stderr || '', erro: val.erro || '' });
-      }
-    }, err => rvShellLog('[SYSACK] Erro lendo relay Firestore: ' + err.message, '#EF4444'));
-    _fbRelay = unsub;
+    let lastTs = 0;
+    const ref = rtdb.ref(RTDB_RELAY_PATH + '/resp');
+    const handler = snap => {
+      const val = snap.val();
+      if (!val || !val.payload || !val.ts || val.ts <= lastTs) return;
+      lastTs = val.ts;
+      rvProcessarMensagem(val.payload);
+    };
+    ref.on('value', handler, err => rvShellLog('[SYSACK] Erro lendo relay RTDB: ' + err.message, '#EF4444'));
+    _fbRelay = () => ref.off('value', handler);
   }
 
-  async function rvEnviarViaBanco(msg) {
-    const tipoMsg = msg.tipo || msg.type;
-    let tipo = tipoMsg;
-    let dados = { ...msg, sessaoId };
-
-    // O agente legado entende powershell, screenshot e atualizar_agente.
-    if (tipoMsg === 'exec') {
-      tipo = 'powershell';
-      dados = { cmd: msg.cmd || '', sessaoId };
-    } else if (tipoMsg === 'screenshot') {
-      tipo = 'screenshot';
-      dados = { sessaoId };
-    } else if (tipoMsg === 'metrics') {
-      tipo = 'powershell';
-      dados = { cmd: msg.cmd || '', sessaoId };
-    }
-
-    const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
-    try {
-      await fsAdd('agent_commands', {
-        agentId,
-        tipo,
-        dados: JSON.stringify(dados),
-        token: TOKEN,
-        status: 'pendente',
-        criadoEm: new Date().toISOString(),
-        criadoPor: SESSION_USER?.uid || CURRENT_USER?.uid || '',
-      });
-    } catch(e) {
-      rvShellLog('[SYSACK] Erro enviando comando Firestore: ' + e.message, '#EF4444');
-    }
+  function rvEnviarViaBanco(msg) {
+    const rtdb = rvGetRtdb();
+    if (!rtdb) return Promise.resolve();
+    const payload = { ...msg, tipo: msg.tipo || msg.type, type: msg.type || msg.tipo };
+    return rtdb.ref(RTDB_RELAY_PATH + '/cmd').set({
+      payload,
+      ts: Date.now(),
+      tecnicoUid: SESSION_USER?.uid || CURRENT_USER?.uid || ''
+    }).catch(e => rvShellLog('[SYSACK] Erro enviando comando RTDB: ' + e.message, '#EF4444'));
   }
 
   // ── Processador de mensagens (unifica local e Banco) ──────
@@ -9034,11 +9040,11 @@ async function executarAtualizacaoCliente() {
   const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
   let ok=0,erro=0;
   try {
-    await fsSet('agent_updates', versao.replace(/\./g,'_'),{
+    await fsSet('agent_updates/'+versao.replace(/\./g,'_'),{
       versao,url, publicadoPor:SESSION_USER?.nome||SESSION_USER?.email||'admin',
       publicadoEm:new Date().toISOString(), alvos, totalAgentes:lista.length,
     });
-    updLog(`✓ Metadados gravados em /agent_updates/${versao.replace(/\./g,'_')}`);
+    updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
     for (const ag of lista) {
       try {
         await fsAdd('agent_commands',{
