@@ -3321,10 +3321,41 @@ async function _fazerLoginInterno() {
         }
       } catch (_) {}
 
-      // 3b. Produção: NÃO corrige role usando LOCAL_USERS.
-      // A role deve vir de custom claims ou do documento /users/{uid}.
+      // 3b. Fallback LOCAL_USERS quando Firestore não tem role configurada
+      // Cobre o período inicial antes de criar os docs /users/{uid} no Firestore
       if (!claimsRole && (!profile.role || profile.role === 'viewer')) {
-        console.warn('[Auth] Sem role privilegiada em claims/users — mantendo viewer.');
+        const loginKey   = (fbUser.email || emailNorm).replace(/@.*$/, '');
+        const loginEmail = fbUser.email || emailNorm;
+        const localUser  = LOCAL_USERS[loginKey]
+                        || LOCAL_USERS[loginEmail]
+                        || LOCAL_USERS[emailNorm]
+                        || LOCAL_USERS[emailNorm.replace(/@.*$/, '')]
+                        || null;
+        if (localUser && localUser.role && localUser.role !== 'viewer') {
+          profile.role        = localUser.role;
+          profile.permissions = localUser.permissions || permissionsForRole(localUser.role);
+          if (!profile.nome || profile.nome === emailNorm) profile.nome = localUser.nome || profile.nome;
+          console.log('[Auth] ✓ Role via LOCAL_USERS:', profile.role, 'para', loginEmail);
+          // Auto-cria doc no Firestore — resolve permanentemente nas próximas sessões
+          if (FB_READY && db) {
+            db.collection('users').doc(fbUser.uid).set({
+              nome:        localUser.nome || profile.nome,
+              email:       fbUser.email,
+              login:       loginKey,
+              role:        localUser.role,
+              authTipo:    'ad',
+              permissions: localUser.permissions || permissionsForRole(localUser.role),
+              moduloPerms: localUser.moduloPerms || {},
+              uid:         fbUser.uid,
+              createdAt:   new Date(),
+              criadoPor:   'auto-bootstrap',
+            }, { merge: true })
+            .then(() => console.log('[Auth] ✓ /users/'+fbUser.uid+' criado — próximos logins sem fallback.'))
+            .catch(e => console.warn('[Auth] Não criou doc users:', e.message));
+          }
+        } else {
+          console.warn('[Auth] Sem role privilegiada em claims/users/LOCAL_USERS — mantendo viewer. Email:', fbUser.email);
+        }
       }
 
       // 3. Garante que viewer não acessa admin mesmo se Banco for adulterado
@@ -8146,8 +8177,17 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       rvSetStatus('tunnel', 'Via Cloudflare Tunnel 🌐');
       rvMostrarBannerConexao('tunnel');
       rvSb('Conectando via Cloudflare Tunnel...');
-      rvConnect(tunnelUrl);
-      return;
+      // Tenta tunnel com timeout — se falhar, cai para relay Firebase
+      const tunnelOk = await new Promise(resolve => {
+        let done = false;
+        const timer = setTimeout(() => { if (!done) { done = true; resolve(false); } }, 5000);
+        const wsTest = new WebSocket(tunnelUrl);
+        wsTest.onopen  = () => { if (!done) { done = true; clearTimeout(timer); wsTest.close(); resolve(true); } };
+        wsTest.onerror = () => { if (!done) { done = true; clearTimeout(timer); resolve(false); } };
+        wsTest.onclose = () => { if (!done) { done = true; clearTimeout(timer); resolve(false); } };
+      });
+      if (tunnelOk) { rvConnect(tunnelUrl); return; }
+      rvShellLog('[SYSACK] Cloudflare Tunnel indisponível — usando relay Firebase.', '#F59E0B');
     }
 
     // 2b. Página HTTP — tunnel não disponível, tenta WebSocket local mesmo assim
@@ -8155,13 +8195,13 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       // já tentou acima e falhou — cai para sem rota
     }
 
-    // 3. Sem rota disponível
-    rvSetStatus('offline', 'Inacessível');
-    rvSb('❌ Computador não acessível.');
-    rvShellLog('[SYSACK] Tentativa 1: WebSocket local (' + wsIp + ':9000) — falhou', '#EF4444');
-    rvShellLog('[SYSACK] Tentativa 2: Cloudflare Tunnel — ' + (tunnelUrl ? 'tunnel inativo' : 'tunnel não iniciado'), '#EF4444');
-    rvShellLog('[SYSACK] Verifique se o computador está ligado e o agente SYSACK está rodando.', '#64748B');
-    showToast('❌ ' + hostname + ' não acessível em nenhuma rota.', 'danger', 6000);
+    // 3. Sem rota WS disponível — tenta relay Firebase RTDB (funciona em qualquer rede)
+    rvShellLog('[SYSACK] Tentativa 1: WebSocket local (' + wsIp + ':9000) — ' + (paginaHttps ? 'bloqueado (HTTPS)' : 'falhou'), '#EF4444');
+    rvShellLog('[SYSACK] Tentativa 2: Cloudflare Tunnel — ' + (tunnelUrl ? 'indisponível' : 'não configurado'), '#EF4444');
+    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase RTDB...', '#F59E0B');
+    _modoConexao = 'firebase';
+    rvMostrarBannerConexao('firebase');
+    rvConnectBanco();
   }
 
   function rvTestarConexaoLocal() {
@@ -8884,8 +8924,14 @@ function arInstalarAgente() {
 // ATUALIZAR CLIENTE — auto-update remoto para todos os agentes
 // ════════════════════════════════════════════════════════════
 function arAtualizarClientes() {
-  if (!SESSION_USER || !['admin','gestor'].includes(SESSION_USER.role))
-    return showToast('⛔ Acesso restrito: somente admin/gestor.','error');
+  const u = SESSION_USER || CURRENT_USER;
+  const temPermissao = u && (
+    ['admin','gestor'].includes(u.role) ||
+    (u.moduloPerms?.['assistencia-remota'] === 'rwd') ||
+    (u.moduloPerms?.['assistencia-remota'] === 'rw' && ['admin','gestor','tecnico'].includes(u.role))
+  );
+  if (!temPermissao)
+    return showToast('⛔ Acesso restrito: Admin, Gestor ou permissão RWD em Assistência Remota.','error');
   const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
   if (!online.length) return showToast('Nenhum agente online para atualizar.','warning');
   openModal('modal-atualizar-cliente');
