@@ -8440,62 +8440,112 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
 
   function rvConnectBanco() {
     rvSetStatus('firebase', 'Conectando via Banco...');
-    rvSb('Iniciando relay via Banco...');
+    rvSb('Aguardando agente...');
+    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase RTDB...', '#F59E0B');
 
-    // Notifica o agente para usar o relay Banco
+    // 1. Envia comando via Firestore (agente processa em até 5s no poll)
     arEnviarComando(agentId, 'usar_firebase_relay', { sessaoId }, 'Relay Banco iniciado pelo técnico')
-      .then(() => {
-        rvSetStatus('firebase', 'Via internet 📡');
-        rvSb('Relay Banco ativo — latência ~300-600ms');
+      .catch(() => {}); // não bloqueia — continua aguardando
 
-        // Escuta respostas do agente no Banco
-        rvEscutarRespostasBanco();
+    // 2. Aguarda handshake do agente no RTDB (sinal de que está pronto para receber cmds)
+    //    Tenta a cada 1s por até 15s antes de desistir
+    let tentativas = 0;
+    const MAX_TENTATIVAS = 15;
 
-        // Avisa que screenshot será mais lenta
-        rvShellLog('[SYSACK] Conectado via internet (Banco Relay)', '#F59E0B');
-        rvShellLog('[SYSACK] Captura de tela disponível, mas mais lenta que via rede interna.', '#64748B');
-        rvShellLog('[SYSACK] Use "↺ Tentar rede local" se estiver na mesma rede do PC alvo.', '#64748B');
-      })
-      .catch(err => {
-        rvSetStatus('offline', 'Falha na conexão');
-        rvSb('Erro: ' + err.message);
-      });
+    const aguardarHandshake = setInterval(async () => {
+      tentativas++;
+      rvSb(`Aguardando agente... (${tentativas}/${MAX_TENTATIVAS}s)`);
+
+      try {
+        const hs = await rtdbRead(`relay/${sessaoId}/handshake`);
+        if (hs && hs.status === 'ready') {
+          clearInterval(aguardarHandshake);
+          _modoConexao = 'firebase';
+          rvSetStatus('firebase', 'Via internet 📡');
+          rvSb('Relay Banco ativo — latência ~300-600ms');
+          rvShellLog('[SYSACK] Conectado via internet (Banco Relay)', '#F59E0B');
+          rvShellLog('[SYSACK] Captura de tela disponível, mas mais lenta que via rede interna.', '#64748B');
+          rvShellLog('[SYSACK] Use "↺ Tentar rede local" se estiver na mesma rede do PC alvo.', '#64748B');
+          // Agente pronto — agora sim abre o listener de respostas
+          rvEscutarRespostasBanco();
+          // Solicita screenshot inicial
+          setTimeout(() => rvEnviarViaBanco({ tipo: 'screenshot' }), 500);
+          return;
+        }
+      } catch {}
+
+      if (tentativas >= MAX_TENTATIVAS) {
+        clearInterval(aguardarHandshake);
+        rvSetStatus('offline', 'Agente não respondeu');
+        rvSb('❌ Agente não iniciou relay em 15s. Verifique se o serviço SYSACK está rodando.');
+        rvShellLog('[SYSACK] Timeout: agente não respondeu ao relay em 15s.', '#EF4444');
+        rvShellLog('[SYSACK] Verifique o serviço Windows: sc query SysackAgent', '#64748B');
+      }
+    }, 1000);
   }
 
   function rvEscutarRespostasBanco() {
-    // Agente escreve respostas em RTDB: /relay/{sessaoId}/resp
-    // Usamos polling REST com timestamp para detectar novos dados
     let ultimoTs = 0;
+    let _sseAbortCtrl = null;
 
+    // Polling REST a cada 800ms — confiável, sem problemas de CORS/EventSource
     const poll = setInterval(async () => {
-      if (_modoConexao !== 'firebase') { clearInterval(poll); return; }
-      const data = await rtdbRead(`relay/${sessaoId}/resp`);
-      if (data && data.ts && data.ts > ultimoTs) {
-        ultimoTs = data.ts;
-        rvProcessarMensagem(data.payload || data);
-      }
-    }, 800); // poll a cada 800ms — boa latência para relay
+      if (_modoConexao !== 'firebase') { clearInterval(poll); _sseAbortCtrl?.abort(); return; }
+      try {
+        const data = await rtdbRead(`relay/${sessaoId}/resp`);
+        if (data && data.ts && data.ts > ultimoTs) {
+          ultimoTs = data.ts;
+          rvProcessarMensagem(data.payload || data);
+        }
+      } catch {}
+    }, 800);
 
-    _fbRelay = () => clearInterval(poll);
-
-    // Também tenta SSE nativo se o browser suportar (latência zero)
-    try {
-      const sseUrl = `https://${_RTDB_HOST}/relay/${sessaoId}/resp.json?auth=${_RTDB_KEY}&Accept=text/event-stream`;
-      const sse = new EventSource(sseUrl);
-      sse.onmessage = e => {
-        try {
-          const ev = JSON.parse(e.data);
-          const val = ev?.data;
-          if (val && val.ts && val.ts > ultimoTs) {
-            ultimoTs = val.ts;
-            rvProcessarMensagem(val.payload || val);
+    // SSE via fetch streaming para latência zero quando suportado
+    (async () => {
+      try {
+        _sseAbortCtrl = new AbortController();
+        const res = await fetch(
+          `https://${_RTDB_HOST}/relay/${sessaoId}/resp.json?auth=${_RTDB_KEY}`,
+          { headers: { 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache' },
+            signal: _sseAbortCtrl.signal }
+        );
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '', event = '', data = '';
+        while (true) {
+          if (_modoConexao !== 'firebase') break;
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (line.startsWith('event: '))     { event = line.slice(7).trim(); }
+            else if (line.startsWith('data: ')) { data  = line.slice(6).trim(); }
+            else if (line === '' && event && data) {
+              if (event === 'put' || event === 'patch') {
+                try {
+                  const val = JSON.parse(data)?.data;
+                  if (val && val.ts && val.ts > ultimoTs && val.payload) {
+                    ultimoTs = val.ts;
+                    rvProcessarMensagem(val.payload);
+                  }
+                } catch {}
+              }
+              event = ''; data = '';
+            }
           }
-        } catch {}
-      };
-      const oldRelay = _fbRelay;
-      _fbRelay = () => { clearInterval(poll); sse.close(); };
-      sse.onerror = () => {}; // silencia — poll continua como backup
-    } catch {}
+        }
+      } catch {}
+    })();
+
+    _fbRelay = () => {
+      clearInterval(poll);
+      _sseAbortCtrl?.abort();
+      // Limpa nó da sessão no RTDB
+      rtdbWrite(`relay/${sessaoId}`, null).catch(() => {});
+    };
   }
 
   // ── RTDB helpers (app não tem SDK RTDB — usa REST igual ao agente) ──
@@ -9102,12 +9152,11 @@ function arAtualizarClientes() {
 }
 
 async function executarAtualizacaoCliente() {
-  const url    = (document.getElementById('upd-url')?.value||'').trim();
-  const versao = (document.getElementById('upd-versao')?.value||'').trim();
-  const alvos  = document.getElementById('upd-agentes')?.value||'online';
-  if (!url)    return showToast('Informe a URL do novo agent-desktop.js','warning');
-  if (!versao) return showToast('Informe o número da versão','warning');
-  try { new URL(url); } catch { return showToast('URL inválida','warning'); }
+  // URL sempre fixa — busca diretamente da Vercel, transparente para o técnico
+  const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js';
+  const versao = document.getElementById('btn-upd-exec')?.dataset?.versao || '';
+  const alvos  = document.getElementById('upd-agentes')?.value || 'online';
+  if (!versao) return showToast('Versão não definida — feche e abra o modal novamente.','warning');
   const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
   const todos  = STATE_AGENTS.list||[];
   const lista  = alvos==='todos' ? todos : online;
@@ -9116,22 +9165,27 @@ async function executarAtualizacaoCliente() {
   if(btn){btn.disabled=true;btn.textContent='Enviando...';}
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='';
   updLog(`Iniciando atualização para versão ${versao}...`);
+  updLog(`Fonte: ${AGENT_URL}`);
   updLog(`Alvos: ${lista.length} agente(s)`);
   showUpdStatus('info','Enviando comandos...');
   const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
   let ok=0,erro=0;
   try {
     await fsSet('agent_updates/'+versao.replace(/\./g,'_'),{
-      versao,url, publicadoPor:SESSION_USER?.nome||SESSION_USER?.email||'admin',
-      publicadoEm:new Date().toISOString(), alvos, totalAgentes:lista.length,
+      versao, url: AGENT_URL,
+      publicadoPor: (SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'admin',
+      publicadoEm:  new Date().toISOString(),
+      alvos, totalAgentes: lista.length,
     });
     updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
     for (const ag of lista) {
       try {
         await fsAdd('agent_commands',{
-          agentId:ag.id, tipo:'atualizar_agente',
-          dados:JSON.stringify({url,versao}), token:TOKEN,
-          status:'pendente', criadoEm:new Date().toISOString(), criadoPor:SESSION_USER?.uid||'',
+          agentId: ag.id, tipo: 'atualizar_agente',
+          dados:   JSON.stringify({ url: AGENT_URL, versao }),
+          token:   TOKEN, status: 'pendente',
+          criadoEm:   new Date().toISOString(),
+          criadoPor:  (SESSION_USER||CURRENT_USER)?.uid||'',
         });
         updLog(`→ ${ag.hostname||ag.id}`); ok++;
       } catch(e) { updLog(`✗ ${ag.hostname||ag.id}: ${e.message}`); erro++; }

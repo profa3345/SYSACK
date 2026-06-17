@@ -1416,39 +1416,46 @@ window.dispatchEvent(new Event('firebase-ready'));
 
     <!-- MODAL: ATUALIZAR CLIENTE (auto-update remoto) -->
     <div class="modal-overlay" id="modal-atualizar-cliente">
-      <div class="modal" style="max-width:580px">
+      <div class="modal" style="max-width:500px">
         <div class="modal-header" style="background:#1E3A5F;color:#fff;border-radius:10px 10px 0 0">
-          <div><h3 style="color:#fff;margin:0">🔄 Atualizar Cliente — Auto-Update</h3><p style="color:rgba(255,255,255,.6);font-size:12px;margin:4px 0 0">Envia novo agent-desktop.js para todos os agentes online sem reinstalar</p></div>
+          <div><h3 style="color:#fff;margin:0">🔄 Atualizar Agentes</h3><p style="color:rgba(255,255,255,.6);font-size:12px;margin:4px 0 0">Distribui a versão mais recente do agente SYSACK automaticamente</p></div>
           <button class="close-btn" onclick="closeModal('modal-atualizar-cliente')" style="color:rgba(255,255,255,.5)">✕</button>
         </div>
         <div class="modal-body">
-          <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#1E40AF;display:flex;align-items:center;gap:10px">
-            <span style="font-size:20px">🖥️</span>
-            <div><span style="font-weight:700" id="upd-qtd-online">0</span> agente(s) online serão atualizados.<br><span style="font-size:11.5px;color:#3B82F6">Cada máquina aplica a atualização no próximo ciclo (≤5s) e reinicia automaticamente.</span></div>
+          <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+            <span style="font-size:28px">🖥️</span>
+            <div>
+              <div style="font-weight:700;font-size:15px;color:#1E40AF"><span id="upd-qtd-online">0</span> agente(s) online serão atualizados</div>
+              <div style="font-size:11.5px;color:#3B82F6;margin-top:2px">Cada máquina aplica a nova versão no próximo ciclo (≤5s) e reinicia o serviço automaticamente.</div>
+            </div>
           </div>
           <div id="upd-status-bar" style="display:none"></div>
-          <div class="form-group">
-            <label class="form-label req">URL do novo <code>agent-desktop.js</code></label>
-            <input class="form-control" id="upd-url" type="url" placeholder="https://raw.githubusercontent.com/sua-org/sysack/main/agent-desktop.js" style="font-family:monospace;font-size:12px">
-            <div style="font-size:11.5px;color:var(--g400);margin-top:4px">GitHub raw, Firebase Storage ou qualquer URL HTTPS pública.</div>
-          </div>
-          <div class="form-group">
-            <label class="form-label req">Número da versão</label>
-            <input class="form-control" id="upd-versao" type="text" placeholder="ex: 2.1.1" style="width:160px">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Aplicar em</label>
-            <select class="form-control" id="upd-agentes" style="width:240px">
-              <option value="online">Somente agentes online agora</option>
-              <option value="todos">Todos (online + offline ao reconectar)</option>
-            </select>
+          <div style="background:#F8FAFC;border:1px solid var(--g200);border-radius:10px;padding:14px 16px;margin-bottom:14px">
+            <div style="font-size:12px;color:var(--g500);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">Configurações da atualização</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div>
+                <div style="font-size:12px;font-weight:600;color:var(--g700)">Versão</div>
+                <div style="font-size:11px;color:var(--g400);margin-top:2px">Incrementada automaticamente</div>
+              </div>
+              <span id="upd-versao-label" style="font-family:monospace;font-size:14px;font-weight:700;color:var(--accent);background:#EFF6FF;padding:4px 12px;border-radius:6px">—</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-size:12px;font-weight:600;color:var(--g700)">Aplicar em</div>
+              </div>
+              <select class="form-control" id="upd-agentes" style="width:220px;font-size:12px">
+                <option value="online">Somente agentes online agora</option>
+                <option value="todos">Todos (online + offline ao reconectar)</option>
+              </select>
+            </div>
           </div>
           <div id="upd-log" style="display:none;margin-top:12px">
             <div style="font-size:11.5px;font-weight:700;color:var(--g600);margin-bottom:4px">Log de envio</div>
-            <pre id="upd-log-body" style="background:#0F172A;color:#94A3B8;border-radius:8px;padding:12px;font-size:11px;max-height:140px;overflow-y:auto;margin:0;white-space:pre-wrap;font-family:monospace"></pre>
+            <pre id="upd-log-body" style="background:#0F172A;color:#94A3B8;border-radius:8px;padding:12px;font-size:11px;max-height:160px;overflow-y:auto;margin:0;white-space:pre-wrap;font-family:monospace"></pre>
           </div>
-          <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-top:14px;font-size:12px;color:#92400E">
-            ⚠️ O arquivo antigo é salvo como <code>agent-desktop.backup.js</code> em cada máquina. O Windows Service Manager reinicia o serviço automaticamente.
+          <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-top:12px;font-size:12px;color:#92400E;display:flex;gap:8px">
+            <span style="flex-shrink:0">⚠️</span>
+            <span>O arquivo atual é preservado como <code>agent-desktop.backup.js</code> antes de substituir. O serviço reinicia automaticamente.</span>
           </div>
         </div>
         <div class="modal-footer">
@@ -1456,6 +1463,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <button class="btn btn-primary" id="btn-upd-exec" onclick="executarAtualizacaoCliente()">🚀 Enviar Atualização</button>
         </div>
       </div>
+    </div>
     </div>
 
     <!-- MODAL: MIGRAR COMPUTADOR PARA TERCEIRIZADA -->

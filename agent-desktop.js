@@ -919,6 +919,15 @@ function iniciarRelayRtdb(sessaoId) {
   if (_sessoesAtivas.has(sessaoId)) return;
   _sessoesAtivas.add(sessaoId);
   log(`[RTDB] Iniciando relay para sessão ${sessaoId}`);
+  // Grava handshake — app aguarda esse nó antes de abrir SSE
+  rtdbEscrever(`relay/${sessaoId}/handshake`, {
+    agentId:   AGENT_ID,
+    hostname:  require('os').hostname(),
+    ts:        Date.now(),
+    status:    'ready',
+  }).then(() => {
+    log(`[RTDB] Handshake gravado — sessão ${sessaoId}`);
+  }).catch(e => log(`[RTDB] Erro handshake: ${e.message}`));
   rtdbListen(sessaoId, msg => processarComandoRtdb(sessaoId, msg));
 }
 
