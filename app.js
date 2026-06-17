@@ -1331,11 +1331,9 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // Volta sempre para o topo ao mudar de página
-  const mainContent = document.getElementById('main-content') || document.querySelector('.main-content') || document.querySelector('.content') || page?.parentElement;
-  if (mainContent) mainContent.scrollTop = 0;
-  if (page) page.scrollTop = 0;
-  window.scrollTo(0, 0);
+  // Volta sempre para o topo ao mudar de página — reseta o container real (.content)
+  const scrollContainer = document.querySelector('.content') || document.querySelector('.main-content') || document.getElementById('main-content');
+  if (scrollContainer) scrollContainer.scrollTop = 0;
 
   renderPage(id);
 }
@@ -9212,7 +9210,8 @@ async function executarAtualizacaoCliente() {
   const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
   let ok=0,erro=0;
   try {
-    await fsSet('agent_updates/'+versao.replace(/\./g,'_'),{
+    // Grava metadados da atualização em /agent_updates/{versao}
+    await fsSet('agent_updates', versao.replace(/\./g,'_'), {
       versao, url: AGENT_URL,
       publicadoPor: (SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'admin',
       publicadoEm:  new Date().toISOString(),
