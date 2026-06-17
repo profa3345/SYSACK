@@ -1330,6 +1330,13 @@ function goPage(id) {
   const bcsub = document.getElementById('bc-sub');
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
+
+  // Volta sempre para o topo ao mudar de página
+  const mainContent = document.getElementById('main-content') || document.querySelector('.main-content') || document.querySelector('.content') || page?.parentElement;
+  if (mainContent) mainContent.scrollTop = 0;
+  if (page) page.scrollTop = 0;
+  window.scrollTo(0, 0);
+
   renderPage(id);
 }
 
@@ -3309,9 +3316,10 @@ async function _fazerLoginInterno() {
     try {
       const cred   = await Promise.race([
         auth.signInWithEmailAndPassword(emailNorm, senha),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('auth/timeout')), 3000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('auth/timeout')), 8000)),
       ]);
       const fbUser = cred.user;
+      console.log('[Auth] ✓ Firebase Auth OK — uid:', fbUser.uid, '| email:', fbUser.email);
 
       // 1. Tenta custom claims (token JWT — mais seguro, não pode ser alterado pelo cliente)
       let claimsRole = null;
@@ -3327,10 +3335,10 @@ async function _fazerLoginInterno() {
         const snap = await fsGet('users', fbUser.uid);
         if (snap) {
           Object.assign(profile, snap);
-          // Custom claim tem prioridade sobre Banco (mais seguro)
           if (claimsRole) profile.role = claimsRole;
+          console.log('[Auth] ✓ Role via Firestore /users/'+fbUser.uid+':', profile.role, 'para', fbUser.email);
         } else {
-          // Tenta buscar por email (usuários criados antes de ter uid)
+          // Tenta buscar por email
           try {
             const emailSnap = await db.collection('users')
               .where('email', '==', fbUser.email).limit(1).get();
@@ -3338,7 +3346,9 @@ async function _fazerLoginInterno() {
               const ud = { id: emailSnap.docs[0].id, ...emailSnap.docs[0].data() };
               Object.assign(profile, ud);
               if (claimsRole) profile.role = claimsRole;
-              console.log('[Auth] Role via /users email lookup:', profile.role);
+              console.log('[Auth] ✓ Role via /users email lookup:', profile.role, 'para', fbUser.email);
+            } else {
+              console.warn('[Auth] Doc /users/'+fbUser.uid+' não encontrado — tentando LOCAL_USERS.');
             }
           } catch(_) {}
         }
@@ -3384,6 +3394,7 @@ async function _fazerLoginInterno() {
       // 3. Garante que viewer não acessa admin mesmo se Banco for adulterado
       const VALID_ROLES = ['admin','gestor','tecnico','mdm_admin','viewer'];
       if (!VALID_ROLES.includes(profile.role)) profile.role = 'viewer';
+      console.log('[Auth] Role final:', profile.role, '| fonte: Firebase Auth ✓ + Firestore');
       const user = {
         uid:            fbUser.uid,
         email:          fbUser.email,
@@ -9142,10 +9153,27 @@ function arAtualizarClientes() {
   const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
   if (!online.length) return showToast('Nenhum agente online para atualizar.','warning');
   openModal('modal-atualizar-cliente');
-  const versaoAtual = online.map(a=>a.versaoAgente||a.version||'2.1.0').sort().reverse()[0]||'2.1.0';
-  const pts = versaoAtual.split('.').map(Number); pts[2]=(pts[2]||0)+1;
-  const ev = document.getElementById('upd-versao'); if(ev && !ev.value) ev.value=pts.join('.');
-  const eo = document.getElementById('upd-qtd-online'); if(eo) eo.textContent=online.length;
+
+  // Calcula versão: pega a mais alta dos agentes e incrementa patch
+  const versaoAtual = online.map(a=>a.versaoAgente||a.version||'2.1.0')
+    .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
+  const pts = versaoAtual.split('.').map(Number);
+  pts[2] = (pts[2] || 0) + 1;
+  const novaVersao = pts.join('.');
+
+  // Grava a versão no botão para o executarAtualizacaoCliente ler
+  const btn = document.getElementById('btn-upd-exec');
+  if (btn) btn.dataset.versao = novaVersao;
+
+  // Atualiza o label de versão no modal
+  const vl = document.getElementById('upd-versao-label');
+  if (vl) vl.textContent = 'v' + novaVersao;
+
+  // Atualiza contador de agentes online
+  const eo = document.getElementById('upd-qtd-online');
+  if (eo) eo.textContent = online.length;
+
+  // Limpa estado anterior
   const lb = document.getElementById('upd-log-body'); if(lb) lb.innerHTML='';
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='none';
   const sb = document.getElementById('upd-status-bar'); if(sb) sb.style.display='none';
@@ -9154,14 +9182,27 @@ function arAtualizarClientes() {
 async function executarAtualizacaoCliente() {
   // URL sempre fixa — busca diretamente da Vercel, transparente para o técnico
   const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js';
-  const versao = document.getElementById('btn-upd-exec')?.dataset?.versao || '';
-  const alvos  = document.getElementById('upd-agentes')?.value || 'online';
-  if (!versao) return showToast('Versão não definida — feche e abra o modal novamente.','warning');
-  const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-  const todos  = STATE_AGENTS.list||[];
-  const lista  = alvos==='todos' ? todos : online;
-  if (!lista.length) return showToast('Nenhum agente disponível','warning');
   const btn = document.getElementById('btn-upd-exec');
+
+  // Tenta ler do dataset (setado por arAtualizarClientes) — fallback: recalcula
+  let versao = btn?.dataset?.versao || '';
+  if (!versao) {
+    const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
+    if (online.length) {
+      const va = online.map(a=>a.versaoAgente||a.version||'2.1.0')
+        .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
+      const pts = va.split('.').map(Number); pts[2]=(pts[2]||0)+1;
+      versao = pts.join('.');
+    }
+  }
+  if (!versao) return showToast('Versão não definida — tente fechar e abrir o modal novamente.','warning');
+
+  const alvos  = document.getElementById('upd-agentes')?.value || 'online';
+  const online2 = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
+  const todos   = STATE_AGENTS.list||[];
+  const lista   = alvos==='todos' ? todos : online2;
+  if (!lista.length) return showToast('Nenhum agente disponível','warning');
+
   if(btn){btn.disabled=true;btn.textContent='Enviando...';}
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='';
   updLog(`Iniciando atualização para versão ${versao}...`);
