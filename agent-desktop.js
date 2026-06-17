@@ -729,7 +729,7 @@ async function firestorePatch(docPath, data) {
 // Latência: ~100–200ms vs 2–6s do Firestore polling anterior.
 // ════════════════════════════════════════════════════════════════
 
-const RTDB_HOST = 'sysack-829e2-default-rtdb.firebaseio.com';
+const RTDB_HOST = (cfg.rtdbHost || (cfg.databaseURL || '').replace(/^https?:\/\//,'').replace(/\/$/,'') || 'sysack-829e2-default-rtdb.firebaseio.com');
 
 let _rtdbListeners = new Map(); // sessaoId → req
 let _sessoesAtivas = new Set(); // sessoes com listener ativo
@@ -911,7 +911,16 @@ async function processarComandoRtdb(sessaoId, msg) {
       agentId: AGENT_ID,
     });
   } catch(e) {
-    log('[RTDB] Erro ao gravar resposta: ' + e.message);
+    log('[RTDB] Erro ao gravar resposta: ' + e.message + ' — usando Firestore relay');
+    try {
+      await firestorePatch('sessoes_remotas/' + sessaoId, {
+        relay_resp: JSON.stringify(resposta),
+        relay_resp_ts: Date.now(),
+        relay_modo: 'firestore'
+      });
+    } catch(e2) {
+      log('[Firestore Relay] Erro ao gravar resposta: ' + e2.message);
+    }
   }
 }
 
@@ -927,7 +936,15 @@ function iniciarRelayRtdb(sessaoId) {
     ts:       Date.now(),
     status:   'ready',
   }).then(() => log(`[RTDB] Handshake gravado — sessão ${sessaoId}`))
-    .catch(e  => log(`[RTDB] Handshake falhou: ${e.message} — usando Firestore relay`));
+    .catch(e  => {
+      log(`[RTDB] Handshake falhou: ${e.message} — usando Firestore relay`);
+      firestorePatch('sessoes_remotas/' + sessaoId, {
+        relay_status: 'ready',
+        relay_handshake_ts: Date.now(),
+        relay_modo: 'firestore',
+        agentId: AGENT_ID
+      }).catch(e2 => log('[Firestore Relay] Handshake falhou: ' + e2.message));
+    });
 
   // Escuta comandos via RTDB (baixa latência quando disponível)
   rtdbListen(sessaoId, msg => processarComandoRtdb(sessaoId, msg));

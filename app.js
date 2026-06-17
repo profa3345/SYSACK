@@ -8503,6 +8503,20 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         }
       } catch {}
 
+      // Fallback: handshake pelo Firestore quando o RTDB não existe ou retorna 404
+      try {
+        if (FB_READY && db) {
+          const sess = await db.collection('sessoes_remotas').doc(sessaoId).get();
+          const sd = sess.exists ? (sess.data() || {}) : {};
+          if (sd.relay_status === 'ready') {
+            clearInterval(aguardarHandshake);
+            rvShellLog('[SYSACK] Agente confirmou via Firestore — relay ativo.', '#F59E0B');
+            _conectadoBanco();
+            return;
+          }
+        }
+      } catch {}
+
       // Fallback: verifica se o agente confirmou via Firestore (agent_commands status=concluido)
       try {
         if (FB_READY && db && tentativas % 3 === 0) { // verifica a cada 3s
@@ -8561,12 +8575,30 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       } catch {}
     }, 800);
 
+    // Fallback Firestore: usado quando o Realtime Database não existe/retorna 404
+    const pollFs = setInterval(async () => {
+      if (_modoConexao !== 'firebase') { clearInterval(pollFs); return; }
+      try {
+        if (!FB_READY || !db) return;
+        const docSnap = await db.collection('sessoes_remotas').doc(sessaoId).get();
+        if (!docSnap.exists) return;
+        const d = docSnap.data() || {};
+        const ts = Number(d.relay_resp_ts || 0);
+        const payload = d.relay_resp ? JSON.parse(d.relay_resp) : null;
+        if (payload && ts && ts > ultimoTs) {
+          ultimoTs = ts;
+          rvProcessarMensagem(payload);
+        }
+      } catch {}
+    }, 800);
+
     // SSE via fetch streaming para latência zero quando suportado
     (async () => {
       try {
         _sseAbortCtrl = new AbortController();
+        const token = await _rtdbToken();
         const res = await fetch(
-          `https://${_RTDB_HOST}/relay/${sessaoId}/resp.json?auth=${_RTDB_KEY}`,
+          `https://${_RTDB_HOST}/relay/${sessaoId}/resp.json?auth=${token}`,
           { headers: { 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache' },
             signal: _sseAbortCtrl.signal }
         );
@@ -8603,6 +8635,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
 
     _fbRelay = () => {
       clearInterval(poll);
+      try { clearInterval(pollFs); } catch {}
       _sseAbortCtrl?.abort();
       // Limpa nó da sessão no RTDB
       rtdbWrite(`relay/${sessaoId}`, null).catch(() => {});
@@ -8610,7 +8643,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   // ── RTDB helpers — usa Firebase Auth ID Token para autenticação ──
-  const _RTDB_HOST = 'sysack-829e2-default-rtdb.firebaseio.com';
+  const _RTDB_HOST = (window.SYSACK_RTDB_HOST || (FIREBASE_CONFIG.databaseURL || '').replace(/^https?:\/\//,'').replace(/\/$/,'') || 'sysack-829e2-default-rtdb.firebaseio.com');
 
   async function _rtdbToken() {
     try {
@@ -8632,7 +8665,11 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-    } catch(e) { console.warn('[RTDB write]', e.message); }
+      return true;
+    } catch(e) {
+      console.warn('[RTDB write]', e.message);
+      throw e;
+    }
   }
 
   async function rtdbRead(path) {
@@ -8655,6 +8692,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         return db?.collection('sessoes_remotas').doc(sessaoId).set({
           relay_cmd: JSON.stringify(msg),
           relay_ts: Date.now(),
+          relay_modo: 'firestore',
         }, { merge: true }).catch(() => {});
       });
   }
