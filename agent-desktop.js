@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.3
+ * SYSACK Agent Desktop v2.1.6
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -25,7 +25,7 @@ const PROJECT_ID = cfg.firebaseProjectId || 'sysack-829e2';
 const API_KEY    = cfg.firebaseApiKey    || 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
 const AGENT_ID   = cfg.agentId          || os.hostname();
 const INTERVAL   = (cfg.intervalSeconds || 60) * 1000;
-const TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
+let TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || ''; // v2.1.6: let, pois pode ser carregado do Firestore
 const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000;
 let _softwareCache = { at: 0, list: [] };
 
@@ -579,7 +579,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.3] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1.6] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -1096,15 +1096,32 @@ async function executarComando(doc) {
   const sessaoId = dados.sessaoId || '';
 
   if (tipo === 'iniciar_acesso_remoto' || tipo === 'usar_firebase_relay') {
-    // A partir daqui todos os comandos vão pelo RTDB (push em tempo real)
+    // v2.1.6: o Cloudflare Tunnel agora é SOB DEMANDA.
+    // Antes o agente abria quick tunnel no boot/heartbeat e criava várias URLs trycloudflare,
+    // causando 429/rate limit. Agora só tenta abrir quando o técnico inicia acesso remoto.
+    let tunnelResultado = 'tunnel-nao-solicitado';
+    if (tipo === 'iniciar_acesso_remoto') {
+      try {
+        const r = await iniciarTunnel({ motivo: 'comando_acesso_remoto', sessaoId });
+        tunnelResultado = r?.status || String(r || 'tunnel-solicitado');
+      } catch (e) {
+        tunnelResultado = 'tunnel-erro: ' + e.message;
+      }
+    }
+
+    // A partir daqui todos os comandos também podem ir pelo RTDB/Firestore relay (fallback em tempo real)
     if (sessaoId) iniciarRelayRtdb(sessaoId);
-    await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: RTDB_HOST ? 'rtdb-relay-ativo' : 'firestore-relay-ativo' }).catch(() => {});
+    await firestorePatch('agent_commands/' + id, {
+      status: 'concluido',
+      resultado: (RTDB_HOST ? 'rtdb-relay-ativo' : 'firestore-relay-ativo') + ' | ' + tunnelResultado
+    }).catch(() => {});
     return;
   }
 
   if (tipo === 'encerrar_acesso_remoto') {
     if (sessaoId) encerrarRelayRtdb(sessaoId);
-    await firestorePatch('agent_commands/' + id, { status: 'concluido' }).catch(() => {});
+    await pararTunnel('sessao_encerrada');
+    await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: 'sessao-remota-encerrada' }).catch(() => {});
     return;
   }
 
@@ -1279,26 +1296,70 @@ async function atualizarAtivoComHostname(dados) {
 
 
 // ── Cloudflare Tunnel — acesso remoto seguro ─────────────────────
+// SYSACK v2.1.6 — correção central:
+// - Não abre tunnel no boot/heartbeat.
+// - Abre somente sob demanda, quando chega comando iniciar_acesso_remoto.
+// - Impede múltiplos processos cloudflared simultâneos.
+// - Aplica backoff em falhas para evitar 429/rate limit no Quick Tunnel.
+// - Encerra o tunnel quando a sessão remota é encerrada.
 const { spawn } = require('child_process');
 const CLOUDFLARED_PATH = path.join(__dirname, 'cloudflared.exe');
 const CLOUDFLARED_URL  = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe';
 
-// ─── Credenciais do proxy CESAN ───────────────────────────────
-// Buscadas do Firestore em sysack_config/proxy (documento global, um só lugar).
-// Fallback: config.json local ou variável de ambiente.
-// Para configurar centralmente, salve no Firestore:
-//   coleção: sysack_config  documento: proxy
-//   campos: user (string), pass (string)
 let PROXY_USER = cfg.proxyUser || process.env.PROXY_USER || '';
 let PROXY_PASS = cfg.proxyPass || process.env.PROXY_PASS || '';
-let PROXY_URL  = 'http://proxy.sistemas.cesan.com.br:8080';
+let PROXY_URL  = cfg.proxyUrl  || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || 'http://proxy.sistemas.cesan.com.br:8080';
 
-// Token do tunnel Cloudflare — buscado do Firestore (sysack_config/tunnel)
-// Para configurar: Firebase Console → Firestore → sysack_config → tunnel → campo "token"
-// TUNNEL_TOKEN já declarado no topo do arquivo
+let _tunnelProc = null;
+let _tunnelStarting = false;
+let _tunnelUrl = '';
+let _tunnelModo = '';
+let _tunnelLastAttempt = 0;
+let _tunnelFailCount = 0;
+let _tunnelStopRequested = false;
+let _tunnelConfigLoadedAt = 0;
 
-async function carregarConfigTunnel() {
-  // Busca token do Firestore — um lugar só, distribui para todos os agentes
+const TUNNEL_MIN_RETRY_MS = Number(cfg.tunnelMinRetryMs || 10 * 60 * 1000); // 10 min
+const TUNNEL_MAX_RETRY_MS = Number(cfg.tunnelMaxRetryMs || 60 * 60 * 1000); // 1 h
+const TUNNEL_CONFIG_TTL_MS = 5 * 60 * 1000;
+
+function tunnelBackoffMs() {
+  return Math.min(TUNNEL_MAX_RETRY_MS, TUNNEL_MIN_RETRY_MS * Math.pow(2, Math.max(0, _tunnelFailCount)));
+}
+
+function tunnelStatusExtra() {
+  return {
+    tunnelUpdatedAt: new Date().toISOString(),
+    tunnelFailCount: _tunnelFailCount,
+    tunnelModo: _tunnelModo || '',
+  };
+}
+
+function tunnelPodeIniciar() {
+  if (_tunnelProc && !_tunnelProc.killed) {
+    log('[Tunnel] Já existe tunnel ativo/em execução. Ignorando nova abertura.');
+    return { ok: false, status: 'tunnel-ja-ativo' };
+  }
+  if (_tunnelStarting) {
+    log('[Tunnel] Inicialização já em andamento. Ignorando nova tentativa.');
+    return { ok: false, status: 'tunnel-iniciando' };
+  }
+  const now = Date.now();
+  if (_tunnelLastAttempt) {
+    const backoff = tunnelBackoffMs();
+    const elapsed = now - _tunnelLastAttempt;
+    if (elapsed < backoff) {
+      const waitSec = Math.ceil((backoff - elapsed) / 1000);
+      log('[Tunnel] Backoff ativo após falha. Próxima tentativa em ~' + waitSec + 's.');
+      return { ok: false, status: 'tunnel-backoff-' + waitSec + 's' };
+    }
+  }
+  return { ok: true, status: 'ok' };
+}
+
+async function carregarConfigTunnel(force = false) {
+  if (!force && Date.now() - _tunnelConfigLoadedAt < TUNNEL_CONFIG_TTL_MS) return;
+  _tunnelConfigLoadedAt = Date.now();
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/sysack_config/tunnel?key=${API_KEY}`;
   return new Promise(resolve => {
     const req = https.request(url, { method: 'GET', rejectUnauthorized: false }, res => {
@@ -1308,13 +1369,13 @@ async function carregarConfigTunnel() {
         try {
           const doc = JSON.parse(raw);
           const t = doc.fields?.token?.stringValue || '';
-          if (t) {
+          if (t && t !== TUNNEL_TOKEN) {
             TUNNEL_TOKEN = t;
             log('[Tunnel] Token carregado do Firestore (sysack_config/tunnel)');
           } else if (!TUNNEL_TOKEN) {
-            log('[Tunnel] Sem token — usando quick tunnel (sujeito a rate limit)');
+            log('[Tunnel] Sem token — quick tunnel disponível apenas sob demanda e com backoff.');
           }
-        } catch { /* usa fallback do config.json */ }
+        } catch {}
         resolve();
       });
     });
@@ -1323,8 +1384,7 @@ async function carregarConfigTunnel() {
   });
 }
 
-async function carregarCredenciaisProxy() {
-  // Tenta buscar do Firestore (sem autenticação — documento público de config)
+async function carregarCredenciaisProxy(force = false) {
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/sysack_config/proxy?key=${API_KEY}`;
   return new Promise(resolve => {
     const req = https.request(url, { method: 'GET', rejectUnauthorized: false }, res => {
@@ -1335,20 +1395,17 @@ async function carregarCredenciaisProxy() {
           const doc = JSON.parse(raw);
           const u = doc.fields?.user?.stringValue || '';
           const p = doc.fields?.pass?.stringValue || '';
-          if (u && p) {
-            PROXY_USER = u;
-            PROXY_PASS = p;
-            log('[Proxy] Credenciais carregadas do Firestore');
-          }
-        } catch { /* usa fallback */ }
-        // Monta URL com ou sem credenciais
-        PROXY_URL = PROXY_USER
-          ? `http://${encodeURIComponent(PROXY_USER)}:${encodeURIComponent(PROXY_PASS)}@proxy.sistemas.cesan.com.br:8080`
-          : 'http://proxy.sistemas.cesan.com.br:8080';
+          const proxy = doc.fields?.url?.stringValue || doc.fields?.proxyUrl?.stringValue || '';
+          if (u && p) { PROXY_USER = u; PROXY_PASS = p; log('[Proxy] Credenciais carregadas do Firestore'); }
+          if (proxy) PROXY_URL = proxy;
+        } catch {}
+        if (PROXY_USER && !PROXY_URL.includes('@')) {
+          PROXY_URL = `http://${encodeURIComponent(PROXY_USER)}:${encodeURIComponent(PROXY_PASS)}@proxy.sistemas.cesan.com.br:8080`;
+        }
         resolve();
       });
     });
-    req.on('error', () => resolve()); // sem rede — usa fallback
+    req.on('error', () => resolve());
     req.end();
   });
 }
@@ -1360,122 +1417,166 @@ async function baixarCloudflared() {
     const file = fs.createWriteStream(CLOUDFLARED_PATH);
     const PROXY_HOST = 'proxy.sistemas.cesan.com.br';
     const PROXY_PORT = 8080;
+    let resolved = false;
+    const finish = ok => { if (!resolved) { resolved = true; try { file.close(); } catch {} resolve(ok); } };
     const download = (url, redirects = 0) => {
-      if (redirects > 5) { resolve(false); return; }
+      if (redirects > 5) return finish(false);
       const urlObj = new URL(url);
-      // Download via proxy CESAN
       const req = require('http').request({
-        host: PROXY_HOST, port: PROXY_PORT, method: 'GET',
-        path: url, rejectUnauthorized: false,
+        host: PROXY_HOST, port: PROXY_PORT, method: 'GET', path: url, rejectUnauthorized: false,
         headers: {
           Host: urlObj.hostname,
           ...(PROXY_USER ? { 'Proxy-Authorization': 'Basic ' + Buffer.from(PROXY_USER + ':' + PROXY_PASS).toString('base64') } : {}),
         }
       }, res => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          download(res.headers.location, redirects + 1); return;
+        if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location) {
+          return download(res.headers.location, redirects + 1);
         }
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          download(res.headers.location, redirects + 1);
-          return;
-        }
+        if (res.statusCode !== 200) return finish(false);
         res.pipe(file);
-        file.on('finish', () => { file.close(); resolve(true); });
-        file.on('error', () => resolve(false));
-      }).on('error', () => resolve(false));
+        file.on('finish', () => finish(true));
+        file.on('error', () => finish(false));
+      });
+      req.on('error', () => finish(false));
+      req.setTimeout(60000, () => { try { req.destroy(); } catch {}; finish(false); });
+      req.end();
     };
     download(CLOUDFLARED_URL);
   });
 }
 
-async function iniciarTunnel() {
+async function pararTunnel(motivo = 'manual') {
+  _tunnelStopRequested = true;
+  if (_tunnelProc && !_tunnelProc.killed) {
+    log('[Tunnel] Encerrando tunnel — motivo: ' + motivo);
+    try { _tunnelProc.kill(); } catch(e) { log('[Tunnel] Falha ao encerrar processo: ' + e.message); }
+  }
+  _tunnelProc = null;
+  _tunnelStarting = false;
+  _tunnelUrl = '';
+  _tunnelModo = '';
+  await firestorePatch('agents/' + AGENT_ID, {
+    tunnelUrl: '', tunnelAtivo: false, tunnelStatus: 'offline', tunnelStopReason: motivo,
+    ...tunnelStatusExtra()
+  }).catch(() => {});
+  return { status: 'tunnel-encerrado' };
+}
+
+async function iniciarTunnel(opts = {}) {
+  const chk = tunnelPodeIniciar();
+  if (!chk.ok) return chk;
+
+  _tunnelStarting = true;
+  _tunnelStopRequested = false;
+  _tunnelLastAttempt = Date.now();
+
   try {
-    // Carrega token do tunnel e credenciais do proxy do Firestore
-    await carregarConfigTunnel();
-    await carregarCredenciaisProxy();
+    await carregarConfigTunnel(true);
+    await carregarCredenciaisProxy(true);
     const ok = await baixarCloudflared();
-    if (!ok) { log('[Tunnel] Falha ao baixar cloudflared'); return; }
-
-    log('[Tunnel] Iniciando tunnel Cloudflare...');
-
-    // ── Modo 1: Tunnel NOMEADO com token (sem rate limit, recomendado) ──
-    // Token configurado em: Firebase Console → sysack_config → tunnel → campo "token"
-    if (TUNNEL_TOKEN) {
-      log('[Tunnel] Usando tunnel NOMEADO (sysack_config/tunnel) — sem rate limit');
-      const proc = spawn(CLOUDFLARED_PATH, [
-        'tunnel', '--no-autoupdate', 'run', '--token', TUNNEL_TOKEN,
-      ], { windowsHide: true, detached: false, env: { ...process.env } });
-
-      proc.stderr.on('data', data => {
-        const txt = data.toString();
-        if (txt.includes('Registered tunnel') || txt.includes('Connection') && txt.includes('established')) {
-          log('[Tunnel] Tunnel nomeado conectado!');
-          // Grava status ativo — URL fixa configurada no dashboard Cloudflare
-          firestorePatch('agents/' + AGENT_ID, { tunnelAtivo: true, tunnelModo: 'named' }).catch(() => {});
-        }
-      });
-      proc.stdout.on('data', data => {
-        const txt = data.toString();
-        if (txt.includes('Registered') || txt.includes('established')) {
-          log('[Tunnel] ' + txt.trim());
-        }
-      });
-      proc.on('close', async code => {
-        log('[Tunnel] Tunnel nomeado encerrado — código: ' + code);
-        try { await firestorePatch('agents/' + AGENT_ID, { tunnelAtivo: false }); } catch(e) {}
-        setTimeout(iniciarTunnel, code === 0 ? 5000 : 30000);
-      });
-      proc.on('error', e => log('[Tunnel] Erro: ' + e.message));
-      return;
+    if (!ok) {
+      _tunnelFailCount++;
+      _tunnelStarting = false;
+      log('[Tunnel] Falha ao baixar cloudflared');
+      await firestorePatch('agents/' + AGENT_ID, { tunnelAtivo: false, tunnelStatus: 'erro-download', ...tunnelStatusExtra() }).catch(() => {});
+      return { status: 'tunnel-erro-download' };
     }
 
-    // ── Modo 2: Quick tunnel gratuito (trycloudflare.com — sujeito a rate limit) ──
-    log('[Tunnel] Sem token configurado — usando quick tunnel (sujeito a rate limit)');
-    const proc = spawn(CLOUDFLARED_PATH, [
-      'tunnel', '--url', 'ws://localhost:9000',
-      '--no-autoupdate',
-      '--logfile', path.join(__dirname, 'cloudflared.log'),
-    ], {
-      windowsHide: true,
-      detached: false,
-      env: {
-        ...process.env,
-        HTTPS_PROXY: PROXY_URL,
-        HTTP_PROXY:  PROXY_URL,
-        NO_PROXY:    'localhost,127.0.0.1,172.23.*,10.*,192.168.*',
-      }
-    });
+    log('[Tunnel] Iniciando tunnel Cloudflare sob demanda' + (opts.sessaoId ? ' — sessão ' + opts.sessaoId : '') + '...');
 
-    let tunnelUrl = null;
+    let args, env, modo;
+    if (TUNNEL_TOKEN) {
+      modo = 'named';
+      args = ['tunnel', '--no-autoupdate', 'run', '--token', TUNNEL_TOKEN];
+      env = { ...process.env, HTTPS_PROXY: PROXY_URL, HTTP_PROXY: PROXY_URL, NO_PROXY: 'localhost,127.0.0.1,172.23.*,10.*,192.168.*' };
+      log('[Tunnel] Usando tunnel NOMEADO — sem quick tunnel/rate limit.');
+    } else {
+      modo = 'quick';
+      args = ['tunnel', '--url', 'ws://localhost:9000', '--no-autoupdate', '--logfile', path.join(__dirname, 'cloudflared.log')];
+      env = { ...process.env, HTTPS_PROXY: PROXY_URL, HTTP_PROXY: PROXY_URL, NO_PROXY: 'localhost,127.0.0.1,172.23.*,10.*,192.168.*' };
+      log('[Tunnel] Sem token configurado — usando QUICK TUNNEL sob demanda (sujeito a rate limit).');
+    }
 
-    proc.stderr.on('data', async data => {
+    _tunnelModo = modo;
+    _tunnelProc = spawn(CLOUDFLARED_PATH, args, { windowsHide: true, detached: false, env });
+    _tunnelStarting = false;
+
+    const handleOutput = async data => {
       const txt = data.toString();
-      const match = txt.match(/https:\/\/[a-z0-9\-]+\.trycloudflare\.com/);
-      if (match && !tunnelUrl) {
-        tunnelUrl = match[0].replace('https://', 'wss://');
-        log('[Tunnel] URL gerada: ' + tunnelUrl);
-        await firestorePatch('agents/' + AGENT_ID, { tunnelUrl, tunnelAtivo: true });
+      if (!txt.trim()) return;
+      const match = txt.match(/https:\/\/[a-z0-9\-]+\.trycloudflare\.com/i);
+      if (match && !_tunnelUrl) {
+        _tunnelUrl = match[0].replace('https://', 'wss://');
+        _tunnelFailCount = 0;
+        log('[Tunnel] URL gerada: ' + _tunnelUrl);
+        await firestorePatch('agents/' + AGENT_ID, {
+          tunnelUrl: _tunnelUrl, tunnelAtivo: true, tunnelStatus: 'ativo', ...tunnelStatusExtra()
+        }).catch(() => {});
         log('[Tunnel] URL gravada no Firestore');
       }
+      if (modo === 'named' && (/registered tunnel|connection.*established|established.*connection/i.test(txt))) {
+        _tunnelFailCount = 0;
+        log('[Tunnel] Tunnel nomeado conectado.');
+        await firestorePatch('agents/' + AGENT_ID, {
+          tunnelAtivo: true, tunnelStatus: 'ativo', tunnelModo: 'named', tunnelUrl: '', tunnelUpdatedAt: new Date().toISOString(), tunnelFailCount: 0
+        }).catch(() => {});
+      }
+      if (/429|rate limit|too many requests/i.test(txt)) {
+        _tunnelFailCount++;
+        log('[Tunnel] Rate limit detectado no Cloudflare. Backoff aumentado.');
+      }
+    };
+
+    _tunnelProc.stdout.on('data', handleOutput);
+    _tunnelProc.stderr.on('data', handleOutput);
+
+    _tunnelProc.on('close', async code => {
+      log('[Tunnel] Processo encerrado — código: ' + code + (code === 1 ? ' (provável bloqueio de rede/proxy)' : ''));
+      _tunnelProc = null;
+      _tunnelStarting = false;
+      const foiParadaManual = _tunnelStopRequested;
+      _tunnelUrl = '';
+      if (!foiParadaManual && code !== 0) _tunnelFailCount++;
+      await firestorePatch('agents/' + AGENT_ID, {
+        tunnelUrl: '', tunnelAtivo: false,
+        tunnelStatus: foiParadaManual ? 'offline' : 'erro',
+        tunnelLastExitCode: code,
+        ...tunnelStatusExtra()
+      }).catch(() => {});
+      // Importante: NÃO reinicia automaticamente. Nova tentativa só quando o técnico abrir acesso remoto novamente.
     });
 
-    proc.on('close', async code => {
-      log('[Tunnel] Processo encerrado — código: ' + code + (code===1?' (provável bloqueio de rede/proxy)':''));
-      tunnelUrl = null;
-      try { await firestorePatch('agents/' + AGENT_ID, { tunnelUrl: '', tunnelAtivo: false }); } catch(e) {}
-      const delay = code === 0 ? 5000 : 60000;
-      setTimeout(iniciarTunnel, delay);
+    _tunnelProc.on('error', async e => {
+      _tunnelFailCount++;
+      _tunnelProc = null;
+      _tunnelStarting = false;
+      log('[Tunnel] Erro: ' + e.message);
+      await firestorePatch('agents/' + AGENT_ID, { tunnelAtivo: false, tunnelStatus: 'erro', tunnelErro: e.message, ...tunnelStatusExtra() }).catch(() => {});
     });
 
-    proc.on('error', e => log('[Tunnel] Erro: ' + e.message));
+    await firestorePatch('agents/' + AGENT_ID, {
+      tunnelAtivo: false,
+      tunnelStatus: 'iniciando',
+      tunnelModo: modo,
+      tunnelRequestedAt: new Date().toISOString(),
+      tunnelSessaoId: opts.sessaoId || '',
+      tunnelMotivo: opts.motivo || 'sob_demanda',
+      tunnelFailCount: _tunnelFailCount,
+    }).catch(() => {});
 
+    return { status: 'tunnel-iniciado-' + modo };
   } catch(e) {
+    _tunnelFailCount++;
+    _tunnelStarting = false;
+    _tunnelProc = null;
     log('[Tunnel] Falha: ' + e.message);
+    await firestorePatch('agents/' + AGENT_ID, { tunnelAtivo: false, tunnelStatus: 'erro', tunnelErro: e.message, ...tunnelStatusExtra() }).catch(() => {});
+    return { status: 'tunnel-erro: ' + e.message };
   }
 }
 
-iniciarTunnel();
-
+// v2.1.6: REMOVIDO iniciarTunnel() automático.
+// O tunnel só é iniciado em executarComando(), quando tipo === 'iniciar_acesso_remoto'.
 
 // ── Monitor SNMP de Impressoras ───────────────────────────────────
 const dgram = require('dgram');
