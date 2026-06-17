@@ -1007,22 +1007,25 @@ function iniciarRelayRtdb(sessaoId) {
   _sessoesAtivas.add(sessaoId);
   log(`[RTDB] Iniciando relay para sessão ${sessaoId}`);
 
-  // Grava handshake no RTDB para sinalizar que está pronto
+  // Grava handshake no Firestore SEMPRE (independente do RTDB)
+  // O app lê este campo para saber que o agente está pronto
+  firestorePatch('sessoes_remotas/' + sessaoId, {
+    relay_status: 'ready',
+    relay_handshake_ts: Date.now(),
+    relay_modo: 'firestore',
+    agentId: AGENT_ID,
+    hostname: require('os').hostname(),
+  }).then(() => log('[Relay] Handshake gravado no Firestore — sessão ' + sessaoId))
+    .catch(e => log('[Relay] Handshake Firestore falhou: ' + e.message));
+
+  // Tenta também RTDB (baixa latência se disponível)
   rtdbEscrever(`relay/${sessaoId}/handshake`, {
     agentId:  AGENT_ID,
     hostname: require('os').hostname(),
     ts:       Date.now(),
     status:   'ready',
-  }).then(() => log(`[RTDB] Handshake gravado — sessão ${sessaoId}`))
-    .catch(e  => {
-      log(`[RTDB] Handshake falhou: ${e.message} — usando Firestore relay`);
-      firestorePatch('sessoes_remotas/' + sessaoId, {
-        relay_status: 'ready',
-        relay_handshake_ts: Date.now(),
-        relay_modo: 'firestore',
-        agentId: AGENT_ID
-      }).catch(e2 => log('[Firestore Relay] Handshake falhou: ' + e2.message));
-    });
+  }).then(() => log(`[RTDB] Handshake gravado no RTDB — sessão ${sessaoId}`))
+    .catch(() => {}); // silencia — Firestore é o canal principal
 
   // Escuta comandos via RTDB (baixa latência quando disponível)
   rtdbListen(sessaoId, msg => processarComandoRtdb(sessaoId, msg));

@@ -7883,10 +7883,6 @@ function abrirHistoricoGeralDoAgente(agentId) {
 }
 
 function renderAssistenciaRemota() {
-  // Reseta scroll ao topo sempre que renderiza
-  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
-  if (_sc) _sc.scrollTop = 0;
-
   const tbody = document.getElementById('ar-tbody');
   if (!tbody) return;
 
@@ -8021,6 +8017,10 @@ function renderAssistenciaRemota() {
       </td>
     </tr>`;
   }).join('');
+
+  // Reseta scroll APÓS inserir conteúdo — impede overflow-anchor de reposicionar
+  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
+  if (_sc) { _sc.scrollTop = 0; requestAnimationFrame(() => { _sc.scrollTop = 0; }); }
 }
 
 // ── ABRIR REMOTE VIEWER ───────────────────────────────────────
@@ -9331,10 +9331,7 @@ async function executarAtualizacaoCliente() {
         publicadoEm:  new Date().toISOString(),
         alvos, totalAgentes: listaEnviar.length + listaNaoEnviada.length,
       });
-      updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
-    } catch(eMeta) {
-      updLog(`ℹ️ Metadados não gravados (sem permissão na coleção agent_updates) — continuando...`);
-    }
+    } catch(eMeta) { /* sem permissão em agent_updates — ignorado */ }
 
     for (const ag of listaNaoEnviada) {
       resultados.push({ agent: ag, status:'nao_atualizado', motivo:'Agente offline no momento do envio' });
