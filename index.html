@@ -23,6 +23,9 @@
 .content { scroll-behavior: auto !important; }
 .content > .page { scroll-margin-top: 0 !important; }
 #main-content-area { scroll-behavior: auto !important; }
+/* Fix definitivo do espaço no topo: .content scroll não pode ser preservado entre páginas */
+/* O scroll é resetado via JS no goPage, mas este CSS garante que nada cause padding extra */
+.page.active { display: block !important; padding-top: 0 !important; margin-top: 0 !important; }
 </style>
 <!-- SYSACK v2.1 - listeners corrigidos - 202605131830 -->
 <!-- Firebase SDK embutido localmente (sem CDN externa) -->

@@ -1331,36 +1331,20 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // Reseta scroll ao trocar de página — tenta todos os containers possíveis
+  // ── Reset de scroll ao trocar de página ──────────────────────
+  const _content = document.getElementById('main-content-area') || document.querySelector('.content');
   const _resetScroll = () => {
-    const targets = [
-      document.getElementById('main-content-area'),
-      document.querySelector('.content'),
-      document.querySelector('.main'),
-      document.querySelector('main'),
-      document.documentElement,
-      document.body,
-    ];
-    targets.forEach(el => { if (el) el.scrollTop = 0; });
+    if (_content) _content.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
     window.scrollTo(0, 0);
-    // Força também o page específico
-    const pg = document.getElementById('page-' + id);
-    if (pg) { pg.scrollTop = 0; pg.style.paddingTop = '0'; pg.style.marginTop = '0'; }
-    // Log diagnóstico — identifica qual elemento tem scroll não-zero
-    if (id === 'assistencia-remota') {
-      setTimeout(() => {
-        targets.forEach((el, i) => {
-          if (el && el.scrollTop > 5) console.warn('[Scroll diagnóstico]', el.tagName, el.id || el.className.split(' ')[0], 'scrollTop=', el.scrollTop);
-        });
-      }, 100);
-    }
   };
   _resetScroll();
   requestAnimationFrame(_resetScroll);
-  setTimeout(_resetScroll, 350);
-  setTimeout(_resetScroll, 700);
-
-  renderPage(id);
+  // Resets extras para pegar renders assíncronos (ex: _arEnsureLoaded com 300ms delay)
+  setTimeout(_resetScroll, 200);
+  setTimeout(_resetScroll, 500);
+  setTimeout(_resetScroll, 900);
 }
 
 function renderPage(id) {
@@ -8517,18 +8501,21 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         }
       } catch {}
 
-      // Fallback: verifica se o agente confirmou via Firestore (agent_commands status=concluido)
+      // Fallback: verifica se o agente confirmou via agent_commands (sem orderBy para evitar índice)
       try {
-        if (FB_READY && db && tentativas % 3 === 0) { // verifica a cada 3s
+        if (FB_READY && db && tentativas % 3 === 0) {
           const snap = await db.collection('agent_commands')
             .where('agentId', '==', agentId)
             .where('tipo', '==', 'usar_firebase_relay')
             .where('status', '==', 'concluido')
-            .orderBy('createdAt', 'desc').limit(1).get();
+            .limit(5).get();
           if (!snap.empty) {
-            const cmd = snap.docs[0].data();
-            const criadoEm = new Date(cmd.createdAt).getTime();
-            if (Date.now() - criadoEm < 30000) { // concluído nos últimos 30s
+            // Verifica se algum foi concluído nos últimos 30s
+            const recente = snap.docs.find(d => {
+              const ts = new Date(d.data().createdAt || 0).getTime();
+              return Date.now() - ts < 30000;
+            });
+            if (recente) {
               clearInterval(aguardarHandshake);
               rvShellLog('[SYSACK] Agente confirmou via Firestore — relay ativo.', '#F59E0B');
               _conectadoBanco();
