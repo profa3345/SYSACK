@@ -1331,13 +1331,21 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // Volta sempre para o topo ao mudar de página — aguarda o DOM atualizar
+  // Reseta scroll ao trocar de página — tenta todos os containers possíveis
   const _resetScroll = () => {
-    const sc = document.querySelector('.content') || document.querySelector('.main-content');
-    if (sc) sc.scrollTop = 0;
+    const targets = [
+      document.getElementById('main-content-area'),
+      document.querySelector('.content'),
+      document.querySelector('.main'),
+      document.querySelector('main'),
+    ];
+    targets.forEach(el => { if (el) el.scrollTop = 0; });
+    window.scrollTo(0, 0);
   };
   _resetScroll();
   requestAnimationFrame(_resetScroll);
+  // Segundo reset após renderização assíncrona (ex: _arEnsureLoaded)
+  setTimeout(_resetScroll, 400);
 
   renderPage(id);
 }
@@ -9241,10 +9249,56 @@ async function executarAtualizacaoCliente() {
     const msg = `✅ ${ok} agente(s) notificado(s)${erro?` · ${erro} erro(s)`:''}.`;
     showUpdStatus(erro?'warning':'success',msg);
     updLog(msg);
+    if (ok > 0) {
+      updLog(`⏳ Aguardando confirmação dos agentes (pode levar até 30s)...`);
+      showUpdStatus('info', `Comando enviado — aguardando agentes aplicarem v${versao}...`);
+      // Monitora confirmação via Firestore: agente atualiza versaoAgente no doc /agents/{id}
+      _monitorarConfirmacaoUpdate(lista.filter((_,i) => i < ok), versao);
+    }
     showToast(`Atualização v${versao} enviada para ${ok} agente(s)!`,'success',5000);
-    setTimeout(()=>renderAssistenciaRemota(),1000);
   } catch(e) { showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message); }
   finally { if(btn){btn.disabled=false;btn.textContent='🚀 Enviar Atualização';} }
+}
+
+function _monitorarConfirmacaoUpdate(agentes, versaoEsperada) {
+  const pendentes = new Set(agentes.map(a => a.id));
+  let tentativas = 0;
+  const MAX = 24; // 24 × 5s = 2 minutos
+
+  const poll = setInterval(async () => {
+    tentativas++;
+    if (pendentes.size === 0 || tentativas >= MAX) {
+      clearInterval(poll);
+      if (pendentes.size === 0) {
+        showUpdStatus('success', `✅ Todos os agentes confirmaram v${versaoEsperada}!`);
+        updLog(`✅ Atualização para v${versaoEsperada} concluída em todos os agentes.`);
+        showToast(`✅ Agentes atualizados para v${versaoEsperada}!`, 'success', 6000);
+      } else {
+        const restantes = [...pendentes].join(', ');
+        showUpdStatus('warning', `⚠️ ${pendentes.size} agente(s) ainda não confirmaram. Podem estar reiniciando.`);
+        updLog(`⚠️ Sem confirmação de: ${restantes} — podem estar reiniciando o serviço.`);
+      }
+      setTimeout(()=>renderAssistenciaRemota(), 1000);
+      return;
+    }
+
+    // Verifica no Firestore se o agente atualizou a versão
+    for (const agId of [...pendentes]) {
+      try {
+        if (!FB_READY || !db) continue;
+        const snap = await db.collection('agents').doc(agId).get();
+        if (!snap.exists) continue;
+        const data = snap.data();
+        const versaoAtual = data.versaoAgente || data.version || '';
+        if (versaoAtual === versaoEsperada) {
+          const hostname = data.hostname || agId;
+          pendentes.delete(agId);
+          updLog(`✅ ${hostname} — atualizado para v${versaoEsperada} com sucesso!`);
+          showUpdStatus('info', `${pendentes.size} agente(s) pendente(s)...`);
+        }
+      } catch {}
+    }
+  }, 5000);
 }
 
 function updLog(msg) {
