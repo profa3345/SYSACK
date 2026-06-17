@@ -1338,14 +1338,19 @@ function goPage(id) {
       document.querySelector('.content'),
       document.querySelector('.main'),
       document.querySelector('main'),
+      document.documentElement,
+      document.body,
     ];
     targets.forEach(el => { if (el) el.scrollTop = 0; });
     window.scrollTo(0, 0);
+    // Força também o page específico
+    const pg = document.getElementById('page-' + id);
+    if (pg) { pg.scrollTop = 0; pg.style.paddingTop = '0'; pg.style.marginTop = '0'; }
   };
   _resetScroll();
   requestAnimationFrame(_resetScroll);
-  // Segundo reset após renderização assíncrona (ex: _arEnsureLoaded)
-  setTimeout(_resetScroll, 400);
+  setTimeout(_resetScroll, 350);
+  setTimeout(_resetScroll, 700);
 
   renderPage(id);
 }
@@ -9311,27 +9316,15 @@ async function executarAtualizacaoCliente() {
 
 function _monitorarConfirmacaoUpdate(agentes, versaoEsperada) {
   const pendentes = new Set(agentes.map(a => a.id));
+  const hostnamesMap = Object.fromEntries(agentes.map(a => [a.id, a.hostname || a.id]));
   let tentativas = 0;
-  const MAX = 24; // 24 × 5s = 2 minutos
+  const MAX = 36; // 36 × 5s = 3 minutos (agente precisa reiniciar)
+
+  updLog(`⏳ Monitorando ${pendentes.size} agente(s) por até 3 minutos...`);
 
   const poll = setInterval(async () => {
     tentativas++;
-    if (pendentes.size === 0 || tentativas >= MAX) {
-      clearInterval(poll);
-      if (pendentes.size === 0) {
-        showUpdStatus('success', `✅ Todos os agentes confirmaram v${versaoEsperada}!`);
-        updLog(`✅ Atualização para v${versaoEsperada} concluída em todos os agentes.`);
-        showToast(`✅ Agentes atualizados para v${versaoEsperada}!`, 'success', 6000);
-      } else {
-        const restantes = [...pendentes].join(', ');
-        showUpdStatus('warning', `⚠️ ${pendentes.size} agente(s) ainda não confirmaram. Podem estar reiniciando.`);
-        updLog(`⚠️ Sem confirmação de: ${restantes} — podem estar reiniciando o serviço.`);
-      }
-      setTimeout(()=>renderAssistenciaRemota(), 1000);
-      return;
-    }
 
-    // Verifica no Firestore se o agente atualizou a versão
     for (const agId of [...pendentes]) {
       try {
         if (!FB_READY || !db) continue;
@@ -9339,13 +9332,34 @@ function _monitorarConfirmacaoUpdate(agentes, versaoEsperada) {
         if (!snap.exists) continue;
         const data = snap.data();
         const versaoAtual = data.versaoAgente || data.version || '';
+        const hostname = data.hostname || hostnamesMap[agId] || agId;
+
         if (versaoAtual === versaoEsperada) {
-          const hostname = data.hostname || agId;
           pendentes.delete(agId);
-          updLog(`✅ ${hostname} — atualizado para v${versaoEsperada} com sucesso!`);
-          showUpdStatus('info', `${pendentes.size} agente(s) pendente(s)...`);
+          updLog(`✅ ${hostname} — v${versaoEsperada} confirmado!`);
+          if (pendentes.size === 0) {
+            clearInterval(poll);
+            showUpdStatus('success', `✅ Todos os agentes atualizados para v${versaoEsperada}!`);
+            showToast(`✅ Atualização v${versaoEsperada} concluída!`, 'success', 6000);
+            setTimeout(() => renderAssistenciaRemota(), 1000);
+          } else {
+            showUpdStatus('info', `⏳ ${pendentes.size} agente(s) ainda atualizando...`);
+          }
+        } else if (tentativas % 6 === 0) {
+          // A cada 30s, loga o status atual
+          const status = data.status || '?';
+          updLog(`⏳ ${hostname} — ainda em v${versaoAtual || '?'} (${status}) — aguardando reinício...`);
         }
       } catch {}
+    }
+
+    if (tentativas >= MAX && pendentes.size > 0) {
+      clearInterval(poll);
+      const restantes = [...pendentes].map(id => hostnamesMap[id] || id).join(', ');
+      showUpdStatus('warning', `⚠️ Timeout: ${pendentes.size} agente(s) não confirmaram após 3 min.`);
+      updLog(`⚠️ Sem confirmação de: ${restantes}`);
+      updLog(`ℹ️ O agente pode estar reiniciando. Verifique a versão na tabela em alguns minutos.`);
+      setTimeout(() => renderAssistenciaRemota(), 1000);
     }
   }, 5000);
 }
