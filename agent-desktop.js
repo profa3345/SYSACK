@@ -25,8 +25,38 @@ const PROJECT_ID = cfg.firebaseProjectId || 'sysack-829e2';
 const API_KEY    = cfg.firebaseApiKey    || 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
 const AGENT_ID   = cfg.agentId          || os.hostname();
 const INTERVAL   = (cfg.intervalSeconds || 60) * 1000;
-const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000; // coleta completa de softwares a cada 6h
+const TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
+const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000;
 let _softwareCache = { at: 0, list: [] };
+
+// ── Instância única — impede dois processos rodando ao mesmo tempo ──
+const PID_FILE = path.join(__dirname, 'agent.pid');
+(function garantirInstanciaUnica() {
+  try {
+    if (fs.existsSync(PID_FILE)) {
+      const pidAntigo = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
+      if (pidAntigo && pidAntigo !== process.pid) {
+        try {
+          // Tenta matar o processo anterior
+          process.kill(pidAntigo, 0); // verifica se existe
+          process.kill(pidAntigo);    // mata
+          console.log(`[SYSACK] Processo anterior (PID ${pidAntigo}) encerrado.`);
+          // Aguarda 1s para o processo encerrar antes de continuar
+          const fim = Date.now() + 1000;
+          while (Date.now() < fim) {} // busy wait curto
+        } catch(e) {
+          // Processo não existe mais — OK
+        }
+      }
+    }
+  } catch(e) {}
+  // Registra PID atual
+  try { fs.writeFileSync(PID_FILE, String(process.pid), 'utf8'); } catch(e) {}
+  // Remove PID ao encerrar normalmente
+  process.on('exit',    () => { try { fs.unlinkSync(PID_FILE); } catch(e) {} });
+  process.on('SIGINT',  () => { try { fs.unlinkSync(PID_FILE); } catch(e) {} process.exit(0); });
+  process.on('SIGTERM', () => { try { fs.unlinkSync(PID_FILE); } catch(e) {} process.exit(0); });
+})();
 
 // ── Log ───────────────────────────────────────────────────────────
 const LOG_FILE = path.join(__dirname, 'agent.log');
@@ -47,18 +77,21 @@ function log(msg) {
 
 function agendarReinicioAgent() {
   try {
-    const nodeExe = process.execPath;
-    const script  = path.join(__dirname, 'agent-desktop.js');
-    const bat     = path.join(__dirname, '_restart_sysack_agent.cmd');
-    const taskCmd = 'schtasks /Run /TN "SYSACK-Agent"';
-    const direct  = 'start "SYSACK Agent" /min "' + nodeExe + '" "' + script + '"';
+    const nodeExe  = process.execPath;
+    const script   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
+    const bat      = path.join(__dirname, '_restart_sysack_agent.cmd');
+    const taskCmd  = 'schtasks /Run /TN "SYSACK-Agent"';
+    const direct   = 'start "SYSACK Agent" /min "' + nodeExe + '" "' + script + '"';
+    // Remove PID file antes de reiniciar para o novo processo não tentar matar a si mesmo
+    const pidClean = 'del /f /q "' + PID_FILE + '" >nul 2>nul';
     const body = '@echo off\r\n' +
       'timeout /t 3 /nobreak >nul\r\n' +
+      pidClean + '\r\n' +
       taskCmd + ' >nul 2>nul\r\n' +
       'if errorlevel 1 ' + direct + '\r\n';
     fs.writeFileSync(bat, body, 'utf8');
     exec('cmd /c start "" /min "' + bat + '"', { windowsHide: true });
-    log('[UPDATE] Reinício agendado via tarefa SYSACK-Agent/fallback direto');
+    log('[UPDATE] Reinício agendado — script: ' + script);
   } catch(e) {
     log('[UPDATE] Falha ao agendar reinício: ' + e.message);
   }
@@ -1259,7 +1292,7 @@ let PROXY_URL  = 'http://proxy.sistemas.cesan.com.br:8080';
 
 // Token do tunnel Cloudflare — buscado do Firestore (sysack_config/tunnel)
 // Para configurar: Firebase Console → Firestore → sysack_config → tunnel → campo "token"
-let TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
+// TUNNEL_TOKEN já declarado no topo do arquivo
 
 async function carregarConfigTunnel() {
   // Busca token do Firestore — um lugar só, distribui para todos os agentes
