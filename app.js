@@ -8345,7 +8345,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     // 3. Sem rota WS disponível — tenta relay Firebase RTDB (funciona em qualquer rede)
     rvShellLog('[SYSACK] Tentativa 1: WebSocket local (' + wsIp + ':9000) — ' + (paginaHttps ? 'bloqueado (HTTPS)' : 'falhou'), '#EF4444');
     rvShellLog('[SYSACK] Tentativa 2: Cloudflare Tunnel — ' + (tunnelUrl ? 'indisponível' : 'não configurado'), '#EF4444');
-    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase RTDB...', '#F59E0B');
+    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase/Firestore...', '#F59E0B');
     _modoConexao = 'firebase';
     rvMostrarBannerConexao('firebase');
     rvConnectBanco();
@@ -8479,7 +8479,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   function rvConnectBanco() {
     rvSetStatus('firebase', 'Conectando via Banco...');
     rvSb('Aguardando agente...');
-    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase RTDB...', '#F59E0B');
+    rvShellLog('[SYSACK] Tentativa 3: Relay Firebase/Firestore...', '#F59E0B');
 
     // 1. Envia comando via Firestore (agente processa em até 5s no poll)
     arEnviarComando(agentId, 'usar_firebase_relay', { sessaoId }, 'Relay Banco iniciado pelo técnico')
@@ -8551,7 +8551,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   function _conectadoBanco() {
     _modoConexao = 'firebase';
     rvSetStatus('firebase', 'Via internet 📡');
-    rvSb('Relay Banco ativo — latência ~300-600ms');
+    rvSb(_RTDB_HOST ? 'Relay Banco ativo — latência ~300-600ms' : 'Relay Firestore ativo — sem RTDB configurado');
     rvShellLog('[SYSACK] Conectado via internet (Banco Relay)', '#F59E0B');
     rvShellLog('[SYSACK] Captura de tela disponível, mas mais lenta que via rede interna.', '#64748B');
     rvShellLog('[SYSACK] Use "↺ Tentar rede local" se estiver na mesma rede do PC alvo.', '#64748B');
@@ -8596,6 +8596,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     (async () => {
       try {
         _sseAbortCtrl = new AbortController();
+        if (!_RTDB_HOST) return;
         const token = await _rtdbToken();
         const res = await fetch(
           `https://${_RTDB_HOST}/relay/${sessaoId}/resp.json?auth=${token}`,
@@ -8643,7 +8644,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   // ── RTDB helpers — usa Firebase Auth ID Token para autenticação ──
-  const _RTDB_HOST = (window.SYSACK_RTDB_HOST || (FIREBASE_CONFIG.databaseURL || '').replace(/^https?:\/\//,'').replace(/\/$/,'') || 'sysack-829e2-default-rtdb.firebaseio.com');
+  const _RTDB_HOST = (window.SYSACK_RTDB_HOST || (FIREBASE_CONFIG.databaseURL || '').replace(/^https?:\/\//,'').replace(/\/$/,'') || '');
 
   async function _rtdbToken() {
     try {
@@ -8657,6 +8658,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   async function rtdbWrite(path, data) {
+    if (!_RTDB_HOST) throw new Error('RTDB não configurado — usando Firestore relay');
     try {
       const token = await _rtdbToken();
       const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${token}`, {
@@ -8673,6 +8675,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   async function rtdbRead(path) {
+    if (!_RTDB_HOST) return null;
     try {
       const token = await _rtdbToken();
       const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${token}`);

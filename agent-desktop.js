@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.2
+ * SYSACK Agent Desktop v2.1.3
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -42,6 +42,26 @@ function log(msg) {
       fs.writeFileSync(LOG_FILE, content.slice(-500_000));
     }
   } catch(e) {}
+}
+
+
+function agendarReinicioAgent() {
+  try {
+    const nodeExe = process.execPath;
+    const script  = path.join(__dirname, 'agent-desktop.js');
+    const bat     = path.join(__dirname, '_restart_sysack_agent.cmd');
+    const taskCmd = 'schtasks /Run /TN "SYSACK-Agent"';
+    const direct  = 'start "SYSACK Agent" /min "' + nodeExe + '" "' + script + '"';
+    const body = '@echo off\r\n' +
+      'timeout /t 3 /nobreak >nul\r\n' +
+      taskCmd + ' >nul 2>nul\r\n' +
+      'if errorlevel 1 ' + direct + '\r\n';
+    fs.writeFileSync(bat, body, 'utf8');
+    exec('cmd /c start "" /min "' + bat + '"', { windowsHide: true });
+    log('[UPDATE] Reinício agendado via tarefa SYSACK-Agent/fallback direto');
+  } catch(e) {
+    log('[UPDATE] Falha ao agendar reinício: ' + e.message);
+  }
 }
 
 // ── Coleta de dados do sistema ────────────────────────────────────
@@ -504,7 +524,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.2] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1.3] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -729,13 +749,14 @@ async function firestorePatch(docPath, data) {
 // Latência: ~100–200ms vs 2–6s do Firestore polling anterior.
 // ════════════════════════════════════════════════════════════════
 
-const RTDB_HOST = (cfg.rtdbHost || (cfg.databaseURL || '').replace(/^https?:\/\//,'').replace(/\/$/,'') || 'sysack-829e2-default-rtdb.firebaseio.com');
+const RTDB_HOST = (cfg.rtdbHost || (cfg.databaseURL || '').replace(/^https?:\/\//,'').replace(/\/$/,'') || '');
 
 let _rtdbListeners = new Map(); // sessaoId → req
 let _sessoesAtivas = new Set(); // sessoes com listener ativo
 
 // Abre conexão SSE persistente e chama callback a cada comando recebido
 function rtdbListen(sessaoId, callback) {
+  if (!RTDB_HOST) { log('[RTDB] Sem databaseURL/rtdbHost — usando somente Firestore relay'); return; }
   rtdbUnlisten(sessaoId);
 
   const req = https.request({
@@ -802,6 +823,7 @@ function rtdbUnlisten(sessaoId) {
 
 // Escreve dados no RTDB via REST (PUT)
 function rtdbEscrever(rtdbPath, data) {
+  if (!RTDB_HOST) return Promise.reject(new Error('RTDB não configurado'));
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(data);
     const req  = https.request({
@@ -893,7 +915,8 @@ async function processarComandoRtdb(sessaoId, msg) {
       fs.writeFileSync(sp,novoConteudo,'utf8');
       log(`[UPDATE/RTDB] Substituído (${novoConteudo.length} bytes). Reiniciando...`);
       resposta = {tipo:'update_ok',versao:versaoNova,agentId:AGENT_ID};
-      await firestorePatch('agents/'+AGENT_ID,{versaoAgente:versaoNova,ultimaAtualizacao:new Date().toISOString()}).catch(()=>{});
+      await firestorePatch('agents/'+AGENT_ID,{versaoAgente:versaoNova,ultimaAtualizacao:new Date().toISOString(), agentVersion: versaoNova}).catch(()=>{});
+      agendarReinicioAgent();
       setTimeout(()=>process.exit(0),2000);
 
     } else {
@@ -1017,7 +1040,7 @@ async function executarComando(doc) {
   if (tipo === 'iniciar_acesso_remoto' || tipo === 'usar_firebase_relay') {
     // A partir daqui todos os comandos vão pelo RTDB (push em tempo real)
     if (sessaoId) iniciarRelayRtdb(sessaoId);
-    await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: 'rtdb-relay-ativo' }).catch(() => {});
+    await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: RTDB_HOST ? 'rtdb-relay-ativo' : 'firestore-relay-ativo' }).catch(() => {});
     return;
   }
 
@@ -1065,7 +1088,8 @@ async function executarComando(doc) {
       fs.writeFileSync(selfPath, novoConteudo, 'utf8');
       log(`[UPDATE] Substituído (${novoConteudo.length} bytes). Reiniciando em 2s...`);
       resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
-      await firestorePatch('agents/'+AGENT_ID,{versaoAgente:versaoNova,ultimaAtualizacao:new Date().toISOString()}).catch(()=>{});
+      await firestorePatch('agents/'+AGENT_ID,{versaoAgente:versaoNova,ultimaAtualizacao:new Date().toISOString(), agentVersion: versaoNova}).catch(()=>{});
+      agendarReinicioAgent();
       setTimeout(()=>process.exit(0),2000);
 
     } else if (tipo === 'screenshot') {
