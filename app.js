@@ -1346,6 +1346,14 @@ function goPage(id) {
     // Força também o page específico
     const pg = document.getElementById('page-' + id);
     if (pg) { pg.scrollTop = 0; pg.style.paddingTop = '0'; pg.style.marginTop = '0'; }
+    // Log diagnóstico — identifica qual elemento tem scroll não-zero
+    if (id === 'assistencia-remota') {
+      setTimeout(() => {
+        targets.forEach((el, i) => {
+          if (el && el.scrollTop > 5) console.warn('[Scroll diagnóstico]', el.tagName, el.id || el.className.split(' ')[0], 'scrollTop=', el.scrollTop);
+        });
+      }, 100);
+    }
   };
   _resetScroll();
   requestAnimationFrame(_resetScroll);
@@ -9068,12 +9076,17 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── Encerrar ─────────────────────────────────────────────────
   window.rvEncerrar = async sid => {
     if (!confirm('Encerrar sessão remota?')) return;
-    // Fecha a UI imediatamente — não depende de operações assíncronas
     clearInterval(_autoTimer);
     document.removeEventListener('keydown', rvKeyHandler);
     _ws?.close();
+    if (_fbRelay) { _fbRelay(); _fbRelay = null; }
     document.getElementById('remote-viewer-overlay')?.remove();
-    // Operações secundárias em background
+    // Reseta scroll ao voltar para a página de assistência remota
+    requestAnimationFrame(() => {
+      const sc = document.getElementById('main-content-area') || document.querySelector('.content');
+      if (sc) sc.scrollTop = 0;
+      window.scrollTo(0, 0);
+    });
     if (sid) {
       db?.collection('sessoes_remotas').doc(sid).update({
         status: 'encerrado', encerradoEm: new Date().toISOString(),
@@ -9301,68 +9314,17 @@ async function executarAtualizacaoCliente() {
       } catch(e) { updLog(`✗ ${ag.hostname||ag.id}: ${e.message}`); erro++; }
     }
     const msg = `✅ ${ok} agente(s) notificado(s)${erro?` · ${erro} erro(s)`:''}.`;
-    showUpdStatus(erro?'warning':'success',msg);
+    showUpdStatus('success', msg);
     updLog(msg);
-    if (ok > 0) {
-      updLog(`⏳ Aguardando confirmação dos agentes (pode levar até 30s)...`);
-      showUpdStatus('info', `Comando enviado — aguardando agentes aplicarem v${versao}...`);
-      // Monitora confirmação via Firestore: agente atualiza versaoAgente no doc /agents/{id}
-      _monitorarConfirmacaoUpdate(lista.filter((_,i) => i < ok), versao);
-    }
-    showToast(`Atualização v${versao} enviada para ${ok} agente(s)!`,'success',5000);
+    updLog(`ℹ️ O agente aplica a atualização no próximo ciclo (≤5s) e reinicia automaticamente.`);
+    updLog(`ℹ️ Aguarde ~30s e verifique a coluna "Versão" na tabela — deve exibir v${versao}.`);
+    showToast(`✅ Atualização v${versao} enviada para ${ok} agente(s)!`, 'success', 5000);
+    setTimeout(() => renderAssistenciaRemota(), 2000);
   } catch(e) { showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message); }
   finally { if(btn){btn.disabled=false;btn.textContent='🚀 Enviar Atualização';} }
 }
 
-function _monitorarConfirmacaoUpdate(agentes, versaoEsperada) {
-  const pendentes = new Set(agentes.map(a => a.id));
-  const hostnamesMap = Object.fromEntries(agentes.map(a => [a.id, a.hostname || a.id]));
-  let tentativas = 0;
-  const MAX = 36; // 36 × 5s = 3 minutos (agente precisa reiniciar)
-
-  updLog(`⏳ Monitorando ${pendentes.size} agente(s) por até 3 minutos...`);
-
-  const poll = setInterval(async () => {
-    tentativas++;
-
-    for (const agId of [...pendentes]) {
-      try {
-        if (!FB_READY || !db) continue;
-        const snap = await db.collection('agents').doc(agId).get();
-        if (!snap.exists) continue;
-        const data = snap.data();
-        const versaoAtual = data.versaoAgente || data.version || '';
-        const hostname = data.hostname || hostnamesMap[agId] || agId;
-
-        if (versaoAtual === versaoEsperada) {
-          pendentes.delete(agId);
-          updLog(`✅ ${hostname} — v${versaoEsperada} confirmado!`);
-          if (pendentes.size === 0) {
-            clearInterval(poll);
-            showUpdStatus('success', `✅ Todos os agentes atualizados para v${versaoEsperada}!`);
-            showToast(`✅ Atualização v${versaoEsperada} concluída!`, 'success', 6000);
-            setTimeout(() => renderAssistenciaRemota(), 1000);
-          } else {
-            showUpdStatus('info', `⏳ ${pendentes.size} agente(s) ainda atualizando...`);
-          }
-        } else if (tentativas % 6 === 0) {
-          // A cada 30s, loga o status atual
-          const status = data.status || '?';
-          updLog(`⏳ ${hostname} — ainda em v${versaoAtual || '?'} (${status}) — aguardando reinício...`);
-        }
-      } catch {}
-    }
-
-    if (tentativas >= MAX && pendentes.size > 0) {
-      clearInterval(poll);
-      const restantes = [...pendentes].map(id => hostnamesMap[id] || id).join(', ');
-      showUpdStatus('warning', `⚠️ Timeout: ${pendentes.size} agente(s) não confirmaram após 3 min.`);
-      updLog(`⚠️ Sem confirmação de: ${restantes}`);
-      updLog(`ℹ️ O agente pode estar reiniciando. Verifique a versão na tabela em alguns minutos.`);
-      setTimeout(() => renderAssistenciaRemota(), 1000);
-    }
-  }, 5000);
-}
+function _monitorarConfirmacaoUpdate() {} // removido — não é necessário
 
 function updLog(msg) {
   const el=document.getElementById('upd-log-body'); if(!el) return;
