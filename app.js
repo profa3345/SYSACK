@@ -1331,36 +1331,18 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // Reseta scroll ao trocar de página — tenta todos os containers possíveis
-  const _resetScroll = () => {
-    const targets = [
-      document.getElementById('main-content-area'),
-      document.querySelector('.content'),
-      document.querySelector('.main'),
-      document.querySelector('main'),
-      document.documentElement,
-      document.body,
-    ];
-    targets.forEach(el => { if (el) el.scrollTop = 0; });
-    window.scrollTo(0, 0);
-    // Força também o page específico
-    const pg = document.getElementById('page-' + id);
-    if (pg) { pg.scrollTop = 0; pg.style.paddingTop = '0'; pg.style.marginTop = '0'; }
-    // Log diagnóstico — identifica qual elemento tem scroll não-zero
-    if (id === 'assistencia-remota') {
-      setTimeout(() => {
-        targets.forEach((el, i) => {
-          if (el && el.scrollTop > 5) console.warn('[Scroll diagnóstico]', el.tagName, el.id || el.className.split(' ')[0], 'scrollTop=', el.scrollTop);
-        });
-      }, 100);
-    }
-  };
-  _resetScroll();
-  requestAnimationFrame(_resetScroll);
-  setTimeout(_resetScroll, 350);
-  setTimeout(_resetScroll, 700);
+  // Reseta scroll ao trocar de página
+  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
+  const _doReset = () => { if (_sc) _sc.scrollTop = 0; };
+  _doReset();
+  requestAnimationFrame(_doReset);
 
   renderPage(id);
+
+  // Resets pós-render: captura renders assíncronos (ex: _arEnsureLoaded tem delay 300ms)
+  setTimeout(_doReset, 150);
+  setTimeout(_doReset, 400);
+  setTimeout(_doReset, 800);
 }
 
 function renderPage(id) {
@@ -7901,6 +7883,10 @@ function abrirHistoricoGeralDoAgente(agentId) {
 }
 
 function renderAssistenciaRemota() {
+  // Reseta scroll ao topo sempre que renderiza
+  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
+  if (_sc) _sc.scrollTop = 0;
+
   const tbody = document.getElementById('ar-tbody');
   if (!tbody) return;
 
@@ -8083,7 +8069,7 @@ async function arAbrirViewer(agentId) {
       tipo:          'websocket',
       createdAt:     new Date().toISOString(),
     });
-    // fsAdd retorna o ID do documento diretamente (string)
+    // fsAdd retorna o ID do documento como string direta
     sessaoId = (typeof sessaoDocId === 'string' && sessaoDocId && !sessaoDocId.startsWith('offline_'))
       ? sessaoDocId
       : 'sess_' + Date.now();
@@ -8520,7 +8506,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         }
       } catch {}
 
-      // Fallback: verifica se o agente confirmou via agent_commands (sem orderBy para evitar índice)
+      // Fallback: verifica se o agente confirmou via Firestore (sem orderBy — evita índice)
       try {
         if (FB_READY && db && tentativas % 3 === 0) {
           const snap = await db.collection('agent_commands')
@@ -8531,7 +8517,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
           if (!snap.empty) {
             const recente = snap.docs.find(d => {
               const ts = new Date(d.data().createdAt || d.data().criadoEm || 0).getTime();
-              return Date.now() - ts < 60000; // concluído nos últimos 60s
+              return Date.now() - ts < 60000;
             });
             if (recente) {
               clearInterval(aguardarHandshake);

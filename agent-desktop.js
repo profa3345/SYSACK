@@ -1104,15 +1104,23 @@ async function executarComando(doc) {
         req.end();
       });
       if (!novoConteudo || novoConteudo.length<1000) throw new Error('Arquivo inválido');
-      const selfPath   = path.join(__dirname,'agent-desktop.js');
-      const backupPath = path.join(__dirname,'agent-desktop.backup.js');
-      try { fs.copyFileSync(selfPath, backupPath); } catch(e) {}
+      // Usa o arquivo atualmente em execução (pode ser agent.js ou agent-desktop.js)
+      const selfPath   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
+      const backupPath = selfPath.replace(/\.js$/, '.backup.js');
+      try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
       fs.writeFileSync(selfPath, novoConteudo, 'utf8');
-      log(`[UPDATE] Substituído (${novoConteudo.length} bytes). Reiniciando em 2s...`);
+      log(`[UPDATE] Substituído em ${selfPath} (${novoConteudo.length} bytes). Gravando confirmação...`);
       resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
-      await firestorePatch('agents/'+AGENT_ID,{versaoAgente:versaoNova,ultimaAtualizacao:new Date().toISOString(), agentVersion: versaoNova}).catch(()=>{});
+      // CRÍTICO: grava status ANTES do exit — caso contrário o processo morre antes de confirmar
+      await firestorePatch('agents/'+AGENT_ID, {
+        versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
+      }).catch(()=>{});
+      await firestorePatch('agent_commands/'+id, {
+        status: 'concluido', resultado: resultado
+      }).catch(()=>{});
+      log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 3s...');
       agendarReinicioAgent();
-      setTimeout(()=>process.exit(0),2000);
+      setTimeout(()=>process.exit(0), 3000);
 
     } else if (tipo === 'screenshot') {
       const ps = [
@@ -1144,7 +1152,10 @@ async function executarComando(doc) {
       resultado, tipo, ts: new Date().toISOString(), agentId: AGENT_ID,
     }).catch(() => {});
   }
-  await firestorePatch('agent_commands/' + id, { status: erroExec ? 'erro' : 'concluido', resultado: resultado.slice(0, 500) }).catch(() => {});
+  // atualizar_agente já gravou o status antes do process.exit — não duplicar
+  if (tipo !== 'atualizar_agente') {
+    await firestorePatch('agent_commands/' + id, { status: erroExec ? 'erro' : 'concluido', resultado: resultado.slice(0, 500) }).catch(() => {});
+  }
 }
 
 // Poll Firestore — somente para receber "iniciar_acesso_remoto" com sessaoId
