@@ -1331,9 +1331,13 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // Volta sempre para o topo ao mudar de página — reseta o container real (.content)
-  const scrollContainer = document.querySelector('.content') || document.querySelector('.main-content') || document.getElementById('main-content');
-  if (scrollContainer) scrollContainer.scrollTop = 0;
+  // Volta sempre para o topo ao mudar de página — aguarda o DOM atualizar
+  const _resetScroll = () => {
+    const sc = document.querySelector('.content') || document.querySelector('.main-content');
+    if (sc) sc.scrollTop = 0;
+  };
+  _resetScroll();
+  requestAnimationFrame(_resetScroll);
 
   renderPage(id);
 }
@@ -9210,14 +9214,18 @@ async function executarAtualizacaoCliente() {
   const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
   let ok=0,erro=0;
   try {
-    // Grava metadados da atualização em /agent_updates/{versao}
-    await fsSet('agent_updates', versao.replace(/\./g,'_'), {
-      versao, url: AGENT_URL,
-      publicadoPor: (SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'admin',
-      publicadoEm:  new Date().toISOString(),
-      alvos, totalAgentes: lista.length,
-    });
-    updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
+    // Grava metadados da atualização (opcional — não bloqueia se sem permissão)
+    try {
+      await fsSet('agent_updates', versao.replace(/\./g,'_'), {
+        versao, url: AGENT_URL,
+        publicadoPor: (SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'admin',
+        publicadoEm:  new Date().toISOString(),
+        alvos, totalAgentes: lista.length,
+      });
+      updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
+    } catch(eMeta) {
+      updLog(`ℹ️ Metadados não gravados (sem permissão na coleção agent_updates) — continuando...`);
+    }
     for (const ag of lista) {
       try {
         await fsAdd('agent_commands',{
