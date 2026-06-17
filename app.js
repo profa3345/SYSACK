@@ -8399,10 +8399,14 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   }
 
   window.rvRetentarLocal = async () => {
+    // Em HTTPS não é possível conectar ws:// — ir direto para o relay
+    if (location.protocol === 'https:') {
+      showToast('Em HTTPS não é possível usar rede local direta. Usando relay.', 'warning', 4000);
+      return;
+    }
     rvSb('Tentando reconectar via rede interna...');
     const ok = await rvTestarConexaoLocal();
     if (ok) {
-      // Desconecta Banco relay
       if (_fbRelay) { _fbRelay(); _fbRelay = null; }
       _ws?.close();
       _modoConexao = 'local';
@@ -8466,43 +8470,66 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
 
     // 1. Envia comando via Firestore (agente processa em até 5s no poll)
     arEnviarComando(agentId, 'usar_firebase_relay', { sessaoId }, 'Relay Banco iniciado pelo técnico')
-      .catch(() => {}); // não bloqueia — continua aguardando
+      .catch(() => {});
 
-    // 2. Aguarda handshake do agente no RTDB (sinal de que está pronto para receber cmds)
-    //    Tenta a cada 1s por até 15s antes de desistir
+    // 2. Aguarda handshake do agente no RTDB OU confirmação via Firestore
     let tentativas = 0;
-    const MAX_TENTATIVAS = 15;
+    const MAX_TENTATIVAS = 20; // 20s — agente pode demorar até 5s só para ler o comando
 
     const aguardarHandshake = setInterval(async () => {
       tentativas++;
       rvSb(`Aguardando agente... (${tentativas}/${MAX_TENTATIVAS}s)`);
 
+      // Tenta RTDB primeiro
       try {
         const hs = await rtdbRead(`relay/${sessaoId}/handshake`);
         if (hs && hs.status === 'ready') {
           clearInterval(aguardarHandshake);
-          _modoConexao = 'firebase';
-          rvSetStatus('firebase', 'Via internet 📡');
-          rvSb('Relay Banco ativo — latência ~300-600ms');
-          rvShellLog('[SYSACK] Conectado via internet (Banco Relay)', '#F59E0B');
-          rvShellLog('[SYSACK] Captura de tela disponível, mas mais lenta que via rede interna.', '#64748B');
-          rvShellLog('[SYSACK] Use "↺ Tentar rede local" se estiver na mesma rede do PC alvo.', '#64748B');
-          // Agente pronto — agora sim abre o listener de respostas
-          rvEscutarRespostasBanco();
-          // Solicita screenshot inicial
-          setTimeout(() => rvEnviarViaBanco({ tipo: 'screenshot' }), 500);
+          _conectadoBanco();
           return;
+        }
+      } catch {}
+
+      // Fallback: verifica se o agente confirmou via Firestore (agent_commands status=concluido)
+      try {
+        if (FB_READY && db && tentativas % 3 === 0) { // verifica a cada 3s
+          const snap = await db.collection('agent_commands')
+            .where('agentId', '==', agentId)
+            .where('tipo', '==', 'usar_firebase_relay')
+            .where('status', '==', 'concluido')
+            .orderBy('createdAt', 'desc').limit(1).get();
+          if (!snap.empty) {
+            const cmd = snap.docs[0].data();
+            const criadoEm = new Date(cmd.createdAt).getTime();
+            if (Date.now() - criadoEm < 30000) { // concluído nos últimos 30s
+              clearInterval(aguardarHandshake);
+              rvShellLog('[SYSACK] Agente confirmou via Firestore — relay ativo.', '#F59E0B');
+              _conectadoBanco();
+              return;
+            }
+          }
         }
       } catch {}
 
       if (tentativas >= MAX_TENTATIVAS) {
         clearInterval(aguardarHandshake);
         rvSetStatus('offline', 'Agente não respondeu');
-        rvSb('❌ Agente não iniciou relay em 15s. Verifique se o serviço SYSACK está rodando.');
-        rvShellLog('[SYSACK] Timeout: agente não respondeu ao relay em 15s.', '#EF4444');
-        rvShellLog('[SYSACK] Verifique o serviço Windows: sc query SysackAgent', '#64748B');
+        rvSb('❌ Agente não iniciou relay em 20s.');
+        rvShellLog('[SYSACK] Timeout: agente não respondeu ao relay.', '#EF4444');
+        rvShellLog('[SYSACK] Verifique: sc query SysackAgent no PC alvo.', '#64748B');
       }
     }, 1000);
+  }
+
+  function _conectadoBanco() {
+    _modoConexao = 'firebase';
+    rvSetStatus('firebase', 'Via internet 📡');
+    rvSb('Relay Banco ativo — latência ~300-600ms');
+    rvShellLog('[SYSACK] Conectado via internet (Banco Relay)', '#F59E0B');
+    rvShellLog('[SYSACK] Captura de tela disponível, mas mais lenta que via rede interna.', '#64748B');
+    rvShellLog('[SYSACK] Use "↺ Tentar rede local" se estiver na mesma rede do PC alvo.', '#64748B');
+    rvEscutarRespostasBanco();
+    setTimeout(() => rvEnviarViaBanco({ tipo: 'screenshot' }), 500);
   }
 
   function rvEscutarRespostasBanco() {
@@ -8569,13 +8596,24 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     };
   }
 
-  // ── RTDB helpers (app não tem SDK RTDB — usa REST igual ao agente) ──
+  // ── RTDB helpers — usa Firebase Auth ID Token para autenticação ──
   const _RTDB_HOST = 'sysack-829e2-default-rtdb.firebaseio.com';
-  const _RTDB_KEY  = FIREBASE_CONFIG.apiKey;
+
+  async function _rtdbToken() {
+    try {
+      // Tenta obter o ID Token do Firebase Auth atual (mais seguro que API key)
+      if (window.firebase?.auth?.().currentUser) {
+        return await window.firebase.auth().currentUser.getIdToken();
+      }
+    } catch {}
+    // Fallback: API key (funciona se as Rules permitirem)
+    return FIREBASE_CONFIG.apiKey;
+  }
 
   async function rtdbWrite(path, data) {
     try {
-      const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${_RTDB_KEY}`, {
+      const token = await _rtdbToken();
+      const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${token}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -8586,15 +8624,26 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
 
   async function rtdbRead(path) {
     try {
-      const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${_RTDB_KEY}`);
+      const token = await _rtdbToken();
+      const res = await fetch(`https://${_RTDB_HOST}/${path}.json?auth=${token}`);
+      // 404 = nó não existe ainda (normal) — retorna null silenciosamente
+      if (res.status === 404) return null;
       if (!res.ok) return null;
-      return await res.json();
+      const json = await res.json();
+      return json; // Firebase retorna null (JSON null) quando nó não existe
     } catch(e) { return null; }
   }
 
   function rvEnviarViaBanco(msg) {
-    // Escreve no RTDB no caminho onde o agente faz SSE-listen: /relay/{sessaoId}/cmd
-    return rtdbWrite(`relay/${sessaoId}/cmd`, { payload: msg, ts: Date.now() });
+    // Tenta RTDB primeiro (baixa latência), fallback para Firestore (mais compatível)
+    return rtdbWrite(`relay/${sessaoId}/cmd`, { payload: msg, ts: Date.now() })
+      .catch(() => {
+        // RTDB falhou (permissão?) — usa Firestore como canal de relay
+        return db?.collection('sessoes_remotas').doc(sessaoId).set({
+          relay_cmd: JSON.stringify(msg),
+          relay_ts: Date.now(),
+        }, { merge: true }).catch(() => {});
+      });
   }
 
   function rvEscutarRespostasBanco_old(){} // substituída abaixo

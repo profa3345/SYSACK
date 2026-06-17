@@ -919,16 +919,44 @@ function iniciarRelayRtdb(sessaoId) {
   if (_sessoesAtivas.has(sessaoId)) return;
   _sessoesAtivas.add(sessaoId);
   log(`[RTDB] Iniciando relay para sessão ${sessaoId}`);
-  // Grava handshake — app aguarda esse nó antes de abrir SSE
+
+  // Grava handshake no RTDB para sinalizar que está pronto
   rtdbEscrever(`relay/${sessaoId}/handshake`, {
-    agentId:   AGENT_ID,
-    hostname:  require('os').hostname(),
-    ts:        Date.now(),
-    status:    'ready',
-  }).then(() => {
-    log(`[RTDB] Handshake gravado — sessão ${sessaoId}`);
-  }).catch(e => log(`[RTDB] Erro handshake: ${e.message}`));
+    agentId:  AGENT_ID,
+    hostname: require('os').hostname(),
+    ts:       Date.now(),
+    status:   'ready',
+  }).then(() => log(`[RTDB] Handshake gravado — sessão ${sessaoId}`))
+    .catch(e  => log(`[RTDB] Handshake falhou: ${e.message} — usando Firestore relay`));
+
+  // Escuta comandos via RTDB (baixa latência quando disponível)
   rtdbListen(sessaoId, msg => processarComandoRtdb(sessaoId, msg));
+
+  // Fallback: escuta comandos via Firestore sessoes_remotas
+  _iniciarPollFirestoreRelay(sessaoId);
+}
+
+function _iniciarPollFirestoreRelay(sessaoId) {
+  let ultimoTs = 0;
+  const poll = setInterval(async () => {
+    if (!_sessoesAtivas.has(sessaoId)) { clearInterval(poll); return; }
+    try {
+      const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/sessoes_remotas/${sessaoId}?key=${API_KEY}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const doc = await res.json();
+      const ts  = Number(doc.fields?.relay_ts?.integerValue || doc.fields?.relay_ts?.doubleValue || 0);
+      const cmd = doc.fields?.relay_cmd?.stringValue || '';
+      if (ts > ultimoTs && cmd) {
+        ultimoTs = ts;
+        try {
+          const msg = JSON.parse(cmd);
+          log(`[Firestore Relay] Cmd: ${msg.tipo || JSON.stringify(msg).slice(0,50)}`);
+          await processarComandoRtdb(sessaoId, msg);
+        } catch(e) { log(`[Firestore Relay] Erro: ${e.message}`); }
+      }
+    } catch {}
+  }, 1500);
 }
 
 function encerrarRelayRtdb(sessaoId) {
