@@ -1331,20 +1331,18 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // ── Reset de scroll ao trocar de página ──────────────────────
-  const _content = document.getElementById('main-content-area') || document.querySelector('.content');
-  const _resetScroll = () => {
-    if (_content) _content.scrollTop = 0;
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-    window.scrollTo(0, 0);
-  };
-  _resetScroll();
-  requestAnimationFrame(_resetScroll);
-  // Resets extras para pegar renders assíncronos (ex: _arEnsureLoaded com 300ms delay)
-  setTimeout(_resetScroll, 200);
-  setTimeout(_resetScroll, 500);
-  setTimeout(_resetScroll, 900);
+  // Reseta scroll ao trocar de página
+  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
+  const _doReset = () => { if (_sc) _sc.scrollTop = 0; };
+  _doReset();
+  requestAnimationFrame(_doReset);
+
+  renderPage(id);
+
+  // Resets pós-render (captura renders assíncronos como _arEnsureLoaded com delay 300ms)
+  setTimeout(_doReset, 150);
+  setTimeout(_doReset, 400);
+  setTimeout(_doReset, 750);
 }
 
 function renderPage(id) {
@@ -7885,6 +7883,10 @@ function abrirHistoricoGeralDoAgente(agentId) {
 }
 
 function renderAssistenciaRemota() {
+  // Reseta scroll sempre que esta página é renderizada
+  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
+  if (_sc) _sc.scrollTop = 0;
+
   const tbody = document.getElementById('ar-tbody');
   if (!tbody) return;
 
@@ -8501,21 +8503,18 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         }
       } catch {}
 
-      // Fallback: verifica se o agente confirmou via agent_commands (sem orderBy para evitar índice)
+      // Fallback: verifica se o agente confirmou via Firestore (agent_commands status=concluido)
       try {
-        if (FB_READY && db && tentativas % 3 === 0) {
+        if (FB_READY && db && tentativas % 3 === 0) { // verifica a cada 3s
           const snap = await db.collection('agent_commands')
             .where('agentId', '==', agentId)
             .where('tipo', '==', 'usar_firebase_relay')
             .where('status', '==', 'concluido')
-            .limit(5).get();
+            .orderBy('createdAt', 'desc').limit(1).get();
           if (!snap.empty) {
-            // Verifica se algum foi concluído nos últimos 30s
-            const recente = snap.docs.find(d => {
-              const ts = new Date(d.data().createdAt || 0).getTime();
-              return Date.now() - ts < 30000;
-            });
-            if (recente) {
+            const cmd = snap.docs[0].data();
+            const criadoEm = new Date(cmd.createdAt).getTime();
+            if (Date.now() - criadoEm < 30000) { // concluído nos últimos 30s
               clearInterval(aguardarHandshake);
               rvShellLog('[SYSACK] Agente confirmou via Firestore — relay ativo.', '#F59E0B');
               _conectadoBanco();
