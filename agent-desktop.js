@@ -1086,12 +1086,16 @@ async function executarComando(doc) {
       const backupPath = path.join(__dirname,'agent-desktop.backup.js');
       try { fs.copyFileSync(selfPath, backupPath); } catch(e) {}
       fs.writeFileSync(selfPath, novoConteudo, 'utf8');
-      log(`[UPDATE] Substituído (${novoConteudo.length} bytes). Reiniciando em 3s...`);
+      log(`[UPDATE] Substituído (${novoConteudo.length} bytes). Gravando confirmação...`);
       resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
-      // Grava status ANTES de reiniciar (ordem importa: patch agents, patch command, restart)
-      await firestorePatch('agents/'+AGENT_ID,{versaoAgente:versaoNova,ultimaAtualizacao:new Date().toISOString(), agentVersion: versaoNova}).catch(()=>{});
-      await firestorePatch('agent_commands/'+id, { status: 'concluido', resultado: resultado.slice(0,500) }).catch(()=>{});
-      log(`[UPDATE] Status gravado. Reiniciando processo em 3s...`);
+      // CRÍTICO: grava status ANTES do exit — app monitora este campo
+      await firestorePatch('agents/'+AGENT_ID, {
+        versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
+      }).catch(()=>{});
+      await firestorePatch('agent_commands/'+id, {
+        status: 'concluido', resultado: resultado
+      }).catch(()=>{});
+      log(`[UPDATE] Confirmação gravada. Reiniciando em 3s...`);
       agendarReinicioAgent();
       setTimeout(()=>process.exit(0), 3000);
 
@@ -1125,7 +1129,7 @@ async function executarComando(doc) {
       resultado, tipo, ts: new Date().toISOString(), agentId: AGENT_ID,
     }).catch(() => {});
   }
-  // Para atualizar_agente o status já foi gravado antes do restart — não duplicar
+  // atualizar_agente já gravou o status antes do process.exit — não duplicar
   if (tipo !== 'atualizar_agente') {
     await firestorePatch('agent_commands/' + id, { status: erroExec ? 'erro' : 'concluido', resultado: resultado.slice(0, 500) }).catch(() => {});
   }
