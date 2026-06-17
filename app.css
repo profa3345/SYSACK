@@ -892,3 +892,17 @@ textarea.form-control{resize:vertical;min-height:80px}
 #ch-pq-resultados .emp-ac-item{min-height:58px!important;box-sizing:border-box!important;background:#fff!important;position:relative!important;clear:both!important;}
 #ch-pq-resultados .emp-ac-item:hover{background:#F8FAFC!important;}
 #ch-pq-resultados .emp-ac-item-main{line-height:1.25!important;}
+
+/* SYSACK FIX 2026-06-17 — remove espaço superior da tela */
+html, body { margin: 0 !important; padding: 0 !important; }
+.content, .main .content, #main-content-area {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+.page.active, .page {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+.topbar + .content, .topbar + #main-content-area {
+  padding-top: 0 !important;
+}

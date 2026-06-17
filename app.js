@@ -9258,70 +9258,156 @@ function arAtualizarClientes() {
 
 async function executarAtualizacaoCliente() {
   // URL sempre fixa — busca diretamente da Vercel, transparente para o técnico
-  const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js';
+  const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js?ts=' + Date.now();
   const btn = document.getElementById('btn-upd-exec');
 
-  // Tenta ler do dataset (setado por arAtualizarClientes) — fallback: recalcula
   let versao = btn?.dataset?.versao || '';
   if (!versao) {
     const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-    if (online.length) {
-      const va = online.map(a=>a.versaoAgente||a.version||'2.1.0')
-        .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
-      const pts = va.split('.').map(Number); pts[2]=(pts[2]||0)+1;
-      versao = pts.join('.');
-    }
+    const va = (online.length ? online : (STATE_AGENTS.list||[])).map(a=>a.versaoAgente||a.version||'2.1.0')
+      .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
+    const pts = va.split('.').map(Number); pts[2]=(pts[2]||0)+1;
+    versao = pts.join('.');
   }
   if (!versao) return showToast('Versão não definida — tente fechar e abrir o modal novamente.','warning');
 
   const alvos  = document.getElementById('upd-agentes')?.value || 'online';
-  const online2 = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-  const todos   = STATE_AGENTS.list||[];
-  const lista   = alvos==='todos' ? todos : online2;
-  if (!lista.length) return showToast('Nenhum agente disponível','warning');
+  const todos  = STATE_AGENTS.list || [];
+  const online = todos.filter(a => a.status === 'online');
+  const offline = todos.filter(a => a.status !== 'online');
+  const listaEnviar = alvos === 'todos' ? online : online;
+  const listaNaoEnviada = alvos === 'todos' ? offline : [];
+  if (!listaEnviar.length && !listaNaoEnviada.length) return showToast('Nenhum agente disponível','warning');
 
-  if(btn){btn.disabled=true;btn.textContent='Enviando...';}
+  if(btn){btn.disabled=true;btn.textContent='Aplicando...';}
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='';
-  updLog(`Iniciando atualização para versão ${versao}...`);
+  const lb = document.getElementById('upd-log-body'); if(lb) lb.innerHTML='';
+  updLog(`Iniciando atualização IMEDIATA para versão ${versao}...`);
   updLog(`Fonte: ${AGENT_URL}`);
-  updLog(`Alvos: ${lista.length} agente(s)`);
-  showUpdStatus('info','Enviando comandos...');
+  updLog(`Alvos online: ${listaEnviar.length} agente(s)`);
+  if (listaNaoEnviada.length) updLog(`Não enviados por estarem offline: ${listaNaoEnviada.length} agente(s)`);
+  showUpdStatus('info','Enviando comandos e aguardando confirmação dos agentes...');
+
   const TOKEN = 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9';
-  let ok=0,erro=0;
+  const resultados = [];
+
   try {
-    // Grava metadados da atualização (opcional — não bloqueia se sem permissão)
     try {
       await fsSet('agent_updates', versao.replace(/\./g,'_'), {
         versao, url: AGENT_URL,
         publicadoPor: (SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'admin',
         publicadoEm:  new Date().toISOString(),
-        alvos, totalAgentes: lista.length,
+        alvos, totalAgentes: listaEnviar.length + listaNaoEnviada.length,
       });
       updLog(`✓ Metadados gravados em /agent_updates/${versao}`);
     } catch(eMeta) {
       updLog(`ℹ️ Metadados não gravados (sem permissão na coleção agent_updates) — continuando...`);
     }
-    for (const ag of lista) {
-      try {
-        await fsAdd('agent_commands',{
-          agentId: ag.id, tipo: 'atualizar_agente',
-          dados:   JSON.stringify({ url: AGENT_URL, versao }),
-          token:   TOKEN, status: 'pendente',
-          criadoEm:   new Date().toISOString(),
-          criadoPor:  (SESSION_USER||CURRENT_USER)?.uid||'',
-        });
-        updLog(`→ ${ag.hostname||ag.id}`); ok++;
-      } catch(e) { updLog(`✗ ${ag.hostname||ag.id}: ${e.message}`); erro++; }
+
+    for (const ag of listaNaoEnviada) {
+      resultados.push({ agent: ag, status:'nao_atualizado', motivo:'Agente offline no momento do envio' });
+      updLog(`✗ ${ag.hostname||ag.id}: offline — comando não enviado`);
     }
-    const msg = `✅ ${ok} agente(s) notificado(s)${erro?` · ${erro} erro(s)`:''}.`;
-    showUpdStatus('success', msg);
-    updLog(msg);
-    updLog(`ℹ️ O agente aplica a atualização no próximo ciclo (≤5s) e reinicia automaticamente.`);
-    updLog(`ℹ️ Aguarde ~30s e verifique a coluna "Versão" na tabela — deve exibir v${versao}.`);
-    showToast(`✅ Atualização v${versao} enviada para ${ok} agente(s)!`, 'success', 5000);
-    setTimeout(() => renderAssistenciaRemota(), 2000);
-  } catch(e) { showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message); }
-  finally { if(btn){btn.disabled=false;btn.textContent='🚀 Enviar Atualização';} }
+
+    const comandos = [];
+    for (const ag of listaEnviar) {
+      const cmdId = 'upd_' + Date.now() + '_' + String(ag.id).replace(/[^a-zA-Z0-9_-]/g,'_');
+      try {
+        await fsSet('agent_commands', cmdId, {
+          agentId: ag.id,
+          tipo: 'atualizar_agente',
+          dados: JSON.stringify({ url: AGENT_URL, versao, imediato: true }),
+          token: TOKEN,
+          status: 'pendente',
+          criadoEm: new Date().toISOString(),
+          criadoPor: (SESSION_USER||CURRENT_USER)?.uid||'',
+          criadoPorNome: (SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'',
+        });
+        comandos.push({ cmdId, agent: ag });
+        updLog(`→ ${ag.hostname||ag.id}: comando enviado`);
+      } catch(e) {
+        resultados.push({ agent: ag, status:'nao_atualizado', motivo:'Erro ao gravar comando: ' + e.message });
+        updLog(`✗ ${ag.hostname||ag.id}: ${e.message}`);
+      }
+    }
+
+    const pendentes = new Map(comandos.map(c => [c.cmdId, c]));
+    const inicio = Date.now();
+    const TIMEOUT_MS = 45000;
+
+    while (pendentes.size && Date.now() - inicio < TIMEOUT_MS) {
+      await new Promise(r => setTimeout(r, 1000));
+      for (const [cmdId, item] of [...pendentes.entries()]) {
+        try {
+          const snap = await db.collection('agent_commands').doc(cmdId).get();
+          const d = snap.data() || {};
+          const st = d.status || 'pendente';
+          if (st === 'concluido') {
+            resultados.push({ agent:item.agent, status:'atualizado', motivo:d.resultado || `Atualização v${versao} aplicada` });
+            updLog(`✓ ${item.agent.hostname||item.agent.id}: atualizado (${d.resultado || 'confirmado'})`);
+            pendentes.delete(cmdId);
+          } else if (['erro','falhou','descartado'].includes(st)) {
+            resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:d.resultado || d.erro || st });
+            updLog(`✗ ${item.agent.hostname||item.agent.id}: ${d.resultado || d.erro || st}`);
+            pendentes.delete(cmdId);
+          } else if (st === 'executando' || st === 'processando') {
+            updLog(`… ${item.agent.hostname||item.agent.id}: ${st}`);
+          }
+        } catch(e) {
+          resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:'Erro ao consultar retorno: ' + e.message });
+          updLog(`✗ ${item.agent.hostname||item.agent.id}: erro ao consultar retorno`);
+          pendentes.delete(cmdId);
+        }
+      }
+    }
+
+    for (const item of pendentes.values()) {
+      resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:'Timeout — agente não respondeu em 45s' });
+      updLog(`✗ ${item.agent.hostname||item.agent.id}: timeout — não confirmou em 45s`);
+    }
+
+    renderResultadoAtualizacaoCliente(resultados, versao);
+    const atualizados = resultados.filter(r=>r.status==='atualizado').length;
+    const naoAtualizados = resultados.length - atualizados;
+    const msg = `✅ ${atualizados} atualizado(s) · ❌ ${naoAtualizados} não atualizado(s).`;
+    showUpdStatus(naoAtualizados ? 'warning' : 'success', msg);
+    showToast(msg, naoAtualizados ? 'warning' : 'success', 7000);
+    setTimeout(() => renderAssistenciaRemota(), 1500);
+  } catch(e) {
+    showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message);
+  } finally {
+    if(btn){btn.disabled=false;btn.textContent='🚀 Aplicar Atualização Agora';}
+  }
+}
+
+function renderResultadoAtualizacaoCliente(resultados, versao) {
+  let box = document.getElementById('upd-resultado');
+  if (!box) {
+    const log = document.getElementById('upd-log');
+    if (log) log.insertAdjacentHTML('afterend', '<div id="upd-resultado" style="margin-top:12px"></div>');
+    box = document.getElementById('upd-resultado');
+  }
+  if (!box) return;
+  const ok = resultados.filter(r=>r.status==='atualizado');
+  const fail = resultados.filter(r=>r.status!=='atualizado');
+  const linha = r => `<tr>
+    <td style="padding:6px 8px;border-bottom:1px solid var(--g100)">${escapeHtml(r.agent.hostname||r.agent.id||'—')}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid var(--g100);font-family:monospace;font-size:11px">${escapeHtml(r.agent.id||'—')}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid var(--g100)">${r.status==='atualizado'?'✅ Atualizado':'❌ Não atualizado'}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid var(--g100)">${escapeHtml(r.motivo||'—')}</td>
+  </tr>`;
+  box.innerHTML = `
+    <div style="border:1px solid var(--g200);border-radius:12px;overflow:hidden;background:#fff">
+      <div style="padding:12px 14px;background:var(--g50);font-weight:800;font-size:13px">
+        Resultado da atualização v${escapeHtml(versao)} — ✅ ${ok.length} atualizado(s) · ❌ ${fail.length} não atualizado(s)
+      </div>
+      <div style="max-height:260px;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#F8FAFC"><th>Hostname</th><th>Agent ID</th><th>Status</th><th>Motivo / Retorno</th></tr></thead>
+          <tbody>${resultados.map(linha).join('') || '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--g400)">Nenhum resultado</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 function _monitorarConfirmacaoUpdate() {} // removido — não é necessário

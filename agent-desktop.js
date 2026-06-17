@@ -1012,6 +1012,7 @@ async function executarComando(doc) {
 
   // Comandos legados via Firestore (compatibilidade com agentes antigos)
   let resultado = '';
+  let erroExec = false;
   try {
     if (tipo === 'powershell') {
       const cmd = dados.cmd || '';
@@ -1071,6 +1072,7 @@ async function executarComando(doc) {
       resultado = 'tipo desconhecido: ' + tipo;
     }
   } catch(e) {
+    erroExec = true;
     resultado = '[ERRO] ' + e.message;
   }
 
@@ -1079,7 +1081,7 @@ async function executarComando(doc) {
       resultado, tipo, ts: new Date().toISOString(), agentId: AGENT_ID,
     }).catch(() => {});
   }
-  await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado: resultado.slice(0, 500) }).catch(() => {});
+  await firestorePatch('agent_commands/' + id, { status: erroExec ? 'erro' : 'concluido', resultado: resultado.slice(0, 500) }).catch(() => {});
 }
 
 // Poll Firestore — somente para receber "iniciar_acesso_remoto" com sessaoId
@@ -1098,7 +1100,8 @@ async function pollComandos() {
   } catch(e) {}
 }
 
-setInterval(pollComandos, 5000);
+setInterval(pollComandos, 1000);
+setTimeout(pollComandos, 250);
 
 
 // ── Atualiza ativo correspondente com hostname ────────────────────
