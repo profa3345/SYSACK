@@ -31398,14 +31398,72 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
 })();
 
 
-// SYSACK - URL correta do instalador do agente
-window.SYSACK_AGENT_INSTALLER_URL = '/Instalar-SYSACK-Agent.bat';
+// SYSACK - Instalador local gerado dinamicamente
+// Não depende mais do arquivo /Instalar-SYSACK-Agent.bat publicado na Vercel.
+// O BAT gerado baixa sempre o agent-desktop.js atual da Vercel para C:\SYSACK\agent.js.
+window.SYSACK_AGENT_JS_URL = 'https://sysack.vercel.app/agent-desktop.js';
+window.SYSACK_AGENT_INSTALLER_URL = window.SYSACK_AGENT_JS_URL;
 
 function baixarInstaladorSYSACKCorrigido() {
-  const a = document.createElement('a');
-  a.href = window.SYSACK_AGENT_INSTALLER_URL;
+  const linhas = [
+    '@echo off',
+    'chcp 65001 >nul',
+    'title SYSACK Agent Desktop - Instalador',
+    'echo ============================================',
+    'echo  SYSACK Agent Desktop - Instalacao/Atualizacao',
+    'echo ============================================',
+    'echo.',
+    'net session >nul 2>&1',
+    'if errorlevel 1 (',
+    '  echo ERRO: Execute este arquivo como Administrador.',
+    '  echo Clique com o botao direito e escolha Executar como administrador.',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'set "SYSACK_DIR=C:\\SYSACK"',
+    'set "AGENT_URL=https://sysack.vercel.app/agent-desktop.js"',
+    'set "AGENT_FILE=%SYSACK_DIR%\\agent.js"',
+    'set "NODE_EXE=C:\\Program Files\\nodejs\\node.exe"',
+    'echo [1/5] Preparando pasta %SYSACK_DIR%...',
+    'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
+    'echo [2/5] Encerrando execucao anterior do agente...',
+    'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
+    'for /f "tokens=2 delims==" %%P in (\'wmic process where "CommandLine like \'%%SYSACK%%agent.js%%\'" get ProcessId /value 2^>nul ^| find "ProcessId"\') do taskkill /PID %%P /F >nul 2>&1',
+    'timeout /t 2 /nobreak >nul',
+    'echo [3/5] Baixando agente atualizado da Vercel...',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri (\'%AGENT_URL%?ts=\' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -OutFile \'%AGENT_FILE%\'"',
+    'if not exist "%AGENT_FILE%" (',
+    '  echo ERRO: agent.js nao foi baixado.',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'echo [4/5] Verificando Node.js...',
+    'if not exist "%NODE_EXE%" (',
+    '  echo ERRO: Node.js nao encontrado em %NODE_EXE%.',
+    '  echo Instale Node.js 18+ e execute novamente.',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'echo [5/5] Criando/atualizando tarefa agendada...',
+    'schtasks /Create /TN "SYSACK-Agent" /TR "\"%NODE_EXE%\" \"%AGENT_FILE%\"" /SC ONSTART /RU SYSTEM /RL HIGHEST /F',
+    'schtasks /Run /TN "SYSACK-Agent"',
+    'echo.',
+    'echo ============================================',
+    'echo  Instalacao concluida.',
+    'echo  O computador aparecera no SYSACK em ~60 segundos.',
+    'echo ============================================',
+    'pause'
+  ];
+
+  const script = linhas.join('\r\n');
+  const blob = new Blob([script], { type: 'application/x-bat;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
   a.download = 'Instalar-SYSACK-Agent.bat';
   document.body.appendChild(a);
   a.click();
   a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Instalador gerado. Execute como Administrador no PC alvo.', 'success', 5000);
 }
