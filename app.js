@@ -1335,11 +1335,16 @@ function goPage(id) {
 
   // Marca nova página
   _paginaAtual = id;
-  _scrollFoiReset = false;
 
-  // Reseta scroll do container (segurança)
-  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
-  if (_sc) _sc.scrollTop = 0;
+  // Move a página ativa para o início do container
+  // Isso elimina o offsetTop acumulado pelas páginas anteriores no DOM
+  if (page) {
+    const container = document.getElementById('main-content-area') || document.querySelector('.content');
+    if (container && container.firstChild !== page) {
+      container.insertBefore(page, container.firstChild);
+    }
+    container.scrollTop = 0;
+  }
 
   renderPage(id);
 }
