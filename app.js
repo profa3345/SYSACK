@@ -1343,18 +1343,16 @@ function goPage(id) {
 
   renderPage(id);
 
-  // Resets pós-render com proteção de tempo (2s após mudança de página)
-  const _tsNavegacao = Date.now();
-  const _doReset = () => {
-    if (_paginaAtual !== id) return; // já mudou de página
-    if (Date.now() - _tsNavegacao > 2000) return; // passou muito tempo
+  // Mantém scroll em 0 por 2s após navegação — captura qualquer render assíncrono
+  const _tsNav = Date.now();
+  const _holdScroll = setInterval(() => {
+    if (_paginaAtual !== id || Date.now() - _tsNav > 2000) {
+      clearInterval(_holdScroll);
+      return;
+    }
     const sc = document.getElementById('main-content-area') || document.querySelector('.content');
-    if (sc) sc.scrollTop = 0;
-  };
-  setTimeout(_doReset, 100);
-  setTimeout(_doReset, 300);
-  setTimeout(_doReset, 600);
-  setTimeout(_doReset, 1000);
+    if (sc && sc.scrollTop !== 0) sc.scrollTop = 0;
+  }, 50); // verifica a cada 50ms
 }
 
 function renderPage(id) {
