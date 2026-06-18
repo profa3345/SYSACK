@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.3
+ * SYSACK Agent Desktop v2.1.4
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -25,7 +25,7 @@ const PROJECT_ID = cfg.firebaseProjectId || 'sysack-829e2';
 const API_KEY    = cfg.firebaseApiKey    || 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
 const AGENT_ID   = cfg.agentId          || os.hostname();
 const INTERVAL   = (cfg.intervalSeconds || 60) * 1000;
-const TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
+let TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
 const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000;
 let _softwareCache = { at: 0, list: [] };
 
@@ -579,7 +579,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.3] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1.4] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -1322,7 +1322,7 @@ async function carregarConfigTunnel() {
             TUNNEL_TOKEN = t;
             log('[Tunnel] Token carregado do Firestore (sysack_config/tunnel)');
           } else if (!TUNNEL_TOKEN) {
-            log('[Tunnel] Sem token — usando quick tunnel (sujeito a rate limit)');
+            log('[Tunnel] Sem token — tunnel automático ficará desativado');
           }
         } catch { /* usa fallback do config.json */ }
         resolve();
@@ -1400,15 +1400,32 @@ async function baixarCloudflared() {
 
 async function iniciarTunnel() {
   try {
-    // Carrega token do tunnel e credenciais do proxy do Firestore
+    // Carrega token do tunnel do Firestore.
+    // IMPORTANTE: sem token NÃO inicia quick tunnel automaticamente.
+    // Isso evita loop de tentativas, rate limit do Cloudflare e bloqueios pelo proxy/rede.
     await carregarConfigTunnel();
+
+    if (!TUNNEL_TOKEN) {
+      log('[Tunnel] Sem token configurado — tunnel automático desativado');
+      try {
+        await firestorePatch('agents/' + AGENT_ID, {
+          tunnelAtivo: false,
+          tunnelUrl: '',
+          tunnelModo: 'disabled',
+          tunnelStatus: 'sem_token',
+          tunnelMensagem: 'Tunnel automático desativado: configure sysack_config/tunnel.token para habilitar acesso remoto.'
+        });
+      } catch(e) {}
+      return;
+    }
+
     await carregarCredenciaisProxy();
     const ok = await baixarCloudflared();
     if (!ok) { log('[Tunnel] Falha ao baixar cloudflared'); return; }
 
     log('[Tunnel] Iniciando tunnel Cloudflare...');
 
-    // ── Modo 1: Tunnel NOMEADO com token (sem rate limit, recomendado) ──
+    // ── Tunnel NOMEADO com token (sem rate limit, recomendado) ──
     // Token configurado em: Firebase Console → sysack_config → tunnel → campo "token"
     if (TUNNEL_TOKEN) {
       log('[Tunnel] Usando tunnel NOMEADO (sysack_config/tunnel) — sem rate limit');
@@ -1440,7 +1457,8 @@ async function iniciarTunnel() {
     }
 
     // ── Modo 2: Quick tunnel gratuito (trycloudflare.com — sujeito a rate limit) ──
-    log('[Tunnel] Sem token configurado — usando quick tunnel (sujeito a rate limit)');
+    log('[Tunnel] Sem token configurado — quick tunnel bloqueado/desativado');
+    return;
     const proc = spawn(CLOUDFLARED_PATH, [
       'tunnel', '--url', 'ws://localhost:9000',
       '--no-autoupdate',
