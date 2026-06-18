@@ -1118,6 +1118,114 @@ async function executarComando(doc) {
     return;
   }
 
+  // ── BLOQUEIO DE MÁQUINA (todos os usuários) ──────────────────────
+  if (tipo === 'bloquear_maquina') {
+    try {
+      const motivo   = dados.motivo   || 'Bloqueado pelo TI';
+      const operador = dados.operador || 'TI';
+
+      const blockedUsersFile = path.join(__dirname, 'blocked_users.txt').replace(/\\/g, '\\\\');
+      const lockFile         = path.join(__dirname, 'machine.lock');
+
+      const motivoSafe = motivo.replace(/'/g, '').replace(/\n/g, ' ').replace(/"/g, '');
+      const psBlock = `
+# 1. Salva lista de usuarios locais ativos para restaurar no desbloqueio
+$usuarios = Get-LocalUser | Where-Object { $_.Enabled -eq $true -and $_.Name -notmatch 'Admin|SYSTEM|DefaultAccount|WDAGUtilityAccount|Guest' }
+$lista = ($usuarios.Name) -join ','
+Set-Content -Path '${blockedUsersFile}' -Value $lista -Encoding UTF8
+
+# 2. Desativa TODOS os usuarios locais nao-administradores
+foreach ($u in $usuarios) {
+  try { Disable-LocalUser -Name $u.Name; Write-Host "Desativado: $($u.Name)" } catch { Write-Host "Erro: $($u.Name) - $_" }
+}
+
+# 3. Exibe aviso de bloqueio na tela de logon (Registry)
+$regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System'
+Set-ItemProperty -Path $regPath -Name 'legalnoticecaption' -Value 'MAQUINA BLOQUEADA - TI CESAN' -Type String -Force
+Set-ItemProperty -Path $regPath -Name 'legalnoticetext' -Value 'Esta maquina foi bloqueada pelo TI. Motivo: ${motivoSafe}. Para desbloquear, contate o TI CESAN.' -Type String -Force
+
+# 4. Desconecta todas as sessoes ativas
+query session 2>$null | Select-String 'Active|Ativo' | ForEach-Object {
+  $parts = ($_ -replace '\\s+', ' ').Trim() -split ' '
+  $sid = $parts | Where-Object { $_ -match '^\\d+$' } | Select-Object -First 1
+  if ($sid) { logoff $sid /server:localhost 2>$null; Write-Host "Sessao encerrada: $sid" }
+}
+
+# 5. Bloqueia a tela imediatamente
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LW { [DllImport("user32.dll")] public static extern bool LockWorkStation(); }'
+[LW]::LockWorkStation() | Out-Null
+
+Write-Host "BLOQUEIO_CONCLUIDO"
+`.trim();
+
+      const psPath = path.join(__dirname, '_sysack_block.ps1');
+      fs.writeFileSync(psPath, psBlock, 'utf8');
+      const saida = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 30000, windowsHide: true }).toString();
+      try { fs.unlinkSync(psPath); } catch {}
+
+      // Arquivo de estado local
+      fs.writeFileSync(lockFile, JSON.stringify({ bloqueado: true, motivo, operador, bloqueadoEm: new Date().toISOString(), hostname: require('os').hostname() }), 'utf8');
+
+      log(`[BLOQUEIO] ${saida.includes('BLOQUEIO_CONCLUIDO') ? 'Concluído' : saida.trim()}`);
+      log(`[BLOQUEIO] Máquina bloqueada por ${operador}. Motivo: ${motivo}`);
+      resultado = `Bloqueio aplicado para todos os usuários. Motivo: ${motivo}`;
+      await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado }).catch(() => {});
+    } catch(e) {
+      log('[BLOQUEIO] Erro: ' + e.message);
+      await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: e.message }).catch(() => {});
+    }
+    return;
+  }
+
+  if (tipo === 'desbloquear_maquina') {
+    try {
+      const operador         = dados.operador || 'TI';
+      const blockedUsersFile = path.join(__dirname, 'blocked_users.txt').replace(/\\/g, '\\\\');
+
+      const psUnblock = `
+# 1. Remove aviso da tela de logon
+$regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System'
+Remove-ItemProperty -Path $regPath -Name 'legalnoticecaption' -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path $regPath -Name 'legalnoticetext'    -ErrorAction SilentlyContinue
+
+# 2. Reativa usuarios que foram desativados
+$listaFile = '${blockedUsersFile}'
+if (Test-Path $listaFile) {
+  $nomes = (Get-Content $listaFile -Encoding UTF8) -split ','
+  foreach ($n in $nomes) {
+    $n = $n.Trim()
+    if ($n) {
+      try { Enable-LocalUser -Name $n; Write-Host "Reativado: $n" } catch { Write-Host "Erro ao reativar $n: $_" }
+    }
+  }
+  Remove-Item $listaFile -Force
+} else {
+  # Fallback: reativa todos os desativados (exceto contas do sistema)
+  Get-LocalUser | Where-Object { $_.Enabled -eq $false -and $_.Name -notmatch 'Guest|DefaultAccount|WDAGUtilityAccount' } | ForEach-Object {
+    try { Enable-LocalUser -Name $_.Name; Write-Host "Reativado (fallback): $($_.Name)" } catch {}
+  }
+}
+
+Write-Host "DESBLOQUEIO_CONCLUIDO"
+`.trim();
+
+      const psPath = path.join(__dirname, '_sysack_unblock.ps1');
+      fs.writeFileSync(psPath, psUnblock, 'utf8');
+      const saida = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 30000, windowsHide: true }).toString();
+      try { fs.unlinkSync(psPath); } catch {}
+      try { fs.unlinkSync(path.join(__dirname, 'machine.lock')); } catch {}
+
+      log(`[DESBLOQUEIO] ${saida.includes('DESBLOQUEIO_CONCLUIDO') ? 'Concluído' : saida.trim()}`);
+      log(`[DESBLOQUEIO] Máquina desbloqueada por ${operador}`);
+      resultado = `Desbloqueio aplicado por ${operador}. Usuários reativados.`;
+      await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado }).catch(() => {});
+    } catch(e) {
+      log('[DESBLOQUEIO] Erro: ' + e.message);
+      await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: e.message }).catch(() => {});
+    }
+    return;
+  }
+
   // Comandos legados via Firestore (compatibilidade com agentes antigos)
   let resultado = '';
   let erroExec = false;
