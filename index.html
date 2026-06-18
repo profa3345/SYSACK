@@ -6830,5 +6830,29 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
     </div>
   </div>
 </div>
+<script>
+// SYSACK diagnóstico scroll — remove após identificar o problema
+(function() {
+  function diagScroll() {
+    const sc = document.getElementById('main-content-area') || document.querySelector('.content');
+    if (sc && sc.scrollTop > 5) {
+      console.error('[SCROLL DIAG] main-content-area scrollTop=', sc.scrollTop, '— chamado por:', new Error().stack);
+      sc.scrollTop = 0;
+    }
+  }
+  // Observa mudanças no scrollTop
+  let _lastScroll = 0;
+  setInterval(() => {
+    const sc = document.getElementById('main-content-area') || document.querySelector('.content');
+    if (!sc) return;
+    if (sc.scrollTop !== _lastScroll) {
+      if (sc.scrollTop > 5) {
+        console.error('[SCROLL DIAG] scrollTop mudou para', sc.scrollTop);
+      }
+      _lastScroll = sc.scrollTop;
+    }
+  }, 100);
+})();
+</script>
 </body>
 </html>
