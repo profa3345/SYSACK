@@ -1,4 +1,4 @@
-// SYSACK v2.1.6 — app.js
+// SYSACK v2.1 — app.js
 // Módulo principal de aplicação
 
 
@@ -8282,43 +8282,14 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     rvSb('Detectando melhor rota de conexão...');
     rvSetStatus('detectando', 'Conectando...');
 
-    // v2.1.6: após enviar iniciar_acesso_remoto, o agente pode gravar a URL do tunnel
-    // alguns segundos depois. Então buscamos o documento mais recente antes de decidir rota.
-    let agente = STATE_AGENTS?.list?.find(a => a.id === agentId) || {};
-    try {
-      if (FB_READY && db) {
-        const snapAg = await db.collection('agents').doc(agentId).get();
-        if (snapAg.exists) {
-          agente = { ...agente, ...(snapAg.data() || {}) };
-          const idx = STATE_AGENTS?.list?.findIndex(a => a.id === agentId);
-          if (idx >= 0) STATE_AGENTS.list[idx] = { ...STATE_AGENTS.list[idx], ...agente };
-        }
-      }
-    } catch(e) {}
-
-    let tunnelUrl =
-      agente?.tunnelUrl ||
-      agente?.tunnelURL ||
-      agente?.cloudflareUrl ||
-      agente?.cloudflareTunnelUrl ||
-      agente?.remoteUrl ||
-      '';
-
-    // Se o tunnel ainda estiver iniciando, aguarda um pouco e tenta ler novamente.
-    if (!tunnelUrl && agente?.tunnelStatus === 'iniciando' && FB_READY && db) {
-      rvSb('Aguardando Cloudflare Tunnel iniciar...');
-      for (let i = 0; i < 6 && !tunnelUrl; i++) {
-        await new Promise(r => setTimeout(r, 1500));
-        try {
-          const snapAg2 = await db.collection('agents').doc(agentId).get();
-          if (snapAg2.exists) {
-            const ag2 = snapAg2.data() || {};
-            tunnelUrl = ag2.tunnelUrl || ag2.tunnelURL || ag2.cloudflareUrl || ag2.cloudflareTunnelUrl || ag2.remoteUrl || '';
-            agente = { ...agente, ...ag2 };
-          }
-        } catch(e) {}
-      }
-    }
+    const agente = STATE_AGENTS?.list?.find(a => a.id === agentId);
+    const tunnelUrl =
+  agente?.tunnelUrl ||
+  agente?.tunnelURL ||
+  agente?.cloudflareUrl ||
+  agente?.cloudflareTunnelUrl ||
+  agente?.remoteUrl ||
+  '';
 
     // Página em HTTPS não pode abrir ws:// (mixed content bloqueado pelo browser)
     // Nesse caso vai direto para o tunnel Cloudflare (wss://)
