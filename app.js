@@ -1333,26 +1333,15 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // Marca nova página — permite resetar scroll
+  // Marca nova página
   _paginaAtual = id;
   _scrollFoiReset = false;
 
-  // Reset imediato
+  // Reseta scroll do container (segurança)
   const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
   if (_sc) _sc.scrollTop = 0;
 
   renderPage(id);
-
-  // Mantém scroll em 0 por 2s após navegação — captura qualquer render assíncrono
-  const _tsNav = Date.now();
-  const _holdScroll = setInterval(() => {
-    if (_paginaAtual !== id || Date.now() - _tsNav > 2000) {
-      clearInterval(_holdScroll);
-      return;
-    }
-    const sc = document.getElementById('main-content-area') || document.querySelector('.content');
-    if (sc && sc.scrollTop !== 0) sc.scrollTop = 0;
-  }, 50); // verifica a cada 50ms
 }
 
 function renderPage(id) {

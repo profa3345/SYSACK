@@ -341,8 +341,8 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',sans-serif;background:var(--g100);color:var(--g800);display:flex;height:100vh;overflow:hidden;font-size:14px}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes pageFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes pageFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes shimmer{0%{background-position:-600px 0}100%{background-position:600px 0}}
@@ -911,16 +911,21 @@ html, body { margin: 0 !important; padding: 0 !important; }
 /* SYSACK fix: impede browser de reposicionar scroll ao inserir conteúdo */
 .content,.content *{overflow-anchor:none!important}
 
-/* SYSACK DEFINITIVE FIX: pages stack at position:absolute so offsetTop is always 0 */
-#main-content-area { position: relative !important; }
+/* FIX DEFINITIVO: páginas com position:absolute não acumulam offsetTop
+   Isso resolve o espaço em branco causado por offsetTop:536 no DOM */
+#main-content-area {
+  position: relative !important;
+}
 #main-content-area > .page {
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
+  min-height: 0 !important;
   display: none !important;
 }
 #main-content-area > .page.active {
-  display: block !important;
   position: relative !important;
+  display: block !important;
+  min-height: auto !important;
 }
