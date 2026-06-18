@@ -7980,10 +7980,13 @@ function renderAssistenciaRemota() {
       ? `<span style="font-size:10px;background:#FEF2F2;color:#DC2626;padding:1px 6px;border-radius:10px;margin-left:4px">${a.patchesCriticos} patch(es) crítico(s)</span>`
       : '';
 
-    return `<tr>
+    return `<tr style="${a.bloqueado ? 'background:#FEF2F2;' : ''}">
       <td style="text-align:center"><span class="ar-dot ${statusCls}"></span></td>
       <td>
-        <div style="font-weight:700;font-size:13px">${escapeHtml(a.hostname||a.id)}</div>
+        <div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+          ${escapeHtml(a.hostname||a.id)}
+          ${a.bloqueado ? `<span title="${escapeHtml(a.bloqueadoMotivo||'')}" style="background:#DC2626;color:#fff;font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700">🔒 BLOQUEADA</span>` : ''}
+        </div>
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
 
@@ -8017,6 +8020,12 @@ function renderAssistenciaRemota() {
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações completas da máquina" style="padding:2px 7px;font-size:12px">📋</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
           <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">🗂️</button>
+          <button class="btn btn-xs ${a.bloqueado ? 'btn-danger' : 'btn-secondary'}"
+            onclick="arToggleBloqueio('${a.id}','${escapeHtml(a.hostname||a.id)}',${!!a.bloqueado})"
+            title="${a.bloqueado ? '🔓 Desbloquear — ' + escapeHtml(a.bloqueadoMotivo||'') : '🔒 Bloquear máquina para todos os usuários'}"
+            style="padding:2px 7px;font-size:12px${a.bloqueado?';background:#DC2626;color:#fff;border-color:#DC2626':''}">
+            ${a.bloqueado ? '🔓' : '🔒'}
+          </button>
         </div>
       </td>
     </tr>`;
@@ -9256,8 +9265,103 @@ function arInstalarAgente() {
 }
 
 // ════════════════════════════════════════════════════════════
-// ATUALIZAR CLIENTE — auto-update remoto para todos os agentes
+// BLOQUEIO DE MÁQUINA — bloqueia/desbloqueia para todos os usuários
 // ════════════════════════════════════════════════════════════
+function arToggleBloqueio(agentId, hostname, estaBloqueado) {
+  const u = SESSION_USER || CURRENT_USER;
+  if (!['admin','gestor'].includes(u?.role)) {
+    return showToast('⛔ Apenas Admin ou Gestor pode bloquear/desbloquear máquinas.', 'error');
+  }
+  if (estaBloqueado) {
+    if (!confirm(`Desbloquear a máquina "${hostname}"?\n\nOs usuários poderão fazer login normalmente.`)) return;
+    arDesbloquearMaquina(agentId, hostname);
+  } else {
+    arAbrirModalBloqueio(agentId, hostname);
+  }
+}
+
+function arAbrirModalBloqueio(agentId, hostname) {
+  document.getElementById('modal-bloqueio-maquina')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `
+  <div class="modal-overlay open" id="modal-bloqueio-maquina" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header" style="background:#DC2626;border-radius:10px 10px 0 0">
+        <div>
+          <h3 style="color:#fff;margin:0">🔒 Bloquear Máquina</h3>
+          <p style="color:rgba(255,255,255,.7);font-size:12px;margin:4px 0 0">${escapeHtml(hostname)}</p>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('modal-bloqueio-maquina').remove()" style="color:rgba(255,255,255,.6)">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;color:#991B1B">
+          ⚠️ Todos os usuários serão <strong>desconectados imediatamente</strong> e não conseguirão fazer login até o desbloqueio.
+        </div>
+        <div class="form-group">
+          <label class="form-label req">Motivo do bloqueio</label>
+          <select class="form-control" id="bloqueio-motivo" onchange="document.getElementById('bloqueio-outro-wrap').style.display=this.value==='outro'?'':'none'">
+            <option value="">— Selecione —</option>
+            <option value="Suspeita de incidente de segurança">🔐 Suspeita de incidente de segurança</option>
+            <option value="Manutenção programada">🔧 Manutenção programada</option>
+            <option value="Afastamento / férias">🏖️ Afastamento / férias</option>
+            <option value="Desligamento do colaborador">👤 Desligamento do colaborador</option>
+            <option value="Equipamento perdido ou furtado">🚨 Equipamento perdido ou furtado</option>
+            <option value="outro">✏️ Outro motivo...</option>
+          </select>
+        </div>
+        <div class="form-group" id="bloqueio-outro-wrap" style="display:none">
+          <label class="form-label req">Descreva o motivo</label>
+          <input class="form-control" id="bloqueio-outro-texto" type="text" placeholder="Descreva o motivo..." maxlength="200">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Observação (opcional)</label>
+          <textarea class="form-control" id="bloqueio-obs" rows="2" placeholder="Informações adicionais..." style="resize:vertical"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-bloqueio-maquina').remove()">Cancelar</button>
+        <button class="btn" style="background:#DC2626;color:#fff" onclick="arConfirmarBloqueio('${agentId}','${escapeHtml(hostname)}')">🔒 Confirmar Bloqueio</button>
+      </div>
+    </div>
+  </div>`);
+  setTimeout(() => document.getElementById('bloqueio-motivo')?.focus(), 100);
+}
+
+async function arConfirmarBloqueio(agentId, hostname) {
+  const motivoEl = document.getElementById('bloqueio-motivo');
+  const outroEl  = document.getElementById('bloqueio-outro-texto');
+  const obsEl    = document.getElementById('bloqueio-obs');
+  let motivo = motivoEl?.value || '';
+  if (motivo === 'outro') motivo = outroEl?.value?.trim() || '';
+  if (!motivo) { showToast('Informe o motivo do bloqueio.', 'warning'); return; }
+  const obs = obsEl?.value?.trim() || '';
+  const u   = SESSION_USER || CURRENT_USER;
+  document.getElementById('modal-bloqueio-maquina')?.remove();
+  try {
+    await db.collection('agents').doc(agentId).update({
+      bloqueado: true, bloqueadoEm: new Date().toISOString(),
+      bloqueadoPor: u?.nome || u?.email || 'admin',
+      bloqueadoMotivo: motivo, bloqueadoObs: obs,
+    });
+    await arEnviarComando(agentId, 'bloquear_maquina', { motivo, obs, operador: u?.nome || u?.email }, `Bloqueio: ${motivo}`);
+    auditLog('MACHINE_LOCK', 'agents', agentId, 'agent', { hostname, motivo });
+    showToast(`🔒 "${hostname}" bloqueada para todos os usuários.`, 'success', 5000);
+    setTimeout(() => renderAssistenciaRemota(), 1000);
+  } catch(e) { showToast('Erro ao bloquear: ' + e.message, 'error'); }
+}
+
+async function arDesbloquearMaquina(agentId, hostname) {
+  const u = SESSION_USER || CURRENT_USER;
+  try {
+    await db.collection('agents').doc(agentId).update({
+      bloqueado: false, desbloqueadoEm: new Date().toISOString(),
+      desbloqueadoPor: u?.nome || u?.email || 'admin', bloqueadoMotivo: '',
+    });
+    await arEnviarComando(agentId, 'desbloquear_maquina', { operador: u?.nome || u?.email }, `Desbloqueio por ${u?.nome||u?.email}`);
+    auditLog('MACHINE_UNLOCK', 'agents', agentId, 'agent', { hostname });
+    showToast(`🔓 "${hostname}" desbloqueada.`, 'success', 4000);
+    setTimeout(() => renderAssistenciaRemota(), 1000);
+  } catch(e) { showToast('Erro ao desbloquear: ' + e.message, 'error'); }
+}
 function arAtualizarClientes() {
   const u = SESSION_USER || CURRENT_USER;
   const role = u?.role || '';
