@@ -1294,11 +1294,13 @@ function isPageActive(pageId) {
 }
 
 // ─── SINGLE goPage + renderPage — NO PATCHES, NO RECURSION ───
+let _paginaAtual = '';         // página ativa no momento
+let _scrollFoiReset = false;   // true = ainda pode resetar, false = usuário já scrollou
+
 function goPage(id) {
   // Verifica moduloPerms — bloqueia se o módulo estiver oculto para este usuário
   const u = SESSION_USER || CURRENT_USER;
   if (u?.moduloPerms && Object.keys(u.moduloPerms).length > 0 && !['admin','gestor'].includes(u.role)) {
-    // Mapeamento inverso page→moduloId (mesma tabela de aplicarModuloPermsMenu)
     const P2M = {ativos:'ativos',computadores:'ativos',notebooks:'ativos',servidores:'ativos',monitores:'ativos',
       patrimonio:'patrimonio',movimentacoes:'movimentacoes',chamados:'chamados',aprovacoes:'aprovacoes',
       'assistencia-remota':'assistencia-remota',terceirizada:'terceirizada',osd:'osd',
@@ -1331,18 +1333,28 @@ function goPage(id) {
   if (sep2) sep2.style.display = 'none';
   if (bcsub) bcsub.style.display = 'none';
 
-  // Reseta scroll ao trocar de página
+  // Marca nova página — permite resetar scroll
+  _paginaAtual = id;
+  _scrollFoiReset = false;
+
+  // Reset imediato
   const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
-  const _doReset = () => { if (_sc) _sc.scrollTop = 0; };
-  _doReset();
-  requestAnimationFrame(_doReset);
+  if (_sc) _sc.scrollTop = 0;
 
   renderPage(id);
 
-  // Resets pós-render: captura renders assíncronos (ex: _arEnsureLoaded tem delay 300ms)
-  setTimeout(_doReset, 150);
-  setTimeout(_doReset, 400);
-  setTimeout(_doReset, 800);
+  // Resets pós-render com proteção de tempo (2s após mudança de página)
+  const _tsNavegacao = Date.now();
+  const _doReset = () => {
+    if (_paginaAtual !== id) return; // já mudou de página
+    if (Date.now() - _tsNavegacao > 2000) return; // passou muito tempo
+    const sc = document.getElementById('main-content-area') || document.querySelector('.content');
+    if (sc) sc.scrollTop = 0;
+  };
+  setTimeout(_doReset, 100);
+  setTimeout(_doReset, 300);
+  setTimeout(_doReset, 600);
+  setTimeout(_doReset, 1000);
 }
 
 function renderPage(id) {
@@ -8018,9 +8030,15 @@ function renderAssistenciaRemota() {
     </tr>`;
   }).join('');
 
-  // Reseta scroll APÓS inserir conteúdo — impede overflow-anchor de reposicionar
-  const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
-  if (_sc) { _sc.scrollTop = 0; requestAnimationFrame(() => { _sc.scrollTop = 0; }); }
+  // Reseta scroll após inserir conteúdo — somente nos primeiros 2s após navegação para a página
+  if (_paginaAtual === 'assistencia-remota') {
+    const _sc = document.getElementById('main-content-area') || document.querySelector('.content');
+    if (_sc) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => { _sc.scrollTop = 0; });
+      });
+    }
+  }
 }
 
 // ── ABRIR REMOTE VIEWER ───────────────────────────────────────
