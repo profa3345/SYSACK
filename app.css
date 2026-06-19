@@ -971,3 +971,80 @@ html, body { margin: 0 !important; padding: 0 !important; }
     min-width: 900px;
   }
 }
+
+
+/* ═══════════════════════════════════════════════
+   FIX DEFINITIVO — tabela de Ativos cortada à direita
+   Motivo: o CSS do modo Patrimônio tinha .card{overflow:hidden}
+   vazando globalmente e cortando o .table-wrap interno.
+═══════════════════════════════════════════════ */
+#page-ativos .card {
+  overflow: visible !important;
+}
+
+#page-ativos .table-wrap,
+#page-ativos .ativos-table-wrap {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+#page-ativos #ativos-table,
+#page-ativos table.ativos-table {
+  width: max-content !important;
+  min-width: 1580px !important;
+  table-layout: auto !important;
+  border-collapse: collapse;
+}
+
+#page-ativos #ativos-table th,
+#page-ativos #ativos-table td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+#page-ativos #ativos-table th:last-child,
+#page-ativos #ativos-table td:last-child,
+#page-ativos #ativos-table .th-acoes,
+#page-ativos #ativos-table .td-acoes {
+  min-width: 330px !important;
+  width: 330px !important;
+  max-width: none !important;
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: -8px 0 14px rgba(15, 23, 42, .06);
+}
+
+#page-ativos #ativos-table th:last-child,
+#page-ativos #ativos-table .th-acoes {
+  z-index: 3;
+  background: var(--g50);
+}
+
+#page-ativos #ativos-table .acoes-wrap {
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 6px;
+  min-width: max-content;
+}
+
+#page-ativos #ativos-table .acoes-wrap .btn {
+  flex: 0 0 auto !important;
+}
+
+[data-theme="dark"] #page-ativos #ativos-table th:last-child,
+[data-theme="dark"] #page-ativos #ativos-table .th-acoes {
+  background: #0F172A;
+}
+
+[data-theme="dark"] #page-ativos #ativos-table td:last-child,
+[data-theme="dark"] #page-ativos #ativos-table .td-acoes {
+  background: #1E293B;
+}

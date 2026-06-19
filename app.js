@@ -1676,6 +1676,22 @@ function renderAtivos() {
   const isComp = !!_ativoFiltroTipo && (_ativoFiltroTipo.includes('computador') || _ativoFiltroTipo.includes('notebook') || _ativoFiltroTipo.includes('desktop') || _ativoFiltroTipo.includes('workstation'));
   window._ativosFiltroIsComp = isComp;
 
+  // FIX tabela Ativos: força contêiner rolável e evita corte da coluna Ações
+  const ativosTable = document.getElementById('ativos-table');
+  const ativosWrap  = ativosTable?.closest('.table-wrap');
+  if (ativosTable) {
+    ativosTable.classList.add('ativos-table');
+    ativosTable.style.tableLayout = 'auto';
+    ativosTable.style.width = 'max-content';
+    ativosTable.style.minWidth = isComp ? '1580px' : '980px';
+  }
+  if (ativosWrap) {
+    ativosWrap.classList.add('ativos-table-wrap');
+    ativosWrap.style.overflowX = 'auto';
+    ativosWrap.style.overflowY = 'visible';
+    ativosWrap.style.maxWidth = '100%';
+  }
+
   // Atualiza header da tabela
   const thead = document.getElementById('ativos-thead');
   if (thead) {
@@ -1683,7 +1699,7 @@ function renderAtivos() {
       ${isComp ? '<th style="font-size:11px">Computador</th>' : ''}
       <th>Patrimônio</th>${isComp ? '' : '<th>Descrição</th><th>Tipo</th>'}<th>Área</th><th>Status</th><th style="font-size:11px">⏱ Uptime</th>
       ${isComp ? '<th style="font-size:11px">Usuário logado</th><th style="font-size:11px">Usuário principal</th><th style="font-size:11px">Último login</th><th style="font-size:11px">Monitor</th><th style="font-size:11px">S.O.</th><th style="font-size:11px">IP</th><th style="font-size:11px;width:160px">📊 CPU / RAM / Disco</th>' : ''}
-      <th>Ações</th>
+      <th class="th-acoes" style="min-width:330px;width:330px">Ações</th>
     </tr>`;
   }
 
@@ -1787,7 +1803,7 @@ function renderAtivos() {
         <td>${ip}</td>`;
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
-      <td><div class="flex gap-6">
+      <td class="td-acoes"><div class="flex gap-6 acoes-wrap">
         <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')" title="Histórico geral">📜</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirHistoricoUsuariosDoAtivo('${a.id}')" title="Histórico de logins">👥</button>` : ''}
         <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
