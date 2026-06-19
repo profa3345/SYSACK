@@ -628,8 +628,15 @@ function firestoreSet(docPath, data) {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(raw);
-        else reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 200)}`));
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(raw);
+        } else {
+          // CORREÇÃO: loga o erro HTTP para facilitar diagnóstico de 403 (regras Firestore)
+          // e 400 (índice ausente), em vez de rejeitar silenciosamente.
+          const errMsg = `HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 300)}`;
+          log(`[Firestore] ERRO gravação — ${errMsg}`);
+          reject(new Error(errMsg));
+        }
       });
     });
     req.on('error', reject);
@@ -739,6 +746,12 @@ function firestoreRunQuery(collectionId, filters = [], limitN = 500) {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
+        // CORREÇÃO: loga erros HTTP (400 = índice ausente, 403 = regras Firestore bloqueando)
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          log(`[LoginHistory] runQuery HTTP ${res.statusCode} em ${collectionId}: ${raw.slice(0, 300)}`);
+          log('[LoginHistory] DICA: HTTP 403 = verifique as Firestore Rules para login_history. HTTP 400 = crie o índice: login_history / hostname ASC');
+          return resolve([]);
+        }
         try {
           const arr = JSON.parse(raw);
           if (!Array.isArray(arr)) return resolve([]);
@@ -868,23 +881,45 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
   const safeUser = normalizarTextoId(usuarioNorm);
   const loginDocId = `${safeHost}_${safeUser}_${dia}`;
 
-  const loginDia = {
-    hostname,
-    agentId: hostname,
-    usuario: usuarioNorm,
-    usuarioNorm,
-    dia,
-    mes,
-    primeiroLogin: nowIso,      // se já existir, o PATCH mantém o conceito diário pelo docId
-    ultimoLogin: nowIso,
-    ultimoLoginEm: nowIso,
-    ip: dados.ip || '',
-    fonte: 'agent-desktop',
-    versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.5-login90d',
-  };
+  // CORREÇÃO: grava o documento com PATCH normal (upsert).
+  // primeiroLogin é preservado porque usamos um segundo PATCH com field mask
+  // apenas nos campos que devem ser atualizados — o campo primeiroLogin
+  // só é incluído quando não existia antes (verificamos via GET leve).
+  const docPath = `login_history/${loginDocId}`;
 
   try {
-    await firestoreSet(`login_history/${loginDocId}`, loginDia);
+    // Leitura leve para saber se o doc já existe
+    const getUrl = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${docPath}?key=${API_KEY}&mask.fieldPaths=primeiroLogin`;
+    const jaExiste = await new Promise(resolve => {
+      const u = new URL(getUrl);
+      const r = https.request({ hostname: u.hostname, path: u.pathname + u.search, method: 'GET', rejectUnauthorized: false }, res => {
+        let raw = ''; res.on('data', c => raw += c);
+        res.on('end', () => resolve(res.statusCode === 200));
+      });
+      r.on('error', () => resolve(false));
+      r.end();
+    });
+
+    if (!jaExiste) {
+      // Documento novo: grava tudo incluindo primeiroLogin
+      await firestoreSet(docPath, {
+        hostname, agentId: hostname, usuario: usuarioNorm, usuarioNorm,
+        dia, mes,
+        primeiroLogin: nowIso,
+        ultimoLogin: nowIso, ultimoLoginEm: nowIso,
+        ip: dados.ip || '', fonte: 'agent-desktop',
+        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.5-login90d',
+      });
+      log(`[LoginHistory] Documento criado: ${loginDocId}`);
+    } else {
+      // Documento já existe: atualiza só ultimoLogin — NÃO sobrescreve primeiroLogin
+      await firestorePatch(docPath, {
+        ultimoLogin: nowIso, ultimoLoginEm: nowIso,
+        ip: dados.ip || '',
+        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.5-login90d',
+      });
+      log(`[LoginHistory] Documento atualizado (ultimoLogin): ${loginDocId}`);
+    }
   } catch(e) {
     log('[LoginHistory] Falha ao gravar login_history: ' + e.message);
   }
