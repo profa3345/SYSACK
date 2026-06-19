@@ -1377,7 +1377,7 @@ $out = @()
 foreach ($log in $logs) {
   Get-WinEvent -LogName $log -MaxEvents ${maxEvents} | Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message | ForEach-Object {
     $out += [pscustomobject]@{
-      Log=$log; TimeCreated=$_.TimeCreated; Provider=$_.ProviderName; Id=$_.Id; Level=$_.LevelDisplayName; Message=($_.Message -replace "`r|`n", ' ')
+      Log=$log; TimeCreated=$_.TimeCreated; Provider=$_.ProviderName; Id=$_.Id; Level=$_.LevelDisplayName; Message=($_.Message -replace "[\r\n]", ' ')
     }
   }
 }
