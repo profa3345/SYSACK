@@ -29,6 +29,135 @@ let TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
 const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000;
 let _softwareCache = { at: 0, list: [] };
 
+
+// ── Segurança corporativa para comandos administrativos ──────────────
+// Não há senha compartilhada no código. O agente deve ser instalado/rodar como
+// serviço Windows com conta de serviço AD de menor privilégio OU LocalSystem.
+// Exemplo recomendado no AD: CESAN\svc-sysack-agent com permissão local apenas
+// nas estações-alvo, sem logon interativo, com rotação de senha/gMSA se possível.
+const ADMIN_COMMANDS = new Set([
+  'bloquear_maquina',
+  'desbloquear_maquina',
+  'atualizar_agente',
+  'powershell',
+  'coletar_eventviewer',
+  'analisar_eventviewer_ia',
+  'instalar_software'
+]);
+const ALLOWED_COMMANDS = new Set([
+  'iniciar_acesso_remoto',
+  'usar_firebase_relay',
+  'encerrar_acesso_remoto',
+  ...ADMIN_COMMANDS
+]);
+
+function isWindowsAdminContext() {
+  if (process.platform !== 'win32') return process.getuid && process.getuid() === 0;
+  try {
+    // SYSTEM normalmente tem SID S-1-5-18. A checagem por net session valida admin local.
+    const who = execSync('whoami /user', { timeout: 3000, windowsHide: true }).toString().toUpperCase();
+    if (who.includes('S-1-5-18')) return true;
+  } catch(e) {}
+  try {
+    execSync('net session', { stdio: 'ignore', timeout: 3000, windowsHide: true });
+    return true;
+  } catch(e) { return false; }
+}
+
+function parseFirestoreBool(f) { return !!(f && f.booleanValue === true); }
+function parseFirestoreDate(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+function sanitizeAuditText(v) {
+  return String(v || '').replace(/[\r\n\t]+/g, ' ').slice(0, 500);
+}
+
+async function firestoreCreate(collectionPath, data) {
+  const fields = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v === null || v === undefined) continue;
+    if (typeof v === 'string') fields[k] = { stringValue: v };
+    else if (typeof v === 'number') fields[k] = { doubleValue: v };
+    else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
+    else fields[k] = { stringValue: JSON.stringify(v) };
+  }
+  const body = JSON.stringify({ fields });
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}?key=${API_KEY}`;
+  const urlObj = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => resolve(raw));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function auditAgentCommand(commandId, action, details = {}) {
+  const entry = {
+    action,
+    module: 'agent-desktop',
+    resourceId: AGENT_ID,
+    resourceType: 'agent',
+    commandId: commandId || '',
+    hostname: os.hostname(),
+    agentId: AGENT_ID,
+    serviceContextAdmin: isWindowsAdminContext(),
+    createdAt: new Date().toISOString(),
+    ...details
+  };
+  try { await firestoreCreate('audit_logs', entry); } catch(e) { log('[AUDIT] Falha Firestore: ' + e.message); }
+  try { fs.appendFileSync(path.join(__dirname, 'audit.log'), JSON.stringify(entry) + '\n', 'utf8'); } catch(e) {}
+}
+
+async function validarComandoSeguro(id, tipo, fields, dados) {
+  if (!ALLOWED_COMMANDS.has(tipo)) {
+    await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'tipo_nao_permitido' });
+    await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Tipo de comando não permitido pelo agente.' }).catch(() => {});
+    return false;
+  }
+
+  const expiresAt = parseFirestoreDate((fields.expiresAt || {}).stringValue || dados.expiresAt || '');
+  if (expiresAt && expiresAt.getTime() < Date.now()) {
+    await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'comando_expirado' });
+    await firestorePatch('agent_commands/' + id, { status: 'expirado', resultado: 'Comando expirado antes da execução.' }).catch(() => {});
+    return false;
+  }
+
+  const requiresAdmin = parseFirestoreBool(fields.requiresAdmin) || ADMIN_COMMANDS.has(tipo);
+  if (requiresAdmin && !isWindowsAdminContext()) {
+    await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'servico_sem_privilegio_admin' });
+    await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: 'Agente não está rodando como serviço administrativo/SYSTEM ou conta de serviço AD autorizada.' }).catch(() => {});
+    return false;
+  }
+
+  const role = (fields.requestedByRole || {}).stringValue || dados.requestedByRole || '';
+  if (requiresAdmin && !['admin','gestor','tecnico'].includes(role)) {
+    await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'perfil_sem_permissao', requestedByRole: role });
+    await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Perfil do solicitante sem permissão para comando administrativo.' }).catch(() => {});
+    return false;
+  }
+
+  if (requiresAdmin && !String((fields.motivo || {}).stringValue || dados.motivo || '').trim()) {
+    await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'justificativa_obrigatoria' });
+    await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Justificativa obrigatória não informada.' }).catch(() => {});
+    return false;
+  }
+
+  return true;
+}
+
 // ── Instância única — impede dois processos rodando ao mesmo tempo ──
 const PID_FILE = path.join(__dirname, 'agent.pid');
 (function garantirInstanciaUnica() {
@@ -1093,15 +1222,19 @@ async function executarComando(doc) {
   // Marca imediatamente para não processar duas vezes
   await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
 
-  // Verifica token de segurança
-  const tokenRecebido = getId(fields.token);
-  if (!tokenRecebido || tokenRecebido !== 'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9') {
-    await firestorePatch('agent_commands/' + id, { status: 'descartado' }).catch(() => {});
-    return;
-  }
+  // Segurança corporativa: não aceita token fixo nem senha enviada pelo portal.
+  // Valida tipo, expiração, perfil solicitante, justificativa e contexto administrativo local.
+  if (!(await validarComandoSeguro(id, tipo, fields, dados))) return;
 
-  log('[Relay] Comando Firestore: ' + tipo);
-  await firestorePatch('agent_commands/' + id, { status: 'executando' }).catch(() => {});
+  const requestedBy = getId(fields.requestedBy) || dados.requestedBy || dados.operador || '';
+  log('[Relay] Comando Firestore seguro: ' + tipo + ' solicitado por ' + requestedBy);
+  await auditAgentCommand(id, 'AGENT_COMMAND_ACCEPTED', {
+    tipo,
+    requestedBy: sanitizeAuditText(requestedBy),
+    requestedByRole: sanitizeAuditText(getId(fields.requestedByRole) || dados.requestedByRole || ''),
+    motivo: sanitizeAuditText(getId(fields.motivo) || dados.motivo || '')
+  });
+  await firestorePatch('agent_commands/' + id, { status: 'executando', executandoEm: new Date().toISOString() }).catch(() => {});
 
   const sessaoId = dados.sessaoId || '';
 
@@ -1169,9 +1302,11 @@ Write-Host "BLOQUEIO_CONCLUIDO"
       log(`[BLOQUEIO] ${saida.includes('BLOQUEIO_CONCLUIDO') ? 'Concluído' : saida.trim()}`);
       log(`[BLOQUEIO] Máquina bloqueada por ${operador}. Motivo: ${motivo}`);
       resultado = `Bloqueio aplicado para todos os usuários. Motivo: ${motivo}`;
-      await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado }).catch(() => {});
+      await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado, concluidoEm: new Date().toISOString() }).catch(() => {});
+      await auditAgentCommand(id, 'MACHINE_LOCK_EXECUTED', { tipo, operador: sanitizeAuditText(operador), motivo: sanitizeAuditText(motivo), resultado: sanitizeAuditText(resultado) });
     } catch(e) {
       log('[BLOQUEIO] Erro: ' + e.message);
+      await auditAgentCommand(id, 'MACHINE_LOCK_ERROR', { tipo, erro: sanitizeAuditText(e.message) });
       await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: e.message }).catch(() => {});
     }
     return;
@@ -1218,9 +1353,58 @@ Write-Host "DESBLOQUEIO_CONCLUIDO"
       log(`[DESBLOQUEIO] ${saida.includes('DESBLOQUEIO_CONCLUIDO') ? 'Concluído' : saida.trim()}`);
       log(`[DESBLOQUEIO] Máquina desbloqueada por ${operador}`);
       resultado = `Desbloqueio aplicado por ${operador}. Usuários reativados.`;
-      await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado }).catch(() => {});
+      await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado, concluidoEm: new Date().toISOString() }).catch(() => {});
+      await auditAgentCommand(id, 'MACHINE_UNLOCK_EXECUTED', { tipo, operador: sanitizeAuditText(operador), resultado: sanitizeAuditText(resultado) });
     } catch(e) {
       log('[DESBLOQUEIO] Erro: ' + e.message);
+      await auditAgentCommand(id, 'MACHINE_UNLOCK_ERROR', { tipo, erro: sanitizeAuditText(e.message) });
+      await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: e.message }).catch(() => {});
+    }
+    return;
+  }
+
+
+  // ── COLETA SEGURA DO EVENT VIEWER PARA ANÁLISE IA ───────────────
+  if (tipo === 'coletar_eventviewer' || tipo === 'analisar_eventviewer_ia') {
+    try {
+      const maxEvents = Math.min(Number(dados.maxEvents || 250), 1000);
+      const logs = Array.isArray(dados.logs) && dados.logs.length ? dados.logs : ['System', 'Application'];
+      const logsSafe = logs.map(x => String(x).replace(/[^A-Za-z0-9_\-]/g, '')).filter(Boolean).slice(0, 5);
+      const ps = `
+$ErrorActionPreference = 'SilentlyContinue'
+$logs = @(${logsSafe.map(l => "'" + l + "'").join(',')})
+$out = @()
+foreach ($log in $logs) {
+  Get-WinEvent -LogName $log -MaxEvents ${maxEvents} | Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message | ForEach-Object {
+    $out += [pscustomobject]@{
+      Log=$log; TimeCreated=$_.TimeCreated; Provider=$_.ProviderName; Id=$_.Id; Level=$_.LevelDisplayName; Message=($_.Message -replace "`r|`n", ' ')
+    }
+  }
+}
+$out | ConvertTo-Json -Depth 4 -Compress
+`.trim();
+      const psPath = path.join(__dirname, '_sysack_eventviewer.ps1');
+      fs.writeFileSync(psPath, ps, 'utf8');
+      const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 45000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).toString();
+      try { fs.unlinkSync(psPath); } catch {}
+      const saida = raw.slice(0, 900000); // evita documento gigante
+      await firestoreCreate('agent_eventviewer', {
+        agentId: AGENT_ID,
+        hostname: os.hostname(),
+        commandId: id,
+        requestedBy: sanitizeAuditText(dados.requestedBy || dados.operador || ''),
+        logs: logsSafe.join(','),
+        maxEvents,
+        payload: saida,
+        createdAt: new Date().toISOString(),
+        status: 'coletado'
+      });
+      resultado = `Event Viewer coletado com sucesso (${logsSafe.join(', ')} / até ${maxEvents} eventos por log).`;
+      await auditAgentCommand(id, 'EVENTVIEWER_COLLECTED', { tipo, logs: logsSafe.join(','), maxEvents, resultado });
+      await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado, concluidoEm: new Date().toISOString() }).catch(() => {});
+    } catch(e) {
+      log('[EVENTVIEWER] Erro: ' + e.message);
+      await auditAgentCommand(id, 'EVENTVIEWER_ERROR', { tipo, erro: sanitizeAuditText(e.message) });
       await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: e.message }).catch(() => {});
     }
     return;

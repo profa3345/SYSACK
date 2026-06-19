@@ -9175,15 +9175,87 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
 }
 
 // ── ENVIAR COMANDO PARA AGENTE ────────────────────────────────
+// Segurança corporativa: não envia senha nem token fixo para a máquina.
+// A autorização deve vir do login do portal + regras/Cloud Function + auditoria.
+function sysackCommandRequiresAdmin(tipo) {
+  return [
+    'bloquear_maquina',
+    'desbloquear_maquina',
+    'atualizar_agente',
+    'powershell',
+    'coletar_eventviewer',
+    'analisar_eventviewer_ia',
+    'instalar_software'
+  ].includes(tipo);
+}
+
+function sysackNovoNonce() {
+  try {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+}
+
 async function arEnviarComando(agentId, tipo, dados, motivo) {
-  return fsAdd('agent_commands', {
-    agentId, tipo, motivo: motivo || '',
-    dados:     JSON.stringify(dados || {}),
-    uid:       CURRENT_USER?.uid || '',
-    token:     'CESAN_SYSACK_3e295269119f7e67887d523a9ab607c9',
-    status:    'pendente',
-    createdAt: new Date().toISOString(),
-  });
+  const u = SESSION_USER || CURRENT_USER || {};
+  const role = u.role || '';
+  const requiresAdmin = sysackCommandRequiresAdmin(tipo);
+
+  if (requiresAdmin && !['admin','gestor','tecnico'].includes(role) && u.email !== 'ana.penha@cesan.com.br') {
+    throw new Error('Ação administrativa exige perfil técnico, gestor ou admin.');
+  }
+
+  const agora = new Date();
+  const expira = new Date(agora.getTime() + 5 * 60 * 1000);
+  const payload = {
+    agentId,
+    tipo,
+    motivo: motivo || dados?.motivo || '',
+    dados: JSON.stringify({
+      ...(dados || {}),
+      operador: dados?.operador || u.nome || u.email || '',
+      requestedBy: u.email || u.uid || '',
+      requestedByName: u.nome || '',
+      requestedByRole: role,
+      adminExecutionMode: requiresAdmin ? 'AD_SERVICE_ACCOUNT_OR_LOCAL_SYSTEM' : 'NONE'
+    }),
+    uid: u.uid || '',
+    requestedBy: u.email || u.uid || '',
+    requestedByName: u.nome || '',
+    requestedByRole: role,
+    requiresAdmin,
+    adminExecutionMode: requiresAdmin ? 'AD_SERVICE_ACCOUNT_OR_LOCAL_SYSTEM' : 'NONE',
+    nonce: sysackNovoNonce(),
+    expiresAt: expira.toISOString(),
+    status: 'pendente',
+    createdAt: agora.toISOString(),
+    commandVersion: 'secure-v1'
+  };
+
+  const ref = await fsAdd('agent_commands', payload);
+
+  // Auditoria no portal. A execução real também será auditada pelo agente.
+  try {
+    await fsAdd('audit_logs', {
+      action: 'AGENT_COMMAND_REQUESTED',
+      module: 'agent_commands',
+      resourceId: agentId,
+      resourceType: 'agent',
+      userId: u.uid || '',
+      userName: u.nome || u.email || '',
+      userEmail: u.email || '',
+      role,
+      commandType: tipo,
+      requiresAdmin,
+      motivo: payload.motivo,
+      createdAt: agora.toISOString()
+    });
+  } catch(e) { console.warn('[AUDIT] Falha ao registrar comando:', e.message); }
+
+  return ref;
 }
 
 // ── INVENTÁRIO / INFO DO AGENTE ───────────────────────────────
