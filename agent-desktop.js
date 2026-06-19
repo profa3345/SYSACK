@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.4
+ * SYSACK Agent Desktop v2.1.5-login90d
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -638,6 +638,311 @@ function firestoreSet(docPath, data) {
   });
 }
 
+
+// ── Histórico de login / usuário principal ────────────────────────────────
+// Regras:
+//   - grava 1 documento por usuário + máquina + dia em /login_history
+//   - calcula usuário principal pelo maior número de dias distintos nos últimos 90 dias
+//   - atualiza /agents, /agentes_desktop, /login_resumo_maquina e /ativos correspondente
+const LOGIN_PRINCIPAL_DIAS = 90;
+
+function normalizarTextoId(v) {
+  return String(v || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120);
+}
+
+function normalizarUsuarioLogin(user) {
+  let u = String(user || '').trim();
+  if (!u) return '';
+  // Remove domínio AD ou UPN
+  if (u.includes('\\')) u = u.split('\\').pop();
+  if (u.includes('@')) u = u.split('@')[0];
+  return u.trim().toLowerCase();
+}
+
+function yyyyMmDdLocal(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function firestoreValueToJs(v) {
+  if (!v || typeof v !== 'object') return null;
+  if ('stringValue' in v) return v.stringValue;
+  if ('integerValue' in v) return parseInt(v.integerValue, 10) || 0;
+  if ('doubleValue' in v) return Number(v.doubleValue) || 0;
+  if ('booleanValue' in v) return !!v.booleanValue;
+  if ('timestampValue' in v) return v.timestampValue;
+  if ('nullValue' in v) return null;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(firestoreValueToJs);
+  if ('mapValue' in v) {
+    const out = {};
+    for (const [k, val] of Object.entries(v.mapValue.fields || {})) out[k] = firestoreValueToJs(val);
+    return out;
+  }
+  return null;
+}
+
+function firestoreDocToJs(doc) {
+  if (!doc || !doc.fields) return null;
+  const out = { _name: doc.name, _id: String(doc.name || '').split('/').pop() };
+  for (const [k, v] of Object.entries(doc.fields || {})) out[k] = firestoreValueToJs(v);
+  return out;
+}
+
+function firestoreRunQuery(collectionId, filters = [], limitN = 500) {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${API_KEY}`;
+
+  const structuredQuery = {
+    from: [{ collectionId }],
+    limit: limitN
+  };
+
+  if (filters.length === 1) {
+    const [field, op, value] = filters[0];
+    structuredQuery.where = {
+      fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: String(value) } }
+    };
+  } else if (filters.length > 1) {
+    structuredQuery.where = {
+      compositeFilter: {
+        op: 'AND',
+        filters: filters.map(([field, op, value]) => ({
+          fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: String(value) } }
+        }))
+      }
+    };
+  }
+
+  const body = JSON.stringify({ structuredQuery });
+  const urlObj = new URL(url);
+
+  return new Promise(resolve => {
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => {
+        try {
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) return resolve([]);
+          const docs = arr.map(x => x.document ? firestoreDocToJs(x.document) : null).filter(Boolean);
+          resolve(docs);
+        } catch(e) {
+          log('[LoginHistory] Erro parse runQuery: ' + e.message);
+          resolve([]);
+        }
+      });
+    });
+    req.on('error', e => {
+      log('[LoginHistory] runQuery falhou: ' + e.message);
+      resolve([]);
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+async function localizarAtivoRelacionado(dados) {
+  try {
+    // 1) procura por hostname
+    let docs = await firestoreRunQuery('ativos', [['hostname', 'EQUAL', AGENT_ID]], 2);
+    if (docs.length) return docs[0]._id;
+
+    // 2) procura por hostname em campos alternativos comuns
+    docs = await firestoreRunQuery('ativos', [['nome', 'EQUAL', AGENT_ID]], 2);
+    if (docs.length) return docs[0]._id;
+
+    // 3) procura por IP
+    if (dados && dados.ip) {
+      docs = await firestoreRunQuery('ativos', [['ip', 'EQUAL', dados.ip]], 2);
+      if (docs.length) return docs[0]._id;
+    }
+  } catch(e) {
+    log('[LoginHistory] Falha ao localizar ativo: ' + e.message);
+  }
+  return '';
+}
+
+function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
+  const cutoff = yyyyMmDdLocal(addDays(new Date(), -LOGIN_PRINCIPAL_DIAS + 1));
+  const porUsuario = new Map();
+
+  for (const d of docs || []) {
+    const dia = String(d.dia || d.dateKey || '').slice(0, 10);
+    const usuario = normalizarUsuarioLogin(d.usuarioNorm || d.usuario || '');
+    if (!dia || dia < cutoff || !usuario) continue;
+
+    if (!porUsuario.has(usuario)) {
+      porUsuario.set(usuario, {
+        usuario,
+        diasSet: new Set(),
+        primeiroDia: dia,
+        ultimoDia: dia,
+        ultimoLoginEm: d.ultimoLogin || d.ultimoLoginEm || '',
+      });
+    }
+
+    const item = porUsuario.get(usuario);
+    item.diasSet.add(dia);
+    if (dia < item.primeiroDia) item.primeiroDia = dia;
+    if (dia > item.ultimoDia) item.ultimoDia = dia;
+    const ult = d.ultimoLogin || d.ultimoLoginEm || '';
+    if (ult && (!item.ultimoLoginEm || ult > item.ultimoLoginEm)) item.ultimoLoginEm = ult;
+  }
+
+  // Garante que o login atual conte imediatamente, mesmo antes da query retornar o doc recém-criado.
+  const uAtualNorm = normalizarUsuarioLogin(usuarioAtual);
+  if (uAtualNorm && diaAtual) {
+    if (!porUsuario.has(uAtualNorm)) {
+      porUsuario.set(uAtualNorm, {
+        usuario: uAtualNorm,
+        diasSet: new Set(),
+        primeiroDia: diaAtual,
+        ultimoDia: diaAtual,
+        ultimoLoginEm: new Date().toISOString(),
+      });
+    }
+    const item = porUsuario.get(uAtualNorm);
+    item.diasSet.add(diaAtual);
+    if (diaAtual < item.primeiroDia) item.primeiroDia = diaAtual;
+    if (diaAtual > item.ultimoDia) item.ultimoDia = diaAtual;
+  }
+
+  const usuarios = Array.from(porUsuario.values())
+    .map(x => ({
+      usuario: x.usuario,
+      diasLogados90d: x.diasSet.size,
+      primeiroDia: x.primeiroDia,
+      ultimoDia: x.ultimoDia,
+      ultimoLoginEm: x.ultimoLoginEm || '',
+    }))
+    .sort((a, b) => {
+      if (b.diasLogados90d !== a.diasLogados90d) return b.diasLogados90d - a.diasLogados90d;
+      return String(b.ultimoDia).localeCompare(String(a.ultimoDia));
+    });
+
+  const principal = usuarios[0] || null;
+  return {
+    usuarios,
+    usuarioPrincipal: principal ? principal.usuario : '',
+    usuarioPrincipalDias90d: principal ? principal.diasLogados90d : 0,
+  };
+}
+
+async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
+  const usuarioNorm = normalizarUsuarioLogin(usuarioLogado);
+  const hostname = AGENT_ID;
+  const dia = yyyyMmDdLocal(new Date(nowIso));
+  const mes = dia.slice(0, 7);
+
+  const vazio = {
+    usuarioPrincipal: '',
+    usuarioPrincipalDias90d: 0,
+    usuariosLogin90d: [],
+    totalUsuarios90d: 0,
+  };
+
+  if (!usuarioNorm) {
+    log('[LoginHistory] Nenhum usuário interativo detectado nesta coleta.');
+    return vazio;
+  }
+
+  const safeHost = normalizarTextoId(hostname);
+  const safeUser = normalizarTextoId(usuarioNorm);
+  const loginDocId = `${safeHost}_${safeUser}_${dia}`;
+
+  const loginDia = {
+    hostname,
+    agentId: hostname,
+    usuario: usuarioNorm,
+    usuarioNorm,
+    dia,
+    mes,
+    primeiroLogin: nowIso,      // se já existir, o PATCH mantém o conceito diário pelo docId
+    ultimoLogin: nowIso,
+    ultimoLoginEm: nowIso,
+    ip: dados.ip || '',
+    fonte: 'agent-desktop',
+    versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.5-login90d',
+  };
+
+  try {
+    await firestoreSet(`login_history/${loginDocId}`, loginDia);
+  } catch(e) {
+    log('[LoginHistory] Falha ao gravar login_history: ' + e.message);
+  }
+
+  let docs = [];
+  try {
+    docs = await firestoreRunQuery('login_history', [['hostname', 'EQUAL', hostname]], 800);
+  } catch(e) {
+    log('[LoginHistory] Falha ao consultar histórico: ' + e.message);
+  }
+
+  const resumo = calcularResumoUsuarios90d(docs, usuarioNorm, dia);
+  const payloadResumo = {
+    hostname,
+    agentId: hostname,
+    usuarioLogado: usuarioNorm,
+    usuarioAtual: usuarioNorm,
+    ultimoLoginUsuario: usuarioNorm,
+    ultimoLoginEm: nowIso,
+    loginAtualizadoEm: nowIso,
+    usuarioPrincipal: resumo.usuarioPrincipal,
+    usuarioPrincipalDias90d: resumo.usuarioPrincipalDias90d,
+    usuarioPrincipalPeriodoDias: LOGIN_PRINCIPAL_DIAS,
+    usuariosLogin90d: JSON.stringify(resumo.usuarios),
+    usuariosLogin90dArray: resumo.usuarios,
+    totalUsuarios90d: resumo.usuarios.length,
+  };
+
+  try {
+    await firestoreSet(`login_resumo_maquina/${safeHost}`, payloadResumo);
+  } catch(e) {
+    log('[LoginHistory] Falha ao gravar resumo: ' + e.message);
+  }
+
+  try {
+    const ativoId = await localizarAtivoRelacionado(dados);
+    if (ativoId) {
+      await firestorePatch(`ativos/${ativoId}`, {
+        ...payloadResumo,
+        hostname,
+        ip: dados.ip || '',
+        status: 'em-uso',
+        ultimoAgente: nowIso,
+      });
+      log(`[LoginHistory] Ativo ${ativoId} atualizado: atual=${usuarioNorm}, principal=${resumo.usuarioPrincipal || '-'} (${resumo.usuarioPrincipalDias90d} dias/90d)`);
+    }
+  } catch(e) {
+    log('[LoginHistory] Falha ao atualizar ativo: ' + e.message);
+  }
+
+  try {
+    log(`[LoginHistory] Login registrado: ${usuarioNorm} em ${hostname} | principal=${resumo.usuarioPrincipal || '-'} (${resumo.usuarioPrincipalDias90d} dias/90d)`);
+  } catch(e) {}
+
+  return payloadResumo;
+}
+
+
 // ── Ciclo principal ───────────────────────────────────────────────
 async function reportar() {
   try {
@@ -688,15 +993,21 @@ async function reportar() {
       software:          software,
       softwareCount:     software.length,
       softwareAtualizadoEm: _softwareCache.at ? new Date(_softwareCache.at).toISOString() : now,
-      versaoAgente:      cfg.versaoAgente || '2.1.3',
+      versaoAgente:      cfg.versaoAgente || '2.1.5-login90d',
       ultimaAtualizacao: now,
       lastSeen:          now,
       status:            'online',
       plataforma:        process.platform,
     };
 
+    const loginResumo = await registrarHistoricoLogin(dados, user, now);
+    Object.assign(dados, loginResumo);
+
     await firestoreSet(`agents/${AGENT_ID}`, dados);
-    log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user}`);
+    // Espelho para compatibilidade com telas/consultas que usam agentes_desktop
+    await firestoreSet(`agentes_desktop/${AGENT_ID}`, dados).catch(e => log('[WARN] Falha ao gravar agentes_desktop: ' + e.message));
+
+    log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user || '-'} | Principal 90d: ${dados.usuarioPrincipal || '-'}`);
     // Atualiza ativo correspondente com hostname (roda apenas uma vez por sessão)
     if (!global._ativoAtualizado) {
       global._ativoAtualizado = true;
@@ -708,7 +1019,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.4] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1.5-login90d] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
