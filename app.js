@@ -1795,13 +1795,11 @@ function renderAtivos() {
         <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="patAbrirBusca()" title="Vincular PAT">🏷️</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs" title="Ver softwares instalados" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag?swInvVerSoftwaresMaquina(_ag.id):showToast('Agente não conectado — sem dados de software','warning')})()">🗂️</button>` : ''}
-        ${isComp ? `<button class="btn btn-ghost btn-xs" title="Acesso remoto" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag?arAbrirViewer(_ag.id):showToast('Agente não conectado','warning')})()" style="font-size:11px">🖥️</button>` : ''}
+        ${isComp ? `<button class="btn btn-ghost btn-xs" title="Acesso remoto" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag&&_ag.status==='online'?arAbrirViewer(_ag.id):showToast(_ag?'Agente offline':'Agente não conectado','warning')})()">🖥️</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs"
-          title="${(()=>{const _ag=sysackFindAgentForAtivo(a);return _ag?.bloqueado?'🔓 Desbloquear máquina':'🔒 Bloquear máquina para todos os usuários'})()}"
-          onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);if(!_ag)return showToast('Agente não conectado','warning');arToggleBloqueio(_ag.id,'${escapeHtml(a.hostname||a.desc||a.id)}',!!_ag.bloqueado)})()"
-          style="font-size:11px;${(()=>{const _ag=sysackFindAgentForAtivo(a);return _ag?.bloqueado?'color:#DC2626;font-weight:700':''})()} ">
-          ${(()=>{const _ag=sysackFindAgentForAtivo(a);return _ag?.bloqueado?'🔓':'🔒'})()}
-        </button>` : ''}
+          onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);if(!_ag)return showToast('Agente não conectado nesta máquina','warning');arToggleBloqueio(_ag.id,'${escapeHtml(a.hostname||a.desc||a.id)}',!!_ag.bloqueado)})()"
+          title="Bloquear/Desbloquear máquina para todos os usuários"
+          style="${`font-size:12px;`}">🔒</button>` : ''}
       </div></td>
     </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo — ${tipos.length?'tipo: '+_ativoFiltroTipo:'cadastrado'}</td></tr>`;
   nbUpdate('nb-ativos', lista.length);
@@ -7987,16 +7985,15 @@ function renderAssistenciaRemota() {
       ? `<span style="font-size:10px;background:#FEF2F2;color:#DC2626;padding:1px 6px;border-radius:10px;margin-left:4px">${a.patchesCriticos} patch(es) crítico(s)</span>`
       : '';
 
-    return `<tr style="${a.bloqueado ? 'background:#FEF2F2;' : ''}">
+    return `<tr style="${a.bloqueado ? 'background:#FEF2F2' : ''}">
       <td style="text-align:center"><span class="ar-dot ${statusCls}"></span></td>
       <td>
         <div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:5px;flex-wrap:wrap">
           ${escapeHtml(a.hostname||a.id)}
-          ${a.bloqueado ? `<span title="${escapeHtml(a.bloqueadoMotivo||'Bloqueada')}" style="background:#DC2626;color:#fff;font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700">🔒 BLOQUEADA</span>` : ''}
+          ${a.bloqueado ? `<span title="Bloqueada: ${escapeHtml(a.bloqueadoMotivo||'')}" style="background:#DC2626;color:#fff;font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;letter-spacing:.3px">🔒 BLOQUEADA</span>` : ''}
         </div>
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
-
       </td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
@@ -8024,13 +8021,12 @@ function renderAssistenciaRemota() {
       <td>
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
-          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações completas da máquina" style="padding:2px 7px;font-size:12px">📋</button>
+          <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:2px 7px;font-size:12px">📋</button>
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
-          <button class="btn btn-secondary btn-xs"  onclick="abrirInventarioAgente('${a.id}')"  title="Inventário de Software">🗂️</button>
-          <button class="btn btn-xs ${a.bloqueado ? 'btn-danger' : 'btn-ghost'}"
-            onclick="arToggleBloqueio('${a.id}','${escapeHtml(a.hostname||a.id)}',${!!a.bloqueado})"
-            title="${a.bloqueado ? '🔓 Desbloquear — ' + escapeHtml(a.bloqueadoMotivo||'') : '🔒 Bloquear todos os usuários'}"
-            style="padding:2px 7px;font-size:12px${a.bloqueado ? ';background:#DC2626;color:#fff;border-color:#DC2626' : ''}">
+          <button class="btn btn-secondary btn-xs" onclick="abrirInventarioAgente('${a.id}')" title="Inventário de Software" style="padding:2px 7px;font-size:12px">🗂️</button>
+          <button class="btn btn-xs" onclick="arToggleBloqueio('${a.id}','${escapeHtml(a.hostname||a.id)}',${!!a.bloqueado})"
+            title="${a.bloqueado ? '🔓 Clique para DESBLOQUEAR — ' + escapeHtml(a.bloqueadoMotivo||'') : '🔒 Bloquear para todos os usuários'}"
+            style="padding:2px 7px;font-size:12px;background:${a.bloqueado?'#DC2626':'var(--g100)'};color:${a.bloqueado?'#fff':'var(--g600)'};border:1px solid ${a.bloqueado?'#DC2626':'var(--g300)'};border-radius:6px;cursor:pointer">
             ${a.bloqueado ? '🔓' : '🔒'}
           </button>
         </div>
@@ -9271,11 +9267,11 @@ function arInstalarAgente() {
   openModal('modal-ar-download');
 }
 
-// ════════════════════════════════════════════════════════════
-// BLOQUEIO DE MÁQUINA — bloqueia para TODOS os usuários
-// Disponível em: Computadores + Assistência Remota
+// ══════════════════════════════════════════════════════════════════
+// BLOQUEIO DE MÁQUINA — bloqueia login para TODOS os usuários
+// Disponível: aba Computadores + aba Assistência Remota
 // Permissão: Admin e Gestor apenas
-// ════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 function arToggleBloqueio(agentId, hostname, estaBloqueado) {
   const u = SESSION_USER || CURRENT_USER;
   if (!['admin','gestor'].includes(u?.role)) {
@@ -9303,7 +9299,7 @@ function arAbrirModalBloqueio(agentId, hostname) {
       </div>
       <div class="modal-body">
         <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;color:#991B1B">
-          ⚠️ <strong>Todos os usuários</strong> serão desconectados e não conseguirão fazer login até o desbloqueio.
+          ⚠️ <strong>Todos os usuários</strong> serão desconectados imediatamente e não conseguirão fazer login até o desbloqueio pelo TI.
         </div>
         <div class="form-group">
           <label class="form-label req">Motivo do bloqueio</label>
@@ -9351,7 +9347,7 @@ async function arConfirmarBloqueio(agentId, hostname) {
     await arEnviarComando(agentId, 'bloquear_maquina', { motivo, obs, operador: u?.nome || u?.email }, `Bloqueio: ${motivo}`);
     auditLog('MACHINE_LOCK', 'agents', agentId, 'agent', { hostname, motivo });
     showToast(`🔒 "${hostname}" bloqueada para todos os usuários.`, 'success', 5000);
-    setTimeout(() => { renderAssistenciaRemota?.(); renderAtivos?.(); }, 1000);
+    setTimeout(() => { try { renderAssistenciaRemota(); } catch {} try { renderAtivos(); } catch {} }, 1000);
   } catch(e) { showToast('Erro ao bloquear: ' + e.message, 'error'); }
 }
 
@@ -9365,9 +9361,13 @@ async function arDesbloquearMaquina(agentId, hostname) {
     await arEnviarComando(agentId, 'desbloquear_maquina', { operador: u?.nome || u?.email }, `Desbloqueio por ${u?.nome||u?.email}`);
     auditLog('MACHINE_UNLOCK', 'agents', agentId, 'agent', { hostname });
     showToast(`🔓 "${hostname}" desbloqueada com sucesso.`, 'success', 4000);
-    setTimeout(() => { renderAssistenciaRemota?.(); renderAtivos?.(); }, 1000);
+    setTimeout(() => { try { renderAssistenciaRemota(); } catch {} try { renderAtivos(); } catch {} }, 1000);
   } catch(e) { showToast('Erro ao desbloquear: ' + e.message, 'error'); }
 }
+
+// ════════════════════════════════════════════════════════════
+// ATUALIZAR CLIENTE — auto-update remoto para todos os agentes
+// ════════════════════════════════════════════════════════════
 function arAtualizarClientes() {
   const u = SESSION_USER || CURRENT_USER;
   const role = u?.role || '';

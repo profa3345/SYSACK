@@ -929,3 +929,11 @@ html, body { margin: 0 !important; padding: 0 !important; }
   display: block !important;
   min-height: auto !important;
 }
+
+/* Fix: tabela de computadores não corta na coluna de ações */
+#ativos-table { min-width: 900px; }
+#ativos-table td:last-child,
+#ativos-table th:last-child { white-space: nowrap; min-width: 120px; }
+#ar-table { min-width: 1100px; }
+#ar-table td:last-child,
+#ar-table th:last-child { white-space: nowrap; min-width: 160px; }
