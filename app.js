@@ -9426,56 +9426,50 @@ async function arConfirmarBloqueio(agentId, hostname) {
   const obs = document.getElementById('bloqueio-obs')?.value?.trim() || '';
   const u = SESSION_USER || CURRENT_USER;
   document.getElementById('modal-bloqueio-maquina')?.remove();
-
-  showToast(`🔒 Enviando bloqueio para "${hostname}"...`, 'info', 3000);
+  showToast(`🔒 Bloqueando "${hostname}"...`, 'info', 4000);
   try {
-    // 1. Atualiza estado no Firestore
+    // 1. Grava estado no Firestore
     await db.collection('agents').doc(agentId).update({
       bloqueado: true, bloqueadoEm: new Date().toISOString(),
       bloqueadoPor: u?.nome || u?.email || 'admin',
       bloqueadoMotivo: motivo, bloqueadoObs: obs,
     });
 
-    // 2. Tenta via Privileged Executor (Cloud Function → vservho091 → WinRM)
+    // 2. Tenta via Executor Privilegiado (WinRM — imediato)
+    let usouExecutor = false;
     try {
       const fn = (await getFbFunctions()).httpsCallable('executarAcaoPrivilegiada');
       await fn({ action: 'lock_workstation', hostname, reason: motivo });
-      showToast(`🔒 "${hostname}" bloqueada via executor privilegiado.`, 'success', 5000);
+      usouExecutor = true;
+      showToast(`🔒 "${hostname}" bloqueada via WinRM (imediato).`, 'success', 5000);
     } catch(eFn) {
-      // Fallback: envia via agent_commands (agente lê no próximo ciclo)
+      // Fallback: envia via agent_commands (agente processa no próximo ciclo ≤5s)
       await arEnviarComando(agentId, 'bloquear_maquina', { motivo, obs, operador: u?.nome || u?.email }, `Bloqueio: ${motivo}`);
       showToast(`🔒 "${hostname}" bloqueada (comando enviado ao agente).`, 'success', 5000);
     }
 
-    auditLog('MACHINE_LOCK', 'agents', agentId, 'agent', { hostname, motivo });
+    auditLog('MACHINE_LOCK', 'agents', agentId, 'agent', { hostname, motivo, via: usouExecutor ? 'executor' : 'agent_commands' });
     setTimeout(() => { try { renderAssistenciaRemota(); } catch {} try { renderAtivos(); } catch {} }, 1000);
   } catch(e) { showToast('Erro ao bloquear: ' + e.message, 'error'); }
 }
 
 async function arDesbloquearMaquina(agentId, hostname) {
   const u = SESSION_USER || CURRENT_USER;
-  showToast(`🔓 Desbloqueando "${hostname}"...`, 'info', 3000);
+  showToast(`🔓 Desbloqueando "${hostname}"...`, 'info', 4000);
   try {
+    // 1. Atualiza Firestore
     await db.collection('agents').doc(agentId).update({
       bloqueado: false, desbloqueadoEm: new Date().toISOString(),
       desbloqueadoPor: u?.nome || u?.email || 'admin', bloqueadoMotivo: '',
     });
+
+    // 2. Envia comando de desbloqueio
     await arEnviarComando(agentId, 'desbloquear_maquina', { operador: u?.nome || u?.email }, `Desbloqueio por ${u?.nome||u?.email}`);
+
     auditLog('MACHINE_UNLOCK', 'agents', agentId, 'agent', { hostname });
     showToast(`🔓 "${hostname}" desbloqueada com sucesso.`, 'success', 4000);
     setTimeout(() => { try { renderAssistenciaRemota(); } catch {} try { renderAtivos(); } catch {} }, 1000);
   } catch(e) { showToast('Erro ao desbloquear: ' + e.message, 'error'); }
-}
-
-// Função genérica para ações privilegiadas via executor
-async function sysackExecutarAcaoPrivilegiada(action, hostname, reason) {
-  try {
-    const fn = (await getFbFunctions()).httpsCallable('executarAcaoPrivilegiada');
-    const r = await fn({ action, hostname, reason });
-    return { ok: true, data: r.data };
-  } catch(e) {
-    return { ok: false, error: e.message };
-  }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -9575,15 +9569,17 @@ async function executarAtualizacaoCliente() {
     for (const ag of listaEnviar) {
       const cmdId = 'upd_' + Date.now() + '_' + String(ag.id).replace(/[^a-zA-Z0-9_-]/g,'_');
       try {
-        // Tenta via Privileged Executor (WinRM direto — mais rápido e confiável)
+        // Tenta via Executor Privilegiado (WinRM — mais rápido e confiável)
         let usouExecutor = false;
         try {
           const fn = (await getFbFunctions()).httpsCallable('executarAcaoPrivilegiada');
-          await fn({ action: 'update_agent', hostname: ag.hostname || ag.id, reason: `Atualização remota v${versao}` });
-          resultados.push({ agent: ag, status: 'atualizado', motivo: 'Via executor privilegiado (WinRM)' });
-          updLog(`✅ ${ag.hostname||ag.id}: atualizado via executor WinRM`);
-          usouExecutor = true;
-        } catch(eFn) { /* fallback para agent_commands */ }
+          const r = await fn({ action: 'update_agent', hostname: ag.hostname || ag.id, reason: `Atualização remota v${versao}` });
+          if (r.data?.ok) {
+            resultados.push({ agent: ag, status: 'atualizado', motivo: 'Via executor WinRM (imediato)' });
+            updLog(`✅ ${ag.hostname||ag.id}: atualizado via WinRM`);
+            usouExecutor = true;
+          }
+        } catch(eFn) { /* executor indisponível — usa fallback */ }
 
         if (!usouExecutor) {
           await fsSet('agent_commands', cmdId, {
@@ -9597,10 +9593,10 @@ async function executarAtualizacaoCliente() {
             criadoPorNome: (SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'',
           });
           comandos.push({ cmdId, agent: ag });
-          updLog(`→ ${ag.hostname||ag.id}: comando enviado`);
+          updLog(`→ ${ag.hostname||ag.id}: comando enviado (via Firestore)`);
         }
       } catch(e) {
-        resultados.push({ agent: ag, status:'nao_atualizado', motivo:'Erro ao gravar comando: ' + e.message });
+        resultados.push({ agent: ag, status:'nao_atualizado', motivo:'Erro: ' + e.message });
         updLog(`✗ ${ag.hostname||ag.id}: ${e.message}`);
       }
     }
