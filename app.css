@@ -884,6 +884,10 @@ textarea.form-control{resize:vertical;min-height:80px}
 #ar-table th, #ar-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 8px 10px; vertical-align: middle; }
 #ar-table th { font-size: 11px; font-weight: 600; color: var(--g500); text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid var(--g200); }
 #ar-table td { border-bottom: 1px solid var(--g100); }
+/* Coluna de ações nunca corta — tem vários botões */
+#ar-table td:last-child, #ar-table th:last-child { overflow: visible !important; white-space: nowrap !important; min-width: 175px; }
+/* Tabela de ativos — coluna de ações também não corta */
+#ativos-table td:last-child, #ativos-table th:last-child { overflow: visible !important; white-space: nowrap !important; min-width: 120px; }
 #ar-table .monitor-cell { white-space: normal; line-height: 1.3; }
 
 
@@ -929,11 +933,3 @@ html, body { margin: 0 !important; padding: 0 !important; }
   display: block !important;
   min-height: auto !important;
 }
-
-/* Fix: tabela de computadores não corta na coluna de ações */
-#ativos-table { min-width: 900px; }
-#ativos-table td:last-child,
-#ativos-table th:last-child { white-space: nowrap; min-width: 120px; }
-#ar-table { min-width: 1100px; }
-#ar-table td:last-child,
-#ar-table th:last-child { white-space: nowrap; min-width: 160px; }
