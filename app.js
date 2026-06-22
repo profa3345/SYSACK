@@ -9438,6 +9438,62 @@ function arAbrirModalBloqueio(agentId, hostname) {
   setTimeout(() => document.getElementById('bloqueio-motivo')?.focus(), 100);
 }
 
+function arMostrarStatusBloqueio(tipo, msg) {
+  let el = document.getElementById('bloqueio-status');
+  if (!el) {
+    const body = document.querySelector('#modal-bloqueio-maquina .modal-body');
+    if (!body) return;
+    body.insertAdjacentHTML('beforeend', '<div id="bloqueio-status" style="margin-top:12px;border-radius:8px;padding:10px 12px;font-size:12px;font-weight:600"></div>');
+    el = document.getElementById('bloqueio-status');
+  }
+  const color = tipo === 'erro' ? '#991B1B' : tipo === 'ok' ? '#065F46' : '#1D4ED8';
+  const bg    = tipo === 'erro' ? '#FEF2F2' : tipo === 'ok' ? '#ECFDF5' : '#EFF6FF';
+  const bd    = tipo === 'erro' ? '#FECACA' : tipo === 'ok' ? '#A7F3D0' : '#BFDBFE';
+  el.style.cssText = `margin-top:12px;border-radius:8px;padding:10px 12px;font-size:12px;font-weight:600;color:${color};background:${bg};border:1px solid ${bd};white-space:pre-wrap`;
+  el.textContent = msg;
+}
+
+function arClassificarErroBloqueio(resultado) {
+  const r = String(resultado || '');
+  const l = r.toLowerCase();
+  if (l.includes('credencia') || l.includes('senha') || l.includes('usuário') || l.includes('usuario') || l.includes('logon failure') || l.includes('1326')) {
+    return 'Usuário ou senha inválidos, ou a conta informada não tem permissão de administrador local nesta máquina.\n\nDetalhe: ' + r;
+  }
+  if (l.includes('sem permissão') || l.includes('access is denied') || l.includes('acesso negado') || l.includes('registry') || l.includes('hklm')) {
+    return 'A credencial não possui permissão administrativa suficiente para concluir o bloqueio.\n\nDetalhe: ' + r;
+  }
+  if (l.includes('timeout') || l.includes('não respondeu') || l.includes('nao respondeu')) {
+    return 'O agente não respondeu. A máquina NÃO foi confirmada como bloqueada. Verifique se o agente está online e atualizado.';
+  }
+  return r || 'Falha não informada pelo agente.';
+}
+
+async function arAguardarResultadoComando(commandId, timeoutMs = 70000) {
+  const inicio = Date.now();
+  return new Promise((resolve) => {
+    let done = false;
+    let unsub = null;
+    const finalizar = (r) => {
+      if (done) return;
+      done = true;
+      try { if (unsub) unsub(); } catch {}
+      resolve(r);
+    };
+    try {
+      unsub = db.collection('agent_commands').doc(commandId).onSnapshot(snap => {
+        if (!snap.exists) return;
+        const d = snap.data() || {};
+        const st = String(d.status || '').toLowerCase();
+        if (['processando','executando'].includes(st)) arMostrarStatusBloqueio('info', 'Agente recebeu o comando e está validando as credenciais...');
+        if (['concluido','concluído','erro','falha','descartado','expirado'].includes(st)) finalizar({ id: commandId, ...d });
+      }, err => finalizar({ status:'erro', resultado:'Erro ao acompanhar retorno do agente: ' + err.message }));
+    } catch(e) {
+      finalizar({ status:'erro', resultado:'Erro ao acompanhar retorno do agente: ' + e.message });
+    }
+    setTimeout(() => finalizar({ status:'timeout', resultado:`Timeout — agente não confirmou execução em ${Math.round((Date.now()-inicio)/1000)}s.` }), timeoutMs);
+  });
+}
+
 async function arConfirmarBloqueio(agentId, hostname) {
   let motivo = document.getElementById('bloqueio-motivo')?.value || '';
   if (motivo === 'outro') motivo = document.getElementById('bloqueio-outro-texto')?.value?.trim() || '';
@@ -9447,66 +9503,103 @@ async function arConfirmarBloqueio(agentId, hostname) {
   const adminUser = (document.getElementById('bloqueio-admin-user')?.value || '').trim();
   const adminPass = document.getElementById('bloqueio-admin-pass')?.value || '';
 
-  if (!adminUser) {
-    showToast('Informe o usuário administrador da máquina.', 'warning');
-    document.getElementById('bloqueio-admin-user')?.focus();
-    return;
-  }
-  if (!adminPass) {
-    showToast('Informe a senha do administrador.', 'warning');
-    document.getElementById('bloqueio-admin-pass')?.focus();
-    return;
-  }
+  if (!adminUser) { showToast('Informe o usuário administrador da máquina.', 'warning'); document.getElementById('bloqueio-admin-user')?.focus(); return; }
+  if (!adminPass) { showToast('Informe a senha do administrador.', 'warning'); document.getElementById('bloqueio-admin-pass')?.focus(); return; }
 
   const u = SESSION_USER || CURRENT_USER;
-  document.getElementById('modal-bloqueio-maquina')?.remove();
-  showToast(`🔒 Bloqueando "${hostname}"...`, 'info', 4000);
-  try {
-    // 1. Grava estado no Firestore (sem persistir credenciais)
-    await db.collection('agents').doc(agentId).update({
-      bloqueado: true, bloqueadoEm: new Date().toISOString(),
-      bloqueadoPor: u?.nome || u?.email || 'admin',
-      bloqueadoMotivo: motivo, bloqueadoObs: obs,
-    });
+  const role = u?.role || '';
+  if (!['admin','gestor','tecnico'].includes(role) && u?.email !== 'ana.penha@cesan.com.br') {
+    arMostrarStatusBloqueio('erro', 'Seu usuário do portal não tem permissão para executar bloqueio administrativo.');
+    return;
+  }
 
-    // 2. Tenta via Executor Privilegiado (WinRM — imediato)
-    let usouExecutor = false;
-    try {
-      const fn = (await getFbFunctions()).httpsCallable('executarAcaoPrivilegiada');
-      await fn({ action: 'lock_workstation', hostname, reason: motivo, adminUser, adminPass });
-      usouExecutor = true;
-      showToast(`🔒 "${hostname}" bloqueada via WinRM (imediato).`, 'success', 5000);
-    } catch(eFn) {
-      // Fallback: envia via agent_commands — passa credenciais para o agente usar localmente
-      await arEnviarComando(agentId, 'bloquear_maquina', {
-        motivo, obs,
-        operador:  u?.nome || u?.email,
-        adminUser,
-        adminPass,
-      }, `Bloqueio: ${motivo}`);
-      showToast(`🔒 "${hostname}" bloqueada (comando enviado ao agente).`, 'success', 5000);
+  const btn = [...document.querySelectorAll('#modal-bloqueio-maquina .modal-footer .btn')].find(b => b.textContent.includes('Confirmar'));
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Validando e enviando...'; }
+  arMostrarStatusBloqueio('info', 'Enviando comando ao agente. A máquina só será marcada como bloqueada após confirmação real do agente.');
+
+  try {
+    // IMPORTANTE: não marca agents.bloqueado=true antes da confirmação real.
+    await db.collection('agents').doc(agentId).update({
+      bloqueioPendente: true,
+      bloqueioSolicitadoEm: new Date().toISOString(),
+      bloqueioSolicitadoPor: u?.nome || u?.email || 'admin',
+      bloqueadoMotivo: motivo,
+      bloqueadoObs: obs,
+      ultimoBloqueioStatus: 'pendente'
+    }).catch(()=>{});
+
+    const cmdId = await arEnviarComando(agentId, 'bloquear_maquina', {
+      motivo, obs,
+      operador:  u?.nome || u?.email,
+      adminUser,
+      adminPass,
+    }, `Bloqueio: ${motivo}`);
+
+    arMostrarStatusBloqueio('info', 'Comando enviado. Aguardando validação do usuário/senha e confirmação do bloqueio pelo agente...');
+    const r = await arAguardarResultadoComando(cmdId, 70000);
+    const st = String(r.status || '').toLowerCase();
+
+    if (['concluido','concluído'].includes(st)) {
+      await db.collection('agents').doc(agentId).update({
+        bloqueado: true,
+        bloqueioPendente: false,
+        ultimoBloqueioStatus: 'concluido',
+        bloqueadoEm: new Date().toISOString(),
+        bloqueadoPor: u?.nome || u?.email || 'admin',
+        bloqueadoMotivo: motivo,
+        bloqueadoObs: obs,
+        ultimoBloqueioResultado: r.resultado || 'Bloqueio confirmado pelo agente.'
+      }).catch(()=>{});
+      arMostrarStatusBloqueio('ok', '✅ Bloqueio confirmado pelo agente.\n' + (r.resultado || ''));
+      showToast(`🔒 "${hostname}" bloqueada e confirmada pelo agente.`, 'success', 6000);
+      auditLog('MACHINE_LOCK_CONFIRMED', 'agents', agentId, 'agent', { hostname, motivo, commandId: cmdId });
+      setTimeout(() => { document.getElementById('modal-bloqueio-maquina')?.remove(); try { renderAssistenciaRemota(); } catch {} try { renderAtivos(); } catch {} }, 1800);
+      return;
     }
 
-    auditLog('MACHINE_LOCK', 'agents', agentId, 'agent', { hostname, motivo, via: usouExecutor ? 'executor' : 'agent_commands' });
-    setTimeout(() => { try { renderAssistenciaRemota(); } catch {} try { renderAtivos(); } catch {} }, 1000);
-  } catch(e) { showToast('Erro ao bloquear: ' + e.message, 'error'); }
+    const msg = arClassificarErroBloqueio(r.resultado);
+    await db.collection('agents').doc(agentId).update({
+      bloqueado: false,
+      bloqueioPendente: false,
+      ultimoBloqueioStatus: st || 'erro',
+      ultimoBloqueioErro: msg,
+      ultimoBloqueioErroEm: new Date().toISOString()
+    }).catch(()=>{});
+    arMostrarStatusBloqueio('erro', '❌ Bloqueio NÃO executado.\n' + msg);
+    showToast('Bloqueio não confirmado: ' + msg.slice(0, 120), 'error', 9000);
+    if (btn) { btn.disabled = false; btn.textContent = '🔒 Confirmar Bloqueio'; }
+  } catch(e) {
+    await db.collection('agents').doc(agentId).update({ bloqueado:false, bloqueioPendente:false, ultimoBloqueioStatus:'erro', ultimoBloqueioErro:e.message }).catch(()=>{});
+    arMostrarStatusBloqueio('erro', '❌ Erro ao solicitar bloqueio:\n' + e.message);
+    showToast('Erro ao bloquear: ' + e.message, 'error', 9000);
+    if (btn) { btn.disabled = false; btn.textContent = '🔒 Confirmar Bloqueio'; }
+  }
 }
 
 async function arDesbloquearMaquina(agentId, hostname) {
   const u = SESSION_USER || CURRENT_USER;
-  showToast(`🔓 Desbloqueando "${hostname}"...`, 'info', 4000);
+  showToast(`🔓 Solicitando desbloqueio de "${hostname}"...`, 'info', 4000);
   try {
-    // 1. Atualiza Firestore
+    await db.collection('agents').doc(agentId).update({ desbloqueioPendente:true, ultimoBloqueioStatus:'desbloqueio_pendente' }).catch(()=>{});
+    const cmdId = await arEnviarComando(agentId, 'desbloquear_maquina', { operador: u?.nome || u?.email }, `Desbloqueio por ${u?.nome||u?.email}`);
+    const r = await arAguardarResultadoComando(cmdId, 70000);
+    const st = String(r.status || '').toLowerCase();
+    if (!['concluido','concluído'].includes(st)) {
+      const msg = arClassificarErroBloqueio(r.resultado);
+      await db.collection('agents').doc(agentId).update({ desbloqueioPendente:false, ultimoBloqueioStatus:'erro_desbloqueio', ultimoBloqueioErro:msg }).catch(()=>{});
+      return showToast('Desbloqueio não confirmado: ' + msg.slice(0, 160), 'error', 9000);
+    }
     await db.collection('agents').doc(agentId).update({
-      bloqueado: false, desbloqueadoEm: new Date().toISOString(),
-      desbloqueadoPor: u?.nome || u?.email || 'admin', bloqueadoMotivo: '',
-    });
-
-    // 2. Envia comando de desbloqueio
-    await arEnviarComando(agentId, 'desbloquear_maquina', { operador: u?.nome || u?.email }, `Desbloqueio por ${u?.nome||u?.email}`);
-
-    auditLog('MACHINE_UNLOCK', 'agents', agentId, 'agent', { hostname });
-    showToast(`🔓 "${hostname}" desbloqueada com sucesso.`, 'success', 4000);
+      bloqueado: false,
+      desbloqueioPendente:false,
+      desbloqueadoEm: new Date().toISOString(),
+      desbloqueadoPor: u?.nome || u?.email || 'admin',
+      bloqueadoMotivo: '',
+      ultimoBloqueioStatus:'desbloqueado',
+      ultimoBloqueioResultado:r.resultado || 'Desbloqueio confirmado pelo agente.'
+    }).catch(()=>{});
+    auditLog('MACHINE_UNLOCK_CONFIRMED', 'agents', agentId, 'agent', { hostname, commandId: cmdId });
+    showToast(`🔓 "${hostname}" desbloqueada e confirmada pelo agente.`, 'success', 5000);
     setTimeout(() => { try { renderAssistenciaRemota(); } catch {} try { renderAtivos(); } catch {} }, 1000);
   } catch(e) { showToast('Erro ao desbloquear: ' + e.message, 'error'); }
 }
@@ -31804,14 +31897,38 @@ function baixarInstaladorSYSACKCorrigido() {
    ===================================================================== */
 (function(){
   const SYSACK_ALERTAS_CATALOGO = [
+    // Infraestrutura
     { id:'maquina_offline', titulo:'Máquina offline', icone:'🔔', funcao:'alertaMaquinaOffline', desc:'Verifica computadores/notebooks sem contato por mais de 5 dias', badge:'A cada 6 horas', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:6,horario:'',janela:'intervalo',limiteDias:5,repetir:true} },
+    { id:'mudanca_ip', titulo:'Mudança de IP', icone:'🌐', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando o endereço IP do agente muda, mesmo dentro da mesma faixa', badge:'Imediato', categoria:'infra', severidade:'media', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'mudanca_faixa_ip', titulo:'Mudança de faixa de rede', icone:'🌐', funcao:'onAgentRedeMudou / onAgentInfraSegurancaMudouV219', desc:'Dispara quando uma máquina muda de faixa de rede/IP, por exemplo 172.23.68.0/24 → 172.22.7.0/24', badge:'Imediato', categoria:'infra', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'mudanca_dns', titulo:'Mudança de DNS', icone:'🧭', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando os servidores DNS configurados na máquina mudam', badge:'Imediato', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'mudanca_gateway', titulo:'Mudança de gateway', icone:'📡', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando o gateway padrão da máquina muda', badge:'Imediato', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'mudanca_mac', titulo:'Mudança de MAC', icone:'🔌', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando o MAC address principal muda', badge:'Imediato', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'mudanca_hostname', titulo:'Mudança de hostname', icone:'🏷️', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando o hostname reportado pelo agente muda', badge:'Imediato', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'agente_sem_comunicacao', titulo:'Agente sem comunicação', icone:'📡', funcao:'alertaAgenteSemComunicacaoV219', desc:'Avisa quando um agente deixa de comunicar por período configurado', badge:'A cada 1 hora', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:1,horario:'',janela:'intervalo',limiteHoras:2,repetir:true} },
+    { id:'falha_atualizacao_agente', titulo:'Falha de atualização do agente', icone:'🚀', funcao:'onAgentCommandStatusV219 / agent_results', desc:'Avisa quando uma atualização remota do agente não confirma retorno ou retorna erro', badge:'Imediato', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+
+    // Ativos
+    { id:'troca_monitor', titulo:'Monitor mudou de computador', icone:'🖥️', funcao:'onMonitorConectadoMudou', desc:'Dispara quando um monitor/serial aparece em outro computador ou muda o vínculo do ativo', badge:'Imediato', categoria:'ativos', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'troca_usuario_principal', titulo:'Troca de usuário principal', icone:'👤', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando o usuário principal calculado pelos logins muda', badge:'Imediato', categoria:'ativos', severidade:'media', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'remocao_software', titulo:'Remoção de software', icone:'🧹', funcao:'onAgentSoftwareInventarioMudouV219', desc:'Dispara quando um software desaparece do inventário da máquina', badge:'Imediato', categoria:'ativos', severidade:'media', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'software_proibido', titulo:'Instalação de software proibido', icone:'⛔', funcao:'onAgentSoftwareInventarioMudouV219', desc:'Dispara quando o agente detecta software cadastrado como proibido', badge:'Imediato', categoria:'ativos', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'alteracao_patrimonio', titulo:'Mudança de patrimônio', icone:'🏷️', funcao:'rastrearAlteracoesAtivo', desc:'Dispara quando o patrimônio/PAT de um ativo é alterado', badge:'Imediato', categoria:'ativos', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+
+    // Segurança
+    { id:'bloqueio_maquina', titulo:'Máquina bloqueada', icone:'🔒', funcao:'onAgentCommandStatusV219 / onAgentResultCriadoV219', desc:'Avisa quando bloqueio/desbloqueio de máquina foi executado ou falhou', badge:'Imediato', categoria:'seguranca', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'firewall_desativado', titulo:'Firewall desativado', icone:'🔥', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando o agente informa firewall inativo/desativado', badge:'Imediato', categoria:'seguranca', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:true} },
+    { id:'antivirus_desativado', titulo:'Antivírus desativado', icone:'🛡️', funcao:'onAgentInfraSegurancaMudouV219', desc:'Dispara quando o agente informa antivírus ausente, parado ou desativado', badge:'Imediato', categoria:'seguranca', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:true} },
+
+    // Telecom
+    { id:'smartphone_sem_sincronizacao', titulo:'Smartphone sem sincronização', icone:'📱', funcao:'alertaSmartphoneSemSyncV219', desc:'Avisa smartphones sem check-in/sincronização recente', badge:'Diário 09:00', categoria:'telecom', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:24,horario:'09:00',janela:'diario',limiteDias:3,repetir:true} },
+    { id:'linha_sem_utilizacao', titulo:'Linha sem utilização', icone:'📶', funcao:'alertaTelecomScheduleV219', desc:'Avisa linhas corporativas sem uso registrado dentro do período configurado', badge:'Diário 08:30', categoria:'telecom', severidade:'media', padrao:{ativo:true,emailEnabled:true,intervaloHoras:24,horario:'08:30',janela:'diario',limiteDias:30,repetir:true} },
+    { id:'fatura_vencida', titulo:'Fatura vencida', icone:'🧾', funcao:'alertaTelecomScheduleV219', desc:'Avisa faturas de telecom vencidas e não pagas/baixadas', badge:'Diário 08:30', categoria:'telecom', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:24,horario:'08:30',janela:'diario',repetir:true} },
+
+    // Fluxos já existentes
     { id:'prazo_terceirizada', titulo:'Prazo terceirizada', icone:'🔔', funcao:'verificarPrazosSchedule', desc:'Avisa devoluções próximas e vencidas de equipamentos enviados à terceirizada', badge:'Diário 08:00', categoria:'terceirizada', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:24,horario:'08:00',janela:'diario',diasAntes:5,repetir:true} },
     { id:'aprovacao_pendente', titulo:'Aprovação pendente', icone:'🔔', funcao:'notificarGestorAprovacao / renotificarGestorAprovacoesPendentes', desc:'Notifica gestores sobre movimentações/aprovações aguardando decisão', badge:'Sob demanda', categoria:'patrimonio', severidade:'media', padrao:{ativo:true,emailEnabled:true,intervaloHoras:2,horario:'',janela:'sob_demanda',repetir:true} },
     { id:'confirmacao_chamado', titulo:'Confirmação de chamado', icone:'🔔', funcao:'enviarConfirmacaoChamado', desc:'Envia confirmação de abertura ao solicitante', badge:'Sob demanda', categoria:'chamados', severidade:'baixa', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'sob_demanda',repetir:false} },
-    { id:'mudanca_faixa_ip', titulo:'Mudança de faixa de rede', icone:'🌐', funcao:'rastrearAlteracoesAtivo / onAgentRedeMudou', desc:'Dispara quando uma máquina muda de faixa de rede/IP, por exemplo 172.23.68.0/24 → 172.22.7.0/24', badge:'Imediato', categoria:'rede', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
-    { id:'troca_monitor', titulo:'Monitor mudou de computador', icone:'🖥️', funcao:'rastrearAlteracoesAtivo / onMonitorConectadoMudou', desc:'Dispara quando um monitor/serial aparece em outro computador ou muda o vínculo do ativo', badge:'Imediato', categoria:'patrimonio', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
-    { id:'falha_atualizacao_agente', titulo:'Falha de atualização do agente', icone:'🚀', funcao:'agent_results / agent_commands', desc:'Avisa quando uma atualização remota do agente não confirma retorno dentro do prazo', badge:'Imediato', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
-    { id:'bloqueio_maquina', titulo:'Bloqueio de máquina', icone:'🔒', funcao:'agent_results', desc:'Avisa quando o bloqueio/desbloqueio da máquina foi executado ou falhou', badge:'Imediato', categoria:'seguranca', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
   ];
   window.SYSACK_ALERTAS_CATALOGO = SYSACK_ALERTAS_CATALOGO;
 
@@ -31953,13 +32070,28 @@ function baixarInstaladorSYSACKCorrigido() {
     const titulo = String(it.titulo || it.title || it.desc || it.mensagem || '').toLowerCase();
     const map = {
       maquina_offline: ['maquina_offline','máquina offline','offline','sem contato'],
+      mudanca_ip: ['mudanca_ip','mudança de ip','ip alterado','ip mudou'],
+      mudanca_faixa_ip: ['mudanca_faixa_ip','mudanca_rede','mudança de faixa','faixa de rede','ip mudou','rede mudou'],
+      mudanca_dns: ['mudanca_dns','mudança de dns','dns alterado'],
+      mudanca_gateway: ['mudanca_gateway','mudança de gateway','gateway alterado'],
+      mudanca_mac: ['mudanca_mac','mudança de mac','mac alterado'],
+      mudanca_hostname: ['mudanca_hostname','mudança de hostname','hostname alterado'],
+      troca_monitor: ['troca_monitor','monitor mudou','troca de monitor','monitor'],
+      troca_usuario_principal: ['troca_usuario_principal','usuário principal','usuario principal'],
+      remocao_software: ['remocao_software','remoção de software','software removido'],
+      software_proibido: ['software_proibido','software proibido','instalação proibida'],
+      alteracao_patrimonio: ['alteracao_patrimonio','mudança de patrimônio','patrimônio alterado','pat alterado'],
+      bloqueio_maquina: ['bloqueio_maquina','maquina_bloqueada','bloqueio','bloquear_maquina','desbloquear_maquina'],
+      falha_atualizacao_agente: ['falha_atualizacao_agente','atualização','atualizacao','timeout','agent_update'],
+      agente_sem_comunicacao: ['agente_sem_comunicacao','agente sem comunicação','sem comunicacao','heartbeat'],
+      firewall_desativado: ['firewall_desativado','firewall desativado','firewall inativo'],
+      antivirus_desativado: ['antivirus_desativado','antivírus desativado','antivirus desativado','antivírus inativo','antivirus inativo'],
+      smartphone_sem_sincronizacao: ['smartphone_sem_sincronizacao','smartphone sem sincronização','sem sincronizacao','sem checkin'],
+      linha_sem_utilizacao: ['linha_sem_utilizacao','linha sem utilização','linha sem utilizacao','sem uso'],
+      fatura_vencida: ['fatura_vencida','fatura vencida','vencida'],
       prazo_terceirizada: ['prazo_terceirizada','terceirizada','prazo vencido','devolução'],
       aprovacao_pendente: ['aprovacao_pendente','aprovação','aprovacao','pendente'],
-      confirmacao_chamado: ['confirmacao_chamado','confirmação','confirmacao','chamado'],
-      mudanca_faixa_ip: ['mudanca_faixa_ip','mudanca_rede','mudança de faixa','faixa de rede','ip mudou','rede mudou'],
-      troca_monitor: ['troca_monitor','monitor mudou','troca de monitor','monitor'],
-      falha_atualizacao_agente: ['falha_atualizacao_agente','atualização','atualizacao','timeout','agent_update'],
-      bloqueio_maquina: ['bloqueio_maquina','bloqueio','bloquear_maquina','desbloquear_maquina']
+      confirmacao_chamado: ['confirmacao_chamado','confirmação','confirmacao','chamado']
     };
     return (map[id] || [id]).some(k => tipo.includes(k) || titulo.includes(k));
   }

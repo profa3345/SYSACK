@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.5-login90d
+ * SYSACK Agent Desktop v2.1.9-alertas
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -119,6 +119,22 @@ async function auditAgentCommand(commandId, action, details = {}) {
   };
   try { await firestoreCreate('audit_logs', entry); } catch(e) { log('[AUDIT] Falha Firestore: ' + e.message); }
   try { fs.appendFileSync(path.join(__dirname, 'audit.log'), JSON.stringify(entry) + '\n', 'utf8'); } catch(e) {}
+}
+
+
+async function reportAgentResult(commandId, tipo, status, resultado, extra = {}) {
+  const entry = {
+    commandId: commandId || '',
+    tipo: tipo || '',
+    status: status || '',
+    resultado: String(resultado || '').slice(0, 2000),
+    hostname: os.hostname(),
+    agentId: AGENT_ID,
+    serviceContextAdmin: isWindowsAdminContext(),
+    createdAt: new Date().toISOString(),
+    ...extra
+  };
+  try { await firestoreCreate('agent_results', entry); } catch(e) { log('[AGENT_RESULT] Falha Firestore: ' + e.message); }
 }
 
 async function validarComandoSeguro(id, tipo, fields, dados) {
@@ -476,6 +492,60 @@ function getSegurancaInfo() {
     info.bitlocker = get('BL') === '1' ? 'Ativo' : get('BL') === '0' ? 'Inativo' : '';
     info.firewall  = get('FW') ? 'Ativo (' + get('FW') + ')' : '';
     info.patches   = parseInt(get('PATCHES')) || 0;
+  } catch(e) {}
+  return info;
+}
+
+
+// ── Informações de rede detalhadas para alertas ────────────────────────
+function getNetworkInfo() {
+  const info = { ip: '', mac: '', gateway: '', dns: '', dnsServers: [], adapter: '' };
+  try {
+    const nets = os.networkInterfaces();
+    for (const [name, arr] of Object.entries(nets)) {
+      const ipv4 = (arr || []).find(n => n.family === 'IPv4' && !n.internal);
+      if (ipv4 && !info.ip) {
+        info.ip = ipv4.address || '';
+        info.mac = ipv4.mac || '';
+        info.adapter = name || '';
+      }
+    }
+    if (process.platform === 'win32') {
+      try {
+        const psScript = [
+          '$cfg = Get-NetIPConfiguration | Where-Object { $_.IPv4Address -and $_.NetAdapter.Status -eq "Up" } | Select-Object -First 1',
+          'if ($cfg) {',
+          '  Write-Output ("GW=" + (($cfg.IPv4DefaultGateway.NextHop | Select-Object -First 1) -as [string]))',
+          '  Write-Output ("DNS=" + (($cfg.DNSServer.ServerAddresses -join ",")))',
+          '  Write-Output ("ALIAS=" + $cfg.InterfaceAlias)',
+          '}',
+          '$ad = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1',
+          'if ($ad) { Write-Output ("MAC=" + $ad.MacAddress) }'
+        ].join('\n');
+        const psFile = path.join(__dirname, '_net.ps1');
+        fs.writeFileSync(psFile, psScript, 'utf8');
+        const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"', { timeout: 10000, windowsHide: true }).toString();
+        try { fs.unlinkSync(psFile); } catch(e) {}
+        const get = key => (out.match(new RegExp(key + '=([^\r\n]*)')) || [])[1]?.trim() || '';
+        const gw = get('GW');
+        const dns = get('DNS');
+        const mac = get('MAC');
+        const alias = get('ALIAS');
+        if (gw) info.gateway = gw;
+        if (dns) { info.dns = dns; info.dnsServers = dns.split(',').map(s => s.trim()).filter(Boolean); }
+        if (mac) info.mac = mac;
+        if (alias) info.adapter = alias;
+      } catch(e) {
+        // fallback ipconfig
+        try {
+          const out = execSync('ipconfig /all', { timeout: 8000, windowsHide: true }).toString();
+          const gw = (out.match(/Default Gateway[^:]*:\s*([^\r\n]+)/i) || [])[1]?.trim();
+          if (gw) info.gateway = gw;
+          const dnsMatches = [...out.matchAll(/DNS Servers[^:]*:\s*([^\r\n]+)/gi)].map(m => m[1].trim()).filter(Boolean);
+          if (dnsMatches.length) { info.dnsServers = dnsMatches; info.dns = dnsMatches.join(','); }
+        } catch(e2) {}
+      }
+    }
   } catch(e) {}
   return info;
 }
@@ -908,7 +978,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
         primeiroLogin: nowIso,
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '', fonte: 'agent-desktop',
-        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.5-login90d',
+        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.9-alertas',
       });
       log(`[LoginHistory] Documento criado: ${loginDocId}`);
     } else {
@@ -916,7 +986,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
       await firestorePatch(docPath, {
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '',
-        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.5-login90d',
+        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.9-alertas',
       });
       log(`[LoginHistory] Documento atualizado (ultimoLogin): ${loginDocId}`);
     }
@@ -942,8 +1012,6 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     loginAtualizadoEm: nowIso,
     usuarioPrincipal: resumo.usuarioPrincipal,
     usuarioPrincipalDias90d: resumo.usuarioPrincipalDias90d,
-    diasLogadosAno: resumo.usuarioPrincipalDias90d,
-    diasLogados90d: resumo.usuarioPrincipalDias90d,
     usuarioPrincipalPeriodoDias: LOGIN_PRINCIPAL_DIAS,
     usuariosLogin90d: JSON.stringify(resumo.usuarios),
     usuariosLogin90dArray: resumo.usuarios,
@@ -994,6 +1062,7 @@ async function reportar() {
 
     const hw  = getHardwareInfo();
     const sec = getSegurancaInfo();
+    const net = getNetworkInfo();
     const software = getInstalledSoftware(false);
 
     const dados = {
@@ -1008,8 +1077,14 @@ async function reportar() {
       bitlocker:         sec.bitlocker,
       firewall:          sec.firewall,
       patches:           sec.patches,
-      ip:                Object.values(os.networkInterfaces())
-                           .flat().find(n => n.family === 'IPv4' && !n.internal)?.address || '',
+      ip:                net.ip || Object.values(os.networkInterfaces()).flat().find(n => n.family === 'IPv4' && !n.internal)?.address || '',
+      mac:               net.mac || '',
+      macAddress:        net.mac || '',
+      gateway:           net.gateway || '',
+      defaultGateway:    net.gateway || '',
+      dns:               net.dns || '',
+      dnsServers:        net.dnsServers || [],
+      networkAdapter:    net.adapter || '',
       so:                getOsInfo(),
       osNome:            getOsInfo(),
       // campos esperados pelo renderAssistenciaRemota
@@ -1030,7 +1105,7 @@ async function reportar() {
       software:          software,
       softwareCount:     software.length,
       softwareAtualizadoEm: _softwareCache.at ? new Date(_softwareCache.at).toISOString() : now,
-      versaoAgente:      cfg.versaoAgente || '2.1.5-login90d',
+      versaoAgente:      cfg.versaoAgente || '2.1.9-alertas',
       ultimaAtualizacao: now,
       lastSeen:          now,
       status:            'online',
@@ -1056,7 +1131,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.5-login90d] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1.9-alertas] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -1211,74 +1286,46 @@ iniciarServidorRemoto();
 
 
 // ── Relay Firestore — escuta comandos do técnico ──────────────────
-async function firestoreQuery(collectionPath, filters, limitN = 50) {
-  // v2.1.6: consulta com fallback. A query composta agentId+status pode falhar
-  // por índice/regras e deixava o painel em timeout sem diagnóstico.
+async function firestoreQuery(collectionPath, filters) {
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${API_KEY}`;
-  const structuredQuery = { from: [{ collectionId: collectionPath }], limit: limitN };
-  if (filters && filters.length === 1) {
-    const [field, op, value] = filters[0];
-    structuredQuery.where = { fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: String(value) } } };
-  } else if (filters && filters.length > 1) {
-    structuredQuery.where = { compositeFilter: { op: 'AND', filters: filters.map(([field, op, value]) => ({
-      fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: String(value) } }
-    })) } };
-  }
-  const body = JSON.stringify({ structuredQuery });
-  const runQuery = () => new Promise(resolve => {
-    const urlObj = new URL(url);
-    const req = https.request({ hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'POST', rejectUnauthorized: false,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, res => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(raw);
-          if (res.statusCode < 200 || res.statusCode >= 300 || (Array.isArray(parsed) && parsed[0]?.error)) {
-            const err = Array.isArray(parsed) ? parsed[0]?.error : parsed;
-            log(`[Firestore] Query ${collectionPath} HTTP ${res.statusCode}: ` + JSON.stringify(err).slice(0, 500));
-            return resolve(null);
-          }
-          resolve(Array.isArray(parsed) ? parsed : []);
-        } catch(e) { log('[Firestore] Query parse erro: ' + e.message); resolve(null); }
-      });
-    });
-    req.on('error', e => { log('[Firestore] Query falhou: ' + e.message); resolve(null); });
-    req.write(body); req.end();
+  const body = JSON.stringify({
+    structuredQuery: {
+      from: [{ collectionId: collectionPath }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: filters.map(([field, op, value]) => ({
+            fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: value } }
+          }))
+        }
+      },
+      limit: 10
+    }
   });
-  const out = await runQuery();
-  if (out) return out;
-  // Fallback: lista documentos e filtra localmente. Evita timeout quando falta índice composto.
-  return await firestoreListAndFilter(collectionPath, filters || [], limitN);
-}
-
-function firestoreListAndFilter(collectionPath, filters, limitN = 100) {
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}?key=${API_KEY}&pageSize=${Math.min(Math.max(limitN, 20), 300)}`;
   const urlObj = new URL(url);
-  return new Promise(resolve => {
-    const req = https.request({ hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'GET', rejectUnauthorized: false }, res => {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
         try {
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            log(`[Firestore] List ${collectionPath} HTTP ${res.statusCode}: ${raw.slice(0, 300)}`);
-            return resolve([]);
-          }
           const parsed = JSON.parse(raw);
-          const docs = (parsed.documents || []).map(document => ({ document })).filter(item => {
-            const f = item.document.fields || {};
-            return filters.every(([field, op, value]) => {
-              const v = f[field]?.stringValue || f[field]?.integerValue || f[field]?.doubleValue || f[field]?.booleanValue;
-              if (op === 'EQUAL') return String(v) === String(value);
-              return true;
-            });
-          });
-          resolve(docs.slice(0, limitN));
-        } catch(e) { log('[Firestore] List parse erro: ' + e.message); resolve([]); }
+          // Firestore retorna array — se primeiro item tem 'error', logar
+          if (Array.isArray(parsed) && parsed[0]?.error) {
+            log('[Firestore] Query erro: ' + JSON.stringify(parsed[0].error));
+          }
+          resolve(parsed);
+        } catch(e) { resolve([]); }
       });
     });
-    req.on('error', e => { log('[Firestore] List falhou: ' + e.message); resolve([]); });
+    req.on('error', e => { log('[Firestore] Query falhou: ' + e.message); resolve([]); });
+    req.write(body);
     req.end();
   });
 }
@@ -1593,11 +1640,10 @@ async function executarComando(doc) {
   const dados  = (() => { try { return JSON.parse(getId(fields.dados) || '{}'); } catch { return {}; } })();
   const aId    = getId(fields.agentId);
 
-  const agentAliases = [...new Set([AGENT_ID, os.hostname(), String(os.hostname()).toUpperCase(), String(os.hostname()).toLowerCase()].filter(Boolean))];
-  if (!agentAliases.includes(aId)) return;
+  if (aId !== AGENT_ID) return;
 
-  // Marca imediatamente para não processar duas vezes e confirma que o agente enxergou o comando.
-  await firestorePatch('agent_commands/' + id, { status: 'processando', vistoPor: AGENT_ID, vistoEm: new Date().toISOString() }).catch(() => {});
+  // Marca imediatamente para não processar duas vezes
+  await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
 
   // Segurança corporativa: não aceita token fixo nem senha enviada pelo portal.
   // Valida tipo, expiração, perfil solicitante, justificativa e contexto administrativo local.
@@ -1645,22 +1691,61 @@ async function executarComando(doc) {
       // Cada etapa crítica emite ERRO:<etapa>:<mensagem> se falhar.
       // Só emite BLOQUEIO_CONCLUIDO se TUDO teve êxito.
       const credBlock = adminUser && adminPass ? `
-$secPass = ConvertTo-SecureString '${adminPass}' -AsPlainText -Force
-$cred    = New-Object System.Management.Automation.PSCredential ('${adminUser}', $secPass)
-` : `$cred = $null`;
+$adminUserRaw = '${adminUser}'
+$adminPassRaw = '${adminPass}'
+$secPass = ConvertTo-SecureString $adminPassRaw -AsPlainText -Force
+$cred    = New-Object System.Management.Automation.PSCredential ($adminUserRaw, $secPass)
 
-      const disableBlock = adminUser && adminPass ? `
-foreach ($u in $usuarios) {
-  try {
-    $arg = 'user "' + $u.Name + '" /active:no'
-    $proc = Start-Process -FilePath 'net.exe' -ArgumentList $arg -Credential $cred -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
-    if ($proc.ExitCode -eq 0) { Write-Host "OK_DESATIVADO:$($u.Name)" }
-    else {
-      Disable-LocalUser -Name $u.Name -ErrorAction Stop
-      Write-Host "OK_DESATIVADO:$($u.Name)"
-    }
-  } catch { Write-Host "ERRO_CONTA:$($u.Name):$_" }
-}` : `
+# Valida usuário/senha antes de fazer qualquer alteração.
+try {
+  Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class LogonUtil {
+  [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern bool LogonUser(string lpszUsername, string lpszDomain, string lpszPassword, int dwLogonType, int dwLogonProvider, out IntPtr phToken);
+  [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
+  public extern static bool CloseHandle(IntPtr handle);
+}
+"@
+  $domain = $env:COMPUTERNAME
+  $userOnly = $adminUserRaw
+  if ($adminUserRaw -match '\\') { $parts = $adminUserRaw.Split('\\',2); $domain = $parts[0]; $userOnly = $parts[1] }
+  elseif ($adminUserRaw -match '@') { $userOnly = $adminUserRaw }
+  $token = [IntPtr]::Zero
+  $ok = [LogonUtil]::LogonUser($userOnly, $domain, $adminPassRaw, 2, 0, [ref]$token)
+  if (-not $ok) {
+    $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    Write-Host "ERRO_CREDENCIAL_INVALIDA:Usuario/senha invalidos ou logon negado. Codigo=$err"
+    exit 10
+  }
+  if ($token -ne [IntPtr]::Zero) { [LogonUtil]::CloseHandle($token) | Out-Null }
+
+  # Verifica se a conta está no grupo Administradores local diretamente.
+  $adminGroup = ([Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
+  $members = net localgroup "$adminGroup" 2>$null
+  $needle1 = $adminUserRaw.ToLower()
+  $needle2 = $userOnly.ToLower()
+  $isAdmin = $false
+  foreach ($m in $members) {
+    $ml = ($m.Trim()).ToLower()
+    if ($ml -eq $needle1 -or $ml -eq $needle2 -or $ml.EndsWith('\\' + $needle2)) { $isAdmin = $true }
+  }
+  if (-not $isAdmin) {
+    Write-Host "ERRO_SEM_PERMISSAO_ADMIN:Conta validada, mas nao pertence ao grupo Administradores local."
+    exit 11
+  }
+  Write-Host "OK_CREDENCIAL_ADMIN:$adminUserRaw"
+} catch {
+  Write-Host "ERRO_VALIDACAO_CREDENCIAL:$_"
+  exit 12
+}
+` : `
+Write-Host "ERRO_CREDENCIAL_OBRIGATORIA:Informe usuario e senha de administrador local."
+exit 13
+`;
+
+      const disableBlock = `
 foreach ($u in $usuarios) {
   try { Disable-LocalUser -Name $u.Name -ErrorAction Stop; Write-Host "OK_DESATIVADO:$($u.Name)" }
   catch { Write-Host "ERRO_CONTA:$($u.Name):$_" }
@@ -1745,7 +1830,15 @@ Write-Host "BLOQUEIO_CONCLUIDO"
       if (!concluido || erros.length > 0) {
         // Identifica a falha mais específica para reportar
         let motFalha = 'Falha desconhecida durante o bloqueio.';
-        if (erros.some(e => e.startsWith('ERRO_LISTA')))
+        if (erros.some(e => e.startsWith('ERRO_CREDENCIAL_INVALIDA')))
+          motFalha = 'Usuário ou senha inválidos, ou a conta não tem permissão de logon nesta máquina.';
+        else if (erros.some(e => e.startsWith('ERRO_SEM_PERMISSAO_ADMIN')))
+          motFalha = 'A conta informada é válida, mas NÃO pertence ao grupo Administradores local desta máquina.';
+        else if (erros.some(e => e.startsWith('ERRO_CREDENCIAL_OBRIGATORIA')))
+          motFalha = 'Credenciais de administrador local são obrigatórias.';
+        else if (erros.some(e => e.startsWith('ERRO_VALIDACAO_CREDENCIAL')))
+          motFalha = 'Falha ao validar credenciais administrativas.';
+        else if (erros.some(e => e.startsWith('ERRO_LISTA')))
           motFalha = 'Não foi possível salvar a lista de usuários (sem permissão de escrita no diretório do agente?).';
         else if (erros.some(e => e.startsWith('ERRO_CONTA'))) {
           const contas = erros.filter(e => e.startsWith('ERRO_CONTA')).map(e => e.split(':')[1]).join(', ');
@@ -1762,6 +1855,7 @@ Write-Host "BLOQUEIO_CONCLUIDO"
         const msgErro = `[BLOQUEIO ABORTADO] ${motFalha}`;
         log(msgErro);
         await auditAgentCommand(id, 'MACHINE_LOCK_ABORTED', { tipo, operador: sanitizeAuditText(operador), motivo: sanitizeAuditText(motivo), falha: sanitizeAuditText(motFalha) });
+        await reportAgentResult(id, tipo, 'erro', msgErro, { operador: sanitizeAuditText(operador), motivo: sanitizeAuditText(motivo), falha: sanitizeAuditText(motFalha) });
         // Reverte o campo bloqueado no Firestore para não enganar o painel
         await firestorePatch('agents/' + AGENT_ID, { bloqueado: false }).catch(() => {});
         await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: msgErro, concluidoEm: new Date().toISOString() }).catch(() => {});
@@ -1772,53 +1866,17 @@ Write-Host "BLOQUEIO_CONCLUIDO"
         for (const a of avisos) log(`[BLOQUEIO] ⚠️ ${a}`);
       }
 
-
-      // v2.1.6: guarda de bloqueio real. O aviso de logon sozinho não bloqueia domínio AD.
-      // Esta tarefa roda como SYSTEM a cada logon e derruba sessões não administrativas enquanto C:\SYSACK\machine.lock existir.
-      const guardPs = `
-$lock = '${path.join(__dirname, 'machine.lock').replace(/\\/g,'\\\\')}'
-$guard = '${path.join(__dirname, '_sysack_lock_guard.ps1').replace(/\\/g,'\\\\')}'
-@'
-$lock = "${path.join(__dirname, 'machine.lock').replace(/\\/g,'\\\\')}"
-if (!(Test-Path $lock)) { exit 0 }
-try {
-  $admins = @('administrator','administrador','ana.penha','sysack.adm')
-  $q = query user 2>$null
-  foreach ($line in $q) {
-    if ($line -match '^(>|\s)(\S+)\s+') {
-      $user = $Matches[2].Trim()
-      if ($admins -contains $user.ToLower()) { continue }
-      if ($line -match '\s+(\d+)\s+') { logoff $Matches[1] /V }
-    }
-  }
-} catch {}
-'@ | Set-Content -Path $guard -Encoding UTF8
-$act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $guard + '"')
-$trg = New-ScheduledTaskTrigger -AtLogOn
-$pri = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
-Register-ScheduledTask -TaskName 'SYSACK-MachineLockGuard' -Action $act -Trigger $trg -Principal $pri -Force | Out-Null
-Start-ScheduledTask -TaskName 'SYSACK-MachineLockGuard'
-Write-Host 'GUARD_OK'
-`.trim();
-      try {
-        const gp = path.join(__dirname, '_sysack_install_guard.ps1');
-        fs.writeFileSync(gp, guardPs, 'utf8');
-        const gout = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${gp}"`, { timeout: 30000, windowsHide: true }).toString();
-        try { fs.unlinkSync(gp); } catch {}
-        if (!gout.includes('GUARD_OK')) avisos.push('Guarda de bloqueio não confirmou instalação.');
-      } catch(eGuard) {
-        motFalha = 'Falha ao instalar guarda de bloqueio real: ' + eGuard.message;
-      }
-
       // Tudo OK — grava estado e confirma
       fs.writeFileSync(lockFile, JSON.stringify({ bloqueado: true, motivo, operador, bloqueadoEm: new Date().toISOString(), hostname: require('os').hostname() }), 'utf8');
       resultado = `Máquina bloqueada com sucesso. Contas desativadas, registro atualizado. Motivo: ${motivo}`;
       log(`[BLOQUEIO] ✅ ${resultado}`);
       await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado, concluidoEm: new Date().toISOString() }).catch(() => {});
+      await reportAgentResult(id, tipo, 'concluido', resultado, { operador: sanitizeAuditText(operador), motivo: sanitizeAuditText(motivo) });
       await auditAgentCommand(id, 'MACHINE_LOCK_EXECUTED', { tipo, operador: sanitizeAuditText(operador), motivo: sanitizeAuditText(motivo), resultado: sanitizeAuditText(resultado) });
     } catch(e) {
       log('[BLOQUEIO] Erro inesperado: ' + e.message);
       await auditAgentCommand(id, 'MACHINE_LOCK_ERROR', { tipo, erro: sanitizeAuditText(e.message) });
+      await reportAgentResult(id, tipo, 'erro', '[BLOQUEIO ABORTADO] ' + e.message, { erro: sanitizeAuditText(e.message) });
       await firestorePatch('agents/' + AGENT_ID, { bloqueado: false }).catch(() => {});
       await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: '[BLOQUEIO ABORTADO] ' + e.message }).catch(() => {});
     }
@@ -1862,8 +1920,6 @@ Write-Host "DESBLOQUEIO_CONCLUIDO"
       const saida = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 30000, windowsHide: true }).toString();
       try { fs.unlinkSync(psPath); } catch {}
       try { fs.unlinkSync(path.join(__dirname, 'machine.lock')); } catch {}
-      try { execSync('schtasks /Delete /TN "SYSACK-MachineLockGuard" /F', { timeout: 10000, windowsHide: true }); } catch {}
-      try { fs.unlinkSync(path.join(__dirname, '_sysack_lock_guard.ps1')); } catch {}
 
       log(`[DESBLOQUEIO] ${saida.includes('DESBLOQUEIO_CONCLUIDO') ? 'Concluído' : saida.trim()}`);
       log(`[DESBLOQUEIO] Máquina desbloqueada por ${operador}`);
@@ -1962,22 +2018,14 @@ $out | ConvertTo-Json -Depth 4 -Compress
       const backupPath = selfPath.replace(/\.js$/, '.backup.js');
       try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
       fs.writeFileSync(selfPath, novoConteudo, 'utf8');
-      // Também mantém os nomes usados pelo instalador antigo/novo.
-      for (const alt of ['agent.js', 'agent-desktop.js']) {
-        const altPath = path.join(__dirname, alt);
-        if (altPath !== selfPath) { try { fs.writeFileSync(altPath, novoConteudo, 'utf8'); } catch(e) {} }
-      }
       log(`[UPDATE] Substituído em ${selfPath} (${novoConteudo.length} bytes). Gravando confirmação...`);
       resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
       // CRÍTICO: grava status ANTES do exit — caso contrário o processo morre antes de confirmar
       await firestorePatch('agents/'+AGENT_ID, {
         versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
       }).catch(()=>{});
-      await firestorePatch('agentes_desktop/'+AGENT_ID, {
-        versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
-      }).catch(()=>{});
       await firestorePatch('agent_commands/'+id, {
-        status: 'concluido', resultado: resultado, concluidoEm: new Date().toISOString()
+        status: 'concluido', resultado: resultado
       }).catch(()=>{});
       log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 3s...');
       agendarReinicioAgent();
@@ -2023,20 +2071,16 @@ $out | ConvertTo-Json -Depth 4 -Compress
 // Intervalo de 5s (era 3s) — depois que o relay RTDB inicia, não é mais usado
 async function pollComandos() {
   try {
-    const aliases = [...new Set([AGENT_ID, os.hostname(), String(os.hostname()).toUpperCase(), String(os.hostname()).toLowerCase()].filter(Boolean))];
-    let docs = [];
-    for (const aid of aliases) {
-      const r = await firestoreQuery('agent_commands', [ ['agentId', 'EQUAL', aid], ['status', 'EQUAL', 'pendente'] ], 30);
-      if (Array.isArray(r) && r.length) docs.push(...r);
+    const docs = await firestoreQuery('agent_commands', [
+      ['agentId', 'EQUAL', AGENT_ID],
+      ['status',  'EQUAL', 'pendente']
+    ]);
+    if (Array.isArray(docs)) {
+      for (const doc of docs) {
+        if (doc.document) await executarComando(doc);
+      }
     }
-    const vistos = new Set();
-    for (const doc of docs) {
-      const id = doc.document?.name?.split('/').pop();
-      if (!id || vistos.has(id)) continue;
-      vistos.add(id);
-      await executarComando(doc);
-    }
-  } catch(e) { log('[Comandos] poll falhou: ' + e.message); }
+  } catch(e) {}
 }
 
 setInterval(pollComandos, 1000);
