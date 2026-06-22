@@ -1610,93 +1610,147 @@ async function executarComando(doc) {
 
       const motivoSafe = motivo.replace(/'/g, '').replace(/\n/g, ' ').replace(/"/g, '');
 
-      // Bloco de credencial: se fornecidas, usa PSCredential para garantir privilégio admin local
+      // ── Script PowerShell com verificações explícitas e saída estruturada ──
+      // Cada etapa crítica emite ERRO:<etapa>:<mensagem> se falhar.
+      // Só emite BLOQUEIO_CONCLUIDO se TUDO teve êxito.
       const credBlock = adminUser && adminPass ? `
-# Credencial de administrador fornecida pelo operador TI
-$secPass  = ConvertTo-SecureString '${adminPass}' -AsPlainText -Force
-$cred     = New-Object System.Management.Automation.PSCredential ('${adminUser}', $secPass)
-` : `
-# Sem credencial fornecida — executa no contexto atual (requer serviço SYSTEM)
-$cred = $null
-`;
+$secPass = ConvertTo-SecureString '${adminPass}' -AsPlainText -Force
+$cred    = New-Object System.Management.Automation.PSCredential ('${adminUser}', $secPass)
+` : `$cred = $null`;
 
-      // Wrapper para executar comandos como admin local via Start-Process se necessário
       const disableBlock = adminUser && adminPass ? `
-# Desativa usuarios usando credencial de admin explícita via net user
 foreach ($u in $usuarios) {
   try {
     $proc = Start-Process -FilePath 'net.exe' -ArgumentList "user `"$($u.Name)`" /active:no" -Credential $cred -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
-    if ($proc.ExitCode -eq 0) { Write-Host "Desativado: $($u.Name)" }
-    else { Disable-LocalUser -Name $u.Name -ErrorAction Stop; Write-Host "Desativado (fallback): $($u.Name)" }
-  } catch { Write-Host "Erro ao desativar $($u.Name): $_" }
-}
-` : `
-# Desativa usuarios no contexto atual
+    if ($proc.ExitCode -eq 0) { Write-Host "OK_DESATIVADO:$($u.Name)" }
+    else {
+      Disable-LocalUser -Name $u.Name -ErrorAction Stop
+      Write-Host "OK_DESATIVADO:$($u.Name)"
+    }
+  } catch { Write-Host "ERRO_CONTA:$($u.Name):$_" }
+}` : `
 foreach ($u in $usuarios) {
-  try { Disable-LocalUser -Name $u.Name; Write-Host "Desativado: $($u.Name)" } catch { Write-Host "Erro: $($u.Name) - $_" }
-}
-`;
+  try { Disable-LocalUser -Name $u.Name -ErrorAction Stop; Write-Host "OK_DESATIVADO:$($u.Name)" }
+  catch { Write-Host "ERRO_CONTA:$($u.Name):$_" }
+}`;
 
       const psBlock = `
+$ErrorActionPreference = 'Stop'
 ${credBlock}
 
-# 1. Salva lista de usuarios locais ativos para restaurar no desbloqueio
-$usuarios = Get-LocalUser | Where-Object { $_.Enabled -eq $true -and $_.Name -notmatch 'Admin|SYSTEM|DefaultAccount|WDAGUtilityAccount|Guest' }
-$lista = ($usuarios.Name) -join ','
-Set-Content -Path '${blockedUsersFile}' -Value $lista -Encoding UTF8
+# ETAPA 1 — Salvar lista de usuários ativos
+try {
+  $usuarios = Get-LocalUser | Where-Object { $_.Enabled -eq $true -and $_.Name -notmatch 'Admin|SYSTEM|DefaultAccount|WDAGUtilityAccount|Guest' }
+  $lista = ($usuarios.Name) -join ','
+  Set-Content -Path '${blockedUsersFile}' -Value $lista -Encoding UTF8 -ErrorAction Stop
+  Write-Host "OK_LISTA:$lista"
+} catch {
+  Write-Host "ERRO_LISTA:$_"
+  exit 1
+}
 
-# 2. Desativa TODOS os usuarios locais nao-administradores
+# ETAPA 2 — Desativar contas
 ${disableBlock}
 
-# 3. Exibe aviso de bloqueio na tela de logon (Registry) — impede login mesmo que conta seja reativada manualmente
-$regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System'
-Set-ItemProperty -Path $regPath -Name 'legalnoticecaption' -Value 'MAQUINA BLOQUEADA - TI CESAN' -Type String -Force
-Set-ItemProperty -Path $regPath -Name 'legalnoticetext'    -Value 'Esta maquina foi bloqueada pelo TI. Motivo: ${motivoSafe}. Para desbloquear, contate o TI CESAN.' -Type String -Force
-# Força confirmação obrigatória — remove a possibilidade de bypass simples no OK
-Set-ItemProperty -Path $regPath -Name 'legalnoticebutton' -Value 0 -Type DWord -Force 2>$null
+# ETAPA 3 — Verificar se todas foram desativadas
+$ainda = Get-LocalUser | Where-Object { $_.Enabled -eq $true -and $_.Name -notmatch 'Admin|SYSTEM|DefaultAccount|WDAGUtilityAccount|Guest' }
+if ($ainda.Count -gt 0) {
+  Write-Host "ERRO_CONTAS_ATIVAS:$($ainda.Name -join ',')"
+  exit 2
+}
 
-# 4. Desconecta todas as sessoes ativas
+# ETAPA 4 — Escrever chave de aviso no Registry
+$regPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+try {
+  Set-ItemProperty -Path $regPath -Name 'legalnoticecaption' -Value 'MAQUINA BLOQUEADA - TI CESAN' -Type String -Force -ErrorAction Stop
+  Set-ItemProperty -Path $regPath -Name 'legalnoticetext'    -Value 'Esta maquina foi bloqueada pelo TI. Motivo: ${motivoSafe}. Para desbloquear, contate o TI CESAN.' -Type String -Force -ErrorAction Stop
+  Write-Host "OK_REGISTRY"
+} catch {
+  Write-Host "ERRO_REGISTRY:$_"
+  exit 3
+}
+
+# ETAPA 5 — Encerrar sessões ativas
 query session 2>$null | Select-String 'Active|Ativo' | ForEach-Object {
-  $parts = ($_ -replace '\\s+', ' ').Trim() -split ' '
-  $sid = $parts | Where-Object { $_ -match '^\\d+$' } | Select-Object -First 1
-  if ($sid) { logoff $sid /server:localhost 2>$null; Write-Host "Sessao encerrada: $sid" }
+  $parts = ($_ -replace '\s+', ' ').Trim() -split ' '
+  $sid = $parts | Where-Object { $_ -match '^\d+$' } | Select-Object -First 1
+  if ($sid) { logoff $sid /server:localhost 2>$null; Write-Host "OK_LOGOFF:$sid" }
 }
 
-# 5. Bloqueia a tela imediatamente (complementar — contas já estão desativadas)
-Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LW { [DllImport("user32.dll")] public static extern bool LockWorkStation(); }'
-[LW]::LockWorkStation() | Out-Null
+# ETAPA 6 — Bloquear tela (melhor esforço)
+try {
+  Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LW { [DllImport("user32.dll")] public static extern bool LockWorkStation(); }'
+  [LW]::LockWorkStation() | Out-Null
+  Write-Host "OK_LOCKSCREEN"
+} catch { Write-Host "AVISO_LOCKSCREEN:$_" }
 
-# 6. Verifica se as contas foram efetivamente desativadas
-$verificacao = Get-LocalUser | Where-Object { $_.Enabled -eq $true -and $_.Name -notmatch 'Admin|SYSTEM|DefaultAccount|WDAGUtilityAccount|Guest' }
-if ($verificacao.Count -gt 0) {
-  Write-Host "AVISO_CONTAS_ATIVAS: $($verificacao.Name -join ',')"
-} else {
-  Write-Host "BLOQUEIO_CONCLUIDO"
-}
+Write-Host "BLOQUEIO_CONCLUIDO"
 `.trim();
 
       const psPath = path.join(__dirname, '_sysack_block.ps1');
       fs.writeFileSync(psPath, psBlock, 'utf8');
-      const saida = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 30000, windowsHide: true }).toString();
+
+      let saida = '';
+      let psErro = null;
+      try {
+        saida = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 30000, windowsHide: true }).toString();
+      } catch(ePow) {
+        // execSync lança se o processo sair com código != 0 (nossos exit 1/2/3)
+        saida = (ePow.stdout || '').toString() + (ePow.stderr || '').toString();
+        psErro = ePow;
+      }
       try { fs.unlinkSync(psPath); } catch {}
 
-      // Alerta se contas ainda ativas após tentativa
-      if (saida.includes('AVISO_CONTAS_ATIVAS')) {
-        log('[BLOQUEIO] Atenção: algumas contas podem não ter sido desativadas. Verifique se o agente roda como SYSTEM ou forneça credenciais de admin válidas.');
+      // ── Interpretar saída estruturada ──────────────────────────────────────
+      const linhas = saida.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const erros  = linhas.filter(l => l.startsWith('ERRO_'));
+      const avisos = linhas.filter(l => l.startsWith('AVISO_'));
+      const concluido = linhas.some(l => l === 'BLOQUEIO_CONCLUIDO');
+
+      // Log detalhado sempre
+      for (const l of linhas) log(`[BLOQUEIO] ${l}`);
+
+      if (!concluido || erros.length > 0) {
+        // Identifica a falha mais específica para reportar
+        let motFalha = 'Falha desconhecida durante o bloqueio.';
+        if (erros.some(e => e.startsWith('ERRO_LISTA')))
+          motFalha = 'Não foi possível salvar a lista de usuários (sem permissão de escrita no diretório do agente?).';
+        else if (erros.some(e => e.startsWith('ERRO_CONTA'))) {
+          const contas = erros.filter(e => e.startsWith('ERRO_CONTA')).map(e => e.split(':')[1]).join(', ');
+          motFalha = `Não foi possível desativar as contas: ${contas}. Verifique se as credenciais de administrador estão corretas e se o usuário tem permissão para gerenciar contas locais.`;
+        } else if (erros.some(e => e.startsWith('ERRO_CONTAS_ATIVAS'))) {
+          const contas = erros.find(e => e.startsWith('ERRO_CONTAS_ATIVAS'))?.split(':')[1] || '';
+          motFalha = `Contas ainda ativas após tentativa de desativação: ${contas}. Credencial de administrador pode ser inválida ou insuficiente.`;
+        } else if (erros.some(e => e.startsWith('ERRO_REGISTRY'))) {
+          motFalha = 'Sem permissão para alterar o Registry (HKLM\\...\\Policies\\System). O agente precisa rodar como SYSTEM ou administrador local.';
+        } else if (psErro) {
+          motFalha = `PowerShell retornou erro: ${psErro.message}`;
+        }
+
+        const msgErro = `[BLOQUEIO ABORTADO] ${motFalha}`;
+        log(msgErro);
+        await auditAgentCommand(id, 'MACHINE_LOCK_ABORTED', { tipo, operador: sanitizeAuditText(operador), motivo: sanitizeAuditText(motivo), falha: sanitizeAuditText(motFalha) });
+        // Reverte o campo bloqueado no Firestore para não enganar o painel
+        await firestorePatch('agents/' + AGENT_ID, { bloqueado: false }).catch(() => {});
+        await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: msgErro, concluidoEm: new Date().toISOString() }).catch(() => {});
+        return;
       }
 
-      // Arquivo de estado local
-      fs.writeFileSync(lockFile, JSON.stringify({ bloqueado: true, motivo, operador, bloqueadoEm: new Date().toISOString(), hostname: require('os').hostname() }), 'utf8');
+      if (avisos.length) {
+        for (const a of avisos) log(`[BLOQUEIO] ⚠️ ${a}`);
+      }
 
-      log(`[BLOQUEIO] ${saida.includes('BLOQUEIO_CONCLUIDO') ? 'Concluído' : saida.trim()}`);
-      log(`[BLOQUEIO] Máquina bloqueada por ${operador}. Motivo: ${motivo}`);
-      resultado = `Bloqueio aplicado para todos os usuários. Motivo: ${motivo}`;
+      // Tudo OK — grava estado e confirma
+      fs.writeFileSync(lockFile, JSON.stringify({ bloqueado: true, motivo, operador, bloqueadoEm: new Date().toISOString(), hostname: require('os').hostname() }), 'utf8');
+      resultado = `Máquina bloqueada com sucesso. Contas desativadas, registro atualizado. Motivo: ${motivo}`;
+      log(`[BLOQUEIO] ✅ ${resultado}`);
       await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado, concluidoEm: new Date().toISOString() }).catch(() => {});
       await auditAgentCommand(id, 'MACHINE_LOCK_EXECUTED', { tipo, operador: sanitizeAuditText(operador), motivo: sanitizeAuditText(motivo), resultado: sanitizeAuditText(resultado) });
     } catch(e) {
-      log('[BLOQUEIO] Erro: ' + e.message);
+      log('[BLOQUEIO] Erro inesperado: ' + e.message);
       await auditAgentCommand(id, 'MACHINE_LOCK_ERROR', { tipo, erro: sanitizeAuditText(e.message) });
-      await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: e.message }).catch(() => {});
+      await firestorePatch('agents/' + AGENT_ID, { bloqueado: false }).catch(() => {});
+      await firestorePatch('agent_commands/' + id, { status: 'erro', resultado: '[BLOQUEIO ABORTADO] ' + e.message }).catch(() => {});
     }
     return;
   }
