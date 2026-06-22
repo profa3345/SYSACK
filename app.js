@@ -31900,18 +31900,25 @@ function baixarInstaladorSYSACKCorrigido() {
       }
     });
 
+    if (!document.getElementById('sysack-alerta-card-click-css')) {
+      const st = document.createElement('style');
+      st.id = 'sysack-alerta-card-click-css';
+      st.textContent = '.sysack-alerta-card-click:hover{transform:translateY(-1px);border-color:#93C5FD!important;box-shadow:0 10px 26px rgba(37,99,235,.12)!important}.sysack-alerta-card-click:focus{outline:3px solid rgba(37,99,235,.22);outline-offset:2px}.sysack-alerta-evidencia-row:hover{background:#F8FAFC}';
+      document.head.appendChild(st);
+    }
+
     list.innerHTML = SYSACK_ALERTAS_CATALOGO.map(a => {
       const cfg = cfgAlerta(a.id);
       const emails = emailsDoAlerta(a.id);
       const grupos = gruposSelecionados(cfg).map(gid => (STATE.alertaGrupos||[]).find(g=>g.id===gid)?.nome || gid).filter(Boolean);
       const status = cfg.ativo === false ? '<span style="background:#F3F4F6;color:#64748B;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700">Pausado</span>' : '<span style="background:#DCFCE7;color:#166534;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700">Ativo</span>';
       const periodo = cfg.janela === 'diario' ? ('Diário ' + (cfg.horario||'08:00')) : cfg.janela === 'imediato' ? 'Imediato' : cfg.janela === 'sob_demanda' ? 'Sob demanda' : ('A cada ' + (cfg.intervaloHoras || a.padrao?.intervaloHoras || 6) + ' horas');
-      return `<div class="card mb-16" style="padding:18px 20px;border-radius:14px;border:1px solid var(--line);box-shadow:0 1px 2px rgba(15,23,42,.03)">
+      return `<div class="card mb-16 sysack-alerta-card-click" role="button" tabindex="0" onclick="abrirItensAlertaSYSACK('${a.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirItensAlertaSYSACK('${a.id}')}" style="padding:18px 20px;border-radius:14px;border:1px solid var(--line);box-shadow:0 1px 2px rgba(15,23,42,.03);cursor:pointer;transition:all .16s ease">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
           <div style="flex:1">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
               <span>${a.icone}</span><strong style="font-size:15px;color:var(--g900)">${esc(a.titulo)}</strong>${status}
-              <span style="background:#EFF6FF;color:#2563EB;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700">${esc(periodo)}</span>
+              <span style="background:#EFF6FF;color:#2563EB;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700">${esc(periodo)}</span><span style="color:#64748B;font-size:11px;margin-left:6px">Clique para ver itens em evidência</span>
             </div>
             <div style="font-size:12.5px;color:var(--g500);margin-bottom:10px">${esc(a.desc)}</div>
             <div style="font-size:12px;margin-bottom:6px"><b>Função:</b> <code>${esc(a.funcao)}</code></div>
@@ -31919,14 +31926,204 @@ function baixarInstaladorSYSACKCorrigido() {
             <div style="font-size:12px"><b>Recebem e-mail:</b> ${emails.length ? emails.map(e=>`<span style="background:#D1FAE5;color:#047857;padding:3px 8px;border-radius:999px;margin-right:4px">${esc(e)}</span>`).join('') : '<span style="color:#DC2626">Nenhum destinatário</span>'}</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:8px;min-width:190px">
-            <button class="btn btn-secondary btn-sm" onclick="abrirModalConfigAlertaSYSACK('${a.id}')">⚙️ Configurar alerta</button>
-            <button class="btn btn-ghost btn-sm" onclick="abrirModalGruposAlertaSYSACK('${a.id}')">👥 Gerenciar grupos</button>
-            <button class="btn btn-ghost btn-sm" onclick="testarAlertaSYSACK('${a.id}')">📧 Testar e-mail</button>
+            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();abrirModalConfigAlertaSYSACK('${a.id}')">⚙️ Configurar alerta</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();abrirModalGruposAlertaSYSACK('${a.id}')">👥 Gerenciar grupos</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();testarAlertaSYSACK('${a.id}')">📧 Testar e-mail</button>
           </div>
         </div>
       </div>`;
     }).join('');
   };
+
+  function dataAlertaValor(v) {
+    if (!v) return '';
+    if (v?.toDate) return v.toDate().toLocaleString('pt-BR');
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? String(v) : d.toLocaleString('pt-BR');
+  }
+
+  function ipFaixa24(ip) {
+    const p = String(ip || '').trim().split('.');
+    if (p.length < 3) return '';
+    return p.slice(0, 3).join('.') + '.0/24';
+  }
+
+  function itemAlertaBate(id, it) {
+    const tipo = String(it.tipo || it.alertaId || it.categoria || '').toLowerCase();
+    const titulo = String(it.titulo || it.title || it.desc || it.mensagem || '').toLowerCase();
+    const map = {
+      maquina_offline: ['maquina_offline','máquina offline','offline','sem contato'],
+      prazo_terceirizada: ['prazo_terceirizada','terceirizada','prazo vencido','devolução'],
+      aprovacao_pendente: ['aprovacao_pendente','aprovação','aprovacao','pendente'],
+      confirmacao_chamado: ['confirmacao_chamado','confirmação','confirmacao','chamado'],
+      mudanca_faixa_ip: ['mudanca_faixa_ip','mudanca_rede','mudança de faixa','faixa de rede','ip mudou','rede mudou'],
+      troca_monitor: ['troca_monitor','monitor mudou','troca de monitor','monitor'],
+      falha_atualizacao_agente: ['falha_atualizacao_agente','atualização','atualizacao','timeout','agent_update'],
+      bloqueio_maquina: ['bloqueio_maquina','bloqueio','bloquear_maquina','desbloquear_maquina']
+    };
+    return (map[id] || [id]).some(k => tipo.includes(k) || titulo.includes(k));
+  }
+
+  async function buscarDocsColecaoLimitada(col, max = 120) {
+    const fdb = window.db || window._db;
+    if (!fdb) return [];
+    try {
+      const snap = await fdb.collection(col).limit(max).get();
+      return (snap.docs || []).map(d => Object.assign({ id:d.id, _col:col }, d.data()));
+    } catch(e) {
+      console.warn('[Alertas] Falha ao buscar ' + col + ':', e.message);
+      return [];
+    }
+  }
+
+  async function coletarItensAlertaSYSACK(id) {
+    const itens = [];
+    const now = Date.now();
+
+    if (id === 'maquina_offline') {
+      const cfg = cfgAlerta(id);
+      const limiteDias = Number(cfg.limiteDias || 5);
+      const fontes = [
+        ...(Array.isArray(STATE.ativos) ? STATE.ativos : []),
+        ...(Array.isArray(STATE.agentesDesktop) ? STATE.agentesDesktop : []),
+        ...(Array.isArray(STATE.agents) ? STATE.agents : []),
+        ...(Array.isArray(STATE.agentes) ? STATE.agentes : [])
+      ];
+      const porHost = new Map();
+      fontes.forEach(a => {
+        const host = a.hostname || a.computador || a.agentId || a.id || a.pat;
+        if (!host) return;
+        const dt = a.lastSeen || a.ultimoContato || a.updatedAt || a.vistoEm || a.lastHeartbeat;
+        const d = dt?.toDate ? dt.toDate() : new Date(dt);
+        if (!dt || isNaN(d.getTime())) return;
+        const dias = Math.floor((now - d.getTime()) / 86400000);
+        if (dias >= limiteDias) porHost.set(String(host), {
+          destaque: String(host),
+          subtitulo: (a.ip || a.ipAddress || 'sem IP') + ' · ' + dias + ' dia(s) sem contato',
+          detalhe: 'Último contato: ' + d.toLocaleString('pt-BR'),
+          severidade: dias >= 10 ? 'critica' : 'alta',
+          criadoEm: d
+        });
+      });
+      itens.push(...porHost.values());
+    }
+
+    if (id === 'mudanca_faixa_ip') {
+      const eventos = [
+        ...(await buscarDocsColecaoLimitada('alertas', 160)),
+        ...(await buscarDocsColecaoLimitada('eventos_detectados', 160)),
+        ...(await buscarDocsColecaoLimitada('audit_logs', 80))
+      ].filter(x => itemAlertaBate(id, x));
+      eventos.forEach(e => {
+        const ant = e.ipAnterior || e.ipAntigo || e.beforeIp || e.ip_before || e.ipOrigem || '';
+        const atu = e.ipAtual || e.ipNovo || e.afterIp || e.ip_after || e.ip || '';
+        itens.push({
+          destaque: e.hostname || e.agentId || e.ativo || e.pat || e.id,
+          subtitulo: (ant || 'IP anterior não informado') + ' → ' + (atu || 'IP atual não informado'),
+          detalhe: (ipFaixa24(ant) || 'faixa anterior —') + ' → ' + (ipFaixa24(atu) || 'faixa atual —'),
+          severidade: e.severidade || 'critica',
+          criadoEm: e.createdAt || e.criadoEm || e.data || e.updatedAt,
+          _raw: e
+        });
+      });
+    }
+
+    if (id === 'troca_monitor') {
+      const eventos = [
+        ...(await buscarDocsColecaoLimitada('alertas', 160)),
+        ...(await buscarDocsColecaoLimitada('eventos_detectados', 160)),
+        ...(await buscarDocsColecaoLimitada('monitor_historico', 160))
+      ].filter(x => itemAlertaBate(id, x));
+      eventos.forEach(e => {
+        itens.push({
+          destaque: e.monitorSerial || e.serial || e.monitor || e.patrimonioMonitor || e.id,
+          subtitulo: (e.hostnameAnterior || e.computadorAnterior || e.hostAnterior || 'computador anterior —') + ' → ' + (e.hostnameAtual || e.computadorAtual || e.hostAtual || e.hostname || 'computador atual —'),
+          detalhe: e.modelo || e.desc || e.mensagem || e.titulo || 'Monitor detectado em computador diferente',
+          severidade: e.severidade || 'alta',
+          criadoEm: e.createdAt || e.criadoEm || e.data || e.updatedAt,
+          _raw: e
+        });
+      });
+    }
+
+    if (!itens.length) {
+      const eventos = [
+        ...(await buscarDocsColecaoLimitada('alertas', 160)),
+        ...(await buscarDocsColecaoLimitada('eventos_detectados', 160)),
+        ...(await buscarDocsColecaoLimitada('agent_results', 120))
+      ].filter(x => itemAlertaBate(id, x));
+      eventos.forEach(e => itens.push({
+        destaque: e.hostname || e.agentId || e.pat || e.ativo || e.titulo || e.id,
+        subtitulo: e.desc || e.mensagem || e.resultado || e.status || 'Evento registrado',
+        detalhe: e.funcao || e.tipo || e.alertaId || e.comando || '',
+        severidade: e.severidade || e.nivel || 'media',
+        criadoEm: e.createdAt || e.criadoEm || e.executadoEm || e.data || e.updatedAt,
+        _raw: e
+      }));
+    }
+
+    const dedup = new Map();
+    itens.forEach(it => {
+      const key = [it.destaque, it.subtitulo, it.detalhe].join('|');
+      if (!dedup.has(key)) dedup.set(key, it);
+    });
+    return [...dedup.values()].slice(0, 80);
+  }
+
+  window.abrirItensAlertaSYSACK = async function(id) {
+    const a = SYSACK_ALERTAS_CATALOGO.find(x => x.id === id);
+    if (!a) return;
+    const old = document.getElementById('modal-itens-alerta-sysack');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'modal-itens-alerta-sysack';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10002;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `<div style="background:var(--panel,#fff);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.25);width:980px;max-width:97vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+      <div style="padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <div><b style="font-size:18px">${a.icone} ${esc(a.titulo)}</b><div style="font-size:12px;color:var(--g500)">Itens em evidência relacionados a este alerta</div></div>
+        <div style="display:flex;gap:8px"><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();abrirModalConfigAlertaSYSACK('${id}')">⚙️ Configurar</button><button class="btn btn-ghost" onclick="document.getElementById('modal-itens-alerta-sysack')?.remove()">✕</button></div>
+      </div>
+      <div id="alerta-itens-body" style="padding:18px 22px;overflow:auto">
+        <div style="padding:28px;text-align:center;color:var(--g500)">Carregando itens em evidência...</div>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+    const body = overlay.querySelector('#alerta-itens-body');
+    const itens = await coletarItensAlertaSYSACK(id);
+    if (!itens.length) {
+      body.innerHTML = `<div style="border:1px dashed var(--line);border-radius:14px;padding:30px;text-align:center;color:var(--g500)">
+        <div style="font-size:28px;margin-bottom:8px">🔎</div>
+        Nenhum item em evidência encontrado agora para <b>${esc(a.titulo)}</b>.<br>
+        <small>Quando o agente ou a Cloud Function registrar eventos em <code>alertas</code>, <code>eventos_detectados</code> ou coleções relacionadas, eles aparecerão aqui.</small>
+      </div>`;
+      return;
+    }
+
+    const sevStyle = s => {
+      s = String(s||'media').toLowerCase();
+      if (s.includes('crit')) return 'background:#FEE2E2;color:#991B1B';
+      if (s.includes('alta')) return 'background:#FFEDD5;color:#9A3412';
+      if (s.includes('baixa')) return 'background:#E0F2FE;color:#075985';
+      return 'background:#FEF3C7;color:#92400E';
+    };
+
+    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div><b>${itens.length}</b> item(ns) em evidência</div>
+        <small style="color:var(--g500)">Clique em Configurar para alterar destinatários, horários e intervalo.</small>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:14px;overflow:hidden">
+        ${itens.map(it => `<div class="sysack-alerta-evidencia-row" style="display:grid;grid-template-columns:1.1fr 1.7fr 1.4fr auto;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+          <div><b>${esc(it.destaque || '—')}</b><div style="font-size:11px;color:var(--g500)">${esc(dataAlertaValor(it.criadoEm) || '')}</div></div>
+          <div style="font-size:12px;color:var(--g700)">${esc(it.subtitulo || '—')}</div>
+          <div style="font-size:12px;color:var(--g500)">${esc(it.detalhe || '')}</div>
+          <span style="${sevStyle(it.severidade)};padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800">${esc(String(it.severidade||'media').toUpperCase())}</span>
+        </div>`).join('')}
+      </div>`;
+  };
+
 
   window.abrirModalConfigAlertaSYSACK = async function(id){
     await carregarConfigAlertasSYSACK();
