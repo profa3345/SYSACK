@@ -942,6 +942,8 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     loginAtualizadoEm: nowIso,
     usuarioPrincipal: resumo.usuarioPrincipal,
     usuarioPrincipalDias90d: resumo.usuarioPrincipalDias90d,
+    diasLogadosAno: resumo.usuarioPrincipalDias90d,
+    diasLogados90d: resumo.usuarioPrincipalDias90d,
     usuarioPrincipalPeriodoDias: LOGIN_PRINCIPAL_DIAS,
     usuariosLogin90d: JSON.stringify(resumo.usuarios),
     usuariosLogin90dArray: resumo.usuarios,
@@ -1209,46 +1211,74 @@ iniciarServidorRemoto();
 
 
 // ── Relay Firestore — escuta comandos do técnico ──────────────────
-async function firestoreQuery(collectionPath, filters) {
+async function firestoreQuery(collectionPath, filters, limitN = 50) {
+  // v2.1.6: consulta com fallback. A query composta agentId+status pode falhar
+  // por índice/regras e deixava o painel em timeout sem diagnóstico.
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${API_KEY}`;
-  const body = JSON.stringify({
-    structuredQuery: {
-      from: [{ collectionId: collectionPath }],
-      where: {
-        compositeFilter: {
-          op: 'AND',
-          filters: filters.map(([field, op, value]) => ({
-            fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: value } }
-          }))
-        }
-      },
-      limit: 10
-    }
-  });
-  const urlObj = new URL(url);
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: 'POST',
-      rejectUnauthorized: false,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-    }, res => {
+  const structuredQuery = { from: [{ collectionId: collectionPath }], limit: limitN };
+  if (filters && filters.length === 1) {
+    const [field, op, value] = filters[0];
+    structuredQuery.where = { fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: String(value) } } };
+  } else if (filters && filters.length > 1) {
+    structuredQuery.where = { compositeFilter: { op: 'AND', filters: filters.map(([field, op, value]) => ({
+      fieldFilter: { field: { fieldPath: field }, op, value: { stringValue: String(value) } }
+    })) } };
+  }
+  const body = JSON.stringify({ structuredQuery });
+  const runQuery = () => new Promise(resolve => {
+    const urlObj = new URL(url);
+    const req = https.request({ hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'POST', rejectUnauthorized: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, res => {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
         try {
           const parsed = JSON.parse(raw);
-          // Firestore retorna array — se primeiro item tem 'error', logar
-          if (Array.isArray(parsed) && parsed[0]?.error) {
-            log('[Firestore] Query erro: ' + JSON.stringify(parsed[0].error));
+          if (res.statusCode < 200 || res.statusCode >= 300 || (Array.isArray(parsed) && parsed[0]?.error)) {
+            const err = Array.isArray(parsed) ? parsed[0]?.error : parsed;
+            log(`[Firestore] Query ${collectionPath} HTTP ${res.statusCode}: ` + JSON.stringify(err).slice(0, 500));
+            return resolve(null);
           }
-          resolve(parsed);
-        } catch(e) { resolve([]); }
+          resolve(Array.isArray(parsed) ? parsed : []);
+        } catch(e) { log('[Firestore] Query parse erro: ' + e.message); resolve(null); }
       });
     });
-    req.on('error', e => { log('[Firestore] Query falhou: ' + e.message); resolve([]); });
-    req.write(body);
+    req.on('error', e => { log('[Firestore] Query falhou: ' + e.message); resolve(null); });
+    req.write(body); req.end();
+  });
+  const out = await runQuery();
+  if (out) return out;
+  // Fallback: lista documentos e filtra localmente. Evita timeout quando falta índice composto.
+  return await firestoreListAndFilter(collectionPath, filters || [], limitN);
+}
+
+function firestoreListAndFilter(collectionPath, filters, limitN = 100) {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}?key=${API_KEY}&pageSize=${Math.min(Math.max(limitN, 20), 300)}`;
+  const urlObj = new URL(url);
+  return new Promise(resolve => {
+    const req = https.request({ hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method: 'GET', rejectUnauthorized: false }, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => {
+        try {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            log(`[Firestore] List ${collectionPath} HTTP ${res.statusCode}: ${raw.slice(0, 300)}`);
+            return resolve([]);
+          }
+          const parsed = JSON.parse(raw);
+          const docs = (parsed.documents || []).map(document => ({ document })).filter(item => {
+            const f = item.document.fields || {};
+            return filters.every(([field, op, value]) => {
+              const v = f[field]?.stringValue || f[field]?.integerValue || f[field]?.doubleValue || f[field]?.booleanValue;
+              if (op === 'EQUAL') return String(v) === String(value);
+              return true;
+            });
+          });
+          resolve(docs.slice(0, limitN));
+        } catch(e) { log('[Firestore] List parse erro: ' + e.message); resolve([]); }
+      });
+    });
+    req.on('error', e => { log('[Firestore] List falhou: ' + e.message); resolve([]); });
     req.end();
   });
 }
@@ -1563,10 +1593,11 @@ async function executarComando(doc) {
   const dados  = (() => { try { return JSON.parse(getId(fields.dados) || '{}'); } catch { return {}; } })();
   const aId    = getId(fields.agentId);
 
-  if (aId !== AGENT_ID) return;
+  const agentAliases = [...new Set([AGENT_ID, os.hostname(), String(os.hostname()).toUpperCase(), String(os.hostname()).toLowerCase()].filter(Boolean))];
+  if (!agentAliases.includes(aId)) return;
 
-  // Marca imediatamente para não processar duas vezes
-  await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
+  // Marca imediatamente para não processar duas vezes e confirma que o agente enxergou o comando.
+  await firestorePatch('agent_commands/' + id, { status: 'processando', vistoPor: AGENT_ID, vistoEm: new Date().toISOString() }).catch(() => {});
 
   // Segurança corporativa: não aceita token fixo nem senha enviada pelo portal.
   // Valida tipo, expiração, perfil solicitante, justificativa e contexto administrativo local.
@@ -1621,7 +1652,8 @@ $cred    = New-Object System.Management.Automation.PSCredential ('${adminUser}',
       const disableBlock = adminUser && adminPass ? `
 foreach ($u in $usuarios) {
   try {
-    $proc = Start-Process -FilePath 'net.exe' -ArgumentList "user `"$($u.Name)`" /active:no" -Credential $cred -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+    $arg = 'user "' + $u.Name + '" /active:no'
+    $proc = Start-Process -FilePath 'net.exe' -ArgumentList $arg -Credential $cred -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
     if ($proc.ExitCode -eq 0) { Write-Host "OK_DESATIVADO:$($u.Name)" }
     else {
       Disable-LocalUser -Name $u.Name -ErrorAction Stop
@@ -1740,6 +1772,44 @@ Write-Host "BLOQUEIO_CONCLUIDO"
         for (const a of avisos) log(`[BLOQUEIO] ⚠️ ${a}`);
       }
 
+
+      // v2.1.6: guarda de bloqueio real. O aviso de logon sozinho não bloqueia domínio AD.
+      // Esta tarefa roda como SYSTEM a cada logon e derruba sessões não administrativas enquanto C:\SYSACK\machine.lock existir.
+      const guardPs = `
+$lock = '${path.join(__dirname, 'machine.lock').replace(/\\/g,'\\\\')}'
+$guard = '${path.join(__dirname, '_sysack_lock_guard.ps1').replace(/\\/g,'\\\\')}'
+@'
+$lock = "${path.join(__dirname, 'machine.lock').replace(/\\/g,'\\\\')}"
+if (!(Test-Path $lock)) { exit 0 }
+try {
+  $admins = @('administrator','administrador','ana.penha','sysack.adm')
+  $q = query user 2>$null
+  foreach ($line in $q) {
+    if ($line -match '^(>|\s)(\S+)\s+') {
+      $user = $Matches[2].Trim()
+      if ($admins -contains $user.ToLower()) { continue }
+      if ($line -match '\s+(\d+)\s+') { logoff $Matches[1] /V }
+    }
+  }
+} catch {}
+'@ | Set-Content -Path $guard -Encoding UTF8
+$act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $guard + '"')
+$trg = New-ScheduledTaskTrigger -AtLogOn
+$pri = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
+Register-ScheduledTask -TaskName 'SYSACK-MachineLockGuard' -Action $act -Trigger $trg -Principal $pri -Force | Out-Null
+Start-ScheduledTask -TaskName 'SYSACK-MachineLockGuard'
+Write-Host 'GUARD_OK'
+`.trim();
+      try {
+        const gp = path.join(__dirname, '_sysack_install_guard.ps1');
+        fs.writeFileSync(gp, guardPs, 'utf8');
+        const gout = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${gp}"`, { timeout: 30000, windowsHide: true }).toString();
+        try { fs.unlinkSync(gp); } catch {}
+        if (!gout.includes('GUARD_OK')) avisos.push('Guarda de bloqueio não confirmou instalação.');
+      } catch(eGuard) {
+        motFalha = 'Falha ao instalar guarda de bloqueio real: ' + eGuard.message;
+      }
+
       // Tudo OK — grava estado e confirma
       fs.writeFileSync(lockFile, JSON.stringify({ bloqueado: true, motivo, operador, bloqueadoEm: new Date().toISOString(), hostname: require('os').hostname() }), 'utf8');
       resultado = `Máquina bloqueada com sucesso. Contas desativadas, registro atualizado. Motivo: ${motivo}`;
@@ -1792,6 +1862,8 @@ Write-Host "DESBLOQUEIO_CONCLUIDO"
       const saida = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 30000, windowsHide: true }).toString();
       try { fs.unlinkSync(psPath); } catch {}
       try { fs.unlinkSync(path.join(__dirname, 'machine.lock')); } catch {}
+      try { execSync('schtasks /Delete /TN "SYSACK-MachineLockGuard" /F', { timeout: 10000, windowsHide: true }); } catch {}
+      try { fs.unlinkSync(path.join(__dirname, '_sysack_lock_guard.ps1')); } catch {}
 
       log(`[DESBLOQUEIO] ${saida.includes('DESBLOQUEIO_CONCLUIDO') ? 'Concluído' : saida.trim()}`);
       log(`[DESBLOQUEIO] Máquina desbloqueada por ${operador}`);
@@ -1890,14 +1962,22 @@ $out | ConvertTo-Json -Depth 4 -Compress
       const backupPath = selfPath.replace(/\.js$/, '.backup.js');
       try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
       fs.writeFileSync(selfPath, novoConteudo, 'utf8');
+      // Também mantém os nomes usados pelo instalador antigo/novo.
+      for (const alt of ['agent.js', 'agent-desktop.js']) {
+        const altPath = path.join(__dirname, alt);
+        if (altPath !== selfPath) { try { fs.writeFileSync(altPath, novoConteudo, 'utf8'); } catch(e) {} }
+      }
       log(`[UPDATE] Substituído em ${selfPath} (${novoConteudo.length} bytes). Gravando confirmação...`);
       resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
       // CRÍTICO: grava status ANTES do exit — caso contrário o processo morre antes de confirmar
       await firestorePatch('agents/'+AGENT_ID, {
         versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
       }).catch(()=>{});
+      await firestorePatch('agentes_desktop/'+AGENT_ID, {
+        versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
+      }).catch(()=>{});
       await firestorePatch('agent_commands/'+id, {
-        status: 'concluido', resultado: resultado
+        status: 'concluido', resultado: resultado, concluidoEm: new Date().toISOString()
       }).catch(()=>{});
       log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 3s...');
       agendarReinicioAgent();
@@ -1943,16 +2023,20 @@ $out | ConvertTo-Json -Depth 4 -Compress
 // Intervalo de 5s (era 3s) — depois que o relay RTDB inicia, não é mais usado
 async function pollComandos() {
   try {
-    const docs = await firestoreQuery('agent_commands', [
-      ['agentId', 'EQUAL', AGENT_ID],
-      ['status',  'EQUAL', 'pendente']
-    ]);
-    if (Array.isArray(docs)) {
-      for (const doc of docs) {
-        if (doc.document) await executarComando(doc);
-      }
+    const aliases = [...new Set([AGENT_ID, os.hostname(), String(os.hostname()).toUpperCase(), String(os.hostname()).toLowerCase()].filter(Boolean))];
+    let docs = [];
+    for (const aid of aliases) {
+      const r = await firestoreQuery('agent_commands', [ ['agentId', 'EQUAL', aid], ['status', 'EQUAL', 'pendente'] ], 30);
+      if (Array.isArray(r) && r.length) docs.push(...r);
     }
-  } catch(e) {}
+    const vistos = new Set();
+    for (const doc of docs) {
+      const id = doc.document?.name?.split('/').pop();
+      if (!id || vistos.has(id)) continue;
+      vistos.add(id);
+      await executarComando(doc);
+    }
+  } catch(e) { log('[Comandos] poll falhou: ' + e.message); }
 }
 
 setInterval(pollComandos, 1000);
