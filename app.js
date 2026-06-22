@@ -9377,7 +9377,7 @@ function arAbrirModalBloqueio(agentId, hostname) {
   document.getElementById('modal-bloqueio-maquina')?.remove();
   document.body.insertAdjacentHTML('beforeend', `
   <div class="modal-overlay open" id="modal-bloqueio-maquina" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:460px">
+    <div class="modal" style="max-width:480px">
       <div class="modal-header" style="background:#DC2626;border-radius:10px 10px 0 0">
         <div>
           <h3 style="color:#fff;margin:0">🔒 Bloquear Máquina</h3>
@@ -9387,7 +9387,7 @@ function arAbrirModalBloqueio(agentId, hostname) {
       </div>
       <div class="modal-body">
         <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;color:#991B1B">
-          ⚠️ <strong>Todos os usuários</strong> serão desconectados imediatamente e não conseguirão fazer login até o desbloqueio pelo TI.
+          ⚠️ <strong>Todos os usuários serão desativados</strong> e não poderão fazer login até o desbloqueio pelo TI. Informe as credenciais de administrador local para garantir o bloqueio efetivo.
         </div>
         <div class="form-group">
           <label class="form-label req">Motivo do bloqueio</label>
@@ -9409,6 +9409,25 @@ function arAbrirModalBloqueio(agentId, hostname) {
           <label class="form-label">Observação (opcional)</label>
           <textarea class="form-control" id="bloqueio-obs" rows="2" placeholder="Informações adicionais..." style="resize:vertical"></textarea>
         </div>
+        <div style="border-top:1px solid #FECACA;margin:14px 0 10px;padding-top:14px">
+          <p style="font-size:12px;font-weight:700;color:#7F1D1D;margin:0 0 10px;display:flex;align-items:center;gap:6px">
+            🔑 Credenciais de administrador local
+            <span style="font-weight:400;color:#B91C1C">(obrigatório para desativar as contas)</span>
+          </p>
+          <div class="form-group" style="margin-bottom:10px">
+            <label class="form-label req" style="font-size:12px">Usuário administrador</label>
+            <input class="form-control" id="bloqueio-admin-user" type="text" placeholder="Ex: Administrator" autocomplete="off" spellcheck="false" style="font-family:monospace">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label req" style="font-size:12px">Senha</label>
+            <div style="position:relative">
+              <input class="form-control" id="bloqueio-admin-pass" type="password" placeholder="Senha do administrador local" autocomplete="new-password" style="font-family:monospace;padding-right:42px">
+              <button type="button"
+                onclick="var i=document.getElementById('bloqueio-admin-pass');i.type=i.type==='password'?'text':'password'"
+                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:15px;padding:0;line-height:1">👁</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="document.getElementById('modal-bloqueio-maquina').remove()">Cancelar</button>
@@ -9422,13 +9441,28 @@ function arAbrirModalBloqueio(agentId, hostname) {
 async function arConfirmarBloqueio(agentId, hostname) {
   let motivo = document.getElementById('bloqueio-motivo')?.value || '';
   if (motivo === 'outro') motivo = document.getElementById('bloqueio-outro-texto')?.value?.trim() || '';
-  if (!motivo) { showToast('Informe o motivo do bloqueio.', 'warning'); return; }
-  const obs = document.getElementById('bloqueio-obs')?.value?.trim() || '';
+  if (!motivo) { showToast('Informe o motivo do bloqueio.', 'warning'); document.getElementById('bloqueio-motivo')?.focus(); return; }
+
+  const obs       = document.getElementById('bloqueio-obs')?.value?.trim() || '';
+  const adminUser = (document.getElementById('bloqueio-admin-user')?.value || '').trim();
+  const adminPass = document.getElementById('bloqueio-admin-pass')?.value || '';
+
+  if (!adminUser) {
+    showToast('Informe o usuário administrador da máquina.', 'warning');
+    document.getElementById('bloqueio-admin-user')?.focus();
+    return;
+  }
+  if (!adminPass) {
+    showToast('Informe a senha do administrador.', 'warning');
+    document.getElementById('bloqueio-admin-pass')?.focus();
+    return;
+  }
+
   const u = SESSION_USER || CURRENT_USER;
   document.getElementById('modal-bloqueio-maquina')?.remove();
   showToast(`🔒 Bloqueando "${hostname}"...`, 'info', 4000);
   try {
-    // 1. Grava estado no Firestore
+    // 1. Grava estado no Firestore (sem persistir credenciais)
     await db.collection('agents').doc(agentId).update({
       bloqueado: true, bloqueadoEm: new Date().toISOString(),
       bloqueadoPor: u?.nome || u?.email || 'admin',
@@ -9439,12 +9473,17 @@ async function arConfirmarBloqueio(agentId, hostname) {
     let usouExecutor = false;
     try {
       const fn = (await getFbFunctions()).httpsCallable('executarAcaoPrivilegiada');
-      await fn({ action: 'lock_workstation', hostname, reason: motivo });
+      await fn({ action: 'lock_workstation', hostname, reason: motivo, adminUser, adminPass });
       usouExecutor = true;
       showToast(`🔒 "${hostname}" bloqueada via WinRM (imediato).`, 'success', 5000);
     } catch(eFn) {
-      // Fallback: envia via agent_commands (agente processa no próximo ciclo ≤5s)
-      await arEnviarComando(agentId, 'bloquear_maquina', { motivo, obs, operador: u?.nome || u?.email }, `Bloqueio: ${motivo}`);
+      // Fallback: envia via agent_commands — passa credenciais para o agente usar localmente
+      await arEnviarComando(agentId, 'bloquear_maquina', {
+        motivo, obs,
+        operador:  u?.nome || u?.email,
+        adminUser,
+        adminPass,
+      }, `Bloqueio: ${motivo}`);
       showToast(`🔒 "${hostname}" bloqueada (comando enviado ao agente).`, 'success', 5000);
     }
 
