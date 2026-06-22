@@ -1600,28 +1600,60 @@ async function executarComando(doc) {
   // ── BLOQUEIO DE MÁQUINA (todos os usuários) ──────────────────────
   if (tipo === 'bloquear_maquina') {
     try {
-      const motivo   = dados.motivo   || 'Bloqueado pelo TI';
-      const operador = dados.operador || 'TI';
+      const motivo    = dados.motivo    || 'Bloqueado pelo TI';
+      const operador  = dados.operador  || 'TI';
+      const adminUser = (dados.adminUser || '').replace(/['"]/g, '').trim();
+      const adminPass = (dados.adminPass || '').replace(/'/g,  '').trim();
 
       const blockedUsersFile = path.join(__dirname, 'blocked_users.txt').replace(/\\/g, '\\\\');
       const lockFile         = path.join(__dirname, 'machine.lock');
 
       const motivoSafe = motivo.replace(/'/g, '').replace(/\n/g, ' ').replace(/"/g, '');
+
+      // Bloco de credencial: se fornecidas, usa PSCredential para garantir privilégio admin local
+      const credBlock = adminUser && adminPass ? `
+# Credencial de administrador fornecida pelo operador TI
+$secPass  = ConvertTo-SecureString '${adminPass}' -AsPlainText -Force
+$cred     = New-Object System.Management.Automation.PSCredential ('${adminUser}', $secPass)
+` : `
+# Sem credencial fornecida — executa no contexto atual (requer serviço SYSTEM)
+$cred = $null
+`;
+
+      // Wrapper para executar comandos como admin local via Start-Process se necessário
+      const disableBlock = adminUser && adminPass ? `
+# Desativa usuarios usando credencial de admin explícita via net user
+foreach ($u in $usuarios) {
+  try {
+    $proc = Start-Process -FilePath 'net.exe' -ArgumentList "user `"$($u.Name)`" /active:no" -Credential $cred -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+    if ($proc.ExitCode -eq 0) { Write-Host "Desativado: $($u.Name)" }
+    else { Disable-LocalUser -Name $u.Name -ErrorAction Stop; Write-Host "Desativado (fallback): $($u.Name)" }
+  } catch { Write-Host "Erro ao desativar $($u.Name): $_" }
+}
+` : `
+# Desativa usuarios no contexto atual
+foreach ($u in $usuarios) {
+  try { Disable-LocalUser -Name $u.Name; Write-Host "Desativado: $($u.Name)" } catch { Write-Host "Erro: $($u.Name) - $_" }
+}
+`;
+
       const psBlock = `
+${credBlock}
+
 # 1. Salva lista de usuarios locais ativos para restaurar no desbloqueio
 $usuarios = Get-LocalUser | Where-Object { $_.Enabled -eq $true -and $_.Name -notmatch 'Admin|SYSTEM|DefaultAccount|WDAGUtilityAccount|Guest' }
 $lista = ($usuarios.Name) -join ','
 Set-Content -Path '${blockedUsersFile}' -Value $lista -Encoding UTF8
 
 # 2. Desativa TODOS os usuarios locais nao-administradores
-foreach ($u in $usuarios) {
-  try { Disable-LocalUser -Name $u.Name; Write-Host "Desativado: $($u.Name)" } catch { Write-Host "Erro: $($u.Name) - $_" }
-}
+${disableBlock}
 
-# 3. Exibe aviso de bloqueio na tela de logon (Registry)
+# 3. Exibe aviso de bloqueio na tela de logon (Registry) — impede login mesmo que conta seja reativada manualmente
 $regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System'
 Set-ItemProperty -Path $regPath -Name 'legalnoticecaption' -Value 'MAQUINA BLOQUEADA - TI CESAN' -Type String -Force
-Set-ItemProperty -Path $regPath -Name 'legalnoticetext' -Value 'Esta maquina foi bloqueada pelo TI. Motivo: ${motivoSafe}. Para desbloquear, contate o TI CESAN.' -Type String -Force
+Set-ItemProperty -Path $regPath -Name 'legalnoticetext'    -Value 'Esta maquina foi bloqueada pelo TI. Motivo: ${motivoSafe}. Para desbloquear, contate o TI CESAN.' -Type String -Force
+# Força confirmação obrigatória — remove a possibilidade de bypass simples no OK
+Set-ItemProperty -Path $regPath -Name 'legalnoticebutton' -Value 0 -Type DWord -Force 2>$null
 
 # 4. Desconecta todas as sessoes ativas
 query session 2>$null | Select-String 'Active|Ativo' | ForEach-Object {
@@ -1630,17 +1662,28 @@ query session 2>$null | Select-String 'Active|Ativo' | ForEach-Object {
   if ($sid) { logoff $sid /server:localhost 2>$null; Write-Host "Sessao encerrada: $sid" }
 }
 
-# 5. Bloqueia a tela imediatamente
+# 5. Bloqueia a tela imediatamente (complementar — contas já estão desativadas)
 Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LW { [DllImport("user32.dll")] public static extern bool LockWorkStation(); }'
 [LW]::LockWorkStation() | Out-Null
 
-Write-Host "BLOQUEIO_CONCLUIDO"
+# 6. Verifica se as contas foram efetivamente desativadas
+$verificacao = Get-LocalUser | Where-Object { $_.Enabled -eq $true -and $_.Name -notmatch 'Admin|SYSTEM|DefaultAccount|WDAGUtilityAccount|Guest' }
+if ($verificacao.Count -gt 0) {
+  Write-Host "AVISO_CONTAS_ATIVAS: $($verificacao.Name -join ',')"
+} else {
+  Write-Host "BLOQUEIO_CONCLUIDO"
+}
 `.trim();
 
       const psPath = path.join(__dirname, '_sysack_block.ps1');
       fs.writeFileSync(psPath, psBlock, 'utf8');
       const saida = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 30000, windowsHide: true }).toString();
       try { fs.unlinkSync(psPath); } catch {}
+
+      // Alerta se contas ainda ativas após tentativa
+      if (saida.includes('AVISO_CONTAS_ATIVAS')) {
+        log('[BLOQUEIO] Atenção: algumas contas podem não ter sido desativadas. Verifique se o agente roda como SYSTEM ou forneça credenciais de admin válidas.');
+      }
 
       // Arquivo de estado local
       fs.writeFileSync(lockFile, JSON.stringify({ bloqueado: true, motivo, operador, bloqueadoEm: new Date().toISOString(), hostname: require('os').hostname() }), 'utf8');
