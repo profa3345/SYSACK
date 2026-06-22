@@ -31794,205 +31794,297 @@ function baixarInstaladorSYSACKCorrigido() {
   showToast('Instalador gerado. Execute como Administrador no PC alvo.', 'success', 5000);
 }
 
-// ════════════════════════════════════════════════════════════════
-// SYSACK v2.1.6 — CORREÇÕES: comandos, atualização, bloqueio e alertas
-// Este bloco sobrescreve funções anteriores sem alterar o restante da tela.
-// ════════════════════════════════════════════════════════════════
 
-function _sysackGetAgentAlias(ag) {
-  return ag?.agentId || ag?.id || ag?.hostname || ag?.computador || '';
-}
-
-async function _sysackAguardarComando(cmdId, timeoutMs = 75000, onStatus) {
-  const inicio = Date.now();
-  let ultimo = '';
-  while (Date.now() - inicio < timeoutMs) {
-    await new Promise(r => setTimeout(r, 1000));
-    const snap = await db.collection('agent_commands').doc(cmdId).get();
-    const d = snap.data() || {};
-    const st = d.status || 'pendente';
-    if (st !== ultimo) { ultimo = st; if (onStatus) onStatus(st, d); }
-    if (['concluido','erro','falhou','descartado','expirado'].includes(st)) return { status: st, data: d };
-  }
-  return { status: 'timeout', data: {} };
-}
-
-async function arEnviarComando(agentId, tipo, dados, motivo) {
-  const u = SESSION_USER || CURRENT_USER || {};
-  const role = u.role || u.perfil || '';
-  const requiresAdmin = typeof sysackCommandRequiresAdmin === 'function' ? sysackCommandRequiresAdmin(tipo) : ['bloquear_maquina','desbloquear_maquina','atualizar_agente','powershell','coletar_eventviewer','analisar_eventviewer_ia','instalar_software'].includes(tipo);
-  if (requiresAdmin && !['admin','gestor','tecnico'].includes(role) && u.email !== 'ana.penha@cesan.com.br') {
-    throw new Error('Ação administrativa exige perfil técnico, gestor ou admin.');
-  }
-  const agora = new Date();
-  const expira = new Date(agora.getTime() + 10 * 60 * 1000);
-  const payloadDados = {
-    ...(dados || {}),
-    operador: dados?.operador || u.nome || u.email || '',
-    requestedBy: u.email || u.uid || '',
-    requestedByName: u.nome || '',
-    requestedByRole: role,
-    adminExecutionMode: requiresAdmin ? 'AD_SERVICE_ACCOUNT_OR_LOCAL_SYSTEM' : 'NONE'
-  };
-  const payload = {
-    agentId: String(agentId || '').trim(),
-    tipo,
-    motivo: motivo || dados?.motivo || tipo,
-    dados: JSON.stringify(payloadDados),
-    uid: u.uid || '',
-    requestedBy: u.email || u.uid || '',
-    requestedByName: u.nome || '',
-    requestedByRole: role,
-    requiresAdmin,
-    adminExecutionMode: requiresAdmin ? 'AD_SERVICE_ACCOUNT_OR_LOCAL_SYSTEM' : 'NONE',
-    nonce: (typeof sysackNovoNonce === 'function' ? sysackNovoNonce() : String(Date.now())),
-    expiresAt: expira.toISOString(),
-    status: 'pendente',
-    createdAt: agora.toISOString(),
-    criadoEm: agora.toISOString(),
-    commandVersion: 'secure-v2.1.6'
-  };
-  const ref = await fsAdd('agent_commands', payload);
-  try {
-    await fsAdd('audit_logs', { action:'AGENT_COMMAND_REQUESTED', module:'agent_commands', resourceId:agentId, resourceType:'agent', userId:u.uid||'', userName:u.nome||u.email||'', userEmail:u.email||'', role, commandType:tipo, requiresAdmin, motivo:payload.motivo, commandId:ref?.id||'', createdAt:agora.toISOString() });
-  } catch(e) {}
-  return ref;
-}
-
-async function arConfirmarBloqueio(agentId, hostname) {
-  let motivo = document.getElementById('bloqueio-motivo')?.value || '';
-  if (motivo === 'outro') motivo = document.getElementById('bloqueio-outro-texto')?.value?.trim() || '';
-  if (!motivo) return showToast('Informe o motivo do bloqueio.', 'warning');
-  const obs = document.getElementById('bloqueio-obs')?.value?.trim() || '';
-  const u = SESSION_USER || CURRENT_USER;
-  document.getElementById('modal-bloqueio-maquina')?.remove();
-  showToast(`🔒 Enviando bloqueio para "${hostname}"...`, 'info', 4000);
-  try {
-    const ref = await arEnviarComando(agentId, 'bloquear_maquina', { motivo, obs, operador:u?.nome||u?.email }, `Bloqueio: ${motivo}`);
-    await db.collection('agents').doc(agentId).set({ bloqueioPendente:true, bloqueado:false, bloqueadoMotivo:motivo, bloqueadoObs:obs, bloqueioSolicitadoEm:new Date().toISOString(), bloqueioSolicitadoPor:u?.nome||u?.email||'admin' }, { merge:true });
-    const r = await _sysackAguardarComando(ref.id, 75000, st => showToast(`Bloqueio ${hostname}: ${st}`, 'info', 1800));
-    if (r.status === 'concluido') {
-      await db.collection('agents').doc(agentId).set({ bloqueioPendente:false, bloqueado:true, bloqueadoEm:new Date().toISOString(), bloqueadoPor:u?.nome||u?.email||'admin', bloqueadoMotivo:motivo, bloqueadoObs:obs }, { merge:true });
-      showToast(`🔒 "${hostname}" bloqueada de fato pelo agente.`, 'success', 6000);
-    } else {
-      await db.collection('agents').doc(agentId).set({ bloqueioPendente:false, bloqueado:false, ultimoErroBloqueio:r.data?.resultado || r.status }, { merge:true });
-      showToast(`Bloqueio não confirmado: ${r.data?.resultado || r.status}`, 'error', 8000);
-    }
-    setTimeout(()=>{ try{renderAssistenciaRemota()}catch{} try{renderAtivos()}catch{} }, 1000);
-  } catch(e) { showToast('Erro ao bloquear: ' + e.message, 'error'); }
-}
-
-async function arDesbloquearMaquina(agentId, hostname) {
-  const u = SESSION_USER || CURRENT_USER;
-  showToast(`🔓 Enviando desbloqueio para "${hostname}"...`, 'info', 4000);
-  try {
-    const ref = await arEnviarComando(agentId, 'desbloquear_maquina', { operador:u?.nome||u?.email }, `Desbloqueio por ${u?.nome||u?.email}`);
-    const r = await _sysackAguardarComando(ref.id, 75000, st => showToast(`Desbloqueio ${hostname}: ${st}`, 'info', 1800));
-    if (r.status === 'concluido') {
-      await db.collection('agents').doc(agentId).set({ bloqueado:false, bloqueioPendente:false, desbloqueadoEm:new Date().toISOString(), desbloqueadoPor:u?.nome||u?.email||'admin', bloqueadoMotivo:'' }, { merge:true });
-      showToast(`🔓 "${hostname}" desbloqueada.`, 'success', 5000);
-    } else {
-      showToast(`Desbloqueio não confirmado: ${r.data?.resultado || r.status}`, 'error', 8000);
-    }
-    setTimeout(()=>{ try{renderAssistenciaRemota()}catch{} try{renderAtivos()}catch{} }, 1000);
-  } catch(e) { showToast('Erro ao desbloquear: ' + e.message, 'error'); }
-}
-
-async function executarAtualizacaoCliente() {
-  const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js?ts=' + Date.now();
-  const btn = document.getElementById('btn-upd-exec');
-  let versao = btn?.dataset?.versao || '';
-  if (!versao) {
-    const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-    const va = (online.length ? online : (STATE_AGENTS.list||[])).map(a=>a.versaoAgente||a.version||'2.1.0').sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
-    const pts = va.split('.').map(Number); pts[2]=(pts[2]||0)+1; versao = pts.join('.');
-  }
-  const alvos = document.getElementById('upd-agentes')?.value || 'online';
-  const todos = STATE_AGENTS.list || [];
-  const online = todos.filter(a => a.status === 'online');
-  const offline = todos.filter(a => a.status !== 'online');
-  const listaEnviar = online;
-  const listaNaoEnviada = alvos === 'todos' ? offline : [];
-  if (!listaEnviar.length && !listaNaoEnviada.length) return showToast('Nenhum agente disponível','warning');
-  if(btn){btn.disabled=true;btn.textContent='Aplicando...';}
-  const ll=document.getElementById('upd-log'); if(ll) ll.style.display='';
-  const lb=document.getElementById('upd-log-body'); if(lb) lb.innerHTML='';
-  const resultados=[];
-  try {
-    updLog(`Iniciando atualização v${versao}...`); updLog(`Fonte: ${AGENT_URL}`); updLog(`Alvos online: ${listaEnviar.length}`);
-    showUpdStatus('info','Enviando comandos e aguardando retorno real do agente...');
-    try { await fsSet('agent_updates', versao.replace(/\./g,'_'), { versao, url:AGENT_URL, publicadoPor:(SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'admin', publicadoEm:new Date().toISOString(), alvos, totalAgentes:listaEnviar.length+listaNaoEnviada.length }); } catch(e) {}
-    for (const ag of listaNaoEnviada) { resultados.push({agent:ag,status:'nao_atualizado',motivo:'Agente offline'}); updLog(`✗ ${ag.hostname||ag.id}: offline`); }
-    const comandos=[];
-    for (const ag of listaEnviar) {
-      const agentId = _sysackGetAgentAlias(ag);
-      try {
-        const ref = await arEnviarComando(agentId, 'atualizar_agente', { url:AGENT_URL, versao, imediato:true, operador:(SESSION_USER||CURRENT_USER)?.nome||(SESSION_USER||CURRENT_USER)?.email||'admin' }, `Atualização remota v${versao}`);
-        comandos.push({ ref, agent:ag }); updLog(`→ ${ag.hostname||ag.id}: comando ${ref.id} enviado para agentId=${agentId}`);
-      } catch(e) { resultados.push({agent:ag,status:'nao_atualizado',motivo:e.message}); updLog(`✗ ${ag.hostname||ag.id}: ${e.message}`); }
-    }
-    const pendentes = new Map(comandos.map(c => [c.ref.id, c]));
-    const inicio = Date.now();
-    const TIMEOUT_MS = 90000;
-    while (pendentes.size && Date.now()-inicio < TIMEOUT_MS) {
-      await new Promise(r=>setTimeout(r,1000));
-      for (const [cmdId,item] of [...pendentes.entries()]) {
-        const snap = await db.collection('agent_commands').doc(cmdId).get();
-        const d=snap.data()||{}; const st=d.status||'pendente';
-        if (['processando','executando'].includes(st) && !item._last) { updLog(`… ${item.agent.hostname||item.agent.id}: ${st}`); item._last=st; }
-        if (st==='concluido') { resultados.push({agent:item.agent,status:'atualizado',motivo:d.resultado||`Atualização v${versao} aplicada`}); updLog(`✓ ${item.agent.hostname||item.agent.id}: ${d.resultado||'confirmado'}`); pendentes.delete(cmdId); }
-        else if (['erro','falhou','descartado','expirado'].includes(st)) { resultados.push({agent:item.agent,status:'nao_atualizado',motivo:d.resultado||d.erro||st}); updLog(`✗ ${item.agent.hostname||item.agent.id}: ${d.resultado||d.erro||st}`); pendentes.delete(cmdId); }
-      }
-    }
-    for (const item of pendentes.values()) { resultados.push({agent:item.agent,status:'nao_atualizado',motivo:'Timeout — agente não respondeu em 90s. Verifique log C:\\SYSACK\\agent.log, rules e índice agent_commands(agentId,status).'}); updLog(`✗ ${item.agent.hostname||item.agent.id}: timeout`); }
-    renderResultadoAtualizacaoCliente(resultados, versao);
-    const ok = resultados.filter(r=>r.status==='atualizado').length;
-    const fail = resultados.length-ok;
-    showUpdStatus(fail?'warning':'success', `✅ ${ok} atualizado(s) · ❌ ${fail} não atualizado(s).`);
-    setTimeout(()=>renderAssistenciaRemota(),1500);
-  } catch(e) { showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message); }
-  finally { if(btn){btn.disabled=false;btn.textContent='🚀 Aplicar Atualização Agora';} }
-}
-
-async function renderAlertas() {
-  const el = document.getElementById('alertas-list');
-  if (!el) return;
-  el.innerHTML = '<div style="padding:20px;color:var(--g500)">Carregando alertas configurados...</div>';
-  const tipos = [
-    ['maquina_offline','Máquina offline','Verifica computadores/notebooks sem contato por mais de 5 dias','alertaMaquinaOffline','A cada 6 horas'],
-    ['prazo_terceirizada','Prazo terceirizada','Avisa devoluções próximas e vencidas de equipamentos enviados à terceirizada','verificarPrazosSchedule','Diário 08:00'],
-    ['aprovacao_pendente','Aprovação pendente','Notifica gestores sobre movimentações/aprovações aguardando decisão','notificarGestorAprovacao / renotificarGestorAprovacoesPendentes','Sob demanda'],
-    ['confirmacao_chamado','Confirmação de chamado','Envia confirmação de abertura ao solicitante','enviarConfirmacaoChamado','Sob demanda'],
-    ['fila_email','Fila de e-mails pendentes','Reprocessa e-mails que falharam por SMTP indisponível','processarEmailsPendentes','A cada 5 minutos']
+/* =====================================================================
+   SYSACK v2.1.7 — ALERTAS CONFIGURÁVEIS
+   Corrige botões da tela de Alertas, permite configurar destinatários,
+   grupos, horário, intervalo, repetição e adiciona alertas de:
+   - mudança de faixa de rede
+   - monitor mudou de computador
+   ===================================================================== */
+(function(){
+  const SYSACK_ALERTAS_CATALOGO = [
+    { id:'maquina_offline', titulo:'Máquina offline', icone:'🔔', funcao:'alertaMaquinaOffline', desc:'Verifica computadores/notebooks sem contato por mais de 5 dias', badge:'A cada 6 horas', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:6,horario:'',janela:'intervalo',limiteDias:5,repetir:true} },
+    { id:'prazo_terceirizada', titulo:'Prazo terceirizada', icone:'🔔', funcao:'verificarPrazosSchedule', desc:'Avisa devoluções próximas e vencidas de equipamentos enviados à terceirizada', badge:'Diário 08:00', categoria:'terceirizada', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:24,horario:'08:00',janela:'diario',diasAntes:5,repetir:true} },
+    { id:'aprovacao_pendente', titulo:'Aprovação pendente', icone:'🔔', funcao:'notificarGestorAprovacao / renotificarGestorAprovacoesPendentes', desc:'Notifica gestores sobre movimentações/aprovações aguardando decisão', badge:'Sob demanda', categoria:'patrimonio', severidade:'media', padrao:{ativo:true,emailEnabled:true,intervaloHoras:2,horario:'',janela:'sob_demanda',repetir:true} },
+    { id:'confirmacao_chamado', titulo:'Confirmação de chamado', icone:'🔔', funcao:'enviarConfirmacaoChamado', desc:'Envia confirmação de abertura ao solicitante', badge:'Sob demanda', categoria:'chamados', severidade:'baixa', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'sob_demanda',repetir:false} },
+    { id:'mudanca_faixa_ip', titulo:'Mudança de faixa de rede', icone:'🌐', funcao:'rastrearAlteracoesAtivo / onAgentRedeMudou', desc:'Dispara quando uma máquina muda de faixa de rede/IP, por exemplo 172.23.68.0/24 → 172.22.7.0/24', badge:'Imediato', categoria:'rede', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'troca_monitor', titulo:'Monitor mudou de computador', icone:'🖥️', funcao:'rastrearAlteracoesAtivo / onMonitorConectadoMudou', desc:'Dispara quando um monitor/serial aparece em outro computador ou muda o vínculo do ativo', badge:'Imediato', categoria:'patrimonio', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'falha_atualizacao_agente', titulo:'Falha de atualização do agente', icone:'🚀', funcao:'agent_results / agent_commands', desc:'Avisa quando uma atualização remota do agente não confirma retorno dentro do prazo', badge:'Imediato', categoria:'infra', severidade:'alta', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
+    { id:'bloqueio_maquina', titulo:'Bloqueio de máquina', icone:'🔒', funcao:'agent_results', desc:'Avisa quando o bloqueio/desbloqueio da máquina foi executado ou falhou', badge:'Imediato', categoria:'seguranca', severidade:'critica', padrao:{ativo:true,emailEnabled:true,intervaloHoras:0,horario:'',janela:'imediato',repetir:false} },
   ];
-  let configs={}, grupos=[], users=[];
-  try { const r = await callFunction('getAlertaConfig', {}); configs=r.configs||{}; grupos=r.grupos||[]; } catch(e) { console.warn('[Alertas] getAlertaConfig:', e.message); }
-  try { const us = await db.collection('users').where('ativo','==',true).get(); users = us.docs.map(d=>({id:d.id,...d.data()})); } catch(e) {}
-  const admins = users.filter(u=>['admin','gestor'].includes(u.role)).map(u=>u.email).filter(Boolean);
-  const card = ([id,nome,desc,func,quando]) => {
-    const cfg=configs[id]||{};
-    const gs=(cfg.grupos||[]).map(gid=>grupos.find(g=>g.id===gid)).filter(Boolean);
-    const membros=[...(cfg.destinatariosExtras||[]), ...gs.flatMap(g=>g.membros||g.emails?.map(e=>e.email)||[])];
-    const destinatarios=[...new Set([...admins, ...membros].filter(Boolean))];
-    return `<div style="background:#fff;border:1px solid var(--g200);border-radius:12px;padding:16px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><div style="font-weight:800;color:var(--g900)">🔔 ${escapeHtml(nome)}</div><div style="font-size:12px;color:var(--g500);margin-top:4px">${escapeHtml(desc)}</div></div><span style="font-size:11px;background:#EFF6FF;color:#1D4ED8;border-radius:20px;padding:4px 10px">${escapeHtml(quando)}</span></div>
-      <div style="font-size:12px;margin-top:10px"><b>Função:</b> <code>${escapeHtml(func)}</code></div>
-      <div style="font-size:12px;margin-top:8px"><b>Grupos:</b> ${gs.length?gs.map(g=>`<span style="background:var(--g100);border-radius:20px;padding:3px 8px;margin-right:4px">${escapeHtml(g.nome||g.id)}</span>`).join(''):'<span style="color:var(--g400)">Nenhum grupo vinculado</span>'}</div>
-      <div style="font-size:12px;margin-top:8px"><b>Recebem e-mail:</b> ${destinatarios.length?destinatarios.map(e=>`<span style="background:#ECFDF5;color:#065F46;border-radius:20px;padding:3px 8px;margin:2px;display:inline-block">${escapeHtml(e)}</span>`).join(''):'<span style="color:#DC2626">Nenhum destinatário encontrado</span>'}</div>
-      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-secondary btn-sm" onclick="abrirConfigAlerta('${id}')">⚙️ Configurar destinatários</button><button class="btn btn-ghost btn-sm" onclick="goPage('grupos-alerta')">👥 Gerenciar grupos</button></div>
-    </div>`;
+  window.SYSACK_ALERTAS_CATALOGO = SYSACK_ALERTAS_CATALOGO;
+
+  if (!window.STATE) window.STATE = {};
+  STATE.alertaConfiguracoes = STATE.alertaConfiguracoes || {};
+  STATE.alertaGrupos = STATE.alertaGrupos || [];
+
+  function esc(v){ return typeof escapeHtml === 'function' ? escapeHtml(String(v ?? '')) : String(v ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s])); }
+  function emailOk(e){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e||'').trim()); }
+  function splitEmails(v){ return String(v||'').split(/[;,\n]/).map(s=>s.trim().toLowerCase()).filter(emailOk).filter((e,i,a)=>a.indexOf(e)===i); }
+  function cfgAlerta(id){
+    const item = SYSACK_ALERTAS_CATALOGO.find(a=>a.id===id) || {};
+    return Object.assign({}, item.padrao || {}, STATE.alertaConfiguracoes?.[id] || {});
+  }
+  function gruposSelecionados(cfg){ return Array.isArray(cfg.grupos) ? cfg.grupos : []; }
+  function membrosGrupo(g){
+    if (!g) return [];
+    if (Array.isArray(g.membros)) return g.membros.filter(emailOk);
+    if (Array.isArray(g.emails)) return g.emails.map(x => typeof x === 'string' ? x : (x.email || '')).filter(emailOk);
+    return [];
+  }
+  function emailsDoAlerta(id){
+    const cfg = cfgAlerta(id);
+    const emails = new Set();
+    (cfg.destinatariosExtras || []).forEach(e => { if (emailOk(e)) emails.add(e); });
+    gruposSelecionados(cfg).forEach(gid => {
+      const g = (STATE.alertaGrupos || []).find(x => x.id === gid) || (STATE.gruposAlerta || []).find(x => x.id === gid);
+      membrosGrupo(g).forEach(e => emails.add(e));
+    });
+    if (!emails.size && SESSION_USER?.email) emails.add(SESSION_USER.email);
+    return [...emails];
+  }
+  async function carregarConfigAlertasSYSACK(){
+    if (!window.db && !window._db) return;
+    const fdb = window.db || window._db;
+    try {
+      const [cfgSnap, gruposSnap, gruposLegadoSnap] = await Promise.all([
+        fdb.collection('alerta_configuracoes').get().catch(()=>({docs:[]})),
+        fdb.collection('alerta_grupos').get().catch(()=>({docs:[]})),
+        fdb.collection('gruposAlerta').get().catch(()=>({docs:[]})),
+      ]);
+      const configs = {};
+      (cfgSnap.docs||[]).forEach(d => configs[d.id] = Object.assign({id:d.id}, d.data()));
+      const grupos = [];
+      (gruposSnap.docs||[]).forEach(d => grupos.push(Object.assign({id:d.id}, d.data())));
+      (gruposLegadoSnap.docs||[]).forEach(d => {
+        if (!grupos.some(g=>g.id===d.id)) grupos.push(Object.assign({id:d.id, legado:true}, d.data()));
+      });
+      STATE.alertaConfiguracoes = configs;
+      STATE.alertaGrupos = grupos.filter(g => g.excluido !== true);
+    } catch(e) {
+      console.warn('[Alertas] Falha ao carregar configurações:', e.message);
+    }
+  }
+  async function salvarConfigAlertaSYSACK(id, cfg){
+    const fdb = window.db || window._db;
+    const clean = Object.assign({}, cfg, {
+      atualizadoEm: new Date().toISOString(),
+      atualizadoPor: SESSION_USER?.email || SESSION_USER?.uid || 'sysack',
+    });
+    STATE.alertaConfiguracoes[id] = Object.assign({}, STATE.alertaConfiguracoes[id] || {}, clean);
+    if (fdb) await fdb.collection('alerta_configuracoes').doc(id).set(clean, {merge:true});
+  }
+  async function salvarGrupoAlertaSYSACK(id, grupo){
+    const fdb = window.db || window._db;
+    const ref = id ? fdb.collection('alerta_grupos').doc(id) : fdb.collection('alerta_grupos').doc();
+    const clean = Object.assign({}, grupo, { atualizadoEm: new Date().toISOString(), atualizadoPor: SESSION_USER?.email || 'sysack' });
+    await ref.set(clean, {merge:true});
+    clean.id = ref.id;
+    const idx = (STATE.alertaGrupos||[]).findIndex(g=>g.id===ref.id);
+    if (idx >= 0) STATE.alertaGrupos[idx] = Object.assign({}, STATE.alertaGrupos[idx], clean); else STATE.alertaGrupos.push(clean);
+    return ref.id;
+  }
+
+  window.renderAlertas = async function renderAlertas(){
+    await carregarConfigAlertasSYSACK();
+    const list = document.getElementById('alertas-list') || document.getElementById('eventos-alertas-grid') || document.querySelector('#page-alertas .card, #page-alertas');
+    if (!list) return;
+
+    // Corrige botão superior "+ Configurar Alerta" mesmo que ele tenha sido criado no HTML original
+    [...document.querySelectorAll('button')].forEach(b => {
+      const tx = (b.textContent||'').trim().toLowerCase();
+      if (tx.includes('configurar alerta') && !b.dataset.alertasBind) {
+        b.dataset.alertasBind = '1';
+        b.onclick = () => abrirModalConfigAlertaSYSACK('maquina_offline');
+      }
+    });
+
+    list.innerHTML = SYSACK_ALERTAS_CATALOGO.map(a => {
+      const cfg = cfgAlerta(a.id);
+      const emails = emailsDoAlerta(a.id);
+      const grupos = gruposSelecionados(cfg).map(gid => (STATE.alertaGrupos||[]).find(g=>g.id===gid)?.nome || gid).filter(Boolean);
+      const status = cfg.ativo === false ? '<span style="background:#F3F4F6;color:#64748B;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700">Pausado</span>' : '<span style="background:#DCFCE7;color:#166534;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700">Ativo</span>';
+      const periodo = cfg.janela === 'diario' ? ('Diário ' + (cfg.horario||'08:00')) : cfg.janela === 'imediato' ? 'Imediato' : cfg.janela === 'sob_demanda' ? 'Sob demanda' : ('A cada ' + (cfg.intervaloHoras || a.padrao?.intervaloHoras || 6) + ' horas');
+      return `<div class="card mb-16" style="padding:18px 20px;border-radius:14px;border:1px solid var(--line);box-shadow:0 1px 2px rgba(15,23,42,.03)">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+              <span>${a.icone}</span><strong style="font-size:15px;color:var(--g900)">${esc(a.titulo)}</strong>${status}
+              <span style="background:#EFF6FF;color:#2563EB;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700">${esc(periodo)}</span>
+            </div>
+            <div style="font-size:12.5px;color:var(--g500);margin-bottom:10px">${esc(a.desc)}</div>
+            <div style="font-size:12px;margin-bottom:6px"><b>Função:</b> <code>${esc(a.funcao)}</code></div>
+            <div style="font-size:12px;margin-bottom:6px"><b>Grupos:</b> ${grupos.length ? grupos.map(g=>`<span style="background:#EEF2FF;color:#4338CA;padding:3px 8px;border-radius:999px;margin-right:4px">${esc(g)}</span>`).join('') : '<span style="color:#94A3B8">Nenhum grupo vinculado</span>'}</div>
+            <div style="font-size:12px"><b>Recebem e-mail:</b> ${emails.length ? emails.map(e=>`<span style="background:#D1FAE5;color:#047857;padding:3px 8px;border-radius:999px;margin-right:4px">${esc(e)}</span>`).join('') : '<span style="color:#DC2626">Nenhum destinatário</span>'}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;min-width:190px">
+            <button class="btn btn-secondary btn-sm" onclick="abrirModalConfigAlertaSYSACK('${a.id}')">⚙️ Configurar alerta</button>
+            <button class="btn btn-ghost btn-sm" onclick="abrirModalGruposAlertaSYSACK('${a.id}')">👥 Gerenciar grupos</button>
+            <button class="btn btn-ghost btn-sm" onclick="testarAlertaSYSACK('${a.id}')">📧 Testar e-mail</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
   };
-  el.innerHTML = tipos.map(card).join('');
-}
 
-function abrirConfigAlerta(alertaId) {
-  const nome = alertaId;
-  document.getElementById('modal-config-alerta')?.remove();
-  document.body.insertAdjacentHTML('beforeend', `<div class="modal-overlay open" id="modal-config-alerta" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:560px"><div class="modal-header"><h3>Configurar alerta: ${escapeHtml(nome)}</h3><button class="close-btn" onclick="document.getElementById('modal-config-alerta').remove()">×</button></div><div class="modal-body"><label class="form-label">E-mails extras separados por vírgula</label><textarea class="form-control" id="cfg-alerta-emails" rows="3" placeholder="email1@cesan.com.br, email2@cesan.com.br"></textarea><label class="form-label" style="margin-top:12px">IDs dos grupos separados por vírgula</label><input class="form-control" id="cfg-alerta-grupos" placeholder="grupo_ti, grupo_gestores"><p class="form-hint">O backend sempre adiciona automaticamente usuários ativos com role admin/gestor como fallback.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="document.getElementById('modal-config-alerta').remove()">Cancelar</button><button class="btn btn-primary" onclick="salvarConfigAlerta('${alertaId}')">Salvar</button></div></div></div>`);
-}
+  window.abrirModalConfigAlertaSYSACK = async function(id){
+    await carregarConfigAlertasSYSACK();
+    const a = SYSACK_ALERTAS_CATALOGO.find(x=>x.id===id);
+    if (!a) return showToast('Alerta não encontrado', 'warning');
+    const cfg = cfgAlerta(id);
+    const extras = (cfg.destinatariosExtras || []).join('\n');
+    const grupos = STATE.alertaGrupos || [];
+    const selecionados = new Set(gruposSelecionados(cfg));
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'modal-config-alerta-sysack';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `<div class="modal-card" style="background:var(--panel,#fff);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.25);width:760px;max-width:96vw;max-height:92vh;overflow:auto">
+      <div style="padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-weight:800;font-size:18px">${a.icone} ${esc(a.titulo)}</div><div style="font-size:12px;color:var(--g500)">${esc(a.desc)}</div></div>
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-config-alerta-sysack')?.remove()">✕</button>
+      </div>
+      <div style="padding:20px 22px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <label style="display:flex;align-items:center;gap:8px;grid-column:1/-1"><input type="checkbox" id="sa-ativo" ${cfg.ativo!==false?'checked':''}> <b>Alerta ativo</b></label>
+        <label style="display:flex;align-items:center;gap:8px;grid-column:1/-1"><input type="checkbox" id="sa-email" ${cfg.emailEnabled!==false?'checked':''}> <b>Enviar e-mail além de mostrar na tela</b></label>
+        <div><label class="form-label">Tipo de execução</label><select id="sa-janela" class="form-control" onchange="SYSACK_alertaToggleCampos()">
+          <option value="imediato" ${cfg.janela==='imediato'?'selected':''}>Imediato quando detectar evento</option>
+          <option value="intervalo" ${cfg.janela==='intervalo'?'selected':''}>Por intervalo</option>
+          <option value="diario" ${cfg.janela==='diario'?'selected':''}>Diário em horário fixo</option>
+          <option value="sob_demanda" ${cfg.janela==='sob_demanda'?'selected':''}>Sob demanda</option>
+        </select></div>
+        <div><label class="form-label">Severidade</label><select id="sa-severidade" class="form-control">
+          ${['baixa','media','alta','critica'].map(s=>`<option value="${s}" ${String(cfg.severidade||a.severidade)===s?'selected':''}>${s.toUpperCase()}</option>`).join('')}
+        </select></div>
+        <div id="sa-box-intervalo"><label class="form-label">Intervalo entre alertas/e-mails</label><div style="display:flex;gap:8px;align-items:center"><input id="sa-intervalo" class="form-control" type="number" min="0" max="168" value="${Number(cfg.intervaloHoras||0)}"><span style="font-size:12px;color:var(--g500)">horas</span></div></div>
+        <div id="sa-box-horario"><label class="form-label">Horário de execução</label><input id="sa-horario" class="form-control" type="time" value="${esc(cfg.horario||'')}"></div>
+        <label style="display:flex;align-items:center;gap:8px;grid-column:1/-1"><input type="checkbox" id="sa-repetir" ${cfg.repetir!==false?'checked':''}> Repetir enquanto o problema continuar</label>
+        <div style="grid-column:1/-1"><label class="form-label">Destinatários extras, um por linha</label><textarea id="sa-emails" class="form-control" rows="5" placeholder="usuario@cesan.com.br">${esc(extras)}</textarea></div>
+        <div style="grid-column:1/-1"><label class="form-label">Grupos vinculados</label><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">
+          ${grupos.length ? grupos.map(g=>`<label style="display:flex;gap:8px;align-items:center;background:var(--g50);border:1px solid var(--line);border-radius:10px;padding:9px"><input type="checkbox" name="sa-grupo" value="${esc(g.id)}" ${selecionados.has(g.id)?'checked':''}> <span><b>${esc(g.nome||g.id)}</b><br><small style="color:var(--g500)">${membrosGrupo(g).length} e-mail(s)</small></span></label>`).join('') : '<div style="color:var(--g400);font-size:12px">Nenhum grupo criado. Use Gerenciar grupos.</div>'}
+        </div></div>
+      </div>
+      <div style="padding:16px 22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px">
+        <button class="btn btn-ghost" onclick="abrirModalGruposAlertaSYSACK('${id}')">👥 Gerenciar grupos</button>
+        <div style="display:flex;gap:8px"><button class="btn btn-secondary" onclick="document.getElementById('modal-config-alerta-sysack')?.remove()">Cancelar</button><button class="btn btn-primary" onclick="salvarConfigAlertaModalSYSACK('${id}', this)">💾 Salvar</button></div>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    window.SYSACK_alertaToggleCampos();
+  };
 
-async function salvarConfigAlerta(alertaId) {
-  const emails=(document.getElementById('cfg-alerta-emails')?.value||'').split(/[;,\n]/).map(x=>x.trim()).filter(Boolean);
-  const grupos=(document.getElementById('cfg-alerta-grupos')?.value||'').split(/[;,\n]/).map(x=>x.trim()).filter(Boolean);
-  try { await callFunction('salvarAlertaConfig', { alertaId, destinatariosExtras:emails, grupos }); document.getElementById('modal-config-alerta')?.remove(); showToast('Configuração de alerta salva.','success'); renderAlertas(); } catch(e) { showToast('Erro ao salvar alerta: '+e.message,'error'); }
-}
+  window.SYSACK_alertaToggleCampos = function(){
+    const janela = document.getElementById('sa-janela')?.value;
+    const bi = document.getElementById('sa-box-intervalo');
+    const bh = document.getElementById('sa-box-horario');
+    if (bi) bi.style.display = janela === 'intervalo' ? '' : 'none';
+    if (bh) bh.style.display = janela === 'diario' ? '' : 'none';
+  };
+
+  window.salvarConfigAlertaModalSYSACK = async function(id, btn){
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+      const cfg = {
+        ativo: document.getElementById('sa-ativo')?.checked !== false,
+        emailEnabled: document.getElementById('sa-email')?.checked !== false,
+        janela: document.getElementById('sa-janela')?.value || 'imediato',
+        severidade: document.getElementById('sa-severidade')?.value || 'media',
+        intervaloHoras: Number(document.getElementById('sa-intervalo')?.value || 0),
+        horario: document.getElementById('sa-horario')?.value || '',
+        repetir: document.getElementById('sa-repetir')?.checked !== false,
+        destinatariosExtras: splitEmails(document.getElementById('sa-emails')?.value || ''),
+        grupos: [...document.querySelectorAll('[name="sa-grupo"]:checked')].map(x=>x.value),
+      };
+      await salvarConfigAlertaSYSACK(id, cfg);
+      document.getElementById('modal-config-alerta-sysack')?.remove();
+      await renderAlertas();
+      showToast('✅ Configuração do alerta salva', 'success', 3000);
+    } catch(e) { showToast('Erro ao salvar alerta: ' + e.message, 'danger', 5000); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar'; } }
+  };
+
+  window.abrirModalGruposAlertaSYSACK = async function(alertaId){
+    await carregarConfigAlertasSYSACK();
+    const overlay = document.createElement('div');
+    overlay.id = 'modal-grupos-alerta-sysack';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10001;display:flex;align-items:center;justify-content:center;padding:20px';
+    const grupos = STATE.alertaGrupos || [];
+    overlay.innerHTML = `<div style="background:var(--panel,#fff);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.25);width:760px;max-width:96vw;max-height:92vh;overflow:auto">
+      <div style="padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:18px">👥 Grupos de alerta</b><div style="font-size:12px;color:var(--g500)">Crie grupos de e-mails e vincule aos alertas</div></div><button class="btn btn-ghost" onclick="document.getElementById('modal-grupos-alerta-sysack')?.remove()">✕</button></div>
+      <div style="padding:18px 22px">
+        <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:10px;align-items:end;margin-bottom:14px">
+          <div><label class="form-label">Nome do grupo</label><input id="sg-nome" class="form-control" placeholder="Ex: Infraestrutura / Service Desk"></div>
+          <div><label class="form-label">E-mails, separados por vírgula, ponto e vírgula ou linha</label><textarea id="sg-emails" class="form-control" rows="2" placeholder="ana.penha@cesan.com.br"></textarea></div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="salvarGrupoAlertaModalSYSACK('${alertaId||''}', this)">+ Criar grupo</button>
+        <div style="margin-top:18px;display:flex;flex-direction:column;gap:10px" id="sg-lista">
+          ${grupos.length ? grupos.map(g=>`<div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;justify-content:space-between;gap:10px"><div><b>${esc(g.nome||g.id)}</b><div style="font-size:12px;color:var(--g500)">${membrosGrupo(g).map(esc).join(', ') || 'sem e-mails'}</div></div><div style="display:flex;gap:6px"><button class="btn btn-ghost btn-xs" onclick="editarGrupoAlertaModalSYSACK('${esc(g.id)}')">Editar</button><button class="btn btn-ghost btn-xs" onclick="excluirGrupoAlertaModalSYSACK('${esc(g.id)}')">Excluir</button></div></div>`).join('') : '<div style="color:var(--g400);text-align:center;padding:25px">Nenhum grupo criado.</div>'}
+        </div>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  };
+
+  window.salvarGrupoAlertaModalSYSACK = async function(alertaId, btn){
+    try {
+      const nome = document.getElementById('sg-nome')?.value?.trim();
+      const membros = splitEmails(document.getElementById('sg-emails')?.value || '');
+      if (!nome) return showToast('Informe o nome do grupo', 'warning');
+      if (!membros.length) return showToast('Informe ao menos um e-mail válido', 'warning');
+      if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+      const id = await salvarGrupoAlertaSYSACK('', { nome, membros, ativo:true, createdAt:new Date().toISOString() });
+      if (alertaId) {
+        const cfg = cfgAlerta(alertaId);
+        const grupos = new Set(cfg.grupos || []); grupos.add(id);
+        await salvarConfigAlertaSYSACK(alertaId, Object.assign({}, cfg, {grupos:[...grupos]}));
+      }
+      document.getElementById('modal-grupos-alerta-sysack')?.remove();
+      if (document.getElementById('modal-config-alerta-sysack')) document.getElementById('modal-config-alerta-sysack')?.remove();
+      await renderAlertas();
+      showToast('✅ Grupo salvo e disponível para os alertas', 'success');
+    } catch(e) { showToast('Erro ao salvar grupo: ' + e.message, 'danger'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '+ Criar grupo'; } }
+  };
+
+  window.editarGrupoAlertaModalSYSACK = async function(id){
+    const g = (STATE.alertaGrupos||[]).find(x=>x.id===id); if (!g) return;
+    const nome = prompt('Nome do grupo:', g.nome || ''); if (!nome) return;
+    const membros = splitEmails(prompt('E-mails do grupo:', membrosGrupo(g).join('; ')) || '');
+    if (!membros.length) return showToast('Nenhum e-mail válido informado', 'warning');
+    await salvarGrupoAlertaSYSACK(id, {nome, membros, ativo:g.ativo!==false});
+    document.getElementById('modal-grupos-alerta-sysack')?.remove();
+    await carregarConfigAlertasSYSACK();
+    await renderAlertas();
+    showToast('Grupo atualizado', 'success');
+  };
+
+  window.excluirGrupoAlertaModalSYSACK = async function(id){
+    if (!confirm('Excluir este grupo?')) return;
+    const fdb = window.db || window._db;
+    if (fdb) await fdb.collection('alerta_grupos').doc(id).delete();
+    STATE.alertaGrupos = (STATE.alertaGrupos||[]).filter(g=>g.id!==id);
+    await renderAlertas();
+    document.getElementById('modal-grupos-alerta-sysack')?.remove();
+    showToast('Grupo excluído', 'warning');
+  };
+
+  window.testarAlertaSYSACK = async function(id){
+    const emails = emailsDoAlerta(id);
+    if (!emails.length) return showToast('Configure pelo menos um destinatário para testar.', 'warning');
+    try {
+      if (typeof callFunction === 'function') {
+        await callFunction('testarAlertaConfig', { alertaId:id });
+        showToast('✅ E-mail de teste solicitado para ' + emails.length + ' destinatário(s)', 'success');
+      } else {
+        await (window.db||window._db).collection('alertas').add({ tipo:id, titulo:'Teste de alerta SYSACK', desc:'Teste manual da configuração de alerta', lida:false, createdAt:new Date().toISOString(), teste:true });
+        showToast('Teste registrado em alertas', 'info');
+      }
+    } catch(e) { showToast('Teste registrado/fila de e-mail. Detalhe: ' + e.message, 'info', 5000); }
+  };
+
+  // Garante carga automática ao entrar na página
+  setTimeout(() => { if (document.getElementById('page-alertas')?.classList.contains('active')) renderAlertas(); }, 500);
+})();
