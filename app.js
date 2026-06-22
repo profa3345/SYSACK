@@ -4182,533 +4182,27 @@ function renderPesquisas() {
     </tr>`).join('');
 }
 
-// ─── ALERTAS — definição canônica dos alertas configurados ───────────────────
-const SYSACK_ALERTAS_DEF = [
-  { id:'maquina_offline',    nome:'Máquinas offline',                  icon:'🖥️', cor:'danger',
-    freq:'A cada 6 horas',  tipo:'schedule',
-    desc:'Verifica computadores/notebooks/workstations com status "ativo" que não reportam há mais de 5 dias. Envia e-mail listando todos os equipamentos offline com PAT, área, responsável e data do último contato.',
-    notificaEmail:true, notificaTela:true,
-    destPadrao:'Todos os usuários com role admin ou gestor (ativos)' },
-  { id:'prazo_terceirizada', nome:'Prazo de devolução — terceirizada', icon:'⏰', cor:'warning',
-    freq:'Diário às 08h + callable',  tipo:'schedule',
-    desc:'Verifica equipamentos emprestados a terceirizados ainda não devolvidos. Alerta 5 dias antes do vencimento (técnico responsável + gestores) e alerta diário para todos os atrasados.',
-    notificaEmail:true, notificaTela:true,
-    destPadrao:'Técnico responsável + admins/gestores' },
-  { id:'aprovacao_pendente', nome:'Aprovação pendente de movimentação',icon:'✅', cor:'warning',
-    freq:'Acionado ao criar movimentação',  tipo:'callable',
-    desc:'Notifica gestores quando uma movimentação precisa de aprovação. Renotifica se pendente há mais de 1 dia (urgente). Avisa o solicitante quando a decisão é tomada.',
-    notificaEmail:true, notificaTela:true,
-    destPadrao:'Gestores para aprovar · Solicitante recebe a decisão' },
-  { id:'confirmacao_chamado',nome:'Confirmação de abertura de chamado', icon:'📧', cor:'info',
-    freq:'Acionado ao abrir chamado',  tipo:'callable',
-    desc:'Envia e-mail de confirmação ao solicitante com número, descrição e prioridade do chamado recém-aberto.',
-    notificaEmail:true, notificaTela:false,
-    destPadrao:'E-mail do solicitante informado no chamado' },
-  { id:'recurso_critico',    nome:'Recurso crítico (CPU / RAM / Disco)',icon:'⚡', cor:'danger',
-    freq:'Tempo real — a cada heartbeat do agente',  tipo:'http',
-    desc:'Detectado no endpoint registrarMetricaCliente quando CPU, RAM ou disco C: ultrapassam 90%. O alerta é retornado no payload de resposta ao agente e exibido na tela do sistema.',
-    notificaEmail:false, notificaTela:true,
-    destPadrao:'Retorno ao agente — front-end exibe o alerta na tela' },
-];
-
-// Estado local para edição de destinatários/grupos
-window._alertasCfg   = {};  // { [alertaId]: { destinatariosExtras:[], grupos:[] } }
-window._alertasGrupos = []; // [{ id, nome, membros:[] }]
-window._alertasLoaded = false;
-
-async function _alertasCarregar() {
-  if (!window.db) return;
-  try {
-    const fn = firebase.functions().httpsCallable('getAlertaConfig');
-    const r  = await fn();
-    window._alertasCfg    = r.data.configs  || {};
-    window._alertasGrupos = r.data.grupos   || [];
-    window._alertasLoaded = true;
-  } catch(e) {
-    console.warn('[Alertas] Não foi possível carregar configs:', e.message);
-  }
-}
-
-async function _alertasSalvarConfig(alertaId) {
-  try {
-    const fn = firebase.functions().httpsCallable('salvarAlertaConfig');
-    const cfg = window._alertasCfg[alertaId] || {};
-    await fn({ alertaId, destinatariosExtras: cfg.destinatariosExtras||[], grupos: cfg.grupos||[] });
-    showToast('Configuração salva!', 'success');
-  } catch(e) { showToast('Erro ao salvar: ' + e.message, 'error'); }
-}
-
-async function _alertasSalvarGrupo(id, nome, membros) {
-  try {
-    const fn = firebase.functions().httpsCallable('salvarGrupoAlerta');
-    const r  = await fn({ id: id||null, nome, membros });
-    if (!id) {
-      window._alertasGrupos.push({ id: r.data.id, nome, membros });
-    } else {
-      const g = window._alertasGrupos.find(x => x.id === id);
-      if (g) { g.nome = nome; g.membros = membros; }
-    }
-    showToast('Grupo salvo!', 'success');
-    _alertasRenderGerenciar();
-  } catch(e) { showToast('Erro: ' + e.message, 'error'); }
-}
-
-async function _alertasExcluirGrupo(id) {
-  if (!confirm('Remover este grupo?')) return;
-  try {
-    const fn = firebase.functions().httpsCallable('excluirGrupoAlerta');
-    await fn({ id });
-    window._alertasGrupos = window._alertasGrupos.filter(g => g.id !== id);
-    showToast('Grupo removido', 'success');
-    _alertasRenderGerenciar();
-  } catch(e) { showToast('Erro: ' + e.message, 'error'); }
-}
-
-function _alertasCorStyles(cor) {
-  const map = {
-    danger:  { bg:'var(--danger-l,#FEF2F2)',  border:'#FCA5A5', badge:'background:#FEE2E2;color:#991B1B' },
-    warning: { bg:'var(--warning-l,#FFFBEB)', border:'#FCD34D', badge:'background:#FEF3C7;color:#92400E' },
-    info:    { bg:'var(--accent-l,#EFF6FF)',  border:'#93C5FD', badge:'background:#DBEAFE;color:#1E40AF' },
-  };
-  return map[cor] || map.info;
-}
-
-function _alertasRenderDestChips(alertaId) {
-  const cfg   = window._alertasCfg[alertaId] || {};
-  const dests = cfg.destinatariosExtras || [];
-  const grps  = (cfg.grupos||[]).map(gid => window._alertasGrupos.find(g=>g.id===gid)).filter(Boolean);
-  const isAdminOrGestor = ['admin','gestor'].includes(window._currentUserRole||STATE?.user?.role||'');
-
-  const chips = dests.map((e,i) =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--g100,#F3F4F6);border:1px solid var(--g200,#E5E7EB);border-radius:20px;padding:3px 10px;font-size:12px">
-      ${e}
-      ${isAdminOrGestor ? `<span style="cursor:pointer;color:var(--g400,#9CA3AF)" onclick="_alertasRemDest('${alertaId}',${i})">×</span>` : ''}
-    </span>`
-  ).join('');
-
-  const grpChips = grps.map(g =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:20px;padding:3px 10px;font-size:12px;color:#1D4ED8">
-      👥 ${g.nome}
-      ${isAdminOrGestor ? `<span style="cursor:pointer;color:#93C5FD" onclick="_alertasRemGrupo('${alertaId}','${g.id}')">×</span>` : ''}
-    </span>`
-  ).join('');
-
-  return chips + grpChips || '<span style="font-size:12px;color:var(--g400,#9CA3AF)">Nenhum destinatário extra configurado</span>';
-}
-
-function _alertasRemDest(alertaId, idx) {
-  if (!window._alertasCfg[alertaId]) return;
-  window._alertasCfg[alertaId].destinatariosExtras.splice(idx, 1);
-  _alertasSalvarConfig(alertaId);
-  document.getElementById('alerta-dests-'+alertaId).innerHTML = _alertasRenderDestChips(alertaId);
-}
-
-function _alertasRemGrupo(alertaId, gid) {
-  if (!window._alertasCfg[alertaId]) return;
-  window._alertasCfg[alertaId].grupos = (window._alertasCfg[alertaId].grupos||[]).filter(x=>x!==gid);
-  _alertasSalvarConfig(alertaId);
-  document.getElementById('alerta-dests-'+alertaId).innerHTML = _alertasRenderDestChips(alertaId);
-}
-
-function _alertasAddDest(alertaId) {
-  const inp = document.getElementById('alerta-newemail-'+alertaId);
-  if (!inp) return;
-  const val = inp.value.trim();
-  if (!val || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) { inp.style.borderColor='var(--danger,#EF4444)'; return; }
-  inp.style.borderColor='';
-  if (!window._alertasCfg[alertaId]) window._alertasCfg[alertaId] = { destinatariosExtras:[], grupos:[] };
-  if (!window._alertasCfg[alertaId].destinatariosExtras.includes(val))
-    window._alertasCfg[alertaId].destinatariosExtras.push(val);
-  inp.value = '';
-  _alertasSalvarConfig(alertaId);
-  document.getElementById('alerta-dests-'+alertaId).innerHTML = _alertasRenderDestChips(alertaId);
-}
-
-function _alertasAddGrupo(alertaId) {
-  const sel = document.getElementById('alerta-selgrp-'+alertaId);
-  if (!sel || !sel.value) return;
-  if (!window._alertasCfg[alertaId]) window._alertasCfg[alertaId] = { destinatariosExtras:[], grupos:[] };
-  if (!window._alertasCfg[alertaId].grupos) window._alertasCfg[alertaId].grupos = [];
-  if (!window._alertasCfg[alertaId].grupos.includes(sel.value))
-    window._alertasCfg[alertaId].grupos.push(sel.value);
-  sel.value='';
-  _alertasSalvarConfig(alertaId);
-  document.getElementById('alerta-dests-'+alertaId).innerHTML = _alertasRenderDestChips(alertaId);
-}
-
-function _alertasRenderCard(a) {
-  const cs   = _alertasCorStyles(a.cor);
-  const isAG = ['admin','gestor'].includes(window._currentUserRole||STATE?.user?.role||'');
-  const grpOpts = window._alertasGrupos.map(g =>
-    `<option value="${g.id}">${g.nome}</option>`).join('');
-
-  const tipoBadge = a.tipo==='schedule'
-    ? `<span style="background:#DBEAFE;color:#1E40AF;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500">🕐 Schedule</span>`
-    : a.tipo==='callable'
-    ? `<span style="background:#F3F4F6;color:#374151;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500">⚡ Callable</span>`
-    : `<span style="background:#D1FAE5;color:#065F46;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500">🌐 HTTP</span>`;
-
-  return `
-  <div style="background:var(--card-bg,#fff);border:1px solid var(--g200,#E5E7EB);border-radius:var(--r,12px);overflow:hidden;margin-bottom:12px">
-    <div style="background:${cs.bg};border-bottom:1px solid ${cs.border};padding:14px 18px;display:flex;gap:14px;align-items:flex-start">
-      <div style="font-size:26px;line-height:1;flex-shrink:0;padding-top:2px">${a.icon}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:14px;font-weight:700;color:var(--g900,#111827);margin-bottom:4px">${a.nome}</div>
-        <div style="font-size:12px;color:var(--g600,#4B5563);line-height:1.55;margin-bottom:8px">${a.desc}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          ${tipoBadge}
-          <span style="background:var(--g100,#F3F4F6);color:var(--g600,#4B5563);font-size:11px;padding:2px 8px;border-radius:20px">🔄 ${a.freq}</span>
-          ${a.notificaEmail ? `<span style="background:#DBEAFE;color:#1D4ED8;font-size:11px;padding:2px 8px;border-radius:20px">📧 E-mail</span>` : ''}
-          ${a.notificaTela  ? `<span style="background:#D1FAE5;color:#065F46;font-size:11px;padding:2px 8px;border-radius:20px">🔔 Tela</span>` : ''}
+function renderAlertas() {
+  const items = [
+    { tipo:'danger', titulo:'🚨 PAT-0103 na Terceirizada — 12 dias úteis', desc:'Dell OptiPlex 3090 — prazo de 10 dias úteis excedido. Roberto Mendes deve ser contatado imediatamente.', data:'Hoje, 09:00', acao:'Ver Terceirizada' },
+    { tipo:'warning', titulo:'⚠️ Aprovação pendente — Transferência PAT-0102', desc:'HP EliteBook 840 G8 aguarda sua autorização para ser transferido para Comercial.', data:'Ontem, 14:32', acao:'Ver Aprovações' },
+    { tipo:'warning', titulo:'⚠️ Aprovação pendente — Envio Terceirizada PAT-0201', desc:'HP Monitor 24" aguarda autorização de envio para empresa terceirizada.', data:'Há 2 dias', acao:'Ver Aprovações' },
+    { tipo:'info', titulo:'ℹ️ Alerta preventivo — PAT-0201 com 6 dias na Terceirizada', desc:'HP Monitor 24" — faltam 4 dias úteis para o prazo máximo. Técnico Patrícia Rocha foi notificada.', data:'Há 3 dias', acao: null },
+    { tipo:'info', titulo:'ℹ️ Smartphone PAT-MOB-004 bloqueado remotamente', desc:'Galaxy A34 de Carlos Lima foi bloqueado após relato de extravio. Boletim de ocorrência solicitado.', data:'Há 2 dias', acao: null },
+  ];
+  document.getElementById('alertas-list').innerHTML = items.map(a => {
+    const colors = { danger:'var(--danger-l)','danger-border':'#FCA5A5', warning:'var(--warning-l)','warning-border':'#FCD34D', info:'var(--accent-l)','info-border':'#93C5FD' };
+    return `
+      <div style="background:${colors[a.tipo]};border:1px solid ${colors[a.tipo+'-border']||'#93C5FD'};border-radius:var(--r);padding:14px 16px;display:flex;gap:12px;align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:var(--g900);margin-bottom:4px">${a.titulo}</div>
+          <div style="font-size:12px;color:var(--g600);margin-bottom:6px;line-height:1.5">${a.desc}</div>
+          <div style="font-size:11px;color:var(--g400)">${a.data}</div>
         </div>
-      </div>
-    </div>
-    <div style="padding:14px 18px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-        <div style="background:var(--g50,#F9FAFB);border-radius:8px;padding:10px 12px">
-          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--g500,#6B7280);margin-bottom:4px">Destinatários padrão</div>
-          <div style="font-size:12px;color:var(--g700,#374151)">${a.destPadrao}</div>
-        </div>
-        <div style="background:var(--g50,#F9FAFB);border-radius:8px;padding:10px 12px">
-          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--g500,#6B7280);margin-bottom:4px">Tipo de disparo</div>
-          <div style="font-size:12px;color:var(--g700,#374151)">${a.tipo === 'schedule' ? 'Agendado (Firebase Schedule)' : a.tipo==='callable' ? 'Callable (acionado pelo app)' : 'Endpoint HTTP (agente desktop)'}</div>
-        </div>
-      </div>
-      <div style="border-top:1px solid var(--g100,#F3F4F6);padding-top:12px">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--g500,#6B7280);margin-bottom:8px">Destinatários extras de e-mail</div>
-        <div id="alerta-dests-${a.id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-          ${_alertasRenderDestChips(a.id)}
-        </div>
-        ${isAG ? `
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <input id="alerta-newemail-${a.id}" type="email" placeholder="email@cesan.com.br"
-            style="flex:1;min-width:180px;height:32px;font-size:12px;padding:0 10px;border:1px solid var(--g200,#E5E7EB);border-radius:8px;background:var(--g50,#F9FAFB);color:var(--g900)"
-            onkeydown="if(event.key==='Enter')_alertasAddDest('${a.id}')">
-          <button class="btn btn-primary btn-sm" onclick="_alertasAddDest('${a.id}')">+ E-mail</button>
-          <select id="alerta-selgrp-${a.id}"
-            style="height:32px;font-size:12px;padding:0 8px;border:1px solid var(--g200,#E5E7EB);border-radius:8px;background:var(--g50,#F9FAFB);color:var(--g900)">
-            <option value="">Adicionar grupo...</option>
-            ${grpOpts}
-          </select>
-          <button class="btn btn-secondary btn-sm" onclick="_alertasAddGrupo('${a.id}')">+ Grupo</button>
-        </div>` : ''}
-      </div>
-    </div>
-  </div>`;
-}
-
-function _alertasRenderGerenciar() {
-  const el = document.getElementById('alertas-grupos-section');
-  if (!el) return;
-  const isAG = ['admin','gestor'].includes(window._currentUserRole||STATE?.user?.role||'');
-
-  const gruposHtml = window._alertasGrupos.map(g => `
-    <div style="background:var(--g50,#F9FAFB);border:1px solid var(--g200,#E5E7EB);border-radius:10px;padding:12px 14px;margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:13px;font-weight:600;color:var(--g800)">👥 ${g.nome}</span>
-        ${isAG ? `<button class="btn btn-ghost btn-xs" style="color:var(--danger)" onclick="_alertasExcluirGrupo('${g.id}')">🗑</button>` : ''}
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
-        ${(g.membros||[]).map((m,i) => `
-          <span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--g200);border-radius:20px;padding:2px 8px;font-size:12px">
-            ${m}
-            ${isAG ? `<span style="cursor:pointer;color:var(--g400)" onclick="_alertasRemMembroGrupo('${g.id}',${i})">×</span>` : ''}
-          </span>`
-        ).join('') || '<span style="font-size:12px;color:var(--g400)">Sem membros</span>'}
-      </div>
-      ${isAG ? `
-      <div style="display:flex;gap:6px">
-        <input id="grp-nm-${g.id}" type="email" placeholder="email@cesan.com.br"
-          style="flex:1;height:30px;font-size:12px;padding:0 8px;border:1px solid var(--g200);border-radius:6px;background:#fff"
-          onkeydown="if(event.key==='Enter')_alertasAddMembroGrupo('${g.id}')">
-        <button class="btn btn-secondary btn-sm" onclick="_alertasAddMembroGrupo('${g.id}')">+ Membro</button>
-      </div>` : ''}
-    </div>`).join('') || '<p style="font-size:13px;color:var(--g400);padding:8px 0">Nenhum grupo criado ainda.</p>';
-
-  el.innerHTML = `
-    <div style="border-top:1px solid var(--g200,#E5E7EB);padding-top:20px;margin-top:24px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div>
-          <h3 style="font-size:15px;font-weight:700;color:var(--g900)">Grupos de destinatários</h3>
-          <p style="font-size:12px;color:var(--g500);margin-top:2px">Crie grupos para adicionar múltiplos usuários a um alerta de uma só vez</p>
-        </div>
-        ${isAG ? `<button class="btn btn-primary btn-sm" onclick="_alertasNovoGrupoForm()">+ Novo Grupo</button>` : ''}
-      </div>
-      <div id="alertas-novo-grupo-form" style="display:none;background:var(--accent-l,#EFF6FF);border:1px solid #BFDBFE;border-radius:10px;padding:14px;margin-bottom:12px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Novo grupo</div>
-        <input id="ng-nome" placeholder="Nome do grupo (ex: Coordenadores DSI)"
-          style="width:100%;height:34px;font-size:13px;padding:0 10px;border:1px solid var(--g200);border-radius:8px;background:#fff;margin-bottom:8px">
-        <div style="font-size:12px;color:var(--g500);margin-bottom:4px">Membros (separados por vírgula ou um por linha)</div>
-        <textarea id="ng-membros" rows="3" placeholder="joao@cesan.com.br, maria@cesan.com.br"
-          style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--g200);border-radius:8px;background:#fff;resize:vertical;margin-bottom:8px"></textarea>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" onclick="_alertasCriarGrupo()">Criar grupo</button>
-          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('alertas-novo-grupo-form').style.display='none'">Cancelar</button>
-        </div>
-      </div>
-      ${gruposHtml}
-    </div>`;
-}
-
-function _alertasNovoGrupoForm() {
-  const f = document.getElementById('alertas-novo-grupo-form');
-  if (f) f.style.display = f.style.display==='none' ? '' : 'none';
-}
-
-async function _alertasCriarGrupo() {
-  const nome   = document.getElementById('ng-nome')?.value.trim();
-  const raw    = document.getElementById('ng-membros')?.value||'';
-  if (!nome) { showToast('Informe um nome para o grupo','error'); return; }
-  const membros = raw.split(/[\n,]/).map(m=>m.trim()).filter(m=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m));
-  await _alertasSalvarGrupo(null, nome, membros);
-  const f = document.getElementById('alertas-novo-grupo-form');
-  if (f) f.style.display='none';
-  document.getElementById('ng-nome').value='';
-  document.getElementById('ng-membros').value='';
-}
-
-function _alertasAddMembroGrupo(gid) {
-  const inp = document.getElementById('grp-nm-'+gid);
-  if (!inp) return;
-  const val = inp.value.trim();
-  if (!val||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) { inp.style.borderColor='var(--danger)'; return; }
-  inp.style.borderColor='';
-  const g = window._alertasGrupos.find(x=>x.id===gid);
-  if (!g) return;
-  if (!g.membros.includes(val)) g.membros.push(val);
-  inp.value='';
-  _alertasSalvarGrupo(g.id, g.nome, g.membros);
-}
-
-function _alertasRemMembroGrupo(gid, idx) {
-  const g = window._alertasGrupos.find(x=>x.id===gid);
-  if (!g) return;
-  g.membros.splice(idx, 1);
-  _alertasSalvarGrupo(g.id, g.nome, g.membros);
-}
-
-async function renderAlertas() {
-  const el = document.getElementById('alertas-list');
-  if (!el) return;
-
-  // Carrega configs do Firestore se ainda não carregou
-  if (!window._alertasLoaded) {
-    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--g400)">⏳ Carregando configurações...</div>';
-    await _alertasCarregar();
-  }
-
-  // Renderiza cards de alertas ativos
-  el.innerHTML = SYSACK_ALERTAS_DEF.map(a => _alertasRenderCard(a)).join('');
-
-  // Renderiza / atualiza seção de grupos
-  _alertasRenderGerenciar();
-
-  // Também carrega alertas disparados recentes do Firestore e mostra no topo
-  if (window.db) {
-    try {
-      const snap = await db.collection('alertas').orderBy('criadoEm','desc').limit(20).get();
-      if (!snap.empty) {
-        const recentes = snap.docs.map(d => {
-          const a = d.data();
-          const cor = a.tipo==='danger'||a.urgente ? 'danger' : a.tipo==='warning' ? 'warning' : 'info';
-          const cs  = _alertasCorStyles(cor);
-          const dtLabel = a.criadoEm?.toDate ? _fmtRelativo(a.criadoEm.toDate()) : (a.criadoEm||'');
-          return `<div data-alerta-id="${d.id}"
-            style="background:${cs.bg};border:1px solid ${cs.border};border-radius:var(--r,12px);padding:14px 16px;display:flex;gap:12px;align-items:flex-start;margin-bottom:8px">
-            <div style="flex:1">
-              <div style="font-size:13px;font-weight:700;color:var(--g900);margin-bottom:4px">${a.titulo||'Alerta do sistema'}</div>
-              <div style="font-size:12px;color:var(--g600);margin-bottom:5px;line-height:1.5">${a.desc||a.mensagem||''}</div>
-              <div style="font-size:11px;color:var(--g400)">${dtLabel}</div>
-            </div>
-            <button class="btn btn-ghost btn-xs" style="flex-shrink:0" title="Dispensar"
-              onclick="this.closest('[data-alerta-id]').remove()">✕</button>
-          </div>`;
-        }).join('');
-        el.insertAdjacentHTML('afterbegin',
-          `<div style="margin-bottom:20px">
-            <h3 style="font-size:13px;font-weight:600;color:var(--g700);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Alertas disparados recentemente</h3>
-            ${recentes}
-          </div>
-          <h3 style="font-size:13px;font-weight:600;color:var(--g700);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Alertas configurados no sistema</h3>`
-        );
-      }
-    } catch(e) { console.warn('[Alertas] alertas recentes:', e.message); }
-  }
-}
-
-function _fmtRelativo(date) {
-  const diff = Date.now() - date.getTime();
-  const m = Math.floor(diff/60000);
-  if (m < 2)   return 'Agora há pouco';
-  if (m < 60)  return `Há ${m} min`;
-  const h = Math.floor(m/60);
-  if (h < 24)  return `Há ${h}h`;
-  const d = Math.floor(h/24);
-  if (d === 1) return 'Ontem';
-  return `Há ${d} dias`;
-}
-
-// ─── TABS DA PÁGINA DE ALERTAS ────────────────────────────────────────────────
-function alertasTab(tab) {
-  const tabs   = ['cfg','logins'];
-  const labels = { cfg:'🔔 Alertas configurados', logins:'🖥️ Histórico de logins' };
-  tabs.forEach(t => {
-    const btn   = document.getElementById('alertas-tab-'+t);
-    const panel = document.getElementById('alertas-panel-'+t);
-    const ativo = t === tab;
-    if (btn) {
-      btn.style.borderBottomColor = ativo ? 'var(--accent,#3B82F6)' : 'transparent';
-      btn.style.color = ativo ? 'var(--accent,#3B82F6)' : 'var(--g500,#6B7280)';
-      btn.style.fontWeight = ativo ? '600' : '500';
-    }
-    if (panel) panel.style.display = ativo ? '' : 'none';
-  });
-  if (tab === 'logins' && !document.getElementById('lh-results').innerHTML)
-    loginHistoryBuscar(true);
-}
-
-// ─── HISTÓRICO DE LOGINS POR MÁQUINA ─────────────────────────────────────────
-async function loginHistoryBuscar(todos) {
-  const qHost = (document.getElementById('lh-q-host')?.value||'').trim().toLowerCase();
-  const qUser = (document.getElementById('lh-q-user')?.value||'').trim().toLowerCase();
-  const de    = document.getElementById('lh-de')?.value||'';
-  const ate   = document.getElementById('lh-ate')?.value||'';
-  const loading = document.getElementById('lh-loading');
-  const results = document.getElementById('lh-results');
-  const resumo  = document.getElementById('lh-resumo');
-  if (!results) return;
-
-  if (loading) loading.style.display='';
-  results.innerHTML = '';
-  if (resumo) resumo.style.display='none';
-
-  let docs = [];
-  try {
-    let q = db.collection('login_history');
-    if (qHost && !todos) {
-      // Filtra pelo hostname quando informado
-      q = q.where('hostname','==',qHost.toUpperCase())
-           .orderBy('ultimoLogin','desc').limit(200);
-    } else {
-      q = q.orderBy('ultimoLogin','desc').limit(500);
-    }
-    const snap = await q.get();
-    docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch(e) {
-    console.warn('[LoginHistory] Erro ao buscar:', e.message);
-    // Fallback: tenta sem orderBy (se índice ainda não existe)
-    try {
-      const snap2 = await db.collection('login_history').limit(500).get();
-      docs = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch(e2) {
-      results.innerHTML = `<div style="padding:20px;text-align:center;color:var(--danger,#EF4444)">
-        ❌ Erro ao buscar histórico: ${e2.message}<br>
-        <span style="font-size:12px;color:var(--g500)">Verifique as Firestore Rules e o índice <code>login_history / hostname ASC + ultimoLogin DESC</code></span>
+        ${a.acao ? `<button class="btn btn-secondary btn-sm" style="flex-shrink:0" onclick="goPage('${a.acao.toLowerCase().includes('tercei')?'terceirizada':'aprovacoes'}')">${a.acao}</button>` : ''}
+        <button class="btn btn-ghost btn-xs" style="flex-shrink:0" title="Dispensar">✕</button>
       </div>`;
-      if (loading) loading.style.display='none';
-      return;
-    }
-  }
-
-  // Filtra client-side
-  if (qHost && !todos) docs = docs.filter(d => (d.hostname||'').toLowerCase().includes(qHost) || (d.ip||'').includes(qHost));
-  if (qUser)  docs = docs.filter(d => (d.usuarioNorm||d.usuario||d.login||'').toLowerCase().includes(qUser));
-  if (de)     docs = docs.filter(d => (d.dia||d.ultimoLogin||'') >= de);
-  if (ate)    docs = docs.filter(d => (d.dia||d.ultimoLogin||'') <= ate+'Z');
-
-  if (loading) loading.style.display='none';
-
-  if (!docs.length) {
-    results.innerHTML = '<div style="padding:32px;text-align:center;color:var(--g400)">Nenhum registro de login encontrado com os filtros informados.</div>';
-    return;
-  }
-
-  // Agrupa por hostname
-  const porHost = new Map();
-  docs.forEach(d => {
-    const h = d.hostname || d.agentId || 'Desconhecido';
-    if (!porHost.has(h)) porHost.set(h, []);
-    porHost.get(h).push(d);
-  });
-
-  if (resumo) {
-    resumo.style.display='';
-    const totalLogins = docs.length;
-    const maquinas   = porHost.size;
-    const usuarios   = new Set(docs.map(d=>d.usuarioNorm||d.usuario||'')).size;
-    resumo.innerHTML = `<strong>${totalLogins}</strong> registro(s) encontrado(s) · <strong>${maquinas}</strong> máquina(s) · <strong>${usuarios}</strong> usuário(s) único(s)`;
-  }
-
-  let html = '';
-  for (const [host, logs] of [...porHost.entries()].sort((a,b)=>a[0].localeCompare(b[0]))) {
-    // Ordena por ultimoLogin desc
-    logs.sort((a,b) => (b.ultimoLogin||b.dia||'').localeCompare(a.ultimoLogin||a.dia||''));
-    const ip         = logs[0]?.ip || '';
-    const ultimoLogin = logs[0]?.ultimoLogin || logs[0]?.ultimoLoginEm || '';
-    const primeiroLogin = [...logs].sort((a,b)=>(a.primeiroLogin||a.dia||'').localeCompare(b.primeiroLogin||b.dia||''))[0]?.primeiroLogin || '';
-    const versao     = logs[0]?.versaoAgente || '';
-    const uniqueUsers= [...new Set(logs.map(d=>d.usuarioNorm||d.usuario||'').filter(Boolean))];
-
-    const rows = logs.map(d => {
-      const u = d.usuarioNorm || d.usuario || d.login || '—';
-      const prim = d.primeiroLogin ? new Date(d.primeiroLogin).toLocaleString('pt-BR') : '—';
-      const ulti = d.ultimoLogin   ? new Date(d.ultimoLogin).toLocaleString('pt-BR')   : '—';
-      const dia  = d.dia || d.ultimoLogin?.slice(0,10) || '—';
-      return `<tr>
-        <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--g100)">${u}</td>
-        <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--g100);color:var(--g500)">${dia}</td>
-        <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--g100);color:var(--g500)">${prim}</td>
-        <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--g100);color:var(--g500)">${ulti}</td>
-        <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--g100);color:var(--g400)">${d.ip||'—'}</td>
-        <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--g100);color:var(--g400)">${d.fonte||'agent-desktop'}</td>
-      </tr>`;
-    }).join('');
-
-    html += `
-    <div style="background:var(--card-bg,#fff);border:1px solid var(--g200,#E5E7EB);border-radius:12px;margin-bottom:12px;overflow:hidden">
-      <div style="background:var(--g50,#F9FAFB);border-bottom:1px solid var(--g200);padding:12px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
-          <span style="font-size:20px">🖥️</span>
-          <div>
-            <div style="font-size:14px;font-weight:700;color:var(--g900)">${host}</div>
-            <div style="font-size:12px;color:var(--g500)">${ip ? 'IP: '+ip+' · ' : ''}${versao ? 'Agente: '+versao : ''}</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap">
-          <div style="text-align:center">
-            <div style="font-size:18px;font-weight:700;color:var(--accent,#3B82F6)">${logs.length}</div>
-            <div style="font-size:10px;color:var(--g500);text-transform:uppercase">Registros</div>
-          </div>
-          <div style="text-align:center">
-            <div style="font-size:18px;font-weight:700;color:var(--g700)">${uniqueUsers.length}</div>
-            <div style="font-size:10px;color:var(--g500);text-transform:uppercase">Usuários</div>
-          </div>
-          ${ultimoLogin ? `<div style="text-align:center">
-            <div style="font-size:12px;font-weight:600;color:var(--g700)">${new Date(ultimoLogin).toLocaleDateString('pt-BR')}</div>
-            <div style="font-size:10px;color:var(--g500);text-transform:uppercase">Último login</div>
-          </div>` : ''}
-        </div>
-      </div>
-      <div style="padding:0">
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr style="background:var(--g50,#F9FAFB)">
-                <th style="padding:8px 10px;font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;text-align:left;border-bottom:1px solid var(--g200)">Usuário</th>
-                <th style="padding:8px 10px;font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;text-align:left;border-bottom:1px solid var(--g200)">Dia</th>
-                <th style="padding:8px 10px;font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;text-align:left;border-bottom:1px solid var(--g200)">Primeiro login</th>
-                <th style="padding:8px 10px;font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;text-align:left;border-bottom:1px solid var(--g200)">Último login</th>
-                <th style="padding:8px 10px;font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;text-align:left;border-bottom:1px solid var(--g200)">IP</th>
-                <th style="padding:8px 10px;font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;text-align:left;border-bottom:1px solid var(--g200)">Fonte</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
-  }
-  results.innerHTML = html;
+  }).join('');
 }
 
 function atualizarIniciais() {
@@ -10021,7 +9515,46 @@ function arAtualizarClientes() {
   const sb = document.getElementById('upd-status-bar'); if(sb) sb.style.display='none';
 }
 
+// ─── Helpers de credenciais do modal de atualização ─────────────────────────
+function _updToggleSenha() {
+  const inp  = document.getElementById('upd-cred-pass');
+  const eye  = document.getElementById('upd-cred-eye');
+  if (!inp) return;
+  const oculto = inp.type === 'password';
+  inp.type = oculto ? 'text' : 'password';
+  if (eye) eye.textContent = oculto ? '🙈' : '👁';
+}
+
+function _updGetCredenciais() {
+  const user = (document.getElementById('upd-cred-user')?.value || '').trim();
+  const pass = (document.getElementById('upd-cred-pass')?.value || '');
+  return { user, pass };
+}
+
+function _updValidarCredenciais() {
+  const { user, pass } = _updGetCredenciais();
+  const errEl = document.getElementById('upd-cred-erro');
+  const userInp = document.getElementById('upd-cred-user');
+  const passInp = document.getElementById('upd-cred-pass');
+  if (!user || !pass) {
+    if (errEl) errEl.style.display='';
+    if (!user && userInp) userInp.style.borderColor='#EF4444';
+    if (!pass && passInp) passInp.style.borderColor='#EF4444';
+    // Rola para o campo de credenciais
+    document.getElementById('upd-cred-step')?.scrollIntoView({ behavior:'smooth', block:'start' });
+    return false;
+  }
+  if (errEl) errEl.style.display='none';
+  if (userInp) userInp.style.borderColor='#FCD34D';
+  if (passInp) passInp.style.borderColor='#FCD34D';
+  return true;
+}
+
 async function executarAtualizacaoCliente() {
+  // Valida credenciais antes de qualquer coisa
+  if (!_updValidarCredenciais()) return;
+  const { user: credUser, pass: credPass } = _updGetCredenciais();
+
   // URL sempre fixa — busca diretamente da Vercel, transparente para o técnico
   const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js?ts=' + Date.now();
   const btn = document.getElementById('btn-upd-exec');
@@ -10079,7 +9612,7 @@ async function executarAtualizacaoCliente() {
         let usouExecutor = false;
         try {
           const fn = (await getFbFunctions()).httpsCallable('executarAcaoPrivilegiada');
-          const r = await fn({ action: 'update_agent', hostname: ag.hostname || ag.id, reason: `Atualização remota v${versao}` });
+          const r = await fn({ action: 'update_agent', hostname: ag.hostname || ag.id, reason: `Atualização remota v${versao}`, credUser, credPass });
           if (r.data?.ok) {
             resultados.push({ agent: ag, status: 'atualizado', motivo: 'Via executor WinRM (imediato)' });
             updLog(`✅ ${ag.hostname||ag.id}: atualizado via WinRM`);
@@ -10091,7 +9624,7 @@ async function executarAtualizacaoCliente() {
           await fsSet('agent_commands', cmdId, {
             agentId: ag.id,
             tipo: 'atualizar_agente',
-            dados: JSON.stringify({ url: AGENT_URL, versao, imediato: true }),
+            dados: JSON.stringify({ url: AGENT_URL, versao, imediato: true, credUser, credPass }),
             token: TOKEN,
             status: 'pendente',
             criadoEm: new Date().toISOString(),
@@ -10153,6 +9686,11 @@ async function executarAtualizacaoCliente() {
     showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message);
   } finally {
     if(btn){btn.disabled=false;btn.textContent='🚀 Aplicar Atualização Agora';}
+    // Limpa credenciais da memória após o uso
+    const pu = document.getElementById('upd-cred-user');
+    const pp = document.getElementById('upd-cred-pass');
+    if (pu) pu.value='';
+    if (pp) pp.value='';
   }
 }
 

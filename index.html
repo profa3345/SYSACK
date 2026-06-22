@@ -1431,7 +1431,43 @@ window.dispatchEvent(new Event('firebase-ready'));
           <button class="close-btn" onclick="closeModal('modal-atualizar-cliente')" style="color:rgba(255,255,255,.5)">✕</button>
         </div>
         <div class="modal-body">
-          <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+          <!-- STEP 1: CREDENCIAIS DE INSTALAÇÃO -->
+          <div id="upd-cred-step" style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:16px 18px;margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+              <span style="font-size:18px">🔐</span>
+              <div>
+                <div style="font-size:13px;font-weight:700;color:#92400E">Credenciais para instalação</div>
+                <div style="font-size:11.5px;color:#B45309;margin-top:1px">Necessárias para instalar/substituir o agente nas máquinas remotas</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+              <div>
+                <label style="font-size:11px;font-weight:600;color:#78350F;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:4px">Usuário Windows</label>
+                <input id="upd-cred-user" type="text" autocomplete="username"
+                  placeholder="CESAN\administrador"
+                  style="width:100%;height:34px;font-size:13px;padding:0 10px;border:1.5px solid #FCD34D;border-radius:8px;background:#fff;color:var(--g900)">
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:600;color:#78350F;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:4px">Senha</label>
+                <div style="position:relative">
+                  <input id="upd-cred-pass" type="password" autocomplete="current-password"
+                    placeholder="••••••••"
+                    style="width:100%;height:34px;font-size:13px;padding:0 34px 0 10px;border:1.5px solid #FCD34D;border-radius:8px;background:#fff;color:var(--g900)">
+                  <span id="upd-cred-eye" onclick="_updToggleSenha()"
+                    style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:15px;user-select:none">👁</span>
+                </div>
+              </div>
+            </div>
+            <div id="upd-cred-erro" style="display:none;font-size:12px;color:#DC2626;margin-top:4px;padding:6px 10px;background:#FEF2F2;border-radius:6px">
+              ⚠️ Informe usuário e senha antes de aplicar a atualização.
+            </div>
+            <div style="font-size:11px;color:#92400E;margin-top:8px;display:flex;gap:6px;align-items:flex-start">
+              <span style="flex-shrink:0">🔒</span>
+              <span>As credenciais são usadas apenas para este envio e <strong>não são armazenadas</strong> em nenhum lugar. O agente executa a instalação com privilégio de administrador local.</span>
+            </div>
+          </div>
+
+          <div id="upd-qtd-bar" style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
             <span style="font-size:28px">🖥️</span>
             <div>
               <div style="font-weight:700;font-size:15px;color:#1E40AF"><span id="upd-qtd-online">0</span> agente(s) online serão atualizados</div>
@@ -4336,67 +4372,11 @@ window.dispatchEvent(new Event('firebase-ready'));
     </div>
 
     <div class="page" id="page-alertas">
-      <!-- Header -->
       <div class="flex items-center justify-between mb-20">
-        <div>
-          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Alertas &amp; Notificações</h2>
-          <p class="text-sm text-muted mt-8">Configure alertas automáticos, destinatários e visualize o histórico de logins</p>
-        </div>
-        <div class="flex gap-8">
-          <button class="btn btn-secondary btn-sm" onclick="renderAlertas()">↺ Atualizar</button>
-        </div>
+        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Alertas</h2><p class="text-sm text-muted mt-8">Alertas automáticos do sistema</p></div>
+        <button class="btn btn-primary">+ Configurar Alerta</button>
       </div>
-
-      <!-- Tabs -->
-      <div style="display:flex;gap:4px;border-bottom:1px solid var(--g200,#E5E7EB);margin-bottom:20px">
-        <button id="alertas-tab-cfg" onclick="alertasTab('cfg')"
-          style="padding:8px 18px;font-size:13px;font-weight:500;border:none;background:transparent;cursor:pointer;border-bottom:2px solid var(--accent,#3B82F6);color:var(--accent,#3B82F6)">
-          🔔 Alertas configurados
-        </button>
-        <button id="alertas-tab-logins" onclick="alertasTab('logins')"
-          style="padding:8px 18px;font-size:13px;font-weight:500;border:none;background:transparent;cursor:pointer;border-bottom:2px solid transparent;color:var(--g500,#6B7280)">
-          🖥️ Histórico de logins
-        </button>
-      </div>
-
-      <!-- Painel: alertas configurados -->
-      <div id="alertas-panel-cfg">
-        <div id="alertas-list"></div>
-        <div id="alertas-grupos-section"></div>
-      </div>
-
-      <!-- Painel: histórico de logins por máquina -->
-      <div id="alertas-panel-logins" style="display:none">
-        <!-- Busca -->
-        <div style="background:var(--g50,#F9FAFB);border:1px solid var(--g200,#E5E7EB);border-radius:12px;padding:16px 18px;margin-bottom:16px">
-          <div style="font-size:13px;font-weight:600;color:var(--g700);margin-bottom:10px">Buscar histórico de logins</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <div style="flex:1;min-width:160px">
-              <div style="font-size:11px;color:var(--g500);margin-bottom:4px">Máquina / hostname</div>
-              <input id="lh-q-host" placeholder="hostname ou IP" style="width:100%;height:34px;font-size:13px;padding:0 10px;border:1px solid var(--g200);border-radius:8px;background:#fff">
-            </div>
-            <div style="flex:1;min-width:140px">
-              <div style="font-size:11px;color:var(--g500);margin-bottom:4px">Usuário (login)</div>
-              <input id="lh-q-user" placeholder="ana.penha" style="width:100%;height:34px;font-size:13px;padding:0 10px;border:1px solid var(--g200);border-radius:8px;background:#fff">
-            </div>
-            <div style="min-width:120px">
-              <div style="font-size:11px;color:var(--g500);margin-bottom:4px">De</div>
-              <input id="lh-de" type="date" style="width:100%;height:34px;font-size:13px;padding:0 8px;border:1px solid var(--g200);border-radius:8px;background:#fff">
-            </div>
-            <div style="min-width:120px">
-              <div style="font-size:11px;color:var(--g500);margin-bottom:4px">Até</div>
-              <input id="lh-ate" type="date" style="width:100%;height:34px;font-size:13px;padding:0 8px;border:1px solid var(--g200);border-radius:8px;background:#fff">
-            </div>
-            <button class="btn btn-primary" onclick="loginHistoryBuscar()" style="height:34px;padding:0 18px;font-size:13px">🔍 Buscar</button>
-            <button class="btn btn-secondary" onclick="loginHistoryBuscar(true)" style="height:34px;padding:0 14px;font-size:13px">Ver todos</button>
-          </div>
-        </div>
-
-        <!-- Resultado -->
-        <div id="lh-resumo" style="display:none;background:var(--accent-l,#EFF6FF);border:1px solid #BFDBFE;border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:var(--g800)"></div>
-        <div id="lh-loading" style="display:none;text-align:center;padding:24px;color:var(--g400)">⏳ Buscando logins...</div>
-        <div id="lh-results"></div>
-      </div>
+      <div style="display:flex;flex-direction:column;gap:10px" id="alertas-list"></div>
     </div>
 
     <!-- SWITCHES & ROTEADORES -->
