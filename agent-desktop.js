@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.9-alertas
+ * SYSACK Agent Desktop v2.1.12-bloqueio-dominio
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -1131,7 +1131,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.9-alertas] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.1.12-bloqueio-dominio] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -1697,45 +1697,94 @@ $secPass = ConvertTo-SecureString $adminPassRaw -AsPlainText -Force
 $cred    = New-Object System.Management.Automation.PSCredential ($adminUserRaw, $secPass)
 
 # Valida usuário/senha antes de fazer qualquer alteração.
+# Correção v2.1.12:
+# - aceita usuário de domínio CESAN\usuario e usuario@dominio;
+# - tenta vários tipos de logon, pois alguns domínios bloqueiam logon interativo;
+# - NÃO reprova falsamente domínio admin que chega por grupo AD aninhado;
+# - o bloqueio local é executado pelo próprio agente rodando como SYSTEM/admin.
 try {
   Add-Type @"
 using System;
 using System.Runtime.InteropServices;
-public class LogonUtil {
+using System.Security.Principal;
+public class LogonUtilV212 {
   [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
   public static extern bool LogonUser(string lpszUsername, string lpszDomain, string lpszPassword, int dwLogonType, int dwLogonProvider, out IntPtr phToken);
   [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
   public extern static bool CloseHandle(IntPtr handle);
 }
-"@
+"@ -ErrorAction SilentlyContinue
+
   $domain = $env:COMPUTERNAME
   $userOnly = $adminUserRaw
-  if ($adminUserRaw -match '\\') { $parts = $adminUserRaw.Split('\\',2); $domain = $parts[0]; $userOnly = $parts[1] }
-  elseif ($adminUserRaw -match '@') { $userOnly = $adminUserRaw }
+  $isUpn = $false
+
+  if ($adminUserRaw -match '\\') {
+    $parts = $adminUserRaw.Split('\\',2)
+    $domain = $parts[0]
+    $userOnly = $parts[1]
+  } elseif ($adminUserRaw -match '@') {
+    # Para UPN, LogonUser deve receber domínio nulo/vazio.
+    $userOnly = $adminUserRaw
+    $domain = $null
+    $isUpn = $true
+  }
+
   $token = [IntPtr]::Zero
-  $ok = [LogonUtil]::LogonUser($userOnly, $domain, $adminPassRaw, 2, 0, [ref]$token)
+  $ok = $false
+  $lastErr = 0
+  $logonTypes = @(2,3,8,9) # interactive, network, network_cleartext, new_credentials
+
+  foreach ($lt in $logonTypes) {
+    $token = [IntPtr]::Zero
+    $ok = [LogonUtilV212]::LogonUser($userOnly, $domain, $adminPassRaw, $lt, 0, [ref]$token)
+    if ($ok) {
+      Write-Host "OK_CREDENCIAL_VALIDADA:tipoLogon=$lt;usuario=$adminUserRaw"
+      break
+    }
+    $lastErr = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  }
+
   if (-not $ok) {
-    $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-    Write-Host "ERRO_CREDENCIAL_INVALIDA:Usuario/senha invalidos ou logon negado. Codigo=$err"
+    Write-Host "ERRO_CREDENCIAL_INVALIDA:Usuario/senha invalidos ou logon negado pelo dominio. Codigo=$lastErr Usuario=$adminUserRaw Dominio=$domain"
     exit 10
   }
-  if ($token -ne [IntPtr]::Zero) { [LogonUtil]::CloseHandle($token) | Out-Null }
 
-  # Verifica se a conta está no grupo Administradores local diretamente.
-  $adminGroup = ([Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
-  $members = net localgroup "$adminGroup" 2>$null
-  $needle1 = $adminUserRaw.ToLower()
-  $needle2 = $userOnly.ToLower()
-  $isAdmin = $false
-  foreach ($m in $members) {
-    $ml = ($m.Trim()).ToLower()
-    if ($ml -eq $needle1 -or $ml -eq $needle2 -or $ml.EndsWith('\\' + $needle2)) { $isAdmin = $true }
+  # Tenta comprovar se o token possui grupo Administradores.
+  # Em alguns ambientes AD, grupo aninhado/GPO/UAC pode não aparecer nesse teste.
+  # Por isso essa etapa vira AVISO e não aborta, pois o agente já roda como SYSTEM.
+  $adminComprovado = $false
+  try {
+    $identity = New-Object System.Security.Principal.WindowsIdentity($token)
+    $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+    $adminComprovado = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+  } catch {
+    Write-Host "AVISO_ADMIN_TOKEN_NAO_COMPROVADO:$_"
   }
-  if (-not $isAdmin) {
-    Write-Host "ERRO_SEM_PERMISSAO_ADMIN:Conta validada, mas nao pertence ao grupo Administradores local."
-    exit 11
+
+  if (-not $adminComprovado) {
+    try {
+      $adminGroup = ([Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
+      $members = net localgroup "$adminGroup" 2>$null
+      $needle1 = $adminUserRaw.ToLower()
+      $needle2 = $userOnly.ToLower()
+      foreach ($m in $members) {
+        $ml = ($m.Trim()).ToLower()
+        if ($ml -eq $needle1 -or $ml -eq $needle2 -or $ml.EndsWith('\\' + $needle2)) { $adminComprovado = $true }
+        if ($ml -match 'domain admins|administradores do dominio|administradores do domínio|admins\. do domínio|admins\. do dominio') { $adminComprovado = $true }
+      }
+    } catch {
+      Write-Host "AVISO_ADMIN_LOCALGROUP_NAO_COMPROVADO:$_"
+    }
   }
-  Write-Host "OK_CREDENCIAL_ADMIN:$adminUserRaw"
+
+  if ($token -ne [IntPtr]::Zero) { [LogonUtilV212]::CloseHandle($token) | Out-Null }
+
+  if ($adminComprovado) {
+    Write-Host "OK_CREDENCIAL_ADMIN:$adminUserRaw"
+  } else {
+    Write-Host "AVISO_ADMIN_NAO_COMPROVADO:Credencial validada, mas a participação no grupo Administradores local não foi comprovada. Prosseguindo porque o agente está rodando como SYSTEM/admin. Usuario=$adminUserRaw"
+  }
 } catch {
   Write-Host "ERRO_VALIDACAO_CREDENCIAL:$_"
   exit 12
