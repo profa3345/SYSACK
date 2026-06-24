@@ -225,20 +225,56 @@ function agendarReinicioAgent() {
     const nodeExe  = process.execPath;
     const script   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
     const bat      = path.join(__dirname, '_restart_sysack_agent.cmd');
-    const taskCmd  = 'schtasks /Run /TN "SYSACK-Agent"';
-    const direct   = 'start "SYSACK Agent" /min "' + nodeExe + '" "' + script + '"';
-    // Remove PID file antes de reiniciar para o novo processo não tentar matar a si mesmo
     const pidClean = 'del /f /q "' + PID_FILE + '" >nul 2>nul';
-    const body = '@echo off\r\n' +
-      'timeout /t 3 /nobreak >nul\r\n' +
-      pidClean + '\r\n' +
-      taskCmd + ' >nul 2>nul\r\n' +
-      'if errorlevel 1 ' + direct + '\r\n';
+    // Cascata de reinício:
+    // 1) Tenta via sc stop + sc start (serviço Windows)
+    // 2) Tenta via schtasks (task agendada)
+    // 3) Fallback: start direto do node
+    const nodeCmd  = '"' + nodeExe + '" "' + script + '"';
+    const body = '@echo off
+' +
+      'timeout /t 4 /nobreak >nul
+' +
+      pidClean + '
+' +
+      // Tenta reiniciar como serviço Windows (nome SYSACK-Agent ou SYSACKAgent)
+      'sc stop SYSACK-Agent >nul 2>nul
+' +
+      'timeout /t 2 /nobreak >nul
+' +
+      'sc start SYSACK-Agent >nul 2>nul
+' +
+      'if not errorlevel 1 goto :FIM
+' +
+      // Tenta via task scheduler
+      'schtasks /Run /TN "SYSACK-Agent" >nul 2>nul
+' +
+      'if not errorlevel 1 goto :FIM
+' +
+      // Fallback: inicia direto
+      'start "SYSACK Agent" /min ' + nodeCmd + '
+' +
+      ':FIM
+';
     fs.writeFileSync(bat, body, 'utf8');
     exec('cmd /c start "" /min "' + bat + '"', { windowsHide: true });
-    log('[UPDATE] Reinício agendado — script: ' + script);
+    log('[UPDATE] Reinício agendado — bat: ' + bat + ' | script: ' + script);
   } catch(e) {
     log('[UPDATE] Falha ao agendar reinício: ' + e.message);
+    // Último recurso: tenta reiniciar via spawn desacoplado
+    try {
+      const { spawn } = require('child_process');
+      const nodeExe2 = process.execPath;
+      const script2  = process.argv[1];
+      const child = spawn(nodeExe2, [script2], {
+        detached: true, stdio: 'ignore',
+        windowsHide: true
+      });
+      child.unref();
+      log('[UPDATE] Spawn desacoplado iniciado como último recurso.');
+    } catch(e2) {
+      log('[UPDATE] Spawn também falhou: ' + e2.message);
+    }
   }
 }
 
@@ -1830,109 +1866,110 @@ $cred    = New-Object System.Management.Automation.PSCredential ($adminUserRaw, 
 # - tenta vários tipos de logon, pois alguns domínios bloqueiam logon interativo;
 # - NÃO reprova falsamente domínio admin que chega por grupo AD aninhado;
 # - o bloqueio local é executado pelo próprio agente rodando como SYSTEM/admin.
-try {
-  Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Security.Principal;
-public class LogonUtilV212 {
+# ── Validação de credencial v3 ─────────────────────────────────────
+# Estratégia em cascata para ambientes onde SYSTEM não consegue LogonUser:
+# 1) net use contra o próprio compartilhamento IPC$ local (mais confiável em AD)
+# 2) net use contra o DC (se domínio identificado)
+# 3) LogonUser tipos 3/9/8/2 como último recurso
+# O agente já roda como SYSTEM — a validação é apenas para confirmar que a senha
+# informada pertence a um admin local, não para executar as etapas seguintes.
+
+$ok = $false
+$metodo = ''
+
+# Detecta formato: DOMINIO\\usuario, usuario@dominio ou usuário local
+$domain   = $null
+$userOnly = $adminUserRaw
+$isDomain = $false
+
+if ($adminUserRaw -match '\\') {
+  $parts    = $adminUserRaw.Split('\\', 2)
+  $domain   = $parts[0]
+  $userOnly = $parts[1]
+  $isDomain = $true
+} elseif ($adminUserRaw -match '@') {
+  $domain   = ($adminUserRaw -split '@')[1]
+  $isDomain = $true
+}
+
+# MÉTODO 1 — net use IPC$ local (funciona mesmo via SYSTEM, valida senha AD/local)
+if (-not $ok) {
+  try {
+    $share = "\\\\$($env:COMPUTERNAME)\\IPC`$"
+    net use $share /delete /y 2>$null | Out-Null
+    $out = net use $share /user:$adminUserRaw $adminPassRaw 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      net use $share /delete /y 2>$null | Out-Null
+      $ok = $true; $metodo = 'net_use_local'
+      Write-Host "OK_CREDENCIAL_VALIDADA:metodo=$metodo;usuario=$adminUserRaw"
+    }
+  } catch {}
+}
+
+# MÉTODO 2 — net use IPC$ no DC (para contas de domínio)
+if (-not $ok -and $isDomain -and $domain) {
+  try {
+    $dcShare = "\\\\$domain\\IPC`$"
+    net use $dcShare /delete /y 2>$null | Out-Null
+    $out2 = net use $dcShare /user:$adminUserRaw $adminPassRaw 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      net use $dcShare /delete /y 2>$null | Out-Null
+      $ok = $true; $metodo = 'net_use_dc'
+      Write-Host "OK_CREDENCIAL_VALIDADA:metodo=$metodo;usuario=$adminUserRaw"
+    }
+  } catch {}
+}
+
+# MÉTODO 3 — LogonUser (fallback; pode falhar em SYSTEM+GPO restritiva)
+if (-not $ok) {
+  try {
+    Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class LogonUtilV3 {
   [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-  public static extern bool LogonUser(string lpszUsername, string lpszDomain, string lpszPassword, int dwLogonType, int dwLogonProvider, out IntPtr phToken);
-  [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
-  public extern static bool CloseHandle(IntPtr handle);
+  public static extern bool LogonUser(string u, string d, string p, int lt, int lp, out IntPtr t);
+  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
 }
 "@ -ErrorAction SilentlyContinue
-
-  $domain = $env:COMPUTERNAME
-  $userOnly = $adminUserRaw
-  $isUpn = $false
-
-  if ($adminUserRaw -match '\\') {
-    $parts = $adminUserRaw.Split('\\',2)
-    $domain = $parts[0]
-    $userOnly = $parts[1]
-  } elseif ($adminUserRaw -match '@') {
-    # Para UPN, LogonUser deve receber domínio nulo/vazio.
-    $userOnly = $adminUserRaw
-    $domain = $null
-    $isUpn = $true
-  }
-
-  $token = [IntPtr]::Zero
-  $ok = $false
-  $lastErr = 0
-  # Ordem otimizada para AD com GPO restritiva:
-  # 3=Network (mais permissivo), 9=NewCredentials, 8=NetworkCleartext, 2=Interactive
-  $logonTypes = @(3,9,8,2)
-
-  foreach ($lt in $logonTypes) {
     $token = [IntPtr]::Zero
-    $provider = if ($isUpn) { 3 } else { 0 }
-    $ok = [LogonUtilV212]::LogonUser($userOnly, $domain, $adminPassRaw, $lt, $provider, [ref]$token)
-    if ($ok) {
-      Write-Host "OK_CREDENCIAL_VALIDADA:tipoLogon=$lt;usuario=$adminUserRaw"
-      break
-    }
-    $lastErr = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-    if ($token -ne [IntPtr]::Zero) { [LogonUtilV212]::CloseHandle($token) | Out-Null; $token = [IntPtr]::Zero }
-  }
-
-  # Fallback: net use para domínios que bloqueiam LogonUser via SYSTEM
-  if (-not $ok) {
-    try {
-      $netTarget = if ($domain -and $domain -ne $env:COMPUTERNAME) { "\\\\$domain\\IPC`$" } else { "\\\\$env:COMPUTERNAME\\IPC`$" }
-      $netOut = net use $netTarget /user:$adminUserRaw $adminPassRaw 2>&1
-      if ($LASTEXITCODE -eq 0) {
-        net use $netTarget /delete /y 2>$null | Out-Null
-        $ok = $true
-        Write-Host "OK_CREDENCIAL_VALIDADA:tipoLogon=net_use;usuario=$adminUserRaw"
+    $lastErr = 0
+    foreach ($lt in @(3,9,8,2)) {
+      $token = [IntPtr]::Zero
+      $prov  = if ($adminUserRaw -match '@') { 3 } else { 0 }
+      if ([LogonUtilV3]::LogonUser($userOnly, $domain, $adminPassRaw, $lt, $prov, [ref]$token)) {
+        [LogonUtilV3]::CloseHandle($token) | Out-Null
+        $ok = $true; $metodo = "logon_type_$lt"
+        Write-Host "OK_CREDENCIAL_VALIDADA:metodo=$metodo;usuario=$adminUserRaw"
+        break
       }
-    } catch {}
-  }
-
-  if (-not $ok) {
-    Write-Host "ERRO_CREDENCIAL_INVALIDA:Usuario/senha invalidos ou logon negado pelo dominio. Codigo=$lastErr Usuario=$adminUserRaw Dominio=$domain"
-    exit 10
-  }
-
-  # Tenta comprovar se o token possui grupo Administradores.
-  # Em alguns ambientes AD, grupo aninhado/GPO/UAC pode não aparecer nesse teste.
-  # Por isso essa etapa vira AVISO e não aborta, pois o agente já roda como SYSTEM.
-  $adminComprovado = $false
-  try {
-    $identity = New-Object System.Security.Principal.WindowsIdentity($token)
-    $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
-    $adminComprovado = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
-  } catch {
-    Write-Host "AVISO_ADMIN_TOKEN_NAO_COMPROVADO:$_"
-  }
-
-  if (-not $adminComprovado) {
-    try {
-      $adminGroup = ([Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
-      $members = net localgroup "$adminGroup" 2>$null
-      $needle1 = $adminUserRaw.ToLower()
-      $needle2 = $userOnly.ToLower()
-      foreach ($m in $members) {
-        $ml = ($m.Trim()).ToLower()
-        if ($ml -eq $needle1 -or $ml -eq $needle2 -or $ml.EndsWith('\\' + $needle2)) { $adminComprovado = $true }
-        if ($ml -match 'domain admins|administradores do dominio|administradores do domínio|admins\. do domínio|admins\. do dominio') { $adminComprovado = $true }
-      }
-    } catch {
-      Write-Host "AVISO_ADMIN_LOCALGROUP_NAO_COMPROVADO:$_"
+      $lastErr = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+      if ($token -ne [IntPtr]::Zero) { [LogonUtilV3]::CloseHandle($token) | Out-Null }
     }
-  }
+  } catch { Write-Host "AVISO_LOGONUSER:$_" }
+}
 
-  if ($token -ne [IntPtr]::Zero) { [LogonUtilV212]::CloseHandle($token) | Out-Null }
+if (-not $ok) {
+  Write-Host "ERRO_CREDENCIAL_INVALIDA:Nenhum metodo de validacao obteve exito. Verifique usuario/senha. Usuario=$adminUserRaw"
+  exit 10
+}
 
-  if ($adminComprovado) {
-    Write-Host "OK_CREDENCIAL_ADMIN:$adminUserRaw"
-  } else {
-    Write-Host "AVISO_ADMIN_NAO_COMPROVADO:Credencial validada, mas a participação no grupo Administradores local não foi comprovada. Prosseguindo porque o agente está rodando como SYSTEM/admin. Usuario=$adminUserRaw"
+# Verifica pertencimento ao grupo Administradores local (não abortivo)
+$adminComprovado = $false
+try {
+  $adminGroup = ([Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
+  $members = net localgroup "$adminGroup" 2>$null
+  $n1 = $adminUserRaw.ToLower(); $n2 = $userOnly.ToLower()
+  foreach ($m in $members) {
+    $ml = $m.Trim().ToLower()
+    if ($ml -eq $n1 -or $ml -eq $n2 -or $ml.EndsWith('\\' + $n2)) { $adminComprovado = $true }
+    if ($ml -match 'domain admins|administradores do dom') { $adminComprovado = $true }
   }
-} catch {
-  Write-Host "ERRO_VALIDACAO_CREDENCIAL:$_"
-  exit 12
+} catch { Write-Host "AVISO_LOCALGROUP:$_" }
+
+if ($adminComprovado) {
+  Write-Host "OK_CREDENCIAL_ADMIN:$adminUserRaw"
+} else {
+  Write-Host "AVISO_ADMIN_NAO_COMPROVADO:Prosseguindo (agente roda como SYSTEM). Usuario=$adminUserRaw"
 }
 ` : `
 Write-Host "ERRO_CREDENCIAL_OBRIGATORIA:Informe usuario e senha de administrador local."
@@ -2212,6 +2249,13 @@ $out | ConvertTo-Json -Depth 4 -Compress
       const backupPath = selfPath.replace(/\.js$/, '.backup.js');
       try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
       fs.writeFileSync(selfPath, novoConteudo, 'utf8');
+      // Verifica se o arquivo foi realmente escrito com o novo conteúdo
+      const verificacao = fs.readFileSync(selfPath, 'utf8');
+      if (verificacao.length < 1000 || verificacao === novoConteudo.slice(0, verificacao.length)) {
+        log(`[UPDATE] Verificação OK — ${selfPath} tem ${verificacao.length} bytes.`);
+      } else {
+        throw new Error('Arquivo escrito mas verificação falhou — tamanho inesperado.');
+      }
       log(`[UPDATE] Substituído em ${selfPath} (${novoConteudo.length} bytes). Gravando confirmação...`);
       resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
       // CRÍTICO: grava status ANTES do exit — caso contrário o processo morre antes de confirmar

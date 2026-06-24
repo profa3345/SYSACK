@@ -1450,7 +1450,155 @@ function renderDashboard() {
     {dot:'green',  title:'CH-003 concluído',                           desc:'Impressora HP LaserJet M428 — problema resolvido', time:'há 5 dias'},
     {dot:'violet', title:'PAT-0106 enviado para Santa Clara',          desc:'Lenovo ThinkPad E14 — localização e foto registradas', time:'há 30 dias'},
   ].map(i => `<div class="tl-item"><div class="tl-dot ${i.dot}"></div><div class="tl-title">${i.title}</div><div class="tl-desc">${i.desc}</div><div class="tl-time">${i.time}</div></div>`).join('');
+
+  // Carrega alertas do dia no dashboard de forma assíncrona
+  renderDashboardAlertasDia().catch(() => {});
 }
+
+// ── Widget: Alertas do Dia no Dashboard ────────────────────────────────────
+window.dashAlertasTab = function(tab) {
+  const isPend = tab === 'pendentes';
+  const lP = document.getElementById('dash-alertas-pend-list');
+  const lR = document.getElementById('dash-alertas-res-list');
+  const tP = document.getElementById('dash-alertas-tab-pend');
+  const tR = document.getElementById('dash-alertas-tab-res');
+  if (lP) lP.style.display = isPend ? '' : 'none';
+  if (lR) lR.style.display = isPend ? 'none' : '';
+  if (tP) { tP.style.borderBottomColor = isPend ? 'var(--accent)' : 'transparent'; tP.style.color = isPend ? 'var(--accent)' : 'var(--g500)'; tP.style.fontWeight = isPend ? '700' : '600'; }
+  if (tR) { tR.style.borderBottomColor = isPend ? 'transparent' : 'var(--accent)'; tR.style.color = isPend ? 'var(--g500)' : 'var(--accent)'; tR.style.fontWeight = isPend ? '600' : '700'; }
+};
+
+async function renderDashboardAlertasDia() {
+  const elPend = document.getElementById('dash-alertas-pend-list');
+  const elRes  = document.getElementById('dash-alertas-res-list');
+  const elBadgePend = document.getElementById('dash-alertas-badge-pend');
+  const elBadgeRes  = document.getElementById('dash-alertas-badge-res');
+  if (!elPend) return;
+
+  elPend.innerHTML = '<div style="padding:16px;text-align:center;color:var(--g400);font-size:12px">Carregando...</div>';
+
+  // Busca alertas do dia (reutiliza função do painel de alertas se disponível)
+  let alertas = [];
+  if (typeof _sysackBuscarAlertasDia === 'function') {
+    try { alertas = await _sysackBuscarAlertasDia(); } catch {}
+  } else {
+    // Fallback direto: lê Firestore
+    try {
+      const db = window.db || window._db;
+      if (db) {
+        const hoje = new Date(); hoje.setHours(0,0,0,0);
+        const snap = await db.collection('alertas').orderBy('createdAt','desc').limit(60).get().catch(()=>null);
+        if (snap) snap.docs.forEach(d => {
+          const dado = d.data();
+          if ((dado.createdAt||'') >= hoje.toISOString()) alertas.push({ id: d.id, ...dado });
+        });
+        const snap2 = await db.collection('eventos_detectados').orderBy('detecEm','desc').limit(40).get().catch(()=>null);
+        if (snap2) snap2.docs.forEach(d => {
+          const dado = d.data();
+          if ((dado.detecEm||'') >= hoje.toISOString()) alertas.push({ id:'ev_'+d.id, ...dado, createdAt: dado.detecEm });
+        });
+      }
+    } catch {}
+  }
+
+  const hoje = new Date().toISOString().slice(0,10);
+  const estado = window._sysackAlertasDiaEstado || {};
+
+  function getKey(al) {
+    return hoje + '_alerta_' + (al.id||al.tipo||'').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,60);
+  }
+  function isPausado(st) { return st?.tipo==='pausado' && new Date(st.pausaAte) > new Date(); }
+
+  const pendentes  = alertas.filter(al => { const st=estado[getKey(al)]; return !st||(st.tipo!=='resolvido'&&!isPausado(st)); });
+  const resolvidos = alertas.filter(al => { const st=estado[getKey(al)]; return st?.tipo==='resolvido'; });
+
+  // Atualiza badges
+  if (elBadgePend) { elBadgePend.textContent = pendentes.length + ' pendente(s)'; elBadgePend.style.display = pendentes.length ? '' : 'none'; }
+  if (elBadgeRes)  { elBadgeRes.textContent  = resolvidos.length + ' resolvido(s)'; elBadgeRes.style.display  = resolvidos.length ? '' : 'none'; }
+
+  // Também atualiza badge global no topo da página se existir
+  const badgeGlobal = document.getElementById('badge-alertas-dia');
+  if (badgeGlobal) { badgeGlobal.style.display = pendentes.length ? '' : 'none'; badgeGlobal.textContent = pendentes.length; }
+
+  const corMap = { maquina_offline:'#DC2626', mudanca_faixa_ip:'#DC2626', mudanca_ip:'#D97706', offline:'#DC2626', alerta_ip:'#D97706', troca_grupo:'#2563EB', maquina_online:'#16A34A' };
+  function cor(al) { return corMap[String(al.tipo||'').toLowerCase()] || '#64748B'; }
+  function hora(al) {
+    const v = al.createdAt || al.detecEm;
+    if (!v) return '';
+    const d = new Date(v?.seconds ? v.seconds*1000 : v);
+    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  }
+
+  function renderLinha(al, soResolvido) {
+    const key = getKey(al);
+    const st  = estado[key];
+    const titulo  = escapeHtml(al.titulo || al.msg || al.tipo || 'Alerta');
+    const maquina = al.hostname || al.pat || al.computador || al.agentId || '';
+    const det     = al.desc || al.detalhe || al.resultado || '';
+    const h       = hora(al);
+    const badgeSt = st?.tipo==='resolvido'
+      ? '<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;flex-shrink:0">✅</span>'
+      : isPausado(st) ? '<span style="background:#EEF2FF;color:#4338CA;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;flex-shrink:0">⏸️</span>' : '';
+    const botoes = soResolvido ? '' :
+      `<div style="display:flex;gap:4px;flex-shrink:0">
+        <button onclick="event.stopPropagation();window._dashAlertaResolvido && _dashAlertaResolvido('${key}')" title="Marcar como resolvido"
+          style="font-size:10px;padding:3px 8px;border-radius:6px;border:none;background:#D1FAE5;color:#047857;cursor:pointer;font-weight:700">✅</button>
+        <button onclick="event.stopPropagation();window._dashAlertaJustificar && _dashAlertaJustificar('${key}')" title="Justificar"
+          style="font-size:10px;padding:3px 8px;border-radius:6px;border:none;background:#EEF2FF;color:#4338CA;cursor:pointer;font-weight:700">📝</button>
+      </div>`;
+    return `<div data-alerta-dash-key="${key}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);border-left:3px solid ${cor(al)}">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <b style="font-size:12.5px;color:var(--g900)">${titulo}</b>
+          ${maquina ? `<span style="background:#F1F5F9;color:#475569;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:600">${escapeHtml(maquina)}</span>` : ''}
+          ${h ? `<span style="font-size:10.5px;color:var(--g400)">${h}</span>` : ''}
+          ${badgeSt}
+        </div>
+        ${det ? `<div style="font-size:11.5px;color:var(--g500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(det)}</div>` : ''}
+      </div>
+      ${botoes}
+    </div>`;
+  }
+
+  if (!alertas.length) {
+    elPend.innerHTML = '<div style="padding:24px;text-align:center;color:var(--g400);font-size:12px">✅ Nenhum alerta gerado hoje.</div>';
+    if (elRes) elRes.innerHTML = '';
+    return;
+  }
+
+  elPend.innerHTML = pendentes.length
+    ? pendentes.map(al => renderLinha(al, false)).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--g400);font-size:12px">✅ Todos os alertas estão resolvidos!</div>';
+  if (elRes) elRes.innerHTML = resolvidos.length
+    ? resolvidos.map(al => renderLinha(al, true)).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--g400);font-size:12px">Nenhum alerta resolvido ainda hoje.</div>';
+}
+
+// Resolvido direto do dashboard
+window._dashAlertaResolvido = function(key) {
+  if (typeof sysackDiaResolvido === 'function') {
+    sysackDiaResolvido(key);
+    // Após fechar o modal, re-renderiza o widget do dashboard
+    const orig = window.sysackDiaConfirmarResolvido;
+    if (orig) window.sysackDiaConfirmarResolvido = async function(k, btn) {
+      await orig(k, btn);
+      renderDashboardAlertasDia().catch(()=>{});
+      window.sysackDiaConfirmarResolvido = orig;
+    };
+  }
+};
+
+window._dashAlertaJustificar = function(key) {
+  if (typeof sysackDiaJustificar === 'function') {
+    sysackDiaJustificar(key);
+    const orig = window.sysackDiaConfirmarJustif;
+    if (orig) window.sysackDiaConfirmarJustif = async function(k, btn) {
+      await orig(k, btn);
+      renderDashboardAlertasDia().catch(()=>{});
+      window.sysackDiaConfirmarJustif = orig;
+    };
+  }
+};
 
 // ============================================================
 // CHAMADOS
@@ -9903,25 +10051,28 @@ async function executarAtualizacaoCliente() {
 
     const pendentes = new Map(comandos.map(c => [c.cmdId, c]));
     const inicio = Date.now();
-    const TIMEOUT_MS = 45000;
+    const TIMEOUT_MS = 120000; // 2 min — download + restart leva tempo
 
     while (pendentes.size && Date.now() - inicio < TIMEOUT_MS) {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 2000));
       for (const [cmdId, item] of [...pendentes.entries()]) {
         try {
           const snap = await db.collection('agent_commands').doc(cmdId).get();
           const d = snap.data() || {};
           const st = d.status || 'pendente';
+          const elapsed = Math.round((Date.now() - inicio) / 1000);
           if (st === 'concluido') {
             resultados.push({ agent:item.agent, status:'atualizado', motivo:d.resultado || `Atualização v${versao} aplicada` });
-            updLog(`✓ ${item.agent.hostname||item.agent.id}: atualizado (${d.resultado || 'confirmado'})`);
+            updLog(`✓ ${item.agent.hostname||item.agent.id}: atualizado (${d.resultado || 'confirmado'}) — ${elapsed}s`);
             pendentes.delete(cmdId);
           } else if (['erro','falhou','descartado'].includes(st)) {
             resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:d.resultado || d.erro || st });
             updLog(`✗ ${item.agent.hostname||item.agent.id}: ${d.resultado || d.erro || st}`);
             pendentes.delete(cmdId);
           } else if (st === 'executando' || st === 'processando') {
-            updLog(`… ${item.agent.hostname||item.agent.id}: ${st}`);
+            updLog(`… ${item.agent.hostname||item.agent.id}: ${st} (${elapsed}s)`);
+          } else if (st === 'pendente' && elapsed % 20 === 0) {
+            updLog(`⏳ ${item.agent.hostname||item.agent.id}: aguardando agente processar... (${elapsed}s)`);
           }
         } catch(e) {
           resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:'Erro ao consultar retorno: ' + e.message });
@@ -9932,8 +10083,13 @@ async function executarAtualizacaoCliente() {
     }
 
     for (const item of pendentes.values()) {
-      resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:'Timeout — agente não respondeu em 45s' });
-      updLog(`✗ ${item.agent.hostname||item.agent.id}: timeout — não confirmou em 45s`);
+      const ag = STATE_AGENTS?.list?.find(a => a.id === item.agent.id);
+      const statusAg = ag?.status || 'desconhecido';
+      const dica = statusAg !== 'online'
+        ? 'Agente offline — verifique se SYSACK está rodando na máquina.'
+        : 'Agente online mas não processou. Pode estar em versão antiga ou PowerShell bloqueado.';
+      resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:`Timeout (120s) — ${dica}` });
+      updLog(`✗ ${item.agent.hostname||item.agent.id}: timeout — ${dica}`);
     }
 
     renderResultadoAtualizacaoCliente(resultados, versao);
@@ -32306,7 +32462,7 @@ function baixarInstaladorSYSACKCorrigido() {
     } catch {}
   }
 
-  // Busca alertas do dia no Firestore (coleção 'alertas')
+  // Busca alertas do dia no Firestore — exposta no window para uso fora da IIFE
   async function _sysackBuscarAlertasDia() {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
@@ -32360,6 +32516,10 @@ function baixarInstaladorSYSACKCorrigido() {
     out.sort((a, b) => String(b.createdAt || b.detecEm || '').localeCompare(String(a.createdAt || a.detecEm || '')));
     return out;
   }
+  // Expõe para uso no dashboard (fora da IIFE)
+  window._sysackBuscarAlertasDia  = _sysackBuscarAlertasDia;
+  window._sysackCarregarEstadoDia = _sysackCarregarEstadoDia;
+  window._sysackSalvarEstadoDia   = _sysackSalvarEstadoDia;
 
   // Cria o painel inline via JS se o HTML ainda não foi atualizado
   function _sysackCriarPainelDiaSeNecessario() {
