@@ -7690,6 +7690,114 @@ function autocompleteEmpregado(inputEl, onSelect) {
 const STATE_AGENTS = { list: [], listener: null };
 window.STATE_AGENTS = STATE_AGENTS;
 
+// Mapa de estado anterior dos agentes para detectar mudanças
+const _agentPrevMap = new Map(); // agentId → { status, ip, hostname, grupo, area }
+
+// Grava evento de mudança no histórico do ativo relacionado ao agente
+async function _gravarHistoricoAgente(agentId, tipo, titulo, desc, extras = {}) {
+  if (!window.db || !FB_READY) return;
+  const payload = {
+    tipo, titulo, desc,
+    dot: extras.dot || (tipo.includes('offline') ? 'red' : tipo.includes('online') ? 'green' : 'orange'),
+    agentId, origem: 'sysack-monitor-frontend',
+    createdAt: new Date().toISOString(),
+    data: new Date().toISOString(),
+    autor: 'sistema',
+    ...extras,
+  };
+  try {
+    // Grava na subcoleção historico do agente
+    await db.collection('agents').doc(agentId).collection('historico').add(payload);
+  } catch {}
+  // Tenta também no ativo vinculado
+  try {
+    const ativos = window.STATE?.ativos || [];
+    const ativoId = (() => {
+      const hn = String(agentId).toLowerCase();
+      const a = ativos.find(x =>
+        String(x.hostname||'').toLowerCase() === hn ||
+        String(x.computador||'').toLowerCase() === hn ||
+        String(x.id||'') === agentId
+      );
+      return a?.id;
+    })();
+    if (ativoId) await sysackHistoricoPathAdd('ativos', ativoId, payload);
+  } catch {}
+}
+
+// Detecta e registra mudanças a cada atualização do snapshot
+async function _detectarMudancasAgente(ag) {
+  const id = ag.id;
+  const prev = _agentPrevMap.get(id);
+  // Primeira carga — só registra o estado inicial, sem gravar histórico
+  if (!prev) {
+    _agentPrevMap.set(id, {
+      status: ag.status, ip: ag.ip, hostname: ag.hostname,
+      grupo: ag.grupo, area: ag.area, mac: ag.macAddress || ag.mac,
+      ipFaixa: (ag.ip||'').split('.').slice(0,3).join('.')
+    });
+    return;
+  }
+
+  const agora = new Date().toISOString();
+
+  // Máquina ficou offline (status mudou de online para offline/desconhecido)
+  if (prev.status === 'online' && ag.status !== 'online') {
+    await _gravarHistoricoAgente(id, 'maquina_offline',
+      '🔴 Máquina ficou offline',
+      `${ag.hostname || id} ficou offline. Último IP: ${ag.ip || '—'}`,
+      { dot:'red', statusAnterior: prev.status, statusNovo: ag.status });
+  }
+  // Máquina voltou online
+  if (prev.status !== 'online' && ag.status === 'online') {
+    await _gravarHistoricoAgente(id, 'maquina_online',
+      '🟢 Máquina voltou online',
+      `${ag.hostname || id} voltou a ficar online. IP: ${ag.ip || '—'}`,
+      { dot:'green', statusAnterior: prev.status, statusNovo: ag.status });
+  }
+
+  // IP mudou
+  if (prev.ip && ag.ip && prev.ip !== ag.ip) {
+    const faixaAntes  = prev.ip.split('.').slice(0,3).join('.');
+    const faixaDepois = ag.ip.split('.').slice(0,3).join('.');
+    if (faixaAntes !== faixaDepois) {
+      await _gravarHistoricoAgente(id, 'mudanca_faixa_ip',
+        '🚨 Mudou de faixa de rede',
+        `IP: ${prev.ip} → ${ag.ip} (faixa: ${faixaAntes}.0/24 → ${faixaDepois}.0/24)`,
+        { dot:'red', ipAnterior:prev.ip, ipNovo:ag.ip, faixaAnterior:`${faixaAntes}.0/24`, faixaNova:`${faixaDepois}.0/24`,
+          ipAnteriorRaw:prev.ip, ipNovoRaw:ag.ip });
+    } else {
+      await _gravarHistoricoAgente(id, 'mudanca_ip',
+        '✏️ IP alterado',
+        `IP: ${prev.ip} → ${ag.ip}`,
+        { dot:'orange', ipAnterior:prev.ip, ipNovo:ag.ip });
+    }
+  }
+
+  // Hostname mudou
+  if (prev.hostname && ag.hostname && prev.hostname !== ag.hostname) {
+    await _gravarHistoricoAgente(id, 'mudanca_hostname',
+      '✏️ Hostname alterado',
+      `Hostname: ${prev.hostname} → ${ag.hostname}`,
+      { dot:'orange', de:prev.hostname, para:ag.hostname, campo:'hostname' });
+  }
+
+  // Grupo/área mudou
+  if (prev.grupo && ag.grupo && prev.grupo !== ag.grupo) {
+    await _gravarHistoricoAgente(id, 'troca_grupo',
+      '🧩 Grupo/área alterado',
+      `Grupo: ${prev.grupo} → ${ag.grupo}`,
+      { dot:'blue', de:prev.grupo, para:ag.grupo, campo:'grupo' });
+  }
+
+  // Atualiza estado anterior
+  _agentPrevMap.set(id, {
+    status: ag.status, ip: ag.ip, hostname: ag.hostname,
+    grupo: ag.grupo, area: ag.area, mac: ag.macAddress || ag.mac,
+    ipFaixa: (ag.ip||'').split('.').slice(0,3).join('.')
+  });
+}
+
 // Inicia listener Banco para agentes em tempo real
 function startAgentsListener() {
   if (!FB_READY) return;
@@ -7711,6 +7819,11 @@ function startAgentsListener() {
           if (data.memPct  != null) data.memPct  = Number(data.memPct);
           return { id: d.id, ...data };
         });
+        // Detecta mudanças de status/IP/hostname e grava no histórico
+        if (STATE_AGENTS._carregouAntes) {
+          STATE_AGENTS.list.forEach(ag => _detectarMudancasAgente(ag).catch(() => {}));
+        }
+        STATE_AGENTS._carregouAntes = true;
         verificarTrocaMonitores(STATE_AGENTS.list);
         if (isPageActive('assistencia-remota')) renderAssistenciaRemota();
         if (isPageActive('ativos')) renderAtivos();
@@ -31431,24 +31544,39 @@ class SysackWebRTCViewer {
 
   async function fsGetLoginHistorySYSACK(ativo, ag) {
     const out = [];
+    const seenIds = new Set();
+    const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
     try {
       if (!window.db) return out;
+      const hostnames = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean).map(h => String(h).toLowerCase());
       const ids = [ativo?.id, ativo?.pat, ag?.id].filter(Boolean);
-      const hns = [host2(ativo), ag?.hostname, ag?.id].filter(Boolean).map(norm2);
-      for (const id of ids) {
+
+      // 1) Busca por hostname — campo que o agente sempre grava
+      for (const hn of [...new Set(hostnames)]) {
         try {
-          const snap = await db.collection('login_history').where('assetId','==',id).get();
-          snap.docs.forEach(d => out.push({ id:d.id, ...d.data() }));
+          const snap = await db.collection('login_history').where('hostname','==',hn).orderBy('dia','desc').limit(400).get();
+          snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
+        } catch {}
+        try {
+          // Também tenta com o hostname como estava gravado (case original)
+          const snap2 = await db.collection('login_history').where('agentId','==',hn).limit(200).get();
+          snap2.docs.forEach(d => push({ id:d.id, ...d.data() }));
         } catch {}
       }
-      if (!out.length && hns.length) {
+
+      // 2) Busca por assetId (campos alternativos)
+      for (const id of ids) {
         try {
-          const snap = await db.collection('login_history').limit(300).get();
-          snap.docs.forEach(d => {
-            const x = { id:d.id, ...d.data() };
-            const hx = norm2(x.hostname || x.computador || x.assetId || '');
-            if (hns.some(h => h && (hx === h || hx.includes(h) || h.includes(hx)))) out.push(x);
-          });
+          const snap = await db.collection('login_history').where('assetId','==',id).limit(200).get();
+          snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
+        } catch {}
+      }
+
+      // 3) Busca sessões de login com horário (coleção login_sessions)
+      for (const hn of [...new Set(hostnames)]) {
+        try {
+          const snap = await db.collection('login_sessions').where('hostname','==',hn).orderBy('loginAt','desc').limit(300).get();
+          snap.docs.forEach(d => push({ id:d.id, _isSession:true, ...d.data() }));
         } catch {}
       }
     } catch {}
@@ -31545,7 +31673,20 @@ class SysackWebRTCViewer {
     const ag = (STATE_AGENTS?.list || []).find(a => String(a.id) === String(agentId)) || {};
     const ativo = ativoDoAgenteSYSACK(ag) || (STATE.ativos || []).find(a => String(a.id) === String(agentId) || String(a.pat) === String(agentId)) || null;
     const ativoId = ativo?.id || agentId;
-    const historico = ativo?.id ? await fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : [];
+
+    // Carrega histórico do ativo + histórico do agente (onde ficam eventos online/offline/IP)
+    const [historicoAtivo, historicoAgente] = await Promise.all([
+      ativo?.id ? fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : Promise.resolve([]),
+      fsGetSubcolecaoSYSACK(`agents/${agentId}/historico`, 'createdAt'),
+    ]);
+    // Mescla e deduplica por createdAt+tipo
+    const seenH = new Set();
+    const historico = [...historicoAtivo, ...historicoAgente].filter(h => {
+      const k = (h.createdAt||h.data||'') + '_' + (h.tipo||'') + '_' + (h.desc||'').slice(0,30);
+      if (seenH.has(k)) return false;
+      seenH.add(k); return true;
+    });
+
     const usuarios = ativo?.id ? await fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/usuarios_historico`, 'ultimoLogin') : [];
     const loginHistory = await fsGetLoginHistorySYSACK(ativo, ag);
     const chamados = chamadosDoComputadorSYSACK(ativo, ag);
@@ -31567,61 +31708,130 @@ class SysackWebRTCViewer {
 
   
 function renderLoginsTabSYSACK(usuarios, loginHistory, ativo, ag) {
+    const ano = String(new Date().getFullYear());
+    const toDate = v => {
+      if (!v) return null;
+      const d = v?.toDate ? v.toDate() : v?.seconds ? new Date(v.seconds*1000) : new Date(v);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    const fmtHora = v => { const d = toDate(v); return d ? d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; };
+
+    // ── Agrupa por usuário somando dias únicos e sessões ──────────
     const porUsuario = new Map();
-    const addDia = (item, dtRaw, diaRaw) => {
-      if (!item.dias) item.dias = [];
-      if (diaRaw) {
-        item.dias.push(String(diaRaw).slice(0,10));
-      } else if (dtRaw) {
-        const dt = dtRaw?.toDate ? dtRaw.toDate() : (dtRaw?.seconds ? new Date(dtRaw.seconds*1000) : new Date(dtRaw));
-        if (!isNaN(dt.getTime())) item.dias.push(dt.toISOString().slice(0,10));
+    const getItem = k => porUsuario.get(k) || porUsuario.set(k, { login:k, nome:k, dias:new Set(), sessoes:[], primeiro:null, ultimo:null, remoto:false }).get(k);
+
+    const registrarDia = (item, dtRaw, diaRaw) => {
+      const dia = diaRaw ? String(diaRaw).slice(0,10) : (() => { const d = toDate(dtRaw); return d ? d.toISOString().slice(0,10) : null; })();
+      if (dia) item.dias.add(dia);
+      const dt = toDate(dtRaw);
+      if (dt) {
+        if (!item.primeiro || dt < item.primeiro) item.primeiro = dt;
+        if (!item.ultimo   || dt > item.ultimo  ) item.ultimo   = dt;
       }
     };
 
+    // Fonte 1: subcoleção usuarios_historico (agente antigo)
     usuarios.forEach(u => {
       const k = norm2(u.loginNorm || u.login || u.usuario || u.usuarioLogado || u.nome);
       if (!k) return;
-      const dias = Array.isArray(u.dias) ? u.dias : [];
-      porUsuario.set(k, {
-        login:k,
-        nome:u.nome || u.usuarioNome || u.login || k,
-        ultimo:u.ultimoLogin || u.ate || u.dataLogin || u.data || u.createdAt,
-        primeiro:u.desde || u.primeiroLogin || u.dataLogin || u.data || u.createdAt,
-        totalDias:u.totalDias || dias.length || 0,
-        diasAno:u.diasLogadosAno || u.contadorDiasAno || 0,
-        principal:!!u.ehResponsavel,
-        dias:[...dias]
-      });
+      const item = getItem(k);
+      item.nome = u.nome || u.usuarioNome || u.login || k;
+      item.principal = !!u.ehResponsavel;
+      (Array.isArray(u.dias) ? u.dias : []).forEach(d => item.dias.add(String(d).slice(0,10)));
+      if (u.diasLogadosAno || u.contadorDiasAno) item._diasAnoSrc = Number(u.diasLogadosAno || u.contadorDiasAno || 0);
+      registrarDia(item, u.ultimoLogin || u.ate || u.data || u.createdAt, u.dia);
+      registrarDia(item, u.desde || u.primeiroLogin || u.data || u.createdAt, u.diaPrimeiro);
     });
 
-    loginHistory.forEach(l => {
-      const k = norm2(l.usuario || l.login || l.loginNorm || l.usuarioLogado || l.username);
+    // Fonte 2: login_history (agente atual — um doc por usuário+dia)
+    loginHistory.filter(l => !l._isSession).forEach(l => {
+      const k = norm2(l.usuario || l.login || l.loginNorm || l.usuarioLogado || l.usuarioNorm || l.username);
       if (!k) return;
-      const item = porUsuario.get(k) || { login:k, nome:l.usuarioNome || l.nome || l.usuario || l.login || k, dias:[], totalDias:0 };
-      const dt = l.dataLogin || l.data || l.ultimoLogin || l.createdAt || l.timestamp || l.updatedAt;
-      if (dt) {
-        const dtObj = dt?.toDate ? dt.toDate() : (dt?.seconds ? new Date(dt.seconds*1000) : new Date(dt));
-        if (!isNaN(dtObj.getTime())) {
-          if (!item.ultimo || dtObj > new Date(item.ultimo)) item.ultimo = dtObj.toISOString();
-          if (!item.primeiro || dtObj < new Date(item.primeiro)) item.primeiro = dtObj.toISOString();
-        }
-      }
-      addDia(item, dt, l.dia);
-      porUsuario.set(k, item);
+      const item = getItem(k);
+      if (!item.nome || item.nome === k) item.nome = l.usuarioNome || l.nome || l.usuario || l.login || k;
+      registrarDia(item, l.ultimoLogin || l.ultimoLoginEm || l.dataLogin || l.data || l.createdAt, l.dia);
+      registrarDia(item, l.primeiroLogin || l.desde, l.dia);
+      if (l.diasLogados90d != null) item._dias90d = Number(l.diasLogados90d || 0);
     });
 
-    const ano = String(new Date().getFullYear());
-    const arr = [...porUsuario.values()]
-      .map(u => {
-        const diasUnicos = new Set((u.dias||[]).filter(Boolean).map(d => String(d).slice(0,10)));
-        const diasAno = u.diasAno || [...diasUnicos].filter(d => d.startsWith(ano)).length;
-        return {...u, diasAno, totalDias: u.totalDias || diasUnicos.size};
-      })
-      .sort((a,b) => new Date(b.ultimo||0) - new Date(a.ultimo||0));
+    // Fonte 3: login_sessions (sessões com horário exato de login/logout/rdp)
+    const todasSessoes = loginHistory.filter(l => l._isSession);
+    todasSessoes.forEach(s => {
+      const k = norm2(s.usuario || s.login || s.username || s.usuarioNorm);
+      if (!k) return;
+      const item = getItem(k);
+      if (!item.nome || item.nome === k) item.nome = s.usuarioNome || s.nome || s.usuario || k;
+      if (s.tipo === 'remoto' || s.rdp || s.remote) item.remoto = true;
+      item.sessoes.push(s);
+      registrarDia(item, s.loginAt || s.dataLogin || s.data, s.dia);
+    });
 
-    if (!arr.length) return '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum login registrado ainda para esta máquina.<br><span style="font-size:12px">Os dados de login são coletados pelo agente SYSACK a cada ciclo. Se a máquina tiver agente instalado e ativo, os dados aparecerão no próximo ciclo de sincronização (±60s).</span></div>';
+    if (!porUsuario.size) return `<div style="padding:28px;text-align:center;color:var(--g400)">
+      Nenhum login registrado ainda para esta máquina.<br>
+      <span style="font-size:12px">Os dados são coletados pelo agente SYSACK a cada ciclo (±60s).<br>
+      Os horários de login/logout ficam em <b>login_sessions</b>, gravados pelo agente.</span>
+    </div>`;
 
-    return `<table class="data-table" style="width:100%;font-size:12px"><thead><tr><th>Usuário</th><th>Primeiro login</th><th>Último login</th><th>Dias no ano</th><th>Total dias</th><th>Status</th></tr></thead><tbody>${arr.map(u => `<tr><td><b>${esc2(u.nome || u.login)}</b><div style="font-size:11px;color:var(--g400)">${esc2(u.login)}</div></td><td>${esc2(fmt2(u.primeiro))}</td><td>${esc2(fmt2(u.ultimo))}</td><td><b>${esc2(u.diasAno)}</b></td><td>${esc2(u.totalDias)}</td><td>${u.principal ? '<span class="badge badge-info">Principal</span>' : ''}${ativo?.maquinaCompartilhada ? '<span class="badge badge-warning">Compartilhada</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
+    const arr = [...porUsuario.values()].map(u => {
+      const diasUnicos = new Set([...u.dias].filter(d => d && d.length === 10));
+      const diasAno = u._diasAnoSrc || [...diasUnicos].filter(d => d.startsWith(ano)).length;
+      const total = u._dias90d != null ? u._dias90d : diasUnicos.size;
+      return { ...u, diasAno, total, dias: diasUnicos };
+    }).sort((a,b) => (b.ultimo||0) - (a.ultimo||0));
+
+    // ── Tabela resumo por usuário ─────────────────────────────────
+    const tabelaUsuarios = `
+      <div style="font-size:12px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Usuários</div>
+      <table class="data-table" style="width:100%;font-size:12px;margin-bottom:20px">
+        <thead><tr><th>Usuário</th><th>Primeiro login</th><th>Último login</th><th>Dias no ano</th><th>Total dias</th><th></th></tr></thead>
+        <tbody>${arr.map(u => `<tr>
+          <td><b>${esc2(u.nome||u.login)}</b><div style="font-size:10.5px;color:var(--g400)">${esc2(u.login)}</div></td>
+          <td style="font-size:11.5px">${esc2(fmtHora(u.primeiro))}</td>
+          <td style="font-size:11.5px">${esc2(fmtHora(u.ultimo))}</td>
+          <td><b style="font-size:14px;color:var(--accent)">${esc2(u.diasAno||'—')}</b></td>
+          <td>${esc2(u.total||'—')}</td>
+          <td style="white-space:nowrap">
+            ${u.principal ? '<span class="badge badge-info" style="font-size:10px">Principal</span>' : ''}
+            ${u.remoto ? '<span class="badge badge-warning" style="font-size:10px">RDP</span>' : ''}
+          </td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+
+    // ── Linha do tempo de sessões (com horário) ────────────────────
+    let timelineSessoes = '';
+    if (todasSessoes.length) {
+      const sessoesOrdenadas = [...todasSessoes].sort((a,b) => new Date(b.loginAt||b.data||0) - new Date(a.loginAt||a.data||0)).slice(0, 120);
+      timelineSessoes = `
+        <div style="font-size:12px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Sessões registradas (${sessoesOrdenadas.length})</div>
+        <div style="border:1px solid var(--g100);border-radius:12px;overflow:hidden">
+          <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr auto;gap:8px;padding:8px 12px;background:var(--g50);border-bottom:1px solid var(--g100);font-size:11px;font-weight:700;color:var(--g500)">
+            <span>USUÁRIO</span><span>LOGIN</span><span>LOGOUT</span><span>DURAÇÃO</span><span>TIPO</span>
+          </div>
+          ${sessoesOrdenadas.map(s => {
+            const dtIn  = toDate(s.loginAt || s.dataLogin || s.data);
+            const dtOut = toDate(s.logoutAt || s.dataLogout || s.ate);
+            let dur = '—';
+            if (dtIn && dtOut) {
+              const min = Math.round((dtOut - dtIn) / 60000);
+              dur = min < 60 ? min + 'min' : Math.floor(min/60) + 'h' + (min%60 ? (min%60)+'min' : '');
+            }
+            const usuario = norm2(s.usuario || s.login || s.username || s.usuarioNorm);
+            const isRdp = s.tipo === 'remoto' || s.rdp || s.remote || String(s.tipo||'').includes('rdp');
+            const badge = isRdp
+              ? '<span style="background:#FEF3C7;color:#92400E;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px">🖥️ RDP</span>'
+              : '<span style="background:#DCFCE7;color:#166534;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px">💻 Local</span>';
+            return `<div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr auto;gap:8px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--g100);font-size:11.5px">
+              <b>${esc2(usuario)}</b>
+              <span style="color:var(--g700)">${esc2(fmtHora(dtIn))}</span>
+              <span style="color:var(--g500)">${esc2(fmtHora(dtOut))}</span>
+              <span style="color:var(--g600)">${esc2(dur)}</span>
+              <span>${badge}</span>
+            </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    return tabelaUsuarios + timelineSessoes;
   }
 
   function renderChamadosTabSYSACK(chamados) {

@@ -1048,6 +1048,129 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
 }
 
 
+// ── Rastreamento de sessão de usuário ────────────────────────────
+// Detecta troca de usuário, login remoto (RDP) e registra
+// horário de início/fim de sessão em login_sessions.
+let _sessaoAtual = null; // { usuario, loginAt, tipo }
+let _ipAnterior  = null;
+let _statusAnterior = null;
+
+function detectarSessoesRDP() {
+  // Detecta sessões RDP/TS ativas via query session
+  try {
+    const out = require('child_process').execSync('query session', { timeout: 5000, windowsHide: true }).toString();
+    const sessoes = [];
+    for (const line of out.split('
+').slice(1)) {
+      const l = line.trim().replace(/^>/, '').trim();
+      if (!l) continue;
+      const parts = l.split(/\s+/);
+      const usuario = parts[0];
+      const tipo    = String(parts[1] || '').toLowerCase();
+      if (!usuario || ['services','sistema','system','rdp-tcp'].some(x => usuario.toLowerCase().includes(x))) continue;
+      const isRdp = tipo.includes('rdp') || tipo.includes('tcp') || String(parts[2] || '').toLowerCase().includes('rdp');
+      const isAtivo = line.toLowerCase().includes('active') || line.toLowerCase().includes('ativo');
+      if (isAtivo) sessoes.push({ usuario, tipo: isRdp ? 'remoto' : 'local', rdp: isRdp });
+    }
+    return sessoes;
+  } catch { return []; }
+}
+
+async function rastrearSessaoUsuario(userAtual, nowIso) {
+  if (!userAtual) {
+    // Usuário deslogou
+    if (_sessaoAtual) {
+      log(`[Sessao] Logout detectado: ${_sessaoAtual.usuario}`);
+      await firestoreCreate('login_sessions', {
+        hostname:   AGENT_ID,
+        agentId:    AGENT_ID,
+        usuario:    _sessaoAtual.usuario,
+        usuarioNorm: normalizarUsuarioLogin(_sessaoAtual.usuario),
+        loginAt:    _sessaoAtual.loginAt,
+        logoutAt:   nowIso,
+        tipo:       _sessaoAtual.tipo || 'local',
+        rdp:        _sessaoAtual.tipo === 'remoto',
+        dia:        nowIso.slice(0, 10),
+        createdAt:  nowIso,
+      }).catch(() => {});
+      _sessaoAtual = null;
+    }
+    return;
+  }
+
+  const userNorm = normalizarUsuarioLogin(userAtual);
+
+  if (!_sessaoAtual || normalizarUsuarioLogin(_sessaoAtual.usuario) !== userNorm) {
+    // Novo login — fecha sessão anterior se havia
+    if (_sessaoAtual) {
+      log(`[Sessao] Troca de usuário: ${_sessaoAtual.usuario} → ${userAtual}`);
+      await firestoreCreate('login_sessions', {
+        hostname:   AGENT_ID,
+        agentId:    AGENT_ID,
+        usuario:    _sessaoAtual.usuario,
+        usuarioNorm: normalizarUsuarioLogin(_sessaoAtual.usuario),
+        loginAt:    _sessaoAtual.loginAt,
+        logoutAt:   nowIso,
+        tipo:       _sessaoAtual.tipo || 'local',
+        rdp:        _sessaoAtual.tipo === 'remoto',
+        dia:        _sessaoAtual.loginAt.slice(0, 10),
+        createdAt:  _sessaoAtual.loginAt,
+      }).catch(() => {});
+    }
+    // Detecta se é sessão RDP
+    const sessoesRdp = detectarSessoesRDP();
+    const sessaoRdp  = sessoesRdp.find(s => normalizarUsuarioLogin(s.usuario) === userNorm);
+    const tipo = sessaoRdp?.rdp ? 'remoto' : 'local';
+    _sessaoAtual = { usuario: userAtual, loginAt: nowIso, tipo };
+    log(`[Sessao] Login detectado: ${userAtual} (${tipo})`);
+  }
+
+  // Grava também sessões RDP simultâneas (outros usuários remotos além do principal)
+  try {
+    const sessoesRdp = detectarSessoesRDP();
+    for (const s of sessoesRdp) {
+      const sNorm = normalizarUsuarioLogin(s.usuario);
+      if (sNorm === userNorm) continue; // já rastreado acima
+      const chave = AGENT_ID + '_' + sNorm + '_' + nowIso.slice(0, 10);
+      // Grava uma entrada por dia por usuário remoto (não duplica)
+      await firestoreCreate('login_sessions', {
+        hostname:   AGENT_ID,
+        agentId:    AGENT_ID,
+        usuario:    s.usuario,
+        usuarioNorm: sNorm,
+        loginAt:    nowIso,
+        logoutAt:   null,
+        tipo:       'remoto',
+        rdp:        true,
+        dia:        nowIso.slice(0, 10),
+        chaveDedup: chave,
+        createdAt:  nowIso,
+      }).catch(() => {});
+    }
+  } catch {}
+}
+
+async function rastrearMudancasStatus(ip, nowIso) {
+  // Registra na subcoleção historico do agente quando IP ou status muda
+  if (_ipAnterior !== null && _ipAnterior !== ip && ip) {
+    const faixaAntes  = (_ipAnterior||'').split('.').slice(0,3).join('.');
+    const faixaDepois = ip.split('.').slice(0,3).join('.');
+    const tipoEvt = faixaAntes !== faixaDepois ? 'mudanca_faixa_ip' : 'mudanca_ip';
+    const desc = tipoEvt === 'mudanca_faixa_ip'
+      ? `Faixa de IP alterada: ${faixaAntes}.0/24 → ${faixaDepois}.0/24 · IP: ${_ipAnterior} → ${ip}`
+      : `IP alterado: ${_ipAnterior} → ${ip}`;
+    log(`[Status] ${desc}`);
+    await firestoreCreate(`agents/${AGENT_ID}/historico`, {
+      tipo: tipoEvt, titulo: tipoEvt === 'mudanca_faixa_ip' ? '🚨 Mudou de faixa de rede' : '✏️ IP alterado',
+      desc, dot: tipoEvt === 'mudanca_faixa_ip' ? 'red' : 'orange',
+      ipAnterior: _ipAnterior, ipNovo: ip,
+      faixaAnterior: faixaAntes + '.0/24', faixaNova: faixaDepois + '.0/24',
+      agentId: AGENT_ID, hostname: AGENT_ID, origem: 'agente', createdAt: nowIso, data: nowIso,
+    }).catch(() => {});
+  }
+  _ipAnterior = ip || _ipAnterior;
+}
+
 // ── Ciclo principal ───────────────────────────────────────────────
 async function reportar() {
   try {
@@ -1114,6 +1237,11 @@ async function reportar() {
 
     const loginResumo = await registrarHistoricoLogin(dados, user, now);
     Object.assign(dados, loginResumo);
+
+    // Rastreia sessão do usuário (horário de login/logout, RDP)
+    await rastrearSessaoUsuario(user, now).catch(e => log('[Sessao] ' + e.message));
+    // Rastreia mudanças de IP/faixa de rede
+    await rastrearMudancasStatus(dados.ip, now).catch(e => log('[Status] ' + e.message));
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
     // Espelho para compatibilidade com telas/consultas que usam agentes_desktop
