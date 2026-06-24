@@ -32310,42 +32310,119 @@ function baixarInstaladorSYSACKCorrigido() {
   async function _sysackBuscarAlertasDia() {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
+    const hojeIso = hoje.toISOString();
     const db = window.db || window._db;
     const out = [];
-    try {
-      if (db) {
+    const seenIds = new Set();
+    const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
+
+    if (db) {
+      // Busca por createdAt (string ISO) — sem orderBy para evitar exigir índice composto
+      try {
         const snap = await db.collection('alertas')
-          .where('createdAt', '>=', hoje.toISOString())
-          .orderBy('createdAt', 'desc')
-          .limit(150)
-          .get().catch(() => null);
-        if (snap) snap.docs.forEach(d => out.push({ id: d.id, ...d.data() }));
-      }
-    } catch {}
-    // Também inclui alertas do STATE se Firestore não tiver
+          .where('createdAt', '>=', hojeIso)
+          .limit(150).get().catch(() => null);
+        if (snap) snap.docs.forEach(d => push({ id: d.id, ...d.data() }));
+      } catch {}
+
+      // Fallback: busca por campo detecEm (usado pelo trigger v219)
+      try {
+        const snap2 = await db.collection('alertas')
+          .orderBy('createdAt', 'desc').limit(60).get().catch(() => null);
+        if (snap2) snap2.docs.forEach(d => {
+          const dado = d.data();
+          const dt = dado.createdAt || dado.detecEm || '';
+          if (dt >= hojeIso) push({ id: d.id, ...dado });
+        });
+      } catch {}
+
+      // Também lê eventos_detectados do dia
+      try {
+        const snap3 = await db.collection('eventos_detectados')
+          .orderBy('detecEm', 'desc').limit(60).get().catch(() => null);
+        if (snap3) snap3.docs.forEach(d => {
+          const dado = d.data();
+          const dt = dado.detecEm || dado.createdAt || '';
+          if (dt >= hojeIso) push({ id: 'ev_' + d.id, ...dado, createdAt: dado.detecEm || dado.createdAt });
+        });
+      } catch {}
+    }
+
+    // Fallback: STATE em memória
     if (!out.length) {
       const st = window.STATE || {};
-      const fontes = [
-        ...(st.alertasEventos || []),
-        ...(st.alertas || []),
-        ...(st.eventos_detectados || []),
-      ];
-      fontes.forEach((a, i) => out.push({ id: a.id || `estado_${i}`, ...a }));
+      [...(st.alertasEventos || []), ...(st.alertas || [])].forEach((a, i) => {
+        push({ id: a.id || ('estado_' + i), ...a });
+      });
     }
+
+    // Ordena do mais recente para o mais antigo
+    out.sort((a, b) => String(b.createdAt || b.detecEm || '').localeCompare(String(a.createdAt || a.detecEm || '')));
     return out;
+  }
+
+  // Cria o painel inline via JS se o HTML ainda não foi atualizado
+  function _sysackCriarPainelDiaSeNecessario() {
+    if (document.getElementById('painel-alertas-dia-inline')) return true;
+    // Painel não encontrado no HTML — cria como modal overlay
+    const el = document.createElement('div');
+    el.id = 'painel-alertas-dia-inline';
+    el.style.cssText = 'display:none;margin-bottom:24px';
+    el.innerHTML = `<div style="background:var(--panel,#fff);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.06)">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#FAFAFA">
+        <div><b style="font-size:15px">🔔 Alertas do Dia</b><span id="painel-dia-data" style="font-size:12px;color:var(--g500);margin-left:8px"></span></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="painel-dia-pendentes" style="background:#FEE2E2;color:#991B1B;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">0 pendente(s)</span>
+          <span id="painel-dia-resolvidos" style="background:#D1FAE5;color:#047857;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">0 resolvido(s)</span>
+          <button onclick="document.getElementById('painel-alertas-dia-inline').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--g400);padding:0 4px">✕</button>
+        </div>
+      </div>
+      <div style="display:flex;border-bottom:1px solid var(--line)">
+        <button id="tab-dia-pendentes" onclick="sysackDiaTab('pendentes')" style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid var(--accent);font-size:13px;font-weight:700;color:var(--accent);cursor:pointer">🔴 Pendentes</button>
+        <button id="tab-dia-resolvidos" onclick="sysackDiaTab('resolvidos')" style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--g500);cursor:pointer">✅ Resolvidos</button>
+      </div>
+      <div id="painel-dia-lista-pendentes" style="max-height:420px;overflow:auto"></div>
+      <div id="painel-dia-lista-resolvidos" style="max-height:420px;overflow:auto;display:none"></div>
+      <div id="painel-dia-empty" style="display:none;padding:36px;text-align:center;color:var(--g400)">
+        <div style="font-size:32px;margin-bottom:8px">✅</div><b>Nenhum alerta gerado hoje</b>
+      </div>
+    </div>`;
+    // Insere antes do #alertas-list ou na página de alertas
+    const alvoLista = document.getElementById('alertas-list');
+    const alvoPagina = document.getElementById('page-alertas');
+    if (alvoLista) alvoLista.parentNode.insertBefore(el, alvoLista);
+    else if (alvoPagina) alvoPagina.insertBefore(el, alvoPagina.children[1] || alvoPagina.firstChild);
+    else document.body.appendChild(el);
+    return true;
+  }
+
+  // Garante que o botão "Alertas do Dia" existe no cabeçalho da página
+  function _sysackGarantirBotaoPainelDia() {
+    if (document.getElementById('btn-painel-alertas-dia')) return;
+    const btnConfigurar = [...document.querySelectorAll('#page-alertas button')].find(b =>
+      (b.textContent || '').includes('Configurar Alerta'));
+    if (!btnConfigurar) return;
+    const btnDia = document.createElement('button');
+    btnDia.id = 'btn-painel-alertas-dia';
+    btnDia.className = 'btn btn-secondary';
+    btnDia.innerHTML = '🔔 Alertas do Dia <span id="badge-alertas-dia" style="display:none;background:#DC2626;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px">0</span>';
+    btnDia.onclick = () => window.sysackAbrirPainelDia();
+    btnConfigurar.parentNode.insertBefore(btnDia, btnConfigurar);
   }
 
   // Abre/fecha o painel inline
   window.sysackAbrirPainelDia = async function() {
+    _sysackGarantirBotaoPainelDia();
+    _sysackCriarPainelDiaSeNecessario();
     const painel = document.getElementById('painel-alertas-dia-inline');
     if (!painel) return;
     const aberto = painel.style.display !== 'none';
     if (aberto) { painel.style.display = 'none'; return; }
     painel.style.display = '';
-    document.getElementById('painel-dia-data').textContent =
-      new Date().toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long' });
-    document.getElementById('painel-dia-lista-pendentes').innerHTML =
-      '<div style="padding:24px;text-align:center;color:var(--g400)">Carregando alertas...</div>';
+    const elData = document.getElementById('painel-dia-data');
+    if (elData) elData.textContent = new Date().toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long' });
+    const elPend = document.getElementById('painel-dia-lista-pendentes');
+    if (elPend) elPend.innerHTML = '<div style="padding:24px;text-align:center;color:var(--g400)">Carregando alertas...</div>';
     await sysackRenderizarPainelDia();
   };
 
@@ -32551,9 +32628,14 @@ function baixarInstaladorSYSACKCorrigido() {
   };
 
   // Atualiza o badge do botão "Alertas do Dia" sempre que a página de alertas é aberta
+  // Também garante que o botão existe mesmo sem o HTML atualizado
   const _origRenderAlertasPag = window.renderAlertas;
   window.renderAlertas = async function() {
     if (_origRenderAlertasPag) await _origRenderAlertasPag();
+    // Injeta o botão "Alertas do Dia" se não existir ainda
+    setTimeout(() => {
+      _sysackGarantirBotaoPainelDia();
+    }, 200);
     // Atualiza badge sem abrir o painel
     try {
       const alertas = await _sysackBuscarAlertasDia();
