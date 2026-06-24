@@ -9529,7 +9529,8 @@ function arAbrirModalBloqueio(agentId, hostname) {
           </p>
           <div class="form-group" style="margin-bottom:10px">
             <label class="form-label req" style="font-size:12px">Usuário administrador</label>
-            <input class="form-control" id="bloqueio-admin-user" type="text" placeholder="Ex: Administrator" autocomplete="off" spellcheck="false" style="font-family:monospace">
+            <input class="form-control" id="bloqueio-admin-user" type="text" placeholder="CESAN\usuario.adm  ou  usuario@cesan.com.br  ou  Administrator" autocomplete="off" spellcheck="false" style="font-family:monospace">
+            <small style="color:#9CA3AF;font-size:11px;margin-top:3px;display:block">💡 Domínio AD: <code>CESAN\usuario.adm</code> &nbsp;·&nbsp; UPN: <code>usuario@cesan.com.br</code> &nbsp;·&nbsp; Local: <code>Administrator</code></small>
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label class="form-label req" style="font-size:12px">Senha</label>
@@ -9569,14 +9570,22 @@ function arMostrarStatusBloqueio(tipo, msg) {
 function arClassificarErroBloqueio(resultado) {
   const r = String(resultado || '');
   const l = r.toLowerCase();
-  if (l.includes('credencia') || l.includes('senha') || l.includes('usuário') || l.includes('usuario') || l.includes('logon failure') || l.includes('1326')) {
-    return 'Usuário ou senha inválidos, ou a conta informada não tem permissão de administrador local nesta máquina.\n\nDetalhe: ' + r;
+  if (l.includes('credencia') || l.includes('senha') || l.includes('usuário') || l.includes('usuario') || l.includes('logon failure') || l.includes('1326') || l.includes('invalido') || l.includes('inválido')) {
+    return 'Usuário ou senha inválidos, ou a conta não tem permissão de logon nesta máquina.\n\n' +
+      '💡 Formatos aceitos:\n' +
+      '  • Domínio AD: CESAN\\usuario.adm\n' +
+      '  • UPN: usuario@cesan.com.br\n' +
+      '  • Administrador local: Administrator\n\n' +
+      'Detalhe: ' + r;
   }
   if (l.includes('sem permissão') || l.includes('access is denied') || l.includes('acesso negado') || l.includes('registry') || l.includes('hklm')) {
-    return 'A credencial não possui permissão administrativa suficiente para concluir o bloqueio.\n\nDetalhe: ' + r;
+    return 'A credencial é válida mas não possui permissão de Administrador local suficiente.\n\nDetalhe: ' + r;
   }
   if (l.includes('timeout') || l.includes('não respondeu') || l.includes('nao respondeu')) {
-    return 'O agente não respondeu. A máquina NÃO foi confirmada como bloqueada. Verifique se o agente está online e atualizado.';
+    return 'O agente não respondeu em tempo hábil. A máquina NÃO foi confirmada como bloqueada.\nVerifique se o agente SYSACK está rodando e online.';
+  }
+  if (l.includes('obrigatoria') || l.includes('obrigatório')) {
+    return 'Credenciais de administrador local são obrigatórias para executar o bloqueio.';
   }
   return r || 'Falha não informada pelo agente.';
 }
@@ -32412,22 +32421,110 @@ function baixarInstaladorSYSACKCorrigido() {
     return [...dedup.values()].slice(0, 80);
   }
 
+  // ── Estado de resolução (persiste no Firestore em alertas_resolucoes) ──────
+  const _sysackEstAlerta = {};
+  async function _sysackCarregarEstado(key) {
+    if (_sysackEstAlerta[key] !== undefined) return _sysackEstAlerta[key];
+    try {
+      const snap = await (window.db||window._db).collection('alertas_resolucoes').doc(key).get();
+      _sysackEstAlerta[key] = snap.exists ? snap.data() : null;
+    } catch { _sysackEstAlerta[key] = null; }
+    return _sysackEstAlerta[key];
+  }
+  async function _sysackSalvarEstado(key, dados) {
+    _sysackEstAlerta[key] = dados;
+    try { await (window.db||window._db).collection('alertas_resolucoes').doc(key).set(dados, { merge:true }); } catch {}
+  }
+
+  // Modal Resolvido
+  window.sysackAbrirModalResolvido = function(key, label) {
+    document.getElementById('modal-alerta-resolvido')?.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-alerta-resolvido';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML = `<div style="background:var(--panel,#fff);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.22);width:480px;max-width:97vw;padding:24px">
+      <h3 style="margin:0 0 6px;font-size:17px">✅ Marcar como resolvido</h3>
+      <p style="font-size:13px;color:var(--g500);margin:0 0 14px">${esc(label||'')}</p>
+      <label class="form-label">Como foi resolvido? *</label>
+      <textarea id="ar-res-texto" rows="4" class="form-control" placeholder="Descreva como o problema foi resolvido..."></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-alerta-resolvido')?.remove()">Cancelar</button>
+        <button class="btn btn-sm" style="background:#059669;color:#fff" onclick="sysackConfirmarResolvido(${JSON.stringify(key)},this)">✅ Confirmar</button>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+    setTimeout(()=>m.querySelector('textarea')?.focus(), 80);
+  };
+  window.sysackConfirmarResolvido = async function(key, btn) {
+    const texto = document.getElementById('ar-res-texto')?.value?.trim();
+    if (!texto) { showToast('Informe como foi resolvido.','warning'); return; }
+    if (btn) { btn.disabled=true; btn.textContent='Salvando...'; }
+    const u = SESSION_USER||CURRENT_USER||{};
+    await _sysackSalvarEstado(key, { tipo:'resolvido', descricao:texto, resolvidoPor:u.nome||u.email||'', resolvidoEm:new Date().toISOString() });
+    document.getElementById('modal-alerta-resolvido')?.remove();
+    showToast('✅ Alerta marcado como resolvido.','success',3000);
+    // Atualiza linha no painel sem fechar modal principal
+    const row = document.querySelector(`[data-alerta-key="${key}"]`);
+    if (row) { const ac = row.querySelector('.ac-acoes'); if(ac) ac.innerHTML='<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px">✅ RESOLVIDO</span>'; }
+  };
+
+  // Modal Justificar
+  window.sysackAbrirModalJustificar = function(key, label) {
+    document.getElementById('modal-alerta-justif')?.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-alerta-justif';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML = `<div style="background:var(--panel,#fff);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.22);width:520px;max-width:97vw;padding:24px">
+      <h3 style="margin:0 0 6px;font-size:17px">📝 Justificar alerta</h3>
+      <p style="font-size:13px;color:var(--g500);margin:0 0 14px">${esc(label||'')}</p>
+      <label class="form-label">Justificativa *</label>
+      <textarea id="aj-texto" rows="3" class="form-control" placeholder="Explique por que este alerta pode ser ignorado ou adiado..."></textarea>
+      <div style="margin:14px 0 8px;font-size:13px;font-weight:600">O alerta deve:</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="aj-acao" value="continuar" checked> Continuar normalmente</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="aj-acao" value="pausar"> Pausar por <input id="aj-dias" type="number" min="1" max="90" value="7" style="width:50px;margin:0 5px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;font-size:13px"> dias</label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-alerta-justif')?.remove()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="sysackConfirmarJustif(${JSON.stringify(key)},this)">📝 Salvar</button>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+    setTimeout(()=>m.querySelector('textarea')?.focus(), 80);
+  };
+  window.sysackConfirmarJustif = async function(key, btn) {
+    const texto = document.getElementById('aj-texto')?.value?.trim();
+    if (!texto) { showToast('Informe a justificativa.','warning'); return; }
+    const acao  = document.querySelector('[name="aj-acao"]:checked')?.value||'continuar';
+    const dias  = parseInt(document.getElementById('aj-dias')?.value||'7');
+    if (btn) { btn.disabled=true; btn.textContent='Salvando...'; }
+    const u = SESSION_USER||CURRENT_USER||{};
+    const pausaAte = acao==='pausar' ? new Date(Date.now()+dias*86400000).toISOString() : null;
+    await _sysackSalvarEstado(key, { tipo:acao==='pausar'?'pausado':'justificado', descricao:texto, pausaAte, diasPausa:acao==='pausar'?dias:0, justificadoPor:u.nome||u.email||'', justificadoEm:new Date().toISOString() });
+    document.getElementById('modal-alerta-justif')?.remove();
+    showToast(acao==='pausar'?`⏸️ Alerta pausado por ${dias} dias.`:'📝 Justificativa registrada.','success',3000);
+    const row = document.querySelector(`[data-alerta-key="${key}"]`);
+    if (row) { const ac=row.querySelector('.ac-acoes'); if(ac) ac.innerHTML=acao==='pausar'?`<span style="background:#EEF2FF;color:#4338CA;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px">⏸️ PAUSADO ${dias}d</span>`:'<span style="background:#FEF3C7;color:#92400E;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px">📝 JUSTIFICADO</span>'; }
+  };
+
   window.abrirItensAlertaSYSACK = async function(id) {
     const a = SYSACK_ALERTAS_CATALOGO.find(x => x.id === id);
     if (!a) return;
-    const old = document.getElementById('modal-itens-alerta-sysack');
-    if (old) old.remove();
+    document.getElementById('modal-itens-alerta-sysack')?.remove();
 
     const overlay = document.createElement('div');
     overlay.id = 'modal-itens-alerta-sysack';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10002;display:flex;align-items:center;justify-content:center;padding:20px';
-    overlay.innerHTML = `<div style="background:var(--panel,#fff);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.25);width:980px;max-width:97vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+    overlay.innerHTML = `<div style="background:var(--panel,#fff);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.25);width:1060px;max-width:97vw;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
       <div style="padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px">
-        <div><b style="font-size:18px">${a.icone} ${esc(a.titulo)}</b><div style="font-size:12px;color:var(--g500)">Itens em evidência relacionados a este alerta</div></div>
-        <div style="display:flex;gap:8px"><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();abrirModalConfigAlertaSYSACK('${id}')">⚙️ Configurar</button><button class="btn btn-ghost" onclick="document.getElementById('modal-itens-alerta-sysack')?.remove()">✕</button></div>
+        <div><b style="font-size:18px">${a.icone} ${esc(a.titulo)}</b><div style="font-size:12px;color:var(--g500)">Alertas do dia — ${new Date().toLocaleDateString('pt-BR')}</div></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();abrirModalConfigAlertaSYSACK('${id}')">⚙️ Configurar</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('modal-itens-alerta-sysack')?.remove()">✕</button>
+        </div>
       </div>
       <div id="alerta-itens-body" style="padding:18px 22px;overflow:auto">
-        <div style="padding:28px;text-align:center;color:var(--g500)">Carregando itens em evidência...</div>
+        <div style="padding:28px;text-align:center;color:var(--g500)">Carregando itens...</div>
       </div>
     </div>`;
     document.body.appendChild(overlay);
@@ -32435,15 +32532,17 @@ function baixarInstaladorSYSACKCorrigido() {
 
     const body = overlay.querySelector('#alerta-itens-body');
     const itens = await coletarItensAlertaSYSACK(id);
+
     if (!itens.length) {
       body.innerHTML = `<div style="border:1px dashed var(--line);border-radius:14px;padding:30px;text-align:center;color:var(--g500)">
         <div style="font-size:28px;margin-bottom:8px">🔎</div>
-        Nenhum item em evidência encontrado agora para <b>${esc(a.titulo)}</b>.<br>
-        <small>Quando o agente ou a Cloud Function registrar eventos em <code>alertas</code>, <code>eventos_detectados</code> ou coleções relacionadas, eles aparecerão aqui.</small>
+        Nenhum item em evidência para <b>${esc(a.titulo)}</b>.<br>
+        <small>Quando o agente ou a Cloud Function registrar eventos, aparecerão aqui.</small>
       </div>`;
       return;
     }
 
+    const hoje = new Date().toISOString().slice(0,10);
     const sevStyle = s => {
       s = String(s||'media').toLowerCase();
       if (s.includes('crit')) return 'background:#FEE2E2;color:#991B1B';
@@ -32452,20 +32551,57 @@ function baixarInstaladorSYSACKCorrigido() {
       return 'background:#FEF3C7;color:#92400E';
     };
 
-    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div><b>${itens.length}</b> item(ns) em evidência</div>
-        <small style="color:var(--g500)">Clique em Configurar para alterar destinatários, horários e intervalo.</small>
-      </div>
-      <div style="border:1px solid var(--line);border-radius:14px;overflow:hidden">
-        ${itens.map(it => `<div class="sysack-alerta-evidencia-row" style="display:grid;grid-template-columns:1.1fr 1.7fr 1.4fr auto;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
-          <div><b>${esc(it.destaque || '—')}</b><div style="font-size:11px;color:var(--g500)">${esc(dataAlertaValor(it.criadoEm) || '')}</div></div>
-          <div style="font-size:12px;color:var(--g700)">${esc(it.subtitulo || '—')}</div>
-          <div style="font-size:12px;color:var(--g500)">${esc(it.detalhe || '')}</div>
-          <span style="${sevStyle(it.severidade)};padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800">${esc(String(it.severidade||'media').toUpperCase())}</span>
-        </div>`).join('')}
-      </div>`;
-  };
+    // Carrega estado de cada item
+    await Promise.all(itens.map(async it => {
+      const key = hoje+'_'+id+'_'+String(it.destaque||it.id||'').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,60);
+      it._key = key;
+      it._st  = await _sysackCarregarEstado(key);
+    }));
 
+    const ativos    = itens.filter(it => { const s=it._st; return !s||(s.tipo!=='resolvido'&&!(s.tipo==='pausado'&&new Date(s.pausaAte)>new Date())); });
+    const resolvidos = itens.filter(it => it._st?.tipo==='resolvido');
+
+    function renderSecao(lista, titulo, corTit, soResolvidos) {
+      if (!lista.length) return '';
+      return `<div style="margin-bottom:18px">
+        <div style="font-size:11.5px;font-weight:700;color:${corTit};text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${titulo} (${lista.length})</div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden">
+          <div style="display:grid;grid-template-columns:1.1fr 1.6fr 1.3fr auto;gap:10px;padding:8px 14px;background:var(--g50);border-bottom:1px solid var(--line);font-size:11px;font-weight:700;color:var(--g500)">
+            <span>ITEM</span><span>SITUAÇÃO</span><span>DETALHE</span><span style="min-width:120px">AÇÕES</span>
+          </div>
+          ${lista.map(it => {
+            const s   = it._st;
+            const pausado = s?.tipo==='pausado' && new Date(s.pausaAte)>new Date();
+            const label = String(it.destaque||'')+'—'+String(it.subtitulo||'');
+            const badge = s?.tipo==='resolvido'
+              ? '<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">✅ RESOLVIDO</span>'
+              : pausado ? `<span style="background:#EEF2FF;color:#4338CA;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">⏸️ PAUSADO até ${new Date(s.pausaAte).toLocaleDateString('pt-BR')}</span>` : '';
+            return `<div data-alerta-key="${it._key}" class="sysack-alerta-evidencia-row" style="display:grid;grid-template-columns:1.1fr 1.6fr 1.3fr auto;gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line)">
+              <div><b style="font-size:12.5px">${esc(it.destaque||'—')}</b><div style="font-size:10.5px;color:var(--g500)">${esc(dataAlertaValor(it.criadoEm)||'')}</div>${badge}</div>
+              <div style="font-size:12px;color:var(--g700)">${esc(it.subtitulo||'—')}</div>
+              <div style="font-size:11.5px;color:var(--g500)">${esc(it.detalhe||'')}</div>
+              <div class="ac-acoes" style="display:flex;flex-direction:column;gap:5px;min-width:120px">
+                ${s?.tipo==='resolvido'
+                  ? '<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;text-align:center">✅ RESOLVIDO</span>'
+                  : soResolvidos ? ''
+                  : `<span style="${sevStyle(it.severidade)};padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;text-align:center;margin-bottom:2px">${esc(String(it.severidade||'MEDIA').toUpperCase())}</span>
+                     <button class="btn btn-ghost btn-xs" style="background:#D1FAE5;color:#047857;border:none;border-radius:7px;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="event.stopPropagation();sysackAbrirModalResolvido(${JSON.stringify(it._key)},${JSON.stringify(label)})">✅ Resolvido</button>
+                     <button class="btn btn-ghost btn-xs" style="background:#EEF2FF;color:#4338CA;border:none;border-radius:7px;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="event.stopPropagation();sysackAbrirModalJustificar(${JSON.stringify(it._key)},${JSON.stringify(label)})">📝 Justificar</button>`
+                }
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+
+    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div><b>${itens.length}</b> item(ns) — <span style="color:#DC2626;font-weight:700">${ativos.length} pendente(s)</span> · <span style="color:#059669;font-weight:700">${resolvidos.length} resolvido(s)</span></div>
+        <small style="color:var(--g500)">Alertas do dia. Resolva ou justifique cada item.</small>
+      </div>
+      ${renderSecao(ativos,'🔴 Pendentes','#DC2626',false)}
+      ${resolvidos.length ? renderSecao(resolvidos,'✅ Resolvidos hoje','#059669',true) : ''}`;
+  };
 
   window.abrirModalConfigAlertaSYSACK = async function(id){
     await carregarConfigAlertasSYSACK();

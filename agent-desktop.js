@@ -1861,16 +1861,33 @@ public class LogonUtilV212 {
   $token = [IntPtr]::Zero
   $ok = $false
   $lastErr = 0
-  $logonTypes = @(2,3,8,9) # interactive, network, network_cleartext, new_credentials
+  # Ordem otimizada para AD com GPO restritiva:
+  # 3=Network (mais permissivo), 9=NewCredentials, 8=NetworkCleartext, 2=Interactive
+  $logonTypes = @(3,9,8,2)
 
   foreach ($lt in $logonTypes) {
     $token = [IntPtr]::Zero
-    $ok = [LogonUtilV212]::LogonUser($userOnly, $domain, $adminPassRaw, $lt, 0, [ref]$token)
+    $provider = if ($isUpn) { 3 } else { 0 }
+    $ok = [LogonUtilV212]::LogonUser($userOnly, $domain, $adminPassRaw, $lt, $provider, [ref]$token)
     if ($ok) {
       Write-Host "OK_CREDENCIAL_VALIDADA:tipoLogon=$lt;usuario=$adminUserRaw"
       break
     }
     $lastErr = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    if ($token -ne [IntPtr]::Zero) { [LogonUtilV212]::CloseHandle($token) | Out-Null; $token = [IntPtr]::Zero }
+  }
+
+  # Fallback: net use para domínios que bloqueiam LogonUser via SYSTEM
+  if (-not $ok) {
+    try {
+      $netTarget = if ($domain -and $domain -ne $env:COMPUTERNAME) { "\\\\$domain\\IPC`$" } else { "\\\\$env:COMPUTERNAME\\IPC`$" }
+      $netOut = net use $netTarget /user:$adminUserRaw $adminPassRaw 2>&1
+      if ($LASTEXITCODE -eq 0) {
+        net use $netTarget /delete /y 2>$null | Out-Null
+        $ok = $true
+        Write-Host "OK_CREDENCIAL_VALIDADA:tipoLogon=net_use;usuario=$adminUserRaw"
+      }
+    } catch {}
   }
 
   if (-not $ok) {
