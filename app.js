@@ -9529,8 +9529,8 @@ function arAbrirModalBloqueio(agentId, hostname) {
           </p>
           <div class="form-group" style="margin-bottom:10px">
             <label class="form-label req" style="font-size:12px">Usuário administrador</label>
-            <input class="form-control" id="bloqueio-admin-user" type="text" placeholder="CESAN\usuario.adm  ou  usuario@cesan.com.br  ou  Administrator" autocomplete="off" spellcheck="false" style="font-family:monospace">
-            <small style="color:#9CA3AF;font-size:11px;margin-top:3px;display:block">💡 Domínio AD: <code>CESAN\usuario.adm</code> &nbsp;·&nbsp; UPN: <code>usuario@cesan.com.br</code> &nbsp;·&nbsp; Local: <code>Administrator</code></small>
+            <input class="form-control" id="bloqueio-admin-user" type="text" placeholder="CESAN&#92;usuario.adm  ou  usuario@cesan.com.br  ou  Administrator" autocomplete="off" spellcheck="false" style="font-family:monospace">
+            <small style="color:#9CA3AF;font-size:11px;margin-top:3px;display:block">💡 Domínio AD: <code>CESAN&bsol;usuario.adm</code> &nbsp;·&nbsp; UPN: <code>usuario@cesan.com.br</code> &nbsp;·&nbsp; Local: <code>Administrator</code></small>
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label class="form-label req" style="font-size:12px">Senha</label>
