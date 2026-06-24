@@ -32278,6 +32278,299 @@ function baixarInstaladorSYSACKCorrigido() {
     return isNaN(d.getTime()) ? String(v) : d.toLocaleString('pt-BR');
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // PAINEL DE ALERTAS DO DIA — mostra todos os alertas gerados hoje
+  // com botões Resolvido e Justificar ao lado de cada um.
+  // ══════════════════════════════════════════════════════════════════
+
+  // Estado global dos alertas do dia
+  window._sysackAlertasDiaEstado = {}; // key → { tipo, descricao, ... }
+
+  async function _sysackCarregarEstadoDia(key) {
+    if (window._sysackAlertasDiaEstado[key] !== undefined)
+      return window._sysackAlertasDiaEstado[key];
+    try {
+      const db = window.db || window._db;
+      if (!db) return null;
+      const snap = await db.collection('alertas_resolucoes').doc(key).get();
+      window._sysackAlertasDiaEstado[key] = snap.exists ? snap.data() : null;
+    } catch { window._sysackAlertasDiaEstado[key] = null; }
+    return window._sysackAlertasDiaEstado[key];
+  }
+
+  async function _sysackSalvarEstadoDia(key, dados) {
+    window._sysackAlertasDiaEstado[key] = dados;
+    try {
+      const db = window.db || window._db;
+      if (db) await db.collection('alertas_resolucoes').doc(key).set(dados, { merge: true });
+    } catch {}
+  }
+
+  // Busca alertas do dia no Firestore (coleção 'alertas')
+  async function _sysackBuscarAlertasDia() {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const db = window.db || window._db;
+    const out = [];
+    try {
+      if (db) {
+        const snap = await db.collection('alertas')
+          .where('createdAt', '>=', hoje.toISOString())
+          .orderBy('createdAt', 'desc')
+          .limit(150)
+          .get().catch(() => null);
+        if (snap) snap.docs.forEach(d => out.push({ id: d.id, ...d.data() }));
+      }
+    } catch {}
+    // Também inclui alertas do STATE se Firestore não tiver
+    if (!out.length) {
+      const st = window.STATE || {};
+      const fontes = [
+        ...(st.alertasEventos || []),
+        ...(st.alertas || []),
+        ...(st.eventos_detectados || []),
+      ];
+      fontes.forEach((a, i) => out.push({ id: a.id || `estado_${i}`, ...a }));
+    }
+    return out;
+  }
+
+  // Abre/fecha o painel inline
+  window.sysackAbrirPainelDia = async function() {
+    const painel = document.getElementById('painel-alertas-dia-inline');
+    if (!painel) return;
+    const aberto = painel.style.display !== 'none';
+    if (aberto) { painel.style.display = 'none'; return; }
+    painel.style.display = '';
+    document.getElementById('painel-dia-data').textContent =
+      new Date().toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long' });
+    document.getElementById('painel-dia-lista-pendentes').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--g400)">Carregando alertas...</div>';
+    await sysackRenderizarPainelDia();
+  };
+
+  window.sysackDiaTab = function(tab) {
+    const isPend = tab === 'pendentes';
+    document.getElementById('painel-dia-lista-pendentes').style.display = isPend ? '' : 'none';
+    document.getElementById('painel-dia-lista-resolvidos').style.display = isPend ? 'none' : '';
+    const tPend = document.getElementById('tab-dia-pendentes');
+    const tRes  = document.getElementById('tab-dia-resolvidos');
+    if (tPend) { tPend.style.borderBottomColor = isPend ? 'var(--accent)' : 'transparent'; tPend.style.color = isPend ? 'var(--accent)' : 'var(--g500)'; tPend.style.fontWeight = isPend ? '700' : '600'; }
+    if (tRes)  { tRes.style.borderBottomColor  = isPend ? 'transparent' : 'var(--accent)'; tRes.style.color  = isPend ? 'var(--g500)' : 'var(--accent)'; tRes.style.fontWeight = isPend ? '600' : '700'; }
+  };
+
+  window.sysackRenderizarPainelDia = async function() {
+    const alertas = await _sysackBuscarAlertasDia();
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    function alertaKey(al) {
+      return hoje + '_alerta_' + (al.id || al.tipo || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+    }
+
+    // Carrega estados
+    await Promise.all(alertas.map(al => _sysackCarregarEstadoDia(alertaKey(al))));
+
+    function isPausado(st) {
+      return st?.tipo === 'pausado' && new Date(st.pausaAte) > new Date();
+    }
+
+    const pendentes  = alertas.filter(al => {
+      const st = window._sysackAlertasDiaEstado[alertaKey(al)];
+      return !st || (st.tipo !== 'resolvido' && !isPausado(st));
+    });
+    const resolvidos = alertas.filter(al => {
+      const st = window._sysackAlertasDiaEstado[alertaKey(al)];
+      return st?.tipo === 'resolvido';
+    });
+
+    // Atualiza badges
+    const elP = document.getElementById('painel-dia-pendentes');
+    const elR = document.getElementById('painel-dia-resolvidos');
+    const badge = document.getElementById('badge-alertas-dia');
+    if (elP) elP.textContent = pendentes.length + ' pendente(s)';
+    if (elR) elR.textContent = resolvidos.length + ' resolvido(s)';
+    if (badge) {
+      badge.style.display = pendentes.length ? '' : 'none';
+      badge.textContent = pendentes.length;
+    }
+
+    const corMap = {
+      offline:'#DC2626', maquina_offline:'#DC2626',
+      mudanca_faixa_ip:'#DC2626', mudanca_ip:'#D97706', alerta_ip:'#D97706',
+      troca_monitor:'#D97706', monitor:'#D97706',
+      troca_grupo:'#2563EB', troca_area:'#2563EB',
+      maquina_online:'#16A34A',
+    };
+    function corAlerta(al) {
+      const t = String(al.tipo || al.alertaId || '').toLowerCase();
+      return corMap[t] || (['crit','high','alta'].some(x => String(al.severidade||'').toLowerCase().includes(x)) ? '#DC2626' : '#64748B');
+    }
+
+    function renderCard(al, soResolvido) {
+      const key = alertaKey(al);
+      const st  = window._sysackAlertasDiaEstado[key];
+      const cor = corAlerta(al);
+      const titulo  = al.titulo || al.msg || al.mensagem || al.tipo || 'Alerta';
+      const detalhe = al.desc || al.detalhe || al.resultado || al.subtitulo || '';
+      const hora    = al.createdAt ? new Date(al.createdAt?.seconds ? al.createdAt.seconds * 1000 : al.createdAt)
+                        .toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) : '';
+      const maquina = al.hostname || al.pat || al.computador || al.agentId || '';
+
+      const badgeSt = st?.tipo === 'resolvido'
+        ? '<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;margin-left:6px">✅ RESOLVIDO</span>'
+        : isPausado(st)
+          ? `<span style="background:#EEF2FF;color:#4338CA;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;margin-left:6px">⏸️ PAUSADO até ${new Date(st.pausaAte).toLocaleDateString('pt-BR')}</span>`
+          : '';
+
+      const descricaoResolvida = st?.descricao
+        ? `<div style="font-size:11.5px;color:var(--g500);margin-top:5px;font-style:italic;background:#F8FAFC;padding:5px 8px;border-radius:6px;border-left:3px solid #D1FAE5">📌 ${esc(st.descricao)} — <span style="font-size:10.5px;color:var(--g400)">${esc(st.resolvidoPor || st.justificadoPor || '')}</span></div>`
+        : '';
+
+      const botoesAcao = soResolvido ? '' : `
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;min-width:110px">
+          <button onclick="event.stopPropagation();sysackDiaResolvido('${key}')"
+            style="font-size:11px;padding:5px 10px;border-radius:8px;border:none;background:#D1FAE5;color:#047857;cursor:pointer;font-weight:700;white-space:nowrap">✅ Resolvido</button>
+          <button onclick="event.stopPropagation();sysackDiaJustificar('${key}')"
+            style="font-size:11px;padding:5px 10px;border-radius:8px;border:none;background:#EEF2FF;color:#4338CA;cursor:pointer;font-weight:700;white-space:nowrap">📝 Justificar</button>
+        </div>`;
+
+      return `<div data-alerta-dia-key="${key}" style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);border-left:4px solid ${cor}">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
+            <b style="font-size:13px;color:var(--g900)">${esc(titulo)}</b>
+            ${hora ? `<span style="font-size:11px;color:var(--g400)">${hora}</span>` : ''}
+            ${maquina ? `<span style="background:#F1F5F9;color:#475569;font-size:10px;padding:1px 7px;border-radius:6px;font-weight:600">${esc(maquina)}</span>` : ''}
+            ${badgeSt}
+          </div>
+          ${detalhe ? `<div style="font-size:12px;color:var(--g600);margin-bottom:2px">${esc(detalhe)}</div>` : ''}
+          ${descricaoResolvida}
+        </div>
+        ${botoesAcao}
+      </div>`;
+    }
+
+    // Renderiza pendentes
+    const elLstPend = document.getElementById('painel-dia-lista-pendentes');
+    const elLstRes  = document.getElementById('painel-dia-lista-resolvidos');
+    const elEmpty   = document.getElementById('painel-dia-empty');
+
+    if (!alertas.length) {
+      if (elLstPend) elLstPend.innerHTML = '';
+      if (elLstRes)  elLstRes.innerHTML  = '';
+      if (elEmpty)   elEmpty.style.display = '';
+    } else {
+      if (elEmpty)   elEmpty.style.display = 'none';
+      if (elLstPend) elLstPend.innerHTML = pendentes.length
+        ? pendentes.map(al => renderCard(al, false)).join('')
+        : '<div style="padding:28px;text-align:center;color:var(--g400)">✅ Nenhum alerta pendente agora.</div>';
+      if (elLstRes)  elLstRes.innerHTML = resolvidos.length
+        ? resolvidos.map(al => renderCard(al, true)).join('')
+        : '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum alerta resolvido ainda hoje.</div>';
+    }
+  };
+
+  // Modal: Resolvido (do painel do dia)
+  window.sysackDiaResolvido = function(key) {
+    document.getElementById('modal-alerta-resolvido')?.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-alerta-resolvido';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML = `<div style="background:var(--panel,#fff);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.22);width:480px;max-width:97vw;padding:24px">
+      <h3 style="margin:0 0 8px;font-size:17px">✅ Marcar como resolvido</h3>
+      <p style="font-size:13px;color:var(--g500);margin:0 0 12px">Descreva como o problema foi resolvido:</p>
+      <textarea id="ar-res-dia-texto" rows="4" class="form-control" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="Ex: Computador foi ligado pelo usuário após retorno de férias."></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-alerta-resolvido')?.remove()">Cancelar</button>
+        <button class="btn btn-sm" style="background:#059669;color:#fff" onclick="sysackDiaConfirmarResolvido(${JSON.stringify(key)}, this)">✅ Confirmar</button>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+    setTimeout(() => m.querySelector('textarea')?.focus(), 80);
+  };
+
+  window.sysackDiaConfirmarResolvido = async function(key, btn) {
+    const texto = document.getElementById('ar-res-dia-texto')?.value?.trim();
+    if (!texto) { showToast('Informe como foi resolvido.', 'warning'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    const u = SESSION_USER || CURRENT_USER || {};
+    await _sysackSalvarEstadoDia(key, {
+      tipo: 'resolvido', descricao: texto,
+      resolvidoPor: u.nome || u.email || 'técnico',
+      resolvidoEm: new Date().toISOString()
+    });
+    document.getElementById('modal-alerta-resolvido')?.remove();
+    showToast('✅ Alerta marcado como resolvido.', 'success', 3000);
+    await sysackRenderizarPainelDia();
+  };
+
+  // Modal: Justificar (do painel do dia)
+  window.sysackDiaJustificar = function(key) {
+    document.getElementById('modal-alerta-justif')?.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-alerta-justif';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML = `<div style="background:var(--panel,#fff);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.22);width:520px;max-width:97vw;padding:24px">
+      <h3 style="margin:0 0 8px;font-size:17px">📝 Justificar alerta</h3>
+      <p style="font-size:13px;color:var(--g500);margin:0 0 12px">Explique o motivo e defina o que deve acontecer com o alerta:</p>
+      <textarea id="aj-dia-texto" rows="3" class="form-control" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="Ex: Máquina em manutenção preventiva programada."></textarea>
+      <div style="margin:14px 0 6px;font-size:13px;font-weight:600">O alerta deve:</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="aj-dia-acao" value="continuar" checked> Continuar normalmente</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="aj-dia-acao" value="pausar"> Pausar por
+          <input id="aj-dia-dias" type="number" min="1" max="90" value="7" style="width:50px;margin:0 4px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;font-size:13px"> dias
+        </label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-alerta-justif')?.remove()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="sysackDiaConfirmarJustif(${JSON.stringify(key)}, this)">📝 Salvar</button>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+    setTimeout(() => m.querySelector('textarea')?.focus(), 80);
+  };
+
+  window.sysackDiaConfirmarJustif = async function(key, btn) {
+    const texto = document.getElementById('aj-dia-texto')?.value?.trim();
+    if (!texto) { showToast('Informe a justificativa.', 'warning'); return; }
+    const acao  = document.querySelector('[name="aj-dia-acao"]:checked')?.value || 'continuar';
+    const dias  = parseInt(document.getElementById('aj-dia-dias')?.value || '7');
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    const u = SESSION_USER || CURRENT_USER || {};
+    const pausaAte = acao === 'pausar' ? new Date(Date.now() + dias * 86400000).toISOString() : null;
+    await _sysackSalvarEstadoDia(key, {
+      tipo: acao === 'pausar' ? 'pausado' : 'justificado',
+      descricao: texto, pausaAte,
+      diasPausa: acao === 'pausar' ? dias : 0,
+      justificadoPor: u.nome || u.email || 'técnico',
+      justificadoEm: new Date().toISOString()
+    });
+    document.getElementById('modal-alerta-justif')?.remove();
+    showToast(acao === 'pausar' ? `⏸️ Alerta pausado por ${dias} dias.` : '📝 Justificativa registrada.', 'success', 3000);
+    await sysackRenderizarPainelDia();
+  };
+
+  // Atualiza o badge do botão "Alertas do Dia" sempre que a página de alertas é aberta
+  const _origRenderAlertasPag = window.renderAlertas;
+  window.renderAlertas = async function() {
+    if (_origRenderAlertasPag) await _origRenderAlertasPag();
+    // Atualiza badge sem abrir o painel
+    try {
+      const alertas = await _sysackBuscarAlertasDia();
+      const hoje = new Date().toISOString().slice(0, 10);
+      const pendentes = alertas.filter(al => {
+        const key = hoje + '_alerta_' + (al.id || al.tipo || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+        const st  = window._sysackAlertasDiaEstado[key];
+        return !st || (st.tipo !== 'resolvido' && !(st.tipo === 'pausado' && new Date(st.pausaAte) > new Date()));
+      });
+      const badge = document.getElementById('badge-alertas-dia');
+      if (badge) {
+        badge.style.display = pendentes.length ? '' : 'none';
+        badge.textContent = pendentes.length;
+      }
+    } catch {}
+  };
+
   function ipFaixa24(ip) {
     const p = String(ip || '').trim().split('.');
     if (p.length < 3) return '';

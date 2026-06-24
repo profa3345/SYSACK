@@ -4373,10 +4373,48 @@ window.dispatchEvent(new Event('firebase-ready'));
 
     <div class="page" id="page-alertas">
       <div class="flex items-center justify-between mb-20">
-        <div><h2 style="font-size:20px;font-weight:800;color:var(--g900)">Alertas</h2><p class="text-sm text-muted mt-8">Alertas automáticos do sistema</p></div>
-        <button class="btn btn-primary">+ Configurar Alerta</button>
+        <div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--g900)">Alertas</h2>
+          <p class="text-sm text-muted mt-8">Alertas automáticos do sistema</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-secondary" onclick="sysackAbrirPainelDia()" id="btn-painel-alertas-dia">
+            🔔 Alertas do Dia <span id="badge-alertas-dia" style="display:none;background:#DC2626;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px">0</span>
+          </button>
+          <button class="btn btn-primary">+ Configurar Alerta</button>
+        </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px" id="alertas-list"></div>
+
+      <!-- ── PAINEL DE ALERTAS DO DIA ─────────────────────────────── -->
+      <div id="painel-alertas-dia-inline" style="display:none;margin-bottom:24px">
+        <div style="background:var(--panel,#fff);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.06)">
+          <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#FAFAFA">
+            <div>
+              <b style="font-size:15px">🔔 Alertas do Dia</b>
+              <span id="painel-dia-data" style="font-size:12px;color:var(--g500);margin-left:8px"></span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span id="painel-dia-pendentes" style="background:#FEE2E2;color:#991B1B;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">0 pendente(s)</span>
+              <span id="painel-dia-resolvidos" style="background:#D1FAE5;color:#047857;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">0 resolvido(s)</span>
+              <button onclick="document.getElementById('painel-alertas-dia-inline').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--g400);padding:0 4px">✕</button>
+            </div>
+          </div>
+          <!-- Tabs: Pendentes / Resolvidos -->
+          <div style="display:flex;border-bottom:1px solid var(--line)">
+            <button id="tab-dia-pendentes" onclick="sysackDiaTab('pendentes')" style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid var(--accent);font-size:13px;font-weight:700;color:var(--accent);cursor:pointer">🔴 Pendentes</button>
+            <button id="tab-dia-resolvidos" onclick="sysackDiaTab('resolvidos')" style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--g500);cursor:pointer">✅ Resolvidos</button>
+          </div>
+          <div id="painel-dia-lista-pendentes" style="max-height:420px;overflow:auto"></div>
+          <div id="painel-dia-lista-resolvidos" style="max-height:420px;overflow:auto;display:none"></div>
+          <div id="painel-dia-empty" style="display:none;padding:36px;text-align:center;color:var(--g400)">
+            <div style="font-size:32px;margin-bottom:8px">✅</div>
+            <b>Nenhum alerta gerado hoje</b>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── CATÁLOGO DE ALERTAS CONFIGURÁVEIS ───────────────────── -->
+      <div id="alertas-list" style="display:flex;flex-direction:column;gap:10px"></div>
     </div>
 
     <!-- SWITCHES & ROTEADORES -->
