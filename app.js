@@ -9877,6 +9877,9 @@ async function arDesbloquearMaquina(agentId, hostname) {
 // ════════════════════════════════════════════════════════════
 // ATUALIZAR CLIENTE — auto-update remoto para todos os agentes
 // ════════════════════════════════════════════════════════════
+// ── Lista de agentes selecionados para atualização (IDs) ────────
+let _updSelecao = new Set();
+
 function arAtualizarClientes() {
   const u = SESSION_USER || CURRENT_USER;
   const role = u?.role || '';
@@ -9888,33 +9891,155 @@ function arAtualizarClientes() {
     console.warn('[arAtualizarClientes] role='+role+' email='+u?.email);
     return showToast('⛔ Acesso restrito: Admin, Gestor ou permissão "Atualizar Clientes" na Gestão de Contas.','error');
   }
-  const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-  if (!online.length) return showToast('Nenhum agente online para atualizar.','warning');
+  const todos  = STATE_AGENTS.list || [];
+  const online = todos.filter(a => a.status === 'online');
   openModal('modal-atualizar-cliente');
 
-  // Calcula versão: pega a mais alta dos agentes e incrementa patch
-  const versaoAtual = online.map(a=>a.versaoAgente||a.version||'2.1.0')
+  // Calcula versão incrementada
+  const versaoAtual = todos.map(a=>a.versaoAgente||a.version||'2.1.0')
     .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
   const pts = versaoAtual.split('.').map(Number);
   pts[2] = (pts[2] || 0) + 1;
   const novaVersao = pts.join('.');
 
-  // Grava a versão no botão para o executarAtualizacaoCliente ler
   const btn = document.getElementById('btn-upd-exec');
   if (btn) btn.dataset.versao = novaVersao;
-
-  // Atualiza o label de versão no modal
   const vl = document.getElementById('upd-versao-label');
   if (vl) vl.textContent = 'v' + novaVersao;
-
-  // Atualiza contador de agentes online
-  const eo = document.getElementById('upd-qtd-online');
-  if (eo) eo.textContent = online.length;
 
   // Limpa estado anterior
   const lb = document.getElementById('upd-log-body'); if(lb) lb.innerHTML='';
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='none';
   const sb = document.getElementById('upd-status-bar'); if(sb) sb.style.display='none';
+  const busca = document.getElementById('upd-busca-agente'); if(busca) busca.value='';
+
+  // Pré-seleciona todos os online (padrão)
+  _updSelecao = new Set(online.map(a => a.id));
+
+  // Renderiza a lista de agentes
+  updRenderListaAgentes('');
+  updAtualizarContadores();
+}
+
+// Renderiza a lista de checkboxes de agentes
+function updRenderListaAgentes(filtro) {
+  const lista = document.getElementById('upd-lista-agentes');
+  if (!lista) return;
+  const todos = STATE_AGENTS.list || [];
+  const q = (filtro || '').toLowerCase();
+  const filtrados = q ? todos.filter(a =>
+    (a.hostname||a.id||'').toLowerCase().includes(q) ||
+    (a.ip||'').toLowerCase().includes(q) ||
+    (a.area||a.setor||'').toLowerCase().includes(q) ||
+    (a.usuarioLogado||a.usuario||'').toLowerCase().includes(q)
+  ) : todos;
+
+  if (!filtrados.length) {
+    lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--g400);font-size:12px">Nenhum agente encontrado</div>';
+    return;
+  }
+
+  // Ordena: online primeiro, depois por hostname
+  const ordenados = [...filtrados].sort((a,b) => {
+    if (a.status==='online' && b.status!=='online') return -1;
+    if (a.status!=='online' && b.status==='online') return 1;
+    return (a.hostname||a.id||'').localeCompare(b.hostname||b.id||'');
+  });
+
+  lista.innerHTML = ordenados.map(ag => {
+    const isOnline = ag.status === 'online';
+    const checked  = _updSelecao.has(ag.id) ? 'checked' : '';
+    const dot      = isOnline
+      ? '<span style="width:8px;height:8px;border-radius:50%;background:#16A34A;display:inline-block;flex-shrink:0"></span>'
+      : '<span style="width:8px;height:8px;border-radius:50%;background:#DC2626;display:inline-block;flex-shrink:0"></span>';
+    const versao   = ag.versaoAgente || ag.version || '—';
+    const usuario  = ag.usuarioLogado || ag.usuario || '';
+    const area     = ag.area || ag.setor || '';
+    const ip       = ag.ip || '';
+    return `<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--g100);cursor:pointer;transition:background .1s" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+      <input type="checkbox" ${checked} data-agent-id="${ag.id}"
+        onchange="updToggleAgente('${ag.id}', this.checked)"
+        style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+      ${dot}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <b style="font-size:12.5px;color:var(--g900)">${escapeHtml(ag.hostname||ag.id)}</b>
+          <span style="font-size:10px;font-family:monospace;color:var(--g500)">${escapeHtml(ip)}</span>
+          ${area ? `<span style="font-size:10px;background:#F1F5F9;color:#475569;padding:1px 5px;border-radius:4px">${escapeHtml(area)}</span>` : ''}
+          ${usuario ? `<span style="font-size:10px;color:var(--g400)">👤 ${escapeHtml(usuario)}</span>` : ''}
+        </div>
+        <div style="font-size:10.5px;color:var(--g400);margin-top:1px">
+          v${escapeHtml(versao)} · ${isOnline ? '<span style="color:#16A34A;font-weight:600">Online</span>' : '<span style="color:#DC2626">Offline</span>'}
+        </div>
+      </div>
+    </label>`;
+  }).join('');
+}
+
+function updToggleAgente(id, checked) {
+  if (checked) _updSelecao.add(id);
+  else _updSelecao.delete(id);
+  // Muda o select para "manual" quando usuário clica individualmente
+  const sel = document.getElementById('upd-agentes');
+  if (sel) sel.value = 'manual';
+  updAtualizarContadores();
+}
+
+function updSelecionarTodos(marcar) {
+  const todos = STATE_AGENTS.list || [];
+  const filtro = document.getElementById('upd-busca-agente')?.value || '';
+  const q = filtro.toLowerCase();
+  const visiveis = q ? todos.filter(a =>
+    (a.hostname||a.id||'').toLowerCase().includes(q) ||
+    (a.ip||'').toLowerCase().includes(q) ||
+    (a.area||a.setor||'').toLowerCase().includes(q)
+  ) : todos;
+  visiveis.forEach(a => { if (marcar) _updSelecao.add(a.id); else _updSelecao.delete(a.id); });
+  const sel = document.getElementById('upd-agentes');
+  if (sel) sel.value = 'manual';
+  updRenderListaAgentes(filtro);
+  updAtualizarContadores();
+}
+
+function updFiltrarOnline() {
+  const todos = STATE_AGENTS.list || [];
+  _updSelecao = new Set(todos.filter(a=>a.status==='online').map(a=>a.id));
+  const sel = document.getElementById('upd-agentes');
+  if (sel) sel.value = 'online';
+  const filtro = document.getElementById('upd-busca-agente')?.value || '';
+  updRenderListaAgentes(filtro);
+  updAtualizarContadores();
+}
+
+function updFiltrarListaAgentes(q) {
+  updRenderListaAgentes(q);
+}
+
+function updAplicarSelecaoRapida(valor) {
+  const todos  = STATE_AGENTS.list || [];
+  const online = todos.filter(a => a.status === 'online');
+  if (valor === 'online') {
+    _updSelecao = new Set(online.map(a => a.id));
+  } else if (valor === 'todos') {
+    _updSelecao = new Set(todos.map(a => a.id));
+  }
+  // 'manual' não altera a seleção atual
+  const filtro = document.getElementById('upd-busca-agente')?.value || '';
+  updRenderListaAgentes(filtro);
+  updAtualizarContadores();
+}
+
+function updAtualizarContadores() {
+  const todos  = STATE_AGENTS.list || [];
+  const selArr = todos.filter(a => _updSelecao.has(a.id));
+  const onSel  = selArr.filter(a => a.status === 'online').length;
+  const offSel = selArr.filter(a => a.status !== 'online').length;
+  const qs = document.getElementById('upd-qtd-sel');
+  const qo = document.getElementById('upd-qtd-online');
+  const qf = document.getElementById('upd-qtd-offline');
+  if (qs) qs.textContent = selArr.length;
+  if (qo) qo.textContent = onSel + ' online';
+  if (qf) qf.textContent = offSel + ' offline';
 }
 
 // ─── Helpers de credenciais do modal de atualização ─────────────────────────
@@ -9971,13 +10096,23 @@ async function executarAtualizacaoCliente() {
   }
   if (!versao) return showToast('Versão não definida — tente fechar e abrir o modal novamente.','warning');
 
-  const alvos  = document.getElementById('upd-agentes')?.value || 'online';
-  const todos  = STATE_AGENTS.list || [];
-  const online = todos.filter(a => a.status === 'online');
-  const offline = todos.filter(a => a.status !== 'online');
-  const listaEnviar = alvos === 'todos' ? online : online;
-  const listaNaoEnviada = alvos === 'todos' ? offline : [];
-  if (!listaEnviar.length && !listaNaoEnviada.length) return showToast('Nenhum agente disponível','warning');
+  const todos   = STATE_AGENTS.list || [];
+  // Usa a seleção individual (_updSelecao) se houver agentes marcados,
+  // caso contrário respeita o select de seleção rápida como fallback.
+  let listaEnviar, listaNaoEnviada;
+  if (_updSelecao && _updSelecao.size > 0) {
+    const sel = todos.filter(a => _updSelecao.has(a.id));
+    listaEnviar    = sel.filter(a => a.status === 'online');
+    listaNaoEnviada = sel.filter(a => a.status !== 'online');
+  } else {
+    const alvos = document.getElementById('upd-agentes')?.value || 'online';
+    const online  = todos.filter(a => a.status === 'online');
+    const offline = todos.filter(a => a.status !== 'online');
+    listaEnviar    = online;
+    listaNaoEnviada = alvos === 'todos' ? offline : [];
+  }
+  if (!listaEnviar.length && !listaNaoEnviada.length) return showToast('Nenhum agente selecionado ou disponível.','warning');
+  if (!listaEnviar.length) return showToast(`${listaNaoEnviada.length} agente(s) selecionado(s) estão offline. Selecione agentes online para atualizar agora.`,'warning');
 
   if(btn){btn.disabled=true;btn.textContent='Aplicando...';}
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='';

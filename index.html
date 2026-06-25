@@ -451,6 +451,25 @@ window.dispatchEvent(new Event('firebase-ready'));
         </div>
         <div id="dash-overdue-list"></div>
       </div>
+      <!-- ── ALERTAS DO DIA NO DASHBOARD ─────────────────────────── -->
+      <div class="card mb-20" id="dash-alertas-dia-card">
+        <div class="card-header" style="padding:14px 18px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:16px">🔔</span>
+            <h3 style="margin:0">Alertas do Dia</h3>
+            <span id="dash-alertas-badge-pend" style="background:#FEE2E2;color:#991B1B;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;display:none">0 pendente(s)</span>
+            <span id="dash-alertas-badge-res" style="background:#D1FAE5;color:#047857;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;display:none">0 resolvido(s)</span>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" id="dash-alertas-tab-pend" onclick="dashAlertasTab('pendentes')" style="font-size:11px;border-bottom:2px solid var(--accent);color:var(--accent);font-weight:700">🔴 Pendentes</button>
+            <button class="btn btn-ghost btn-sm" id="dash-alertas-tab-res"  onclick="dashAlertasTab('resolvidos')" style="font-size:11px;border-bottom:2px solid transparent;color:var(--g500)">✅ Resolvidos</button>
+            <button class="btn btn-ghost btn-sm" onclick="goPage('alertas')" style="font-size:11px">Ver todos ›</button>
+          </div>
+        </div>
+        <div id="dash-alertas-pend-list" style="max-height:280px;overflow:auto"></div>
+        <div id="dash-alertas-res-list"  style="max-height:280px;overflow:auto;display:none"></div>
+      </div>
+
       <div class="grid-2">
         <div class="card">
           <div class="card-header"><h3>Chamados Recentes</h3><button class="btn btn-ghost btn-sm" onclick="goPage('chamados')">Ver todos</button></div>
@@ -1467,31 +1486,62 @@ window.dispatchEvent(new Event('firebase-ready'));
             </div>
           </div>
 
-          <div id="upd-qtd-bar" style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
-            <span style="font-size:28px">🖥️</span>
-            <div>
-              <div style="font-weight:700;font-size:15px;color:#1E40AF"><span id="upd-qtd-online">0</span> agente(s) online serão atualizados</div>
-              <div style="font-size:11.5px;color:#3B82F6;margin-top:2px">Cada máquina aplica a nova versão no próximo ciclo (≤5s) e reinicia o serviço automaticamente.</div>
+          <!-- Barra de resumo de seleção -->
+          <div id="upd-qtd-bar" style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
+            <span style="font-size:26px">🖥️</span>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:14px;color:#1E40AF">
+                <span id="upd-qtd-sel">0</span> agente(s) selecionado(s) ·
+                <span id="upd-qtd-online" style="color:#16A34A">0 online</span> ·
+                <span id="upd-qtd-offline" style="color:#DC2626">0 offline</span>
+              </div>
+              <div style="font-size:11px;color:#3B82F6;margin-top:2px">Cada máquina aplica a nova versão no próximo ciclo (≤5s) e reinicia automaticamente.</div>
             </div>
           </div>
           <div id="upd-status-bar" style="display:none"></div>
+
+          <!-- Configurações + seleção de agentes -->
           <div style="background:#F8FAFC;border:1px solid var(--g200);border-radius:10px;padding:14px 16px;margin-bottom:14px">
-            <div style="font-size:12px;color:var(--g500);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">Configurações da atualização</div>
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div style="font-size:12px;color:var(--g500);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">Configurações da atualização</div>
+
+            <!-- Versão -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div>
                 <div style="font-size:12px;font-weight:600;color:var(--g700)">Versão</div>
                 <div style="font-size:11px;color:var(--g400);margin-top:2px">Incrementada automaticamente</div>
               </div>
               <span id="upd-versao-label" style="font-family:monospace;font-size:14px;font-weight:700;color:var(--accent);background:#EFF6FF;padding:4px 12px;border-radius:6px">—</span>
             </div>
-            <div style="display:flex;align-items:center;justify-content:space-between">
+
+            <!-- Seleção rápida (mantém compatibilidade) -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div>
                 <div style="font-size:12px;font-weight:600;color:var(--g700)">Aplicar em</div>
+                <div style="font-size:11px;color:var(--g400);margin-top:2px">Atalho de seleção rápida</div>
               </div>
-              <select class="form-control" id="upd-agentes" style="width:220px;font-size:12px">
+              <select class="form-control" id="upd-agentes" style="width:220px;font-size:12px" onchange="updAplicarSelecaoRapida(this.value)">
                 <option value="online">Somente agentes online agora</option>
                 <option value="todos">Todos (online + offline ao reconectar)</option>
+                <option value="manual">Seleção manual abaixo ↓</option>
               </select>
+            </div>
+
+            <!-- Lista de agentes para seleção individual -->
+            <div id="upd-agentes-lista-wrap">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div style="font-size:12px;font-weight:600;color:var(--g700)">Selecionar agentes individualmente</div>
+                <div style="display:flex;gap:6px">
+                  <button type="button" onclick="updSelecionarTodos(true)"  style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--g200);background:#fff;cursor:pointer;color:var(--g700)">✅ Todos</button>
+                  <button type="button" onclick="updSelecionarTodos(false)" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--g200);background:#fff;cursor:pointer;color:var(--g700)">☐ Nenhum</button>
+                  <button type="button" onclick="updFiltrarOnline()"        style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid #BFDBFE;background:#EFF6FF;cursor:pointer;color:#1D4ED8">🟢 Só online</button>
+                </div>
+              </div>
+              <!-- Campo de busca -->
+              <input id="upd-busca-agente" type="text" placeholder="🔍 Filtrar por hostname, IP ou área..."
+                oninput="updFiltrarListaAgentes(this.value)"
+                style="width:100%;height:32px;font-size:12px;padding:0 10px;border:1px solid var(--g200);border-radius:8px;background:#fff;margin-bottom:8px;box-sizing:border-box">
+              <!-- Lista de checkboxes -->
+              <div id="upd-lista-agentes" style="max-height:220px;overflow-y:auto;border:1px solid var(--g200);border-radius:8px;background:#fff"></div>
             </div>
           </div>
           <div id="upd-log" style="display:none;margin-top:12px">
