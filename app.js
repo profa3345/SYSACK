@@ -8306,6 +8306,7 @@ function renderAssistenciaRemota() {
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:2px 7px;font-size:12px">📋</button>
+          ${a.status==='online' ? `<button class="btn btn-secondary btn-xs" onclick="evAbrirAnalise('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Analisar Event Viewer — diagnóstico automático de erros" style="padding:2px 7px;font-size:12px">🔍</button>` : ''}
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
           <button class="btn btn-secondary btn-xs" onclick="abrirInventarioAgente('${a.id}')" title="Inventário de Software" style="padding:2px 7px;font-size:12px">🗂️</button>
           <button class="btn btn-xs" onclick="arToggleBloqueio('${a.id}','${escapeHtml(a.hostname||a.id)}',${!!a.bloqueado})"
@@ -23315,6 +23316,222 @@ async function analisarAtivoPorIA(pat) {
 
 
 // ════════════════════════════════════════════════════════════
+// ANÁLISE DE EVENT VIEWER — motor de regras sem IA
+// Funciona offline, sem API externa, sem custo.
+// Classifica eventos do Windows em categorias de risco.
+// ════════════════════════════════════════════════════════════
+
+// Regras: { ids: [EventID], log, nivel, categoria, titulo, desc, risco }
+const EV_REGRAS = [
+  // ── Segurança ────────────────────────────────────────────
+  { ids:[4625],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Falha de login repetida',         desc:'Tentativas de login falharam — possível ataque de força bruta ou credencial errada.' },
+  { ids:[4648],       log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Login com credenciais explícitas', desc:'Usuário autenticou com credenciais explícitas (RunAs/RDP). Verificar se é uso legítimo.' },
+  { ids:[4672],       log:'Security', risco:'info',    categoria:'Segurança',    titulo:'Privilégios especiais atribuídos', desc:'Logon com privilégios especiais (Administrador/SYSTEM).' },
+  { ids:[4720,4726],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Conta local criada/excluída',      desc:'Conta de usuário local foi criada ou removida. Verificar se foi ação autorizada de TI.' },
+  { ids:[4732,4733],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Alteração em grupo Administradores',desc:'Membro adicionado ou removido do grupo Administradores local.' },
+  { ids:[4698,4699,4700,4701,4702], log:'Security', risco:'alto', categoria:'Segurança', titulo:'Task Agendada criada/alterada', desc:'Uma task agendada foi criada, deletada ou modificada — pode indicar persistência de malware.' },
+  { ids:[1102],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Log de auditoria limpo',           desc:'Alguém limpou o log de auditoria de segurança. Ação suspeita — investigar imediatamente.' },
+  { ids:[4946,4947,4950], log:'Security', risco:'medio', categoria:'Segurança', titulo:'Regra de firewall alterada',       desc:'Uma regra do Firewall do Windows foi criada ou modificada.' },
+  // ── Sistema ─────────────────────────────────────────────
+  { ids:[41],         log:'System',   risco:'critico', categoria:'Sistema',      titulo:'Desligamento inesperado (kernel)',  desc:'O sistema foi desligado sem sequência normal — falha de energia ou tela azul.' },
+  { ids:[1074],       log:'System',   risco:'info',    categoria:'Sistema',      titulo:'Reinicialização solicitada',        desc:'Usuário ou processo solicitou reinicialização do sistema.' },
+  { ids:[6008],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Desligamento sujo anterior',        desc:'Windows detectou que o desligamento anterior foi anormal (queda de energia / BSOD).' },
+  { ids:[7031,7034,7036], log:'System', risco:'medio', categoria:'Sistema',     titulo:'Serviço parou inesperadamente',     desc:'Um serviço do Windows parou de forma inesperada.' },
+  { ids:[7045],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Novo serviço instalado',            desc:'Um novo serviço foi instalado no sistema. Verificar se foi instalação legítima.' },
+  { ids:[55,98,153],  log:'System',   risco:'critico', categoria:'Disco/FS',    titulo:'Erro de sistema de arquivos',       desc:'NTFS detectou corrupção de disco. Risco imediato de perda de dados — fazer backup.' },
+  { ids:[129],        log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Reset de controlador de disco',     desc:'O controlador de armazenamento foi resetado — pode indicar problema de hardware.' },
+  { ids:[11,15],      log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Erro de driver de disco',           desc:'Erro de I/O no disco. Verificar saúde do HD/SSD com SMART.' },
+  { ids:[1001],       log:'System',   risco:'medio',   categoria:'Sistema',     titulo:'Windows Error Reporting',           desc:'Um aplicativo ou componente gerou relatório de erro.' },
+  // ── Aplicação ───────────────────────────────────────────
+  { ids:[1000,1001,1002], log:'Application', risco:'medio', categoria:'Aplicação', titulo:'Falha de aplicativo',           desc:'Um aplicativo travou ou gerou erro crítico.' },
+  { ids:[1026],       log:'Application', risco:'medio', categoria:'Aplicação',  titulo:'Erro .NET Runtime',                desc:'Aplicativo .NET encontrou erro de execução.' },
+  // ── Windows Update ──────────────────────────────────────
+  { ids:[19,20,24,25],log:'System',   risco:'info',    categoria:'Atualização', titulo:'Windows Update instalado',          desc:'Uma atualização do Windows foi instalada com sucesso.' },
+  { ids:[20],         log:'System',   risco:'alto',    categoria:'Atualização', titulo:'Falha no Windows Update',           desc:'A instalação de uma atualização falhou.' },
+  // ── Rede ────────────────────────────────────────────────
+  { ids:[4199,4198],  log:'System',   risco:'medio',   categoria:'Rede',        titulo:'Conflito de IP detectado',          desc:'Outro dispositivo na rede usa o mesmo endereço IP.' },
+  { ids:[10400,10401],log:'System',   risco:'info',    categoria:'Rede',        titulo:'Conexão de rede alterada',          desc:'O estado da interface de rede mudou (conectado/desconectado).' },
+];
+
+function evAnalisarPayload(payload) {
+  let eventos = [];
+  try {
+    const raw = JSON.parse(payload);
+    eventos = Array.isArray(raw) ? raw : [raw];
+  } catch { return { erro: 'Payload não é JSON válido', regras: [], resumo: [] }; }
+
+  // Conta ocorrências por EventID
+  const contagem = new Map();
+  for (const ev of eventos) {
+    const id = Number(ev.Id || ev.id || ev.EventID || 0);
+    const log = String(ev.Log || ev.LogName || '');
+    const key = `${log}:${id}`;
+    if (!contagem.has(key)) contagem.set(key, { id, log, count: 0, ultimo: '', msgs: [] });
+    const entry = contagem.get(key);
+    entry.count++;
+    if (!entry.ultimo || ev.TimeCreated > entry.ultimo) entry.ultimo = ev.TimeCreated;
+    if (entry.msgs.length < 3) entry.msgs.push(String(ev.Message || '').slice(0, 200));
+  }
+
+  // Cruza com regras
+  const achados = [];
+  for (const regra of EV_REGRAS) {
+    for (const id of regra.ids) {
+      const key = `${regra.log}:${id}`;
+      const entry = contagem.get(key);
+      if (!entry) continue;
+      achados.push({
+        ...regra,
+        eventId: id,
+        count: entry.count,
+        ultimo: entry.ultimo,
+        msgs: entry.msgs,
+      });
+    }
+  }
+
+  // Ordena: crítico → alto → médio → info
+  const ordemRisco = { critico: 0, alto: 1, medio: 2, info: 3 };
+  achados.sort((a, b) => (ordemRisco[a.risco] ?? 9) - (ordemRisco[b.risco] ?? 9));
+
+  // Resumo executivo
+  const criticos = achados.filter(a => a.risco === 'critico').length;
+  const altos    = achados.filter(a => a.risco === 'alto').length;
+  const resumo   = [];
+  if (criticos) resumo.push(`🔴 ${criticos} evento(s) CRÍTICO(S) detectado(s)`);
+  if (altos)    resumo.push(`🟠 ${altos} evento(s) de risco ALTO`);
+  if (!criticos && !altos) resumo.push('✅ Nenhum evento crítico ou de alto risco detectado');
+
+  return { total: eventos.length, regrasAplicadas: achados, resumo, criticos, altos };
+}
+
+// Modal de análise de Event Viewer (regras, sem IA)
+function evAbrirAnalise(agentId, hostname) {
+  document.getElementById('modal-ev-analise')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-ev-analise';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:900px;max-width:98vw;max-height:94vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.3)">
+      <div style="padding:16px 20px;background:#0F172A;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#fff">🔍 Análise de Event Viewer — ${escapeHtml(hostname||agentId)}</div>
+          <div style="font-size:11.5px;color:rgba(255,255,255,.5);margin-top:2px">Motor de regras automático — sem IA, sem custo, funciona offline</div>
+        </div>
+        <button onclick="document.getElementById('modal-ev-analise').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+      </div>
+      <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--g50)">
+        <select id="ev-sel-log" class="form-control" style="width:160px;font-size:12px">
+          <option value="System,Application,Security">System + Application + Security</option>
+          <option value="System">System</option>
+          <option value="Application">Application</option>
+          <option value="Security">Security</option>
+        </select>
+        <select id="ev-sel-max" class="form-control" style="width:120px;font-size:12px">
+          <option value="250">250 eventos</option>
+          <option value="500">500 eventos</option>
+          <option value="1000">1000 eventos</option>
+        </select>
+        <button onclick="evColetarEAnalisar('${agentId}')" class="btn btn-primary btn-sm">🔍 Coletar e Analisar</button>
+        <span id="ev-status" style="font-size:12px;color:var(--g500)">Clique em "Coletar e Analisar" para iniciar</span>
+      </div>
+      <div id="ev-resultado" style="flex:1;overflow:auto;padding:14px 18px">
+        <div style="text-align:center;padding:32px;color:var(--g400)">
+          <div style="font-size:32px;margin-bottom:8px">🔍</div>
+          <div>Selecione os logs e clique em "Coletar e Analisar"</div>
+          <div style="font-size:11.5px;margin-top:6px;color:var(--g300)">O agente vai buscar os eventos do Windows, o SYSACK vai analisar com base em ${EV_REGRAS.length} regras de segurança e estabilidade.</div>
+        </div>
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-ev-analise').remove()" class="btn btn-ghost btn-sm">Fechar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function evColetarEAnalisar(agentId) {
+  const logs    = document.getElementById('ev-sel-log')?.value || 'System,Application,Security';
+  const max     = Number(document.getElementById('ev-sel-max')?.value || 250);
+  const status  = document.getElementById('ev-status');
+  const res     = document.getElementById('ev-resultado');
+
+  if (status) status.textContent = '⏳ Enviando comando ao agente...';
+  if (res)    res.innerHTML = '<div style="padding:32px;text-align:center;color:var(--g500)">⏳ Coletando eventos do Windows... (pode levar até 30s)</div>';
+
+  try {
+    const cmdId = 'ev_' + Date.now() + '_' + agentId;
+    const u = SESSION_USER || CURRENT_USER || {};
+    await fsSet('agent_commands', cmdId, {
+      agentId, tipo: 'coletar_eventviewer',
+      dados: JSON.stringify({ logs: logs.split(','), maxEvents: max, requestedBy: u.nome || u.email || '' }),
+      status: 'pendente', criadoEm: new Date().toISOString(),
+    });
+
+    if (status) status.textContent = '⏳ Aguardando resposta do agente...';
+
+    // Poll por resultado
+    const inicio = Date.now();
+    let snap = null;
+    while (Date.now() - inicio < 60000) {
+      await new Promise(r => setTimeout(r, 2000));
+      const cmdSnap = await (window.db||window._db).collection('agent_commands').doc(cmdId).get();
+      const st = cmdSnap.data()?.status;
+      if (st === 'concluido') { snap = cmdSnap.data(); break; }
+      if (st === 'erro') throw new Error(cmdSnap.data()?.resultado || 'Agente retornou erro');
+    }
+    if (!snap) throw new Error('Timeout — agente não respondeu em 60s');
+
+    // Busca o payload do Event Viewer
+    if (status) status.textContent = '🔍 Analisando eventos...';
+    const evSnap = await (window.db||window._db).collection('agent_eventviewer')
+      .where('commandId','==',cmdId).limit(1).get().catch(()=>null);
+
+    const payload = evSnap?.docs?.[0]?.data()?.payload || '';
+    if (!payload) throw new Error('Payload vazio retornado pelo agente');
+
+    const analise = evAnalisarPayload(payload);
+    evRenderizarResultado(analise, res);
+    if (status) status.textContent = `✅ ${analise.total} eventos analisados · ${analise.regrasAplicadas.length} ocorrências encontradas`;
+  } catch(e) {
+    if (status) status.textContent = '❌ ' + e.message;
+    if (res) res.innerHTML = `<div style="padding:24px;color:#DC2626;font-size:13px">❌ ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function evRenderizarResultado(analise, container) {
+  if (!container) return;
+  const corRisco = { critico:'#DC2626', alto:'#D97706', medio:'#2563EB', info:'#64748B' };
+  const bgRisco  = { critico:'#FEF2F2', alto:'#FFFBEB', medio:'#EFF6FF', info:'#F8FAFC' };
+
+  const resumoHtml = analise.resumo.map(r => `<div style="font-size:13px;font-weight:600;margin-bottom:4px">${escapeHtml(r)}</div>`).join('');
+
+  const regraHtml = analise.regrasAplicadas.length ? analise.regrasAplicadas.map(r => `
+    <div style="background:${bgRisco[r.risco]||'#F8FAFC'};border:1px solid ${corRisco[r.risco]||'#E2E8F0'};border-left:4px solid ${corRisco[r.risco]||'#64748B'};border-radius:8px;padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+        <span style="background:${corRisco[r.risco]};color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px">${(r.risco||'').toUpperCase()}</span>
+        <b style="font-size:13px">${escapeHtml(r.titulo)}</b>
+        <span style="font-size:11px;color:var(--g500)">EventID ${r.eventId} · ${r.log} · ${r.count}x</span>
+        ${r.ultimo ? `<span style="font-size:10.5px;color:var(--g400)">Último: ${new Date(r.ultimo).toLocaleString('pt-BR')}</span>` : ''}
+      </div>
+      <div style="font-size:12.5px;color:var(--g700);margin-bottom:4px">${escapeHtml(r.desc)}</div>
+      ${r.msgs[0] ? `<details style="margin-top:6px"><summary style="font-size:11px;cursor:pointer;color:var(--g400)">Ver mensagem do evento</summary><pre style="font-size:10.5px;color:var(--g600);margin-top:6px;white-space:pre-wrap;background:rgba(0,0,0,.04);padding:8px;border-radius:6px">${escapeHtml(r.msgs[0])}</pre></details>` : ''}
+    </div>`).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--g400)">✅ Nenhuma ocorrência encontrada nas regras configuradas.</div>';
+
+  container.innerHTML = `
+    <div style="background:var(--g50);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:6px">Resumo</div>
+      ${resumoHtml}
+      <div style="font-size:11.5px;color:var(--g400);margin-top:4px">${analise.total || 0} eventos coletados · ${analise.regrasAplicadas.length} regras ativadas de ${EV_REGRAS.length} disponíveis</div>
+    </div>
+    <div>${regraHtml}</div>`;
+}
+
+window.evAbrirAnalise    = evAbrirAnalise;
+window.evColetarEAnalisar = evColetarEAnalisar;
+
+// ════════════════════════════════════════════════════════════
 // IA MONITORING — Exibe alertas de anomalia no dashboard
 // Dados vêm da CF detectarAnomalias (a cada hora)
 // ════════════════════════════════════════════════════════════
@@ -33342,134 +33559,243 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
 window.SYSACK_AGENT_JS_URL = 'https://sysack.vercel.app/agent-desktop.js';
 window.SYSACK_AGENT_INSTALLER_URL = window.SYSACK_AGENT_JS_URL;
 
+// ── Verificação periódica de versão do Node.js (roda no frontend SYSACK, não no cliente) ──
+// O sistema verifica a versão LTS do Node.js a cada 24h e armazena em Firestore.
+// Quando há versão nova, exibe alerta e atualiza o instalador gerado automaticamente.
+window._nodeVersionCache = null;
+
+async function sysackVerificarVersaoNode() {
+  const CACHE_KEY = 'sysack_node_version_check';
+  const ultima = localStorage.getItem(CACHE_KEY);
+  if (ultima && Date.now() - Number(ultima) < 86400000) return; // só 1x/dia
+
+  try {
+    // Usa a API pública do Node.js para obter a versão LTS atual
+    const resp = await fetch('https://nodejs.org/dist/index.json');
+    if (!resp.ok) return;
+    const releases = await resp.json();
+    const lts = releases.find(r => r.lts && r.version);
+    if (!lts) return;
+
+    const versao = lts.version; // ex: "v22.3.0"
+    const urlWin64 = `https://nodejs.org/dist/${versao}/node-${versao}-x64.msi`;
+    window._nodeVersionCache = { versao, urlWin64, data: new Date().toISOString() };
+    localStorage.setItem(CACHE_KEY, String(Date.now()));
+
+    // Grava no Firestore para todos os técnicos saberem
+    const db = window.db || window._db;
+    if (db) {
+      const snap = await db.collection('config').doc('node_version').get().catch(() => null);
+      const versaoAtual = snap?.data()?.versao || '';
+      if (versaoAtual !== versao) {
+        await db.collection('config').doc('node_version').set({
+          versao, urlWin64, atualizadoEm: new Date().toISOString(), lts: lts.lts
+        }, { merge: true }).catch(() => {});
+        // Alerta se versão mudou
+        if (versaoAtual) {
+          showToast(`🟢 Nova versão do Node.js disponível: ${versao}. O instalador do agente será atualizado automaticamente.`, 'info', 8000);
+          await (db.collection('alertas').add({
+            tipo: 'node_version_update', titulo: `Nova versão Node.js: ${versao}`,
+            desc: `Versão LTS atualizada de ${versaoAtual} para ${versao}. Instaladores gerados agora usam a nova versão.`,
+            severidade: 'media', createdAt: new Date().toISOString(), lida: false,
+          }).catch(() => {}));
+        }
+      }
+    }
+  } catch(e) {
+    // Silencioso — não é crítico
+  }
+}
+
+// Verifica ao carregar o sistema e depois a cada 24h
+setTimeout(sysackVerificarVersaoNode, 5000);
+
+setInterval(sysackVerificarVersaoNode, 86400000);
+
+// ── Teste de e-mail via painel SMTP ───────────────────────────────
+async function sysackTestarEmail() {
+  const para = (document.getElementById('smtp-test-email')?.value || '').trim();
+  if (!para) return showToast('Informe o e-mail de destino.', 'warning');
+  const res = document.getElementById('smtp-test-resultado');
+  if (res) { res.style.display = ''; res.style.background = '#F8FAFC'; res.textContent = '⏳ Enviando...'; }
+  try {
+    const fn = (await getFbFunctions()).httpsCallable('testarEmail');
+    const r  = await fn({ para });
+    const ok = r.data?.ok;
+    if (res) {
+      res.style.background = ok ? '#F0FDF4' : '#FEF2F2';
+      res.style.color      = ok ? '#065F46' : '#991B1B';
+      res.textContent      = r.data?.msg || (ok ? '✅ Enviado!' : '❌ Falha');
+    }
+    if (!ok) showToast('❌ Falha no envio. Verifique os Secrets SMTP no Firebase.', 'danger', 8000);
+  } catch(e) {
+    if (res) { res.style.display=''; res.style.background='#FEF2F2'; res.style.color='#991B1B'; res.textContent = '❌ ' + e.message; }
+    showToast('Erro: ' + e.message, 'danger', 6000);
+  }
+}
+
+async function sysackObterVersaoNode() {
+  if (window._nodeVersionCache) return window._nodeVersionCache;
+  try {
+    const db = window.db || window._db;
+    if (db) {
+      const snap = await db.collection('config').doc('node_version').get().catch(() => null);
+      if (snap?.exists) {
+        window._nodeVersionCache = snap.data();
+        return window._nodeVersionCache;
+      }
+    }
+  } catch {}
+  // Fallback: versão LTS estável conhecida
+  return { versao: 'v22.14.0', urlWin64: 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' };
+}
+
 function baixarInstaladorSYSACKCorrigido() {
-  // Gera o instalador .bat dinamicamente usando sempre a URL do agent-desktop.js da Vercel
-  const AGENT_URL = window.SYSACK_AGENT_JS_URL || 'https://sysack.vercel.app/agent-desktop.js';
+  // Obtém a versão atual do Node.js para embutir no instalador
+  sysackObterVersaoNode().then(nodeInfo => {
+    const AGENT_URL  = window.SYSACK_AGENT_JS_URL || 'https://sysack.vercel.app/agent-desktop.js';
+    const NODE_VER   = nodeInfo?.versao   || 'v22.14.0';
+    const NODE_MSI   = nodeInfo?.urlWin64 || `https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-x64.msi`;
 
-  // Cada elemento é uma linha do .bat — construído aqui para ser fácil de manter
-  const linhas = [
-    '@echo off',
-    'chcp 65001 >nul',
-    'title SYSACK Agent Desktop v2.2 - Instalador',
-    'echo ============================================',
-    'echo  SYSACK Agent Desktop v2.2 - Instalacao',
-    'echo ============================================',
-    'echo.',
-    '',
-    ':: Verifica privilegio de administrador',
-    'net session >nul 2>&1',
-    'if errorlevel 1 (',
-    '  echo ERRO: Execute como Administrador ^(botao direito -^> Executar como administrador^).',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    '',
-    'set "SYSACK_DIR=C:\\SYSACK"',
-    'set "AGENT_URL=' + AGENT_URL + '"',
-    'set "AGENT_FILE=%SYSACK_DIR%\\agent.js"',
-    'set "LOG_FILE=%SYSACK_DIR%\\install.log"',
-    '',
-    ':: Detecta Node.js em varias localizacoes',
-    'set "NODE_EXE=C:\\Program Files\\nodejs\\node.exe"',
-    'if not exist "%NODE_EXE%" set "NODE_EXE=C:\\Program Files (x86)\\nodejs\\node.exe"',
-    'if not exist "%NODE_EXE%" (',
-    '  where node >nul 2>&1',
-    '  if errorlevel 1 (',
-    '    echo ERRO: Node.js nao encontrado.',
-    '    echo Instale Node.js 18+ em https://nodejs.org e execute novamente.',
-    '    pause',
-    '    exit /b 1',
-    '  )',
-    '  for /f "delims=" %%P in (\'where node\') do set "NODE_EXE=%%P"',
-    ')',
-    'echo [0/6] Node.js: %NODE_EXE%',
-    'for /f "tokens=*" %%V in (\'"%NODE_EXE%" --version 2^>nul\') do echo [0/6] Versao: %%V',
-    '',
-    'echo [1/6] Preparando pasta %SYSACK_DIR%...',
-    'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
-    'echo %date% %time% - Instalacao iniciada > "%LOG_FILE%"',
-    '',
-    'echo [2/6] Parando agente anterior...',
-    'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
-    'timeout /t 2 /nobreak >nul',
-    'for /f "tokens=2 delims==" %%P in (\'wmic process where "CommandLine like \'\'%%SYSACK%%agent%%\'\'" get ProcessId /value 2^>nul ^| find "ProcessId"\') do taskkill /PID %%P /F >nul 2>&1',
-    'timeout /t 2 /nobreak >nul',
-    '',
-    'echo [3/6] Verificando conectividade...',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri \'https://firestore.googleapis.com/\' -UseBasicParsing -TimeoutSec 10 -EA Stop; Write-Host \'OK: Firestore acessivel\' } catch { Write-Host \'AVISO: \' $_.Exception.Message }"',
-    '',
-    'echo [4/6] Baixando agente da Vercel...',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'%AGENT_URL%?v=2.2&ts=\'+$ts) -OutFile \'%AGENT_FILE%\' -UseBasicParsing"',
-    '',
-    'if not exist "%AGENT_FILE%" (',
-    '  echo ERRO: agent.js nao foi baixado. Verifique acesso a sysack.vercel.app',
-    '  echo %date% %time% - ERRO: Download falhou >> "%LOG_FILE%"',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    '',
-    ':: Verifica tamanho minimo (arquivo valido tem mais de 50KB)',
-    'for %%F in ("%AGENT_FILE%") do set AGENT_SIZE=%%~zF',
-    'if %AGENT_SIZE% LSS 50000 (',
-    '  echo ERRO: arquivo baixado parece corrompido ^(%AGENT_SIZE% bytes^).',
-    '  echo %date% %time% - ERRO: arquivo pequeno: %AGENT_SIZE% bytes >> "%LOG_FILE%"',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'echo [4/6] Download OK: %AGENT_SIZE% bytes',
-    '',
-    'echo [5/6] Criando tarefa agendada SYSACK-Agent...',
-    'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
-    'timeout /t 1 /nobreak >nul',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$A=New-ScheduledTaskAction -Execute \'%NODE_EXE%\' -Argument \'%AGENT_FILE%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null; Write-Host \'Tarefa criada com restart automatico\'"',
-    '',
-    'if errorlevel 1 (',
-    '  echo ERRO: falha ao criar tarefa agendada.',
-    '  echo %date% %time% - ERRO: falha na tarefa >> "%LOG_FILE%"',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    '',
-    'echo [6/6] Iniciando agente...',
-    'schtasks /Run /TN "SYSACK-Agent"',
-    'timeout /t 4 /nobreak >nul',
-    '',
-    ':: Verifica se Node.exe esta rodando',
-    'tasklist /FI "IMAGENAME eq node.exe" 2>nul | find "node.exe" >nul',
-    'if errorlevel 1 (',
-    '  echo AVISO: node.exe nao detectado. Iniciando diretamente...',
-    '  start "SYSACK Agent" /min "%NODE_EXE%" "%AGENT_FILE%"',
-    ') else (',
-    '  echo     Agente iniciado com sucesso!',
-    ')',
-    '',
-    'echo %date% %time% - Instalacao concluida >> "%LOG_FILE%"',
-    'echo.',
-    'echo ============================================',
-    'echo  Instalacao concluida!',
-    'echo.',
-    'echo  Aguarde ~60 segundos para o computador',
-    'echo  aparecer online no SYSACK.',
-    'echo.',
-    'echo  Se nao aparecer, verifique:',
-    'echo  1) Acesso a firestore.googleapis.com:443',
-    'echo  2) Log: %LOG_FILE%',
-    'echo  3) schtasks /Query /TN "SYSACK-Agent"',
-    'echo ============================================',
-    'pause',
-  ];
+    const linhas = [
+      '@echo off',
+      'chcp 65001 >nul',
+      'title SYSACK Agent Desktop - Instalador',
+      'echo ============================================',
+      'echo  SYSACK Agent Desktop - Instalacao',
+      'echo ============================================',
+      'echo.',
+      '',
+      ':: Verifica privilegio de administrador',
+      'net session >nul 2>&1',
+      'if errorlevel 1 (',
+      '  echo ERRO: Execute como Administrador (botao direito ^> Executar como administrador).',
+      '  pause',
+      '  exit /b 1',
+      ')',
+      '',
+      'set "SYSACK_DIR=C:\\SYSACK"',
+      'set "AGENT_URL=' + AGENT_URL + '"',
+      'set "AGENT_FILE=%SYSACK_DIR%\\agent.js"',
+      'set "LOG_FILE=%SYSACK_DIR%\\install.log"',
+      'set "NODE_MSI_URL=' + NODE_MSI + '"',
+      'set "NODE_MSI_FILE=%TEMP%\\node_sysack_setup.msi"',
+      '',
+      'echo [1/6] Verificando ambiente...',
+      'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
+      'echo %date% %time% - Instalacao SYSACK iniciada > "%LOG_FILE%"',
+      '',
+      ':: Detecta Node.js em qualquer localizacao',
+      'set "NODE_EXE="',
+      'for %%P in ("%ProgramFiles%\\nodejs\\node.exe" "%ProgramFiles(x86)%\\nodejs\\node.exe") do (',
+      '  if exist "%%~P" set "NODE_EXE=%%~P"',
+      ')',
+      'if "%NODE_EXE%"=="" (',
+      '  where node >nul 2>&1',
+      '  if not errorlevel 1 for /f "delims=" %%P in (\'where node\') do set "NODE_EXE=%%P"',
+      ')',
+      '',
+      'echo [2/6] Verificando plataforma necessaria...',
+      'if "%NODE_EXE%"=="" (',
+      '  echo     Instalando componente de execucao necessario...',
+      '  echo     (Isso pode levar 1-2 minutos)',
+      '  powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'%NODE_MSI_URL%\' -OutFile \'%NODE_MSI_FILE%\' -UseBasicParsing"',
+      '  if not exist "%NODE_MSI_FILE%" (',
+      '    echo ERRO: Nao foi possivel baixar componente de execucao.',
+      '    echo Verifique a conexao com a internet e tente novamente.',
+      '    echo %date% %time% - ERRO: Download componente falhou >> "%LOG_FILE%"',
+      '    pause',
+      '    exit /b 1',
+      '  )',
+      '  echo     Instalando componente... (aguarde)',
+      '  msiexec /i "%NODE_MSI_FILE%" /qn /norestart ADDLOCAL=ALL',
+      '  timeout /t 5 /nobreak >nul',
+      '  del /f /q "%NODE_MSI_FILE%" >nul 2>nul',
+      '  :: Re-detecta apos instalacao',
+      '  for %%P in ("%ProgramFiles%\\nodejs\\node.exe" "%ProgramFiles(x86)%\\nodejs\\node.exe") do (',
+      '    if exist "%%~P" set "NODE_EXE=%%~P"',
+      '  )',
+      '  if "%NODE_EXE%"=="" (',
+      '    echo ERRO: Componente instalado mas nao localizado. Reinicie e tente novamente.',
+      '    echo %date% %time% - ERRO: Componente nao localizado apos instalacao >> "%LOG_FILE%"',
+      '    pause',
+      '    exit /b 1',
+      '  )',
+      '  echo     Componente instalado com sucesso!',
+      ') else (',
+      '  echo     Componente de execucao ja presente.',
+      ')',
+      '',
+      'echo [3/6] Parando versao anterior do agente...',
+      'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      'for /f "tokens=2 delims==" %%P in (\'wmic process where "CommandLine like \'\'%%SYSACK%%agent%%\'\'" get ProcessId /value 2^>nul ^| find "ProcessId"\') do taskkill /PID %%P /F >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      '',
+      'echo [4/6] Baixando agente SYSACK...',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'%AGENT_URL%?ts=\'+$ts) -OutFile \'%AGENT_FILE%\' -UseBasicParsing"',
+      '',
+      'if not exist "%AGENT_FILE%" (',
+      '  echo ERRO: Falha ao baixar o agente SYSACK.',
+      '  echo Verifique o acesso a sysack.vercel.app e tente novamente.',
+      '  echo %date% %time% - ERRO: Download agente falhou >> "%LOG_FILE%"',
+      '  pause',
+      '  exit /b 1',
+      ')',
+      'for %%F in ("%AGENT_FILE%") do set AGENT_SIZE=%%~zF',
+      'if %AGENT_SIZE% LSS 50000 (',
+      '  echo ERRO: Arquivo do agente parece corrompido (%AGENT_SIZE% bytes).',
+      '  echo %date% %time% - ERRO: Arquivo pequeno: %AGENT_SIZE% bytes >> "%LOG_FILE%"',
+      '  pause',
+      '  exit /b 1',
+      ')',
+      'echo     Agente baixado com sucesso (%AGENT_SIZE% bytes).',
+      '',
+      'echo [5/6] Criando servico do agente...',
+      'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
+      'timeout /t 1 /nobreak >nul',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$A=New-ScheduledTaskAction -Execute \'%NODE_EXE%\' -Argument \'%AGENT_FILE%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null"',
+      '',
+      'if errorlevel 1 (',
+      '  echo ERRO: Falha ao registrar servico do agente.',
+      '  echo %date% %time% - ERRO: falha ao registrar servico >> "%LOG_FILE%"',
+      '  pause',
+      '  exit /b 1',
+      ')',
+      '',
+      'echo [6/6] Iniciando agente...',
+      'schtasks /Run /TN "SYSACK-Agent"',
+      'timeout /t 4 /nobreak >nul',
+      '',
+      ':: Verifica se esta rodando',
+      'tasklist /FI "IMAGENAME eq node.exe" 2>nul | find "node.exe" >nul',
+      'if errorlevel 1 (',
+      '  echo     Iniciando agente diretamente...',
+      '  start "" /min "%NODE_EXE%" "%AGENT_FILE%"',
+      ') else (',
+      '  echo     Agente iniciado!',
+      ')',
+      '',
+      'echo %date% %time% - Instalacao concluida com sucesso >> "%LOG_FILE%"',
+      'echo.',
+      'echo ============================================',
+      'echo  Instalacao concluida!',
+      'echo.',
+      'echo  O computador aparecera no SYSACK em',
+      'echo  aproximadamente 60 segundos.',
+      'echo ============================================',
+      'pause',
+    ];
 
-  const script = linhas.join('\r\n');
-  const blob   = new Blob(['\ufeff' + script], { type: 'application/octet-stream' });
-  const url    = URL.createObjectURL(blob);
-  const a      = document.createElement('a');
-  a.href     = url;
-  a.download = 'Instalar-SYSACK-Agent.bat';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-  showToast('✅ Instalador gerado! Execute como Administrador no PC alvo.', 'success', 6000);
+    const script = linhas.join('\r\n');
+    const blob   = new Blob(['\ufeff' + script], { type: 'application/octet-stream' });
+    const url    = URL.createObjectURL(blob);
+    const a      = document.createElement('a');
+    a.href = url; a.download = 'Instalar-SYSACK-Agent.bat';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast('✅ Instalador gerado! Execute como Administrador no PC alvo.', 'success', 6000);
+  });
 }
 
 

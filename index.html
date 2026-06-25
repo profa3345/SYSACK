@@ -3250,6 +3250,15 @@ window.dispatchEvent(new Event('firebase-ready'));
           firebase functions:secrets:set SMTP_FROM
         </div>
       </div>
+      <!-- Teste de envio -->
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--g200)">
+        <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:8px">🧪 Testar envio de e-mail</div>
+        <div style="display:flex;gap:8px">
+          <input id="smtp-test-email" type="email" class="form-control" placeholder="seu@email.com" style="flex:1">
+          <button class="btn btn-secondary btn-sm" onclick="sysackTestarEmail()">Enviar teste</button>
+        </div>
+        <div id="smtp-test-resultado" style="display:none;margin-top:8px;font-size:12px;padding:8px 10px;border-radius:6px"></div>
+      </div>
       <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="document.getElementById('smtp-config-panel').style.display='none'">Entendido</button>
     </div>
 
