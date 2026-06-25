@@ -16607,12 +16607,19 @@ function sapParsearTexto(text) {
 // [5]=Modelo [6]=Marca [7]=Local [8]=Qtde
 function sapNormalizarLinhas(linhas) {
   const resultado = [];
+  const patsSeen  = new Set(); // Deduplica pelo PAT dentro do mesmo arquivo
+  const imobsSeen = new Set(); // Deduplica pelo Imob. SAP também
+
   for (const row of linhas) {
     if (!row || row.length < 3) continue;
     const pat  = String(row[0] || '').trim();
     const imob = String(row[1] || '').trim();
     // Valida: PAT deve ser numérico 4-8 dígitos, Imob 6-12 dígitos
     if (!/^\d{4,8}$/.test(pat) || !/^\d{6,12}$/.test(imob)) continue;
+    // Pula duplicatas dentro do arquivo (mesmo PAT ou mesmo Imob.)
+    if (patsSeen.has(pat) || imobsSeen.has(imob)) continue;
+    patsSeen.add(pat);
+    imobsSeen.add(imob);
     resultado.push({
       pat,
       imob,
@@ -16708,11 +16715,500 @@ function sapMostrarPreview(linhas, nomeArquivo) {
   const btnImportar = document.getElementById('sap-btn-importar');
   if (btnImportar) { btnImportar.disabled = false; btnImportar.dataset.total = itens.length; }
 
+  // Adiciona botão "Cruzar com Discovery" ao lado do botão Importar
+  const footerDiv = document.getElementById('sap-footer-info')?.parentElement;
+  if (footerDiv && !document.getElementById('sap-btn-cruzar')) {
+    const btnCruzar = document.createElement('button');
+    btnCruzar.id = 'sap-btn-cruzar';
+    btnCruzar.className = 'btn btn-secondary btn-sm';
+    btnCruzar.innerHTML = '🔗 Cruzar com Discovery';
+    btnCruzar.title = 'Analisa cada item SAP e tenta localizar o dispositivo correspondente capturado pelo Discovery, mostrando uma tela de revisão.';
+    btnCruzar.onclick = () => {
+      const res = sapCruzarComDiscovery(window._sapItensParsed || []);
+      sapAbrirTelaRevisao(res);
+    };
+    if (btnImportar) btnImportar.parentElement?.insertBefore(btnCruzar, btnImportar);
+  }
+
   // Salva os itens normalizados para a importação
   window._sapItensParsed = itens;
 }
 
 // ── Confirma e executa a importação ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// MOTOR DE CRUZAMENTO SAP × DISCOVERY
+// Tenta unificar cada item do SAP com ativos capturados via Discovery
+// usando múltiplos critérios com pontuação de confiança.
+//
+// Critérios (em ordem de confiança):
+//  1. Número de série idêntico              → 100 pts (CERTEZA)
+//  2. PAT idêntico                          → 100 pts (CERTEZA)
+//  3. Modelo + Marca + Localidade           →  85 pts (ALTA)
+//  4. Modelo + Marca (sem localidade)       →  65 pts (MÉDIA)
+//  5. Tipo + Localidade + Fabricante        →  55 pts (MÉDIA)
+//  6. Tipo + Localidade (sem marca)         →  40 pts (BAIXA — ambíguo)
+//
+// Resultado por item SAP:
+//  score >= 85 → VINCULADO automaticamente
+//  score 50-84 → REVISAR (sugestão, técnico confirma)
+//  score  < 50 → NÃO ENCONTRADO (importa como patrimônio sem vínculo)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function sapCruzarComDiscovery(itensSAP) {
+  const agentes  = STATE_AGENTS?.list || [];
+  const ativos   = STATE.ativos || [];
+
+  // Monta índices para busca rápida
+  const porSerial   = new Map(); // serial.lower → [ativo|agente, ...]
+  const porPat      = new Map(); // pat → ativo
+  const porModeloMarca = new Map(); // 'modelo|marca' → []
+  const porTipoLocal   = new Map(); // 'tipo|local' → []
+
+  const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const normSerial = s => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+  // Indexa ativos SYSACK (Discovery)
+  const fontes = [
+    ...ativos.map(a => ({ ...a, _fonte: 'ativo' })),
+    ...agentes.map(ag => ({ ...ag, _fonte: 'agente', id: ag.id,
+      pat: ag.pat || '', modelo: ag.modelo || '', marca: ag.fabricante || '',
+      nSerie: ag.serial || '', localidade: ag.area || ag.setor || '',
+      tipo: sapClassificarTipo(ag.modelo || '', ag.fabricante || '') })),
+  ];
+
+  for (const f of fontes) {
+    const serial = normSerial(f.nSerie || f.serial || '');
+    if (serial && serial.length >= 4) {
+      if (!porSerial.has(serial)) porSerial.set(serial, []);
+      porSerial.get(serial).push(f);
+    }
+    const pat = norm(f.pat || '');
+    if (pat) porPat.set(pat, f);
+
+    const mm = norm(f.modelo) + '|' + norm(f.marca || f.fabricante || '');
+    if (mm.length > 2) {
+      if (!porModeloMarca.has(mm)) porModeloMarca.set(mm, []);
+      porModeloMarca.get(mm).push(f);
+    }
+
+    const tl = (f.tipo || '') + '|' + norm(f.localidade || f.area || f.setor || '');
+    if (tl.length > 2) {
+      if (!porTipoLocal.has(tl)) porTipoLocal.set(tl, []);
+      porTipoLocal.get(tl).push(f);
+    }
+  }
+
+  const resultados = [];
+
+  for (const it of itensSAP) {
+    const serialSAP   = normSerial(it.nSerie || '');
+    const patSAP      = norm(it.pat);
+    const modeloSAP   = norm(it.modelo);
+    const marcaSAP    = norm(it.marca);
+    const tipoSAP     = it.tipo || sapClassificarTipo(it.desc, it.modelo);
+    const localSAP    = norm(sapMapearLocalidade(it.local));
+    const mmSAP       = modeloSAP + '|' + marcaSAP;
+    const tlSAP       = tipoSAP + '|' + localSAP;
+
+    let melhor = null;
+    let melhorScore = 0;
+    let melhorCriterio = '';
+    const candidatos = [];
+
+    // Critério 1: Número de série idêntico (100 pts)
+    if (serialSAP && serialSAP.length >= 4) {
+      const matches = porSerial.get(serialSAP) || [];
+      for (const m of matches) {
+        candidatos.push({ fonte: m, score: 100, criterio: 'Número de série idêntico', confianca: 'certeza' });
+      }
+    }
+
+    // Critério 2: PAT idêntico (100 pts)
+    if (patSAP) {
+      const m = porPat.get(patSAP);
+      if (m) candidatos.push({ fonte: m, score: 100, criterio: 'PAT idêntico', confianca: 'certeza' });
+    }
+
+    // Critério 3: Modelo + Marca idênticos (65 ou 85 pts dependendo do local)
+    if (modeloSAP && marcaSAP && mmSAP.length > 3) {
+      const matches = porModeloMarca.get(mmSAP) || [];
+      for (const m of matches) {
+        const localAtivo = norm(m.localidade || m.area || m.setor || '');
+        const localMatch = localSAP && localAtivo && localAtivo.includes(localSAP.split(' ')[0]);
+        const score = localMatch ? 85 : 65;
+        const criterio = localMatch ? 'Modelo + Marca + Localidade' : 'Modelo + Marca';
+        const confianca = localMatch ? 'alta' : 'media';
+        candidatos.push({ fonte: m, score, criterio, confianca });
+      }
+    }
+
+    // Critério 4: Tipo + Localidade + Fabricante (55 pts)
+    if (tipoSAP && localSAP) {
+      const matches = porTipoLocal.get(tlSAP) || [];
+      for (const m of matches) {
+        const fabAtivo = norm(m.marca || m.fabricante || '');
+        const fabSAP   = marcaSAP;
+        const fabMatch = fabSAP && fabAtivo && (fabAtivo.includes(fabSAP) || fabSAP.includes(fabAtivo));
+        const score = fabMatch ? 55 : 40;
+        const criterio = fabMatch ? 'Tipo + Localidade + Fabricante' : 'Tipo + Localidade';
+        const confianca = fabMatch ? 'media' : 'baixa';
+        // Evita duplicatas já encontradas por critérios anteriores
+        if (!candidatos.find(c => c.fonte.id === m.id)) {
+          candidatos.push({ fonte: m, score, criterio, confianca });
+        }
+      }
+    }
+
+    // Seleciona o melhor candidato
+    candidatos.sort((a, b) => b.score - a.score);
+    const top = candidatos[0];
+
+    if (top) {
+      melhor = top.fonte;
+      melhorScore = top.score;
+      melhorCriterio = top.criterio;
+    }
+
+    // Classifica o resultado
+    let situacao;
+    if (melhorScore >= 85) {
+      situacao = 'vinculado';        // Vincula automaticamente
+    } else if (melhorScore >= 50) {
+      situacao = 'revisar';          // Sugestão — técnico confirma
+    } else {
+      situacao = 'nao_encontrado';   // Sem correspondência
+    }
+
+    resultados.push({
+      it,                            // Item SAP
+      ativo: melhor,                 // Melhor candidato Discovery
+      score: melhorScore,
+      criterio: melhorCriterio,
+      situacao,
+      candidatos: candidatos.slice(0, 5), // Top 5 para exibir na revisão
+    });
+  }
+
+  return resultados;
+}
+
+// ── Tela de revisão de cruzamento SAP × Discovery ─────────────────
+function sapAbrirTelaRevisao(resultados) {
+  document.getElementById('modal-sap-revisao')?.remove();
+
+  const vinculados    = resultados.filter(r => r.situacao === 'vinculado');
+  const paraRevisar   = resultados.filter(r => r.situacao === 'revisar');
+  const naoEncontrado = resultados.filter(r => r.situacao === 'nao_encontrado');
+
+  // Confirmações manuais do técnico
+  window._sapRevisaoDecisoes = {}; // patSAP → { aceitar: true/false, ativoId }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-sap-revisao';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:12px';
+
+  const sevBadge = (s) => {
+    if (s >= 85) return `<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">✅ ${s} — CERTEZA</span>`;
+    if (s >= 65) return `<span style="background:#DBEAFE;color:#1D4ED8;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">🔵 ${s} — ALTA</span>`;
+    if (s >= 50) return `<span style="background:#FEF3C7;color:#92400E;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">⚠️ ${s} — REVISAR</span>`;
+    return `<span style="background:#FEE2E2;color:#991B1B;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">❌ ${s} — BAIXA</span>`;
+  };
+
+  const rowVinculado = (r) => `
+    <tr style="border-bottom:1px solid var(--line)">
+      <td style="padding:7px 10px;font-family:monospace;font-weight:700;color:var(--accent);font-size:12px">${escapeHtml(r.it.pat)}</td>
+      <td style="padding:7px 10px;font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.it.desc)}">${escapeHtml(r.it.desc)}</td>
+      <td style="padding:7px 10px;font-size:11.5px">${escapeHtml(r.ativo?.hostname || r.ativo?.pat || r.ativo?.id || '—')}</td>
+      <td style="padding:7px 10px;font-size:11.5px;color:var(--g500)">${escapeHtml(r.criterio)}</td>
+      <td style="padding:7px 10px">${sevBadge(r.score)}</td>
+    </tr>`;
+
+  const rowRevisar = (r, i) => `
+    <tr data-revisao-idx="${i}" style="border-bottom:1px solid var(--line)">
+      <td style="padding:8px 10px;font-family:monospace;font-weight:700;color:var(--accent);font-size:12px">${escapeHtml(r.it.pat)}</td>
+      <td style="padding:8px 10px;font-size:11.5px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.it.desc)}">${escapeHtml(r.it.desc)}</td>
+      <td style="padding:8px 10px">
+        <div style="font-size:12px;font-weight:600">${escapeHtml(r.ativo?.hostname || r.ativo?.pat || r.ativo?.id || '—')}</div>
+        <div style="font-size:10.5px;color:var(--g500)">${escapeHtml(r.ativo?.modelo || r.ativo?.desc || '')} · ${escapeHtml(r.ativo?.localidade || r.ativo?.area || '')}</div>
+      </td>
+      <td style="padding:8px 10px;font-size:11px;color:var(--g600)">${escapeHtml(r.criterio)}</td>
+      <td style="padding:8px 10px">${sevBadge(r.score)}</td>
+      <td style="padding:8px 10px">
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <button onclick="sapRevisaoAceitar(${i})" data-btn-aceitar="${i}"
+            style="font-size:11px;padding:4px 10px;border-radius:7px;border:none;background:#D1FAE5;color:#047857;cursor:pointer;font-weight:700">✅ Vincular</button>
+          <button onclick="sapRevisaoRejeitar(${i})" data-btn-rejeitar="${i}"
+            style="font-size:11px;padding:4px 10px;border-radius:7px;border:none;background:#FEE2E2;color:#991B1B;cursor:pointer;font-weight:700">❌ Ignorar</button>
+        </div>
+      </td>
+    </tr>`;
+
+  const rowNaoEncontrado = (r) => `
+    <tr style="border-bottom:1px solid var(--line)">
+      <td style="padding:7px 10px;font-family:monospace;font-weight:700;color:var(--accent);font-size:12px">${escapeHtml(r.it.pat)}</td>
+      <td style="padding:7px 10px;font-size:11.5px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.it.desc)}">${escapeHtml(r.it.desc)}</td>
+      <td style="padding:7px 10px;font-size:11px;color:var(--g400)">${escapeHtml(r.it.tipo || '—')}</td>
+      <td style="padding:7px 10px;font-size:11px;color:var(--g500)">${escapeHtml(r.it.local || '—')}</td>
+      <td style="padding:7px 10px">
+        <span style="background:#F1F5F9;color:#64748B;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">Sem vínculo</span>
+      </td>
+    </tr>`;
+
+  overlay.innerHTML = `
+    <div style="background:var(--panel,#fff);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.3);width:1100px;max-width:98vw;max-height:95vh;overflow:hidden;display:flex;flex-direction:column">
+      <div style="padding:16px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#0F172A;border-radius:16px 16px 0 0">
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#fff">🔗 Cruzamento SAP × Discovery</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.5);margin-top:2px">Revisão de vinculação automática — ${resultados.length} itens analisados</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="background:#D1FAE5;color:#047857;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">${vinculados.length} vinculados</span>
+          <span style="background:#FEF3C7;color:#92400E;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">${paraRevisar.length} a revisar</span>
+          <span style="background:#FEE2E2;color:#991B1B;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">${naoEncontrado.length} sem vínculo</span>
+          <button onclick="document.getElementById('modal-sap-revisao').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+        </div>
+      </div>
+
+      <div style="flex:1;overflow:auto;padding:0">
+        <!-- TABs -->
+        <div style="display:flex;border-bottom:1px solid var(--line);padding:0 22px;gap:2px;background:var(--g50)">
+          <button class="sap-rev-tab" onclick="sapRevTab('vinculado')" id="sap-rev-tab-vinculado"
+            style="padding:10px 14px;background:none;border:none;border-bottom:2px solid var(--accent);font-size:13px;font-weight:700;color:var(--accent);cursor:pointer">
+            ✅ Vinculados automaticamente (${vinculados.length})
+          </button>
+          <button class="sap-rev-tab" onclick="sapRevTab('revisar')" id="sap-rev-tab-revisar"
+            style="padding:10px 14px;background:none;border:none;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--g500);cursor:pointer">
+            ⚠️ Aguardando revisão (${paraRevisar.length})
+          </button>
+          <button class="sap-rev-tab" onclick="sapRevTab('nao_encontrado')" id="sap-rev-tab-nao_encontrado"
+            style="padding:10px 14px;background:none;border:none;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--g500);cursor:pointer">
+            ❌ Sem vínculo (${naoEncontrado.length})
+          </button>
+        </div>
+
+        <!-- Painel vinculados -->
+        <div id="sap-rev-pnl-vinculado" style="overflow:auto;max-height:calc(95vh - 220px)">
+          ${vinculados.length ? `
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="background:var(--g50);position:sticky;top:0">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">PAT SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Descrição SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Ativo Discovery</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Critério</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Confiança</th>
+              </tr>
+            </thead>
+            <tbody>${vinculados.map(r => rowVinculado(r)).join('')}</tbody>
+          </table>` : '<div style="padding:32px;text-align:center;color:var(--g400)">Nenhum vínculo automático encontrado.</div>'}
+        </div>
+
+        <!-- Painel revisar -->
+        <div id="sap-rev-pnl-revisar" style="display:none;overflow:auto;max-height:calc(95vh - 220px)">
+          ${paraRevisar.length ? `
+          <div style="padding:10px 16px;background:#FFFBEB;border-bottom:1px solid #FDE68A;font-size:12px;color:#92400E">
+            ⚠️ Estes itens têm uma correspondência possível mas com confiança média. Revise e confirme ou rejeite cada vínculo.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="background:var(--g50);position:sticky;top:0">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">PAT SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Descrição SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Sugestão Discovery</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Critério</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Score</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Decisão</th>
+              </tr>
+            </thead>
+            <tbody id="sap-rev-tbody-revisar">${paraRevisar.map((r, i) => rowRevisar(r, i)).join('')}</tbody>
+          </table>` : '<div style="padding:32px;text-align:center;color:var(--g400)">✅ Nenhum item aguardando revisão.</div>'}
+        </div>
+
+        <!-- Painel não encontrado -->
+        <div id="sap-rev-pnl-nao_encontrado" style="display:none;overflow:auto;max-height:calc(95vh - 220px)">
+          <div style="padding:10px 16px;background:#FEF2F2;border-bottom:1px solid #FECACA;font-size:12px;color:#991B1B">
+            ❌ Estes itens do SAP não encontraram correspondência no Discovery. Serão importados como patrimônios sem vínculo com ativo físico.
+          </div>
+          ${naoEncontrado.length ? `
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="background:var(--g50);position:sticky;top:0">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">PAT SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Descrição</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Tipo</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Localidade SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Motivo</th>
+              </tr>
+            </thead>
+            <tbody>${naoEncontrado.map(r => rowNaoEncontrado(r)).join('')}</tbody>
+          </table>` : '<div style="padding:32px;text-align:center;color:var(--g400)">✅ Todos os itens foram vinculados.</div>'}
+        </div>
+      </div>
+
+      <div style="padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:12px;color:var(--g500)" id="sap-rev-footer-info">
+          Confirme os vínculos e clique em "Aplicar e Importar".
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('modal-sap-revisao').remove()" class="btn btn-ghost btn-sm">Cancelar</button>
+          <button onclick="sapRevisaoAceitarTodos()" class="btn btn-secondary btn-sm">✅ Aceitar todas as sugestões</button>
+          <button onclick="sapRevisaoAplicar()" class="btn btn-primary btn-sm" id="sap-rev-btn-aplicar">🔗 Aplicar e Importar</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Guarda resultados para uso nas callbacks
+  window._sapRevisaoResultados = resultados;
+  window._sapRevisaoParaRevisar = paraRevisar;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+// Alterna abas da tela de revisão
+window.sapRevTab = function(aba) {
+  ['vinculado', 'revisar', 'nao_encontrado'].forEach(a => {
+    document.getElementById('sap-rev-pnl-' + a).style.display  = a === aba ? '' : 'none';
+    const tab = document.getElementById('sap-rev-tab-' + a);
+    if (tab) {
+      tab.style.borderBottomColor = a === aba ? 'var(--accent)' : 'transparent';
+      tab.style.color = a === aba ? 'var(--accent)' : 'var(--g500)';
+      tab.style.fontWeight = a === aba ? '700' : '600';
+    }
+  });
+};
+
+// Técnico aceita um vínculo
+window.sapRevisaoAceitar = function(idx) {
+  const r = window._sapRevisaoParaRevisar[idx];
+  if (!r) return;
+  window._sapRevisaoDecisoes[r.it.pat] = { aceitar: true, ativoId: r.ativo?.id };
+  const row = document.querySelector(`[data-revisao-idx="${idx}"]`);
+  if (row) row.style.background = '#F0FDF4';
+  const btnA = document.querySelector(`[data-btn-aceitar="${idx}"]`);
+  const btnR = document.querySelector(`[data-btn-rejeitar="${idx}"]`);
+  if (btnA) { btnA.style.background = '#059669'; btnA.style.color = '#fff'; btnA.textContent = '✅ Aceito'; }
+  if (btnR) btnR.style.display = 'none';
+};
+
+// Técnico rejeita um vínculo
+window.sapRevisaoRejeitar = function(idx) {
+  const r = window._sapRevisaoParaRevisar[idx];
+  if (!r) return;
+  window._sapRevisaoDecisoes[r.it.pat] = { aceitar: false };
+  const row = document.querySelector(`[data-revisao-idx="${idx}"]`);
+  if (row) row.style.background = '#FEF2F2';
+  const btnA = document.querySelector(`[data-btn-aceitar="${idx}"]`);
+  const btnR = document.querySelector(`[data-btn-rejeitar="${idx}"]`);
+  if (btnR) { btnR.style.background = '#DC2626'; btnR.style.color = '#fff'; btnR.textContent = '❌ Rejeitado'; }
+  if (btnA) btnA.style.display = 'none';
+};
+
+// Aceita todas as sugestões da aba revisar
+window.sapRevisaoAceitarTodos = function() {
+  (window._sapRevisaoParaRevisar || []).forEach((r, i) => {
+    if (!window._sapRevisaoDecisoes[r.it.pat]) sapRevisaoAceitar(i);
+  });
+};
+
+// Aplica todas as decisões e executa a importação
+window.sapRevisaoAplicar = async function() {
+  const btn = document.getElementById('sap-rev-btn-aplicar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Importando...'; }
+
+  const resultados  = window._sapRevisaoResultados || [];
+  const decisoes    = window._sapRevisaoDecisoes || {};
+  const modo        = document.querySelector('[name="sap-modo"]:checked')?.value || 'atualizar';
+  const agora       = new Date().toISOString();
+
+  let vinculados = 0, criados = 0, atualizados = 0, erros = 0;
+
+  // Previne duplicatas: rastreia PATs e imobSAP já processados nesta aplicação
+  const patsProcessados = new Set();
+  const imobsProcessados = new Set();
+
+  for (const r of resultados) {
+    try {
+      const it = r.it;
+
+      // Já foi processado nesta rodada (arquivo com linhas duplicadas)?
+      if (patsProcessados.has(it.pat)) continue;
+      patsProcessados.add(it.pat);
+      if (it.imob) {
+        if (imobsProcessados.has(it.imob)) continue;
+        imobsProcessados.add(it.imob);
+      }
+      const localSysack = sapMapearLocalidade(it.local);
+      const dadosSAP = {
+        imobSAP: it.imob, desc: it.desc, modelo: it.modelo || '',
+        marca: it.marca || '', nSerie: it.nSerie || '',
+        localSAP: it.local || '', localidade: localSysack,
+        tipo: it.tipo || sapClassificarTipo(it.desc, it.modelo),
+        status: 'ativo', origem: 'sap-import', ultimoSyncSAP: agora,
+      };
+
+      // Determina o ativo a vincular
+      let ativoVincular = null;
+      if (r.situacao === 'vinculado') {
+        ativoVincular = r.ativo;
+      } else if (r.situacao === 'revisar') {
+        const dec = decisoes[it.pat];
+        if (dec?.aceitar && dec.ativoId) {
+          ativoVincular = (STATE.ativos || []).find(a => a.id === dec.ativoId)
+            || (STATE_AGENTS?.list || []).find(a => a.id === dec.ativoId);
+        }
+      }
+
+      // Atualiza o ativo Discovery com dados SAP
+      if (ativoVincular && ativoVincular.id) {
+        const upd = {
+          pat: it.pat, imobSAP: it.imob,
+          desc: ativoVincular.desc || it.desc,
+          modelo: it.modelo || ativoVincular.modelo || '',
+          marca: it.marca || ativoVincular.marca || ativoVincular.fabricante || '',
+          nSerie: it.nSerie || ativoVincular.nSerie || ativoVincular.serial || '',
+          localSAP: it.local, localidade: localSysack || ativoVincular.localidade || '',
+          ultimoSyncSAP: agora,
+          cruzamentoCriterio: r.criterio,
+          cruzamentoScore: r.score,
+        };
+        const col = ativoVincular._fonte === 'agente' ? 'agents' : 'ativos';
+        await fsUpdate(col, ativoVincular.id, upd).catch(() => {});
+        Object.assign(ativoVincular, upd);
+        vinculados++;
+        atualizados++;
+      }
+
+      // Grava/atualiza o patrimônio SAP
+      const patsMap = new Map((STATE.patrimonios || []).map(p => [String(p.pat || ''), p]));
+      const existePat = patsMap.get(it.pat);
+      if (existePat) {
+        const upd = { ...dadosSAP, ativoId: ativoVincular?.id || existePat.ativoId || '' };
+        Object.assign(existePat, upd);
+        await fsUpdate('patrimonios', existePat.id, upd).catch(() => {});
+        atualizados++;
+      } else {
+        const novo = {
+          id: 'SAP-' + it.pat + '-' + Date.now(),
+          pat: it.pat, ...dadosSAP,
+          ativoId: ativoVincular?.id || '',
+          createdAt: agora, atualizadoEm: agora,
+          valorAquisicao: 0, categoria: dadosSAP.tipo, category: dadosSAP.tipo,
+        };
+        if (!STATE.patrimonios) STATE.patrimonios = [];
+        STATE.patrimonios.unshift(novo);
+        await fsAdd('patrimonios', novo).catch(() => {});
+        criados++;
+      }
+    } catch(e) { erros++; }
+  }
+
+  document.getElementById('modal-sap-revisao')?.remove();
+  if (typeof renderPatrimonio === 'function') renderPatrimonio();
+  if (typeof renderAtivos === 'function') renderAtivos();
+  showToast(`✅ SAP importado — ${vinculados} vinculados · ${criados} novos · ${atualizados} atualizados · ${erros} erros`, 'success', 8000);
+};
+
 async function sapConfirmarImportacao(btn) {
   const itens = window._sapItensParsed;
   if (!itens || !itens.length) return showToast('Nenhum dado para importar.', 'warning');
@@ -16728,20 +17224,36 @@ async function sapConfirmarImportacao(btn) {
   sapLog(`[${new Date().toLocaleTimeString('pt-BR')}] Iniciando importação — modo: ${modo} — ${itens.length} registros`);
 
   const patsExistentes = new Map();
-  (STATE.patrimonios || []).forEach(p => patsExistentes.set(String(p.pat || ''), p));
+  (STATE.patrimonios || []).forEach(p => {
+    patsExistentes.set(String(p.pat || ''), p);
+    if (p.imobSAP) patsExistentes.set('imob:' + String(p.imobSAP), p);
+  });
   const ativosExistentes = new Map();
   (STATE.ativos || []).forEach(a => ativosExistentes.set(String(a.pat || ''), a));
 
   // Para sincronização, coleta PATs da carga SAP para detectar baixas
   const patsDaCarga = new Set(itens.map(it => it.pat));
 
+  // Controla PATs já processados nesta importação para evitar duplicatas
+  // quando o mesmo item aparece duas vezes no arquivo SAP
+  const patJaProcessado = new Set();
+
   let criados = 0, atualizadosPat = 0, atualizadosAtivo = 0, ignorados = 0, erros = 0;
 
   for (const it of itens) {
     try {
+      // Ignora duplicatas dentro da mesma carga SAP
+      if (patJaProcessado.has(it.pat)) {
+        sapLog(`  ⏭️ Ignorado (duplicata na carga): PAT ${it.pat}`);
+        ignorados++;
+        continue;
+      }
+      patJaProcessado.add(it.pat);
+
       const tipo          = sapClassificarTipo(it.desc, it.modelo);
       const localSysack   = sapMapearLocalidade(it.local);
-      const existePat     = patsExistentes.get(it.pat);
+      // Busca por PAT e também por número Imob. SAP para evitar importar o mesmo ativo com PAT diferente
+      const existePat     = patsExistentes.get(it.pat) || patsExistentes.get('imob:' + it.imob);
       const existeAtivo   = ativosExistentes.get(it.pat);
       const agora         = new Date().toISOString();
 
