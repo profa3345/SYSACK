@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.12-bloqueio-dominio
+ * SYSACK Agent Desktop v2.2.0
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -25,6 +25,7 @@ const PROJECT_ID = cfg.firebaseProjectId || 'sysack-829e2';
 const API_KEY    = cfg.firebaseApiKey    || 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
 const AGENT_ID   = cfg.agentId          || os.hostname();
 const INTERVAL   = (cfg.intervalSeconds || 60) * 1000;
+let _fsErrosConsecutivos = 0; // contador de falhas consecutivas no Firestore
 let TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
 const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000;
 let _softwareCache = { at: 0, list: [] };
@@ -724,30 +725,57 @@ function firestoreSet(docPath, data) {
     const body = JSON.stringify({ fields });
     const urlObj = new URL(url);
 
-    const req = https.request({
-      hostname: urlObj.hostname,
-      path:     urlObj.pathname + urlObj.search,
-      method:   'PATCH',
-      rejectUnauthorized: false, // aceita proxy CESAN com certificado autoassinado
-      headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-    }, res => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(raw);
+    const makeReq = (attempt) => {
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path:     urlObj.pathname + urlObj.search,
+        method:   'PATCH',
+        rejectUnauthorized: false,
+        timeout:  15000,
+        headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, res => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            _fsErrosConsecutivos = 0; // reset contador de erros
+            if (global._watchdogOk) global._watchdogOk();
+            resolve(raw);
+          } else if ((res.statusCode === 429 || res.statusCode >= 500) && attempt < 3) {
+            // Rate limit ou erro servidor — retry com backoff
+            const delay = attempt * 2000;
+            log(`[Firestore] HTTP ${res.statusCode} em ${docPath} — retry em ${delay}ms (tentativa ${attempt})`);
+            setTimeout(() => makeReq(attempt + 1), delay);
+          } else {
+            _fsErrosConsecutivos++;
+            const errMsg = `HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 200)}`;
+            log(`[Firestore] ERRO gravação — ${errMsg} (erros consecutivos: ${_fsErrosConsecutivos})`);
+            reject(new Error(errMsg));
+          }
+        });
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        if (attempt < 3) {
+          log(`[Firestore] Timeout em ${docPath} — retry ${attempt}`);
+          setTimeout(() => makeReq(attempt + 1), attempt * 1500);
         } else {
-          // CORREÇÃO: loga o erro HTTP para facilitar diagnóstico de 403 (regras Firestore)
-          // e 400 (índice ausente), em vez de rejeitar silenciosamente.
-          const errMsg = `HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 300)}`;
-          log(`[Firestore] ERRO gravação — ${errMsg}`);
-          reject(new Error(errMsg));
+          _fsErrosConsecutivos++;
+          reject(new Error('Timeout após 3 tentativas: ' + docPath));
         }
       });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
+      req.on('error', (e) => {
+        if (attempt < 3) {
+          setTimeout(() => makeReq(attempt + 1), attempt * 1500);
+        } else {
+          _fsErrosConsecutivos++;
+          reject(e);
+        }
+      });
+      req.write(body);
+      req.end();
+    };
+    makeReq(1);
   });
 }
 
@@ -1014,7 +1042,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
         primeiroLogin: nowIso,
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '', fonte: 'agent-desktop',
-        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.9-alertas',
+        versaoAgente: '2.2.0',
       });
       log(`[LoginHistory] Documento criado: ${loginDocId}`);
     } else {
@@ -1022,7 +1050,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
       await firestorePatch(docPath, {
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '',
-        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.9-alertas',
+        versaoAgente: '2.2.0',
       });
       log(`[LoginHistory] Documento atualizado (ultimoLogin): ${loginDocId}`);
     }
@@ -1264,7 +1292,7 @@ async function reportar() {
       software:          software,
       softwareCount:     software.length,
       softwareAtualizadoEm: _softwareCache.at ? new Date(_softwareCache.at).toISOString() : now,
-      versaoAgente:      cfg.versaoAgente || '2.1.9-alertas',
+      versaoAgente:      '2.2.0',
       ultimaAtualizacao: now,
       lastSeen:          now,
       status:            'online',
@@ -1295,7 +1323,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.12-bloqueio-dominio] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.0] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -3116,8 +3144,55 @@ setTimeout(coletarPortasSwitches, 5 * 60 * 1000);
 setInterval(coletarPortasSwitches, 15 * 60 * 1000);
 
 
-reportar(); // Primeira execução imediata
-setInterval(reportar, INTERVAL);
+// ── Diagnóstico de conectividade ao iniciar ────────────────────
+async function verificarConectividade() {
+  return new Promise(resolve => {
+    const req = https.request({
+      hostname: 'firestore.googleapis.com',
+      path: '/',
+      method: 'GET',
+      rejectUnauthorized: false,
+      timeout: 8000,
+    }, res => {
+      log(`[CONECTIVIDADE] Firestore googleapis.com: HTTP ${res.statusCode} — OK`);
+      resolve(true);
+    });
+    req.on('error', e => {
+      log(`[CONECTIVIDADE] FALHA ao acessar firestore.googleapis.com: ${e.message}`);
+      log('[CONECTIVIDADE] Verifique: 1) acesso à internet 2) proxy/firewall bloqueando googleapis.com 3) Node.js tem permissão de rede');
+      resolve(false);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      log('[CONECTIVIDADE] TIMEOUT ao acessar firestore.googleapis.com — proxy ou firewall bloqueando');
+      resolve(false);
+    });
+    req.end();
+  });
+}
+
+// ── Watchdog: reloga o agente se lastSeen parar de atualizar ───
+let _ultimoSucessoGravacao = Date.now();
+const _origFirestoreSet = firestoreSet;
+// Override transparente para rastrear último sucesso
+global._watchdogOk = () => { _ultimoSucessoGravacao = Date.now(); };
+setInterval(() => {
+  const inativo = Date.now() - _ultimoSucessoGravacao;
+  if (inativo > 5 * 60 * 1000) { // 5 minutos sem gravar
+    log(`[WATCHDOG] Sem gravação no Firestore há ${Math.round(inativo/60000)}min — forçando novo ciclo`);
+    reportar().catch(e => log('[WATCHDOG] Erro no ciclo forçado: ' + e.message));
+    _ultimoSucessoGravacao = Date.now(); // evita loop
+  }
+}, 2 * 60 * 1000);
+
+// ── Inicialização ───────────────────────────────────────────────
+verificarConectividade().then(ok => {
+  if (!ok) {
+    log('[AVISO] Sem conectividade ao Firestore. O agente tentará mesmo assim (pode ser falso positivo de proxy).');
+  }
+  reportar(); // Primeira execução imediata
+  setInterval(reportar, INTERVAL);
+});
 
 // Mantém o processo vivo
 process.on('uncaughtException', err => log(`[UNCAUGHT] ${err.message}`));

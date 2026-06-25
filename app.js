@@ -8226,7 +8226,14 @@ function renderAssistenciaRemota() {
   tbody.innerHTML = lista.map(a => {
     const statusCls = a.status || 'sem-agente';
     const statusCor = {online:'badge-success',offline:'badge-danger',alerta:'badge-warning',critico:'badge-danger'}[a.status] || '';
-    const lastSeen  = a.lastSeen ? fmtRelative(new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen)) : '—';
+    const lastSeenDate = a.lastSeen ? new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen) : null;
+    const lastSeenMins = lastSeenDate ? Math.floor((Date.now() - lastSeenDate.getTime()) / 60000) : null;
+    const lastSeenLabel = lastSeenDate ? fmtRelative(lastSeenDate) : '—';
+    // Alerta quando status=online mas lastSeen desatualizado há >10min (agente não grava no Firestore)
+    const lastSeenStale = a.status === 'online' && lastSeenMins !== null && lastSeenMins > 10;
+    const lastSeen = lastSeenStale
+      ? `<span title="Agente online mas lastSeen desatualizado (${lastSeenLabel}). Verifique conectividade ao Firestore na máquina." style="color:#DC2626;font-weight:600;cursor:help">⚠️ ${lastSeenLabel}</span>`
+      : lastSeenLabel;
     const ativoRel = arEncontrarAtivoDoAgente(a);
     const usuarioLogado = a.usuarioLogado || ativoRel?.usuarioLogado || ativoRel?.ultimoLoginUsuario || '—';
     const usuarioPrincipal = arListaUsuariosPrincipais(ativoRel, a);
