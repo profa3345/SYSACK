@@ -16313,74 +16313,500 @@ async function patConfirmarVincularNF(nfId, count, btn) {
 }
 
 // ── IMPORTAR PATs DO SAP (CSV/planilha) ───────────────────────
+// ═══════════════════════════════════════════════════════════════
+// IMPORTAÇÃO SAP — suporta XLSX, TXT tabulado, TXT com pipes (|), CSV
+// Campos SAP mapeados:
+//   Col 0 → Nº inventário (PAT)
+//   Col 1 → Imob. (número SAP)
+//   Col 2 → Sbnº (sub-número, ignorado)
+//   Col 3 → Descrição
+//   Col 4 → Nº de série
+//   Col 5 → Descrição Modelo
+//   Col 6 → Descrição Marca
+//   Col 7 → Descrição Local (localidade)
+//   Col 8 → Qtde
+// ═══════════════════════════════════════════════════════════════
+
 function patImportarSAP() {
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
-  const modal = document.createElement('div');
-  modal.style.cssText = 'background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.4)';
-  modal.innerHTML = `
-    <h3 style="margin:0 0 14px;font-size:16px">📥 Importar Patrimônios do SAP</h3>
-    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;font-size:12.5px;color:#64748B;margin-bottom:16px">
-      <strong>Formato esperado (CSV com ponto-e-vírgula):</strong><br>
-      <code style="font-family:monospace;color:#1E293B">PAT;Descricao;Categoria;Valor;DataAquisicao;Gerencia;Fornecedor;NF</code><br><br>
-      Exporte do SAP: <em>Módulo Patrimônio → Listar Ativos → Exportar CSV</em>
-    </div>
-    <div style="margin-bottom:14px">
-      <label class="form-label">Arquivo CSV do SAP</label>
-      <input type="file" id="sap-csv-input" accept=".csv,.txt" class="form-control" style="padding:8px">
-    </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button onclick="this.closest('[style*=fixed]').remove()" class="btn btn-ghost">Cancelar</button>
-      <button onclick="patProcessarCSVSAP(this)" class="btn btn-primary">📥 Importar</button>
+  overlay.id = 'modal-import-sap-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+
+  overlay.innerHTML = `
+    <div style="background:var(--panel,#fff);border-radius:16px;max-width:640px;width:100%;max-height:94vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.35)">
+      <!-- Cabeçalho -->
+      <div style="padding:18px 22px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:18px;font-weight:800;color:var(--g900)">📥 Importar dados do SAP</div>
+          <div style="font-size:12px;color:var(--g500);margin-top:3px">Ativo imobilizado — atualização de inventário patrimonial</div>
+        </div>
+        <button onclick="document.getElementById('modal-import-sap-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--g400);padding:0 4px;line-height:1">✕</button>
+      </div>
+
+      <!-- Corpo -->
+      <div style="padding:18px 22px;overflow-y:auto;flex:1">
+
+        <!-- Formatos aceitos -->
+        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:#166534">
+          <b>✅ Formatos aceitos:</b>
+          <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px">
+            <span>• <b>.xlsx</b> — Planilha Excel</span>
+            <span>• <b>.xls</b> — Excel legado</span>
+            <span>• <b>.txt</b> com tabuladores (SAP)</span>
+            <span>• <b>.txt</b> com pipes | (SAP)</span>
+            <span>• <b>.csv</b> com ponto-e-vírgula</span>
+            <span>• <b>.csv</b> com vírgula</span>
+          </div>
+        </div>
+
+        <!-- Colunas esperadas -->
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:11.5px;color:#1E40AF">
+          <b>📋 Colunas identificadas automaticamente:</b><br>
+          <span style="font-family:monospace;font-size:11px;display:block;margin-top:6px;color:#1D4ED8">
+            Nº invent. | Imob. | Sbnº | Descrição | Nº de série | Descrição Modelo | Descrição Marca | Descrição Local | Qtde
+          </span>
+          <div style="margin-top:6px;color:#3B82F6">O sistema detecta o formato automaticamente, incluindo cabeçalhos e rodapés do SAP.</div>
+        </div>
+
+        <!-- Modo de importação -->
+        <div style="margin-bottom:16px">
+          <label style="font-size:12px;font-weight:700;color:var(--g700);display:block;margin-bottom:8px">Modo de importação</label>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1.5px solid var(--accent);border-radius:8px;cursor:pointer;background:#EFF6FF">
+              <input type="radio" name="sap-modo" value="atualizar" checked style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:12.5px;font-weight:700;color:var(--g900)">🔄 Atualizar existentes + criar novos</div>
+                <div style="font-size:11px;color:var(--g500);margin-top:2px">PATs já cadastrados terão descrição, modelo, marca e localidade atualizados. PATs novos serão criados.</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;cursor:pointer">
+              <input type="radio" name="sap-modo" value="somente_novos" style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:12.5px;font-weight:700;color:var(--g900)">➕ Somente criar novos</div>
+                <div style="font-size:11px;color:var(--g500);margin-top:2px">Ignora PATs já existentes, importa apenas os que não estão no SYSACK.</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;cursor:pointer">
+              <input type="radio" name="sap-modo" value="sincronizar" style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:12.5px;font-weight:700;color:var(--g900)">🔁 Sincronização completa</div>
+                <div style="font-size:11px;color:var(--g500);margin-top:2px">Atualiza todos os campos dos existentes, cria novos e marca como "baixado no SAP" os que saíram da lista.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Upload -->
+        <div style="margin-bottom:14px">
+          <label style="font-size:12px;font-weight:700;color:var(--g700);display:block;margin-bottom:6px">Arquivo do SAP</label>
+          <div id="sap-drop-zone" style="border:2px dashed var(--accent);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:background .15s"
+            onclick="document.getElementById('sap-file-input').click()"
+            ondragover="event.preventDefault();this.style.background='#EFF6FF'"
+            ondragleave="this.style.background=''"
+            ondrop="event.preventDefault();this.style.background='';sapProcessarArquivo(event.dataTransfer.files[0])">
+            <div style="font-size:28px;margin-bottom:8px">📂</div>
+            <div style="font-size:13px;font-weight:600;color:var(--g700)">Clique ou arraste o arquivo aqui</div>
+            <div style="font-size:11px;color:var(--g500);margin-top:4px">.xlsx · .xls · .txt · .csv</div>
+          </div>
+          <input type="file" id="sap-file-input" accept=".xlsx,.xls,.txt,.csv" style="display:none"
+            onchange="sapProcessarArquivo(this.files[0])">
+        </div>
+
+        <!-- Preview -->
+        <div id="sap-preview" style="display:none">
+          <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:8px">Pré-visualização</div>
+          <div id="sap-preview-resumo" style="background:#F8FAFC;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px"></div>
+          <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;max-height:220px;overflow-y:auto">
+            <table style="width:100%;font-size:11px;border-collapse:collapse" id="sap-preview-table">
+              <thead style="background:var(--g50);position:sticky;top:0">
+                <tr>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">PAT</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Imob. SAP</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Descrição</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Modelo</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Marca</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Localidade SAP</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Status</th>
+                </tr>
+              </thead>
+              <tbody id="sap-preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Log de importação -->
+        <div id="sap-log-wrap" style="display:none;margin-top:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:6px">Log de importação</div>
+          <pre id="sap-log" style="background:#0F172A;color:#94A3B8;border-radius:8px;padding:12px;font-size:11px;max-height:180px;overflow-y:auto;margin:0;white-space:pre-wrap;font-family:monospace"></pre>
+        </div>
+      </div>
+
+      <!-- Rodapé -->
+      <div style="padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+        <div id="sap-footer-info" style="font-size:12px;color:var(--g500)">Selecione um arquivo para continuar</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('modal-import-sap-overlay').remove()" class="btn btn-ghost btn-sm">Cancelar</button>
+          <button id="sap-btn-importar" onclick="sapConfirmarImportacao(this)" class="btn btn-primary btn-sm" disabled>📥 Importar</button>
+        </div>
+      </div>
     </div>`;
-  overlay.appendChild(modal);
+
   document.body.appendChild(overlay);
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  // Guarda dados parseados globalmente para o step de confirmação
+  window._sapDadosParsed = null;
 }
 
-async function patProcessarCSVSAP(btn) {
-  const file = document.getElementById('sap-csv-input')?.files?.[0];
-  if (!file) return showToast('Selecione um arquivo CSV', 'warning');
+// ── Parser universal de arquivos SAP ───────────────────────────
+async function sapProcessarArquivo(file) {
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  let linhas = []; // Array de arrays de strings
 
-  setButtonLoading(btn, true, 'Importando...');
-  const text = await file.text();
-  const linhas = text.split('\n').filter(l => l.trim());
-  let importados = 0;
-
-  for (const linha of linhas.slice(1)) { // pula cabeçalho
-    const cols = linha.split(';').map(c => c.trim().replace(/^"|"$/g, ''));
-    if (cols.length < 3 || !cols[0]) continue;
-
-    const [pat, desc, categoria, valor, dataAq, gerencia, fornecedor, nf] = cols;
-    const novoPat = {
-      id:           'PAT-SAP-' + Date.now() + '-' + importados,
-      pat:          pat.replace(/[^0-9]/g, ''),
-      desc,
-      categoria:    categoria || 'outro',
-      valorAquisicao: parseFloat(valor?.replace(',','.')) || 0,
-      dataAquisicao:  dataAq || '',
-      gerencia:       gerencia || '',
-      fornecedor:     fornecedor || '',
-      nf:             nf || '',
-      status:         'ativo',
-      origem:         'sap-import',
-      createdAt:      new Date().toISOString(),
-    };
-    const dep = calcularDepreciacao(novoPat);
-    novoPat.valorAtual    = dep.valorAtual;
-    novoPat.pctDepreciado = dep.pctDepreciado;
-
-    if (!STATE.patrimonios) STATE.patrimonios = [];
-    STATE.patrimonios.unshift(novoPat);
-    await fsAdd('patrimonios', novoPat);
-    importados++;
+  try {
+    if (ext === 'xlsx' || ext === 'xls') {
+      // Lê XLSX com SheetJS (já carregado no app)
+      const buf = await file.arrayBuffer();
+      linhas = await sapLerXLSX(buf);
+    } else {
+      // TXT ou CSV — tenta detectar encoding
+      const buf = await file.arrayBuffer();
+      let text = '';
+      for (const enc of ['utf-8', 'utf-8-sig', 'latin1', 'windows-1252']) {
+        try { text = new TextDecoder(enc).decode(buf); break; } catch {}
+      }
+      linhas = sapParsearTexto(text);
+    }
+  } catch(e) {
+    showToast('Erro ao ler arquivo: ' + e.message, 'danger'); return;
   }
 
-  setButtonLoading(btn, false, '📥 Importar');
-  btn.closest('[style*=fixed]')?.remove();
-  renderPatrimonio();
-  showToast(`✅ ${importados} patrimônio(s) importado(s) do SAP!`, 'success', 5000);
+  if (!linhas.length) { showToast('Nenhum dado encontrado no arquivo.', 'warning'); return; }
+  window._sapDadosParsed = linhas;
+  sapMostrarPreview(linhas, file.name);
 }
+
+async function sapLerXLSX(buf) {
+  // Tenta usar SheetJS se disponível, senão usa openpyxl via FileReader manual
+  if (typeof XLSX !== 'undefined') {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    return raw.map(row => row.map(c => String(c ?? '').trim()));
+  }
+  // Fallback: lê como CSV tentando extrair valores
+  throw new Error('Biblioteca XLSX não carregada. Use arquivo .txt ou .csv.');
+}
+
+function sapParsearTexto(text) {
+  const linhas = text.split(/\r?\n/);
+  const resultado = [];
+  for (const linha of linhas) {
+    let cols = [];
+    // Formato com pipe (|...|...|)
+    if (linha.includes('|')) {
+      cols = linha.split('|').map(c => c.trim()).filter((_, i, a) => i > 0 && i < a.length - 1);
+    }
+    // Formato tabulado
+    else if (linha.includes('\t')) {
+      cols = linha.split('\t').map(c => c.trim());
+    }
+    // CSV ponto-e-vírgula
+    else if (linha.includes(';')) {
+      cols = linha.split(';').map(c => c.replace(/^"|"$/g, '').trim());
+    }
+    // CSV vírgula
+    else if (linha.includes(',') && linha.split(',').length >= 4) {
+      cols = linha.split(',').map(c => c.replace(/^"|"$/g, '').trim());
+    }
+    if (cols.length >= 3) resultado.push(cols);
+  }
+  return resultado;
+}
+
+// ── Filtra e normaliza linhas do SAP ────────────────────────────
+function sapNormalizarLinhas(linhas) {
+  const resultado = [];
+  // Palavras que indicam linha de cabeçalho/rodapé/totais SAP
+  const ignora = /^(nº\s*invent|imob\.|sbnº|descrição\s*centro|saída\s*dinâm|ativo\s*imobili|data\s*de|pagina|page|\d{2}\.\d{2}\.\d{4}|\*|---|===)/i;
+
+  for (const row of linhas) {
+    if (!row || !row.length) continue;
+    const col0 = String(row[0] || '').trim();
+    const col1 = String(row[1] || '').trim();
+    // Linha de dados: col0 é número de inventário (5-6 dígitos) e col1 é número Imob. SAP
+    if (/^\d{4,8}$/.test(col0) && /^\d{6,12}$/.test(col1)) {
+      resultado.push({
+        pat:        col0,
+        imob:       col1,
+        sbno:       String(row[2] || '').trim(),
+        desc:       String(row[3] || '').trim(),
+        nSerie:     String(row[4] || '').trim(),
+        modelo:     String(row[5] || '').trim(),
+        marca:      String(row[6] || '').trim(),
+        local:      String(row[7] || '').trim(),
+        qtde:       parseInt(String(row[8] || '1').trim()) || 1,
+      });
+    }
+  }
+  return resultado;
+}
+
+// ── Classifica tipo de ativo pela descrição SAP ──────────────────
+function sapClassificarTipo(desc, modelo) {
+  const d = (desc + ' ' + modelo).toUpperCase();
+  if (/micro\s*comp|desktop|pentium|computador|workstation|pc\b/.test(d)) return 'computador';
+  if (/notebook|laptop|ultrabook/.test(d)) return 'notebook';
+  if (/servidor|server/.test(d)) return 'servidor';
+  if (/monitor|vídeo\s*\d|lcd|led\b/.test(d)) return 'monitor';
+  if (/impressora|printer|laser|jato/.test(d)) return 'impressora';
+  if (/switch|hub|roteador|router|gateway/.test(d)) return 'switch';
+  if (/no.?break|ups\b|estabilizador/.test(d)) return 'nobreak';
+  if (/firewall|fortigate|cisco\s*asa/.test(d)) return 'firewall';
+  if (/scanner/.test(d)) return 'scanner';
+  if (/tablet/.test(d)) return 'tablet';
+  if (/smartphone|celular/.test(d)) return 'smartphone';
+  if (/pabx|ramal|central\s*tel/.test(d)) return 'telefonia';
+  if (/ar.condicionado|split|evaporador|condensadora/.test(d)) return 'ar-condicionado';
+  if (/mesa|cadeira|armario|gaveteiro|estante/.test(d)) return 'mobiliario';
+  if (/projetor/.test(d)) return 'projetor';
+  return 'outro';
+}
+
+// ── Mostra preview antes de confirmar ───────────────────────────
+function sapMostrarPreview(linhas, nomeArquivo) {
+  const itens = sapNormalizarLinhas(linhas);
+  if (!itens.length) {
+    showToast('Nenhuma linha de dados reconhecida. Verifique o formato do arquivo.', 'warning');
+    return;
+  }
+
+  // Verifica quais já existem no SYSACK
+  const patsExistentes = new Set((STATE.patrimonios || []).map(p => String(p.pat || p.id || '')));
+  const ativos = STATE.ativos || [];
+  const ativosExistentes = new Set(ativos.map(a => String(a.pat || a.id || '')));
+
+  let novos = 0, existentes = 0, atualizarAtivos = 0;
+  const tbody = document.getElementById('sap-preview-tbody');
+  if (tbody) {
+    tbody.innerHTML = itens.slice(0, 50).map(it => {
+      const existePat   = patsExistentes.has(it.pat);
+      const existeAtivo = ativosExistentes.has(it.pat);
+      if (existePat || existeAtivo) { existentes++; if (existeAtivo) atualizarAtivos++; }
+      else novos++;
+      const tipo   = sapClassificarTipo(it.desc, it.modelo);
+      const status = existeAtivo ? '<span style="background:#DBEAFE;color:#1D4ED8;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700">✏️ Atualiza ativo</span>'
+                   : existePat   ? '<span style="background:#FEF3C7;color:#92400E;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700">🔄 Atualiza PAT</span>'
+                                 : '<span style="background:#D1FAE5;color:#047857;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700">➕ Novo</span>';
+      return `<tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px;font-family:monospace;font-weight:700;color:var(--accent)">${escapeHtml(it.pat)}</td>
+        <td style="padding:6px 10px;font-size:10.5px;color:var(--g500)">${escapeHtml(it.imob)}</td>
+        <td style="padding:6px 10px;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(it.desc)}">${escapeHtml(it.desc)}</td>
+        <td style="padding:6px 10px;font-size:11px;color:var(--g600)">${escapeHtml(it.modelo)}</td>
+        <td style="padding:6px 10px;font-size:11px;color:var(--g600)">${escapeHtml(it.marca)}</td>
+        <td style="padding:6px 10px;font-size:11px;color:var(--g600)">${escapeHtml(it.local)}</td>
+        <td style="padding:6px 10px">${status}</td>
+      </tr>`;
+    }).join('');
+    if (itens.length > 50) {
+      tbody.innerHTML += `<tr><td colspan="7" style="padding:8px 10px;text-align:center;color:var(--g400);font-size:11px">... e mais ${itens.length - 50} registros</td></tr>`;
+    }
+  }
+
+  const resumo = document.getElementById('sap-preview-resumo');
+  if (resumo) resumo.innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <span>📄 <b>Arquivo:</b> ${escapeHtml(nomeArquivo)}</span>
+      <span>📦 <b>Total:</b> ${itens.length} registros</span>
+      <span style="color:#047857">➕ <b>Novos:</b> ${novos}</span>
+      <span style="color:#1D4ED8">✏️ <b>Atualizar:</b> ${existentes}</span>
+      ${itens.length > 50 ? `<span style="color:var(--g400);font-size:11px">(mostrando 50 de ${itens.length})</span>` : ''}
+    </div>`;
+
+  const preview = document.getElementById('sap-preview');
+  if (preview) preview.style.display = '';
+
+  const footerInfo = document.getElementById('sap-footer-info');
+  if (footerInfo) footerInfo.innerHTML = `<b style="color:var(--g900)">${itens.length}</b> registros prontos · <span style="color:#047857">${novos} novos</span> · <span style="color:#1D4ED8">${existentes} a atualizar</span>`;
+
+  const btnImportar = document.getElementById('sap-btn-importar');
+  if (btnImportar) { btnImportar.disabled = false; btnImportar.dataset.total = itens.length; }
+
+  // Salva os itens normalizados para a importação
+  window._sapItensParsed = itens;
+}
+
+// ── Confirma e executa a importação ─────────────────────────────
+async function sapConfirmarImportacao(btn) {
+  const itens = window._sapItensParsed;
+  if (!itens || !itens.length) return showToast('Nenhum dado para importar.', 'warning');
+
+  const modo = document.querySelector('[name="sap-modo"]:checked')?.value || 'atualizar';
+  btn.disabled = true; btn.textContent = 'Importando...';
+
+  const logWrap = document.getElementById('sap-log-wrap');
+  const logEl   = document.getElementById('sap-log');
+  if (logWrap) logWrap.style.display = '';
+  const sapLog = (msg) => { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } };
+
+  sapLog(`[${new Date().toLocaleTimeString('pt-BR')}] Iniciando importação — modo: ${modo} — ${itens.length} registros`);
+
+  const patsExistentes = new Map();
+  (STATE.patrimonios || []).forEach(p => patsExistentes.set(String(p.pat || ''), p));
+  const ativosExistentes = new Map();
+  (STATE.ativos || []).forEach(a => ativosExistentes.set(String(a.pat || ''), a));
+
+  // Para sincronização, coleta PATs da carga SAP para detectar baixas
+  const patsDaCarga = new Set(itens.map(it => it.pat));
+
+  let criados = 0, atualizadosPat = 0, atualizadosAtivo = 0, ignorados = 0, erros = 0;
+
+  for (const it of itens) {
+    try {
+      const tipo          = sapClassificarTipo(it.desc, it.modelo);
+      const localSysack   = sapMapearLocalidade(it.local);
+      const existePat     = patsExistentes.get(it.pat);
+      const existeAtivo   = ativosExistentes.get(it.pat);
+      const agora         = new Date().toISOString();
+
+      const dadosSAP = {
+        pat:          it.pat,
+        imobSAP:      it.imob,
+        desc:         it.desc,
+        modelo:       it.modelo || '',
+        marca:        it.marca  || '',
+        nSerie:       it.nSerie || '',
+        localSAP:     it.local  || '',
+        localidade:   localSysack,
+        tipo,
+        status:       'ativo',
+        origem:       'sap-import',
+        ultimoSyncSAP: agora,
+      };
+
+      if (modo === 'somente_novos' && (existePat || existeAtivo)) {
+        ignorados++;
+        continue;
+      }
+
+      // Atualiza ativo vinculado (aparece na aba Ativos/Computadores etc.)
+      if (existeAtivo) {
+        const upd = {
+          imobSAP:      it.imob,
+          desc:         existeAtivo.desc || it.desc, // não sobrescreve desc se já tem nome melhor
+          modelo:       it.modelo || existeAtivo.modelo || '',
+          marca:        it.marca  || existeAtivo.marca  || '',
+          nSerie:       it.nSerie || existeAtivo.nSerie || '',
+          localSAP:     it.local,
+          localidade:   localSysack || existeAtivo.localidade || '',
+          tipo:         existeAtivo.tipo || tipo,
+          ultimoSyncSAP: agora,
+        };
+        Object.assign(existeAtivo, upd);
+        await fsUpdate('ativos', existeAtivo.id, upd).catch(e => sapLog(`  ⚠️ Firestore ativo ${it.pat}: ${e.message}`));
+        atualizadosAtivo++;
+        sapLog(`  ✏️ Ativo atualizado: PAT ${it.pat} — ${it.desc.slice(0,40)}`);
+      }
+
+      // Atualiza ou cria o registro patrimonial
+      if (existePat) {
+        const upd = { imobSAP: it.imob, desc: it.desc, modelo: it.modelo, marca: it.marca, nSerie: it.nSerie, localSAP: it.local, localidade: localSysack, ultimoSyncSAP: agora };
+        Object.assign(existePat, upd);
+        await fsUpdate('patrimonios', existePat.id, upd).catch(e => sapLog(`  ⚠️ ${e.message}`));
+        atualizadosPat++;
+      } else {
+        // Cria novo patrimônio
+        const novoPat = {
+          id:             'SAP-' + it.pat + '-' + Date.now(),
+          ...dadosSAP,
+          createdAt:      agora,
+          atualizadoEm:  agora,
+          valorAquisicao: 0,
+          category:       tipo,
+          categoria:      tipo,
+        };
+        if (!STATE.patrimonios) STATE.patrimonios = [];
+        STATE.patrimonios.unshift(novoPat);
+        await fsAdd('patrimonios', novoPat).catch(e => sapLog(`  ⚠️ ${e.message}`));
+        criados++;
+        sapLog(`  ➕ Criado: PAT ${it.pat} — ${it.desc.slice(0,40)} (${tipo})`);
+      }
+    } catch(e) {
+      erros++;
+      sapLog(`  ✗ Erro PAT ${it.pat}: ${e.message}`);
+    }
+  }
+
+  // Sincronização completa: marca como "baixado no SAP" os que saíram
+  if (modo === 'sincronizar') {
+    const naoNaCarga = (STATE.patrimonios || []).filter(p =>
+      p.origem === 'sap-import' && p.status === 'ativo' && !patsDaCarga.has(String(p.pat || ''))
+    );
+    for (const p of naoNaCarga) {
+      p.status = 'baixado_sap';
+      await fsUpdate('patrimonios', p.id, { status: 'baixado_sap', baixadoSAPem: new Date().toISOString() }).catch(() => {});
+      sapLog(`  🗑️ Baixado no SAP: PAT ${p.pat} — ${p.desc?.slice(0,30)}`);
+    }
+    if (naoNaCarga.length) sapLog(`  ℹ️ ${naoNaCarga.length} PAT(s) marcados como baixados no SAP`);
+  }
+
+  sapLog(`\n✅ Importação concluída:`);
+  sapLog(`   Criados:             ${criados}`);
+  sapLog(`   Ativos atualizados:  ${atualizadosAtivo}`);
+  sapLog(`   PATs atualizados:    ${atualizadosPat}`);
+  sapLog(`   Ignorados:           ${ignorados}`);
+  sapLog(`   Erros:               ${erros}`);
+  sapLog(`   Data/hora:           ${new Date().toLocaleString('pt-BR')}`);
+
+  // Grava log de importação no Firestore para auditoria
+  try {
+    const u = SESSION_USER || CURRENT_USER || {};
+    await fsAdd('importacoes_sap', {
+      data: new Date().toISOString(),
+      modo,
+      total: itens.length,
+      criados, atualizadosPat, atualizadosAtivo, ignorados, erros,
+      operador: u.nome || u.email || '',
+      createdAt: new Date().toISOString(),
+    });
+  } catch {}
+
+  btn.disabled  = false;
+  btn.textContent = '✅ Concluído';
+  btn.style.background = '#059669';
+
+  const footerInfo = document.getElementById('sap-footer-info');
+  if (footerInfo) footerInfo.innerHTML = `<b style="color:#059669">✅ ${criados} criados · ${atualizadosAtivo + atualizadosPat} atualizados · ${erros} erros</b>`;
+
+  if (typeof renderPatrimonio === 'function') renderPatrimonio();
+  if (typeof renderAtivos     === 'function') renderAtivos();
+  showToast(`✅ SAP importado — ${criados} novos, ${atualizadosAtivo + atualizadosPat} atualizados`, 'success', 6000);
+}
+
+// ── Mapeia localidade SAP para campo de localidade SYSACK ───────
+function sapMapearLocalidade(localSAP) {
+  if (!localSAP) return '';
+  const l = localSAP.toUpperCase();
+  // Remove sufixo de ambiente (ESCRITÓRIO, SALA etc.) e extrai nome do local
+  // Exemplos: "SANTA CLARA-ESCRITÓRIO" → "SANTA CLARA"
+  //           "VITÓRIA-SANTA CLARA" → "VITÓRIA-SANTA CLARA"
+  //           "DATA CENTER" → "DATA CENTER"
+  const partes = l.split('-');
+  if (partes.length >= 2) {
+    const ultimo = partes[partes.length - 1].trim();
+    if (['ESCRITÓRIO', 'ESCRITORIO', 'SALA', 'ALMOXARIFADO', 'DEPÓSITO', 'DEPOSITO', 'COPA'].includes(ultimo)) {
+      return partes.slice(0, -1).join('-').trim();
+    }
+  }
+  return localSAP.trim();
+}
+
+// Mantém compat com código antigo
+async function patProcessarCSVSAP(btn) {
+  const file = document.getElementById('sap-csv-input')?.files?.[0];
+  if (file) await sapProcessarArquivo(file);
+}
+
 
 // ── NOTAS FISCAIS ─────────────────────────────────────────────
 function renderNotasFiscais() {
