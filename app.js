@@ -16468,20 +16468,42 @@ function patImportarSAP() {
 async function sapProcessarArquivo(file) {
   if (!file) return;
   const ext = file.name.split('.').pop().toLowerCase();
-  let linhas = []; // Array de arrays de strings
+  let linhas = [];
 
   try {
     if (ext === 'xlsx' || ext === 'xls') {
-      // Lê XLSX com SheetJS (já carregado no app)
       const buf = await file.arrayBuffer();
       linhas = await sapLerXLSX(buf);
     } else {
-      // TXT ou CSV — tenta detectar encoding
       const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+
+      // Detecta encoding testando se o texto decodificado tem caracteres válidos
+      // O SAP exporta em latin-1/cp1252 (nunca UTF-8 puro para PT-BR com acentos)
+      // TextDecoder('windows-1252') cobre cp1252 corretamente no browser
       let text = '';
-      for (const enc of ['utf-8', 'utf-8-sig', 'latin1', 'windows-1252']) {
-        try { text = new TextDecoder(enc).decode(buf); break; } catch {}
+      const temBomUtf8 = bytes[0]===0xEF && bytes[1]===0xBB && bytes[2]===0xBF;
+      const temBomUtf16LE = bytes[0]===0xFF && bytes[1]===0xFE;
+      const temBomUtf16BE = bytes[0]===0xFE && bytes[1]===0xFF;
+
+      if (temBomUtf8) {
+        text = new TextDecoder('utf-8').decode(buf);
+      } else if (temBomUtf16LE) {
+        text = new TextDecoder('utf-16le').decode(buf);
+      } else if (temBomUtf16BE) {
+        text = new TextDecoder('utf-16be').decode(buf);
+      } else {
+        // SAP PT-BR usa cp1252/latin-1 — testa se tem bytes > 0x7F (acentos)
+        const temHighBytes = bytes.some(b => b > 0x7F);
+        if (temHighBytes) {
+          // cp1252 (windows-1252) converte corretamente É=0xC9, Ã=0xC3, Ó=0xD3 etc.
+          // e também  → ' (aspas curvas) e  → – (travessão)
+          text = new TextDecoder('windows-1252').decode(buf);
+        } else {
+          text = new TextDecoder('utf-8').decode(buf);
+        }
       }
+
       linhas = sapParsearTexto(text);
     }
   } catch(e) {
@@ -16508,53 +16530,100 @@ async function sapLerXLSX(buf) {
 function sapParsearTexto(text) {
   const linhas = text.split(/\r?\n/);
   const resultado = [];
+
   for (const linha of linhas) {
-    let cols = [];
-    // Formato com pipe (|...|...|)
-    if (linha.includes('|')) {
-      cols = linha.split('|').map(c => c.trim()).filter((_, i, a) => i > 0 && i < a.length - 1);
+    let cols = null;
+
+    // ── Formato com pipe (|...|...|) — noconvert.txt do SAP ──────────────
+    // Colunas FIXAS por posição no array após split('|'):
+    // [1]=PAT  [2]=Imob  [3]=Sbno  [4]=Desc  [5]=NrSerie  [6]=Modelo  [7]=Marca  [8]=Local  [9]=Qtde
+    if (linha.includes('|') && !linha.match(/^-+$/) && !linha.match(/^=+$/)) {
+      const partes = linha.split('|');
+      if (partes.length >= 9) {
+        const pat  = partes[1]?.trim() || '';
+        const imob = partes[2]?.trim() || '';
+        // Linha de dados: PAT é numérico 4-8 dígitos, Imob é numérico 6-12 dígitos
+        if (/^\d{4,8}$/.test(pat) && /^\d{6,12}$/.test(imob)) {
+          // Remonta como array na ordem padrão esperada pelo normalizador
+          cols = [
+            pat,            // [0] PAT
+            imob,           // [1] Imob
+            partes[3]?.trim() || '',  // [2] Sbno
+            partes[4]?.trim() || '',  // [3] Descrição
+            partes[5]?.trim() || '',  // [4] Nr Série
+            partes[6]?.trim() || '',  // [5] Modelo
+            partes[7]?.trim() || '',  // [6] Marca
+            partes[8]?.trim() || '',  // [7] Local
+            partes[9]?.trim() || '1', // [8] Qtde
+          ];
+        }
+      }
     }
-    // Formato tabulado
-    else if (linha.includes('\t')) {
-      cols = linha.split('\t').map(c => c.trim());
+
+    // ── Formato tabulado — texto_com_tabuladores.txt do SAP ──────────────
+    // Colunas FIXAS por índice de tab:
+    // [2]=PAT [4]=Imob [5]=Sbno [6]=Desc [7]=NrSerie [8]=Modelo [9]=Marca [10]=Local [11]=Qtde
+    else if (!cols && linha.includes('\t')) {
+      const tabs = linha.split('\t');
+      if (tabs.length >= 11) {
+        const pat  = tabs[2]?.trim() || '';
+        const imob = tabs[4]?.trim() || '';
+        if (/^\d{4,8}$/.test(pat) && /^\d{6,12}$/.test(imob)) {
+          cols = [
+            pat,
+            imob,
+            tabs[5]?.trim() || '',   // Sbno
+            tabs[6]?.trim() || '',   // Descrição
+            tabs[7]?.trim() || '',   // Nr Série
+            tabs[8]?.trim() || '',   // Modelo
+            tabs[9]?.trim() || '',   // Marca
+            tabs[10]?.trim() || '',  // Local
+            tabs[11]?.trim() || '1', // Qtde
+          ];
+        }
+      }
     }
-    // CSV ponto-e-vírgula
-    else if (linha.includes(';')) {
-      cols = linha.split(';').map(c => c.replace(/^"|"$/g, '').trim());
+
+    // ── CSV ponto-e-vírgula ──────────────────────────────────────────────
+    else if (!cols && linha.includes(';')) {
+      const partes = linha.split(';').map(v => v.replace(/^"|"$/g, '').trim());
+      if (partes.length >= 3) cols = partes;
     }
-    // CSV vírgula
-    else if (linha.includes(',') && linha.split(',').length >= 4) {
-      cols = linha.split(',').map(c => c.replace(/^"|"$/g, '').trim());
+
+    // ── CSV vírgula ──────────────────────────────────────────────────────
+    else if (!cols && linha.includes(',') && linha.split(',').length >= 4) {
+      const partes = linha.split(',').map(v => v.replace(/^"|"$/g, '').trim());
+      if (partes.length >= 3) cols = partes;
     }
-    if (cols.length >= 3) resultado.push(cols);
+
+    if (cols && cols.length >= 3) resultado.push(cols);
   }
   return resultado;
 }
 
 // ── Filtra e normaliza linhas do SAP ────────────────────────────
+// O parser sapParsearTexto já garante que todos os formatos produzem
+// arrays na mesma ordem: [0]=PAT [1]=Imob [2]=Sbno [3]=Desc [4]=NrSerie
+// [5]=Modelo [6]=Marca [7]=Local [8]=Qtde
 function sapNormalizarLinhas(linhas) {
   const resultado = [];
-  // Palavras que indicam linha de cabeçalho/rodapé/totais SAP
-  const ignora = /^(nº\s*invent|imob\.|sbnº|descrição\s*centro|saída\s*dinâm|ativo\s*imobili|data\s*de|pagina|page|\d{2}\.\d{2}\.\d{4}|\*|---|===)/i;
-
   for (const row of linhas) {
-    if (!row || !row.length) continue;
-    const col0 = String(row[0] || '').trim();
-    const col1 = String(row[1] || '').trim();
-    // Linha de dados: col0 é número de inventário (5-6 dígitos) e col1 é número Imob. SAP
-    if (/^\d{4,8}$/.test(col0) && /^\d{6,12}$/.test(col1)) {
-      resultado.push({
-        pat:        col0,
-        imob:       col1,
-        sbno:       String(row[2] || '').trim(),
-        desc:       String(row[3] || '').trim(),
-        nSerie:     String(row[4] || '').trim(),
-        modelo:     String(row[5] || '').trim(),
-        marca:      String(row[6] || '').trim(),
-        local:      String(row[7] || '').trim(),
-        qtde:       parseInt(String(row[8] || '1').trim()) || 1,
-      });
-    }
+    if (!row || row.length < 3) continue;
+    const pat  = String(row[0] || '').trim();
+    const imob = String(row[1] || '').trim();
+    // Valida: PAT deve ser numérico 4-8 dígitos, Imob 6-12 dígitos
+    if (!/^\d{4,8}$/.test(pat) || !/^\d{6,12}$/.test(imob)) continue;
+    resultado.push({
+      pat,
+      imob,
+      sbno:   String(row[2] || '').trim(),
+      desc:   String(row[3] || '').trim(),
+      nSerie: String(row[4] || '').trim(),
+      modelo: String(row[5] || '').trim(),
+      marca:  String(row[6] || '').trim(),
+      local:  String(row[7] || '').trim(),
+      qtde:   parseInt(String(row[8] || '1').trim()) || 1,
+    });
   }
   return resultado;
 }
@@ -32762,72 +32831,133 @@ window.SYSACK_AGENT_JS_URL = 'https://sysack.vercel.app/agent-desktop.js';
 window.SYSACK_AGENT_INSTALLER_URL = window.SYSACK_AGENT_JS_URL;
 
 function baixarInstaladorSYSACKCorrigido() {
+  // Gera o instalador .bat dinamicamente usando sempre a URL do agent-desktop.js da Vercel
+  const AGENT_URL = window.SYSACK_AGENT_JS_URL || 'https://sysack.vercel.app/agent-desktop.js';
+
+  // Cada elemento é uma linha do .bat — construído aqui para ser fácil de manter
   const linhas = [
     '@echo off',
     'chcp 65001 >nul',
-    'title SYSACK Agent Desktop - Instalador',
+    'title SYSACK Agent Desktop v2.2 - Instalador',
     'echo ============================================',
-    'echo  SYSACK Agent Desktop - Instalacao/Atualizacao',
+    'echo  SYSACK Agent Desktop v2.2 - Instalacao',
     'echo ============================================',
     'echo.',
+    '',
+    ':: Verifica privilegio de administrador',
     'net session >nul 2>&1',
     'if errorlevel 1 (',
-    '  echo ERRO: Execute este arquivo como Administrador.',
-    '  echo Clique com o botao direito e escolha Executar como administrador.',
+    '  echo ERRO: Execute como Administrador ^(botao direito -^> Executar como administrador^).',
     '  pause',
     '  exit /b 1',
     ')',
+    '',
     'set "SYSACK_DIR=C:\\SYSACK"',
-    'set "AGENT_URL=https://sysack.vercel.app/agent-desktop.js"',
+    'set "AGENT_URL=' + AGENT_URL + '"',
     'set "AGENT_FILE=%SYSACK_DIR%\\agent.js"',
+    'set "LOG_FILE=%SYSACK_DIR%\\install.log"',
+    '',
+    ':: Detecta Node.js em varias localizacoes',
     'set "NODE_EXE=C:\\Program Files\\nodejs\\node.exe"',
-    'echo [1/5] Preparando pasta %SYSACK_DIR%...',
-    'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
-    'echo [2/5] Encerrando execucao anterior do agente...',
-    'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
-    'for /f "tokens=2 delims==" %%P in (\'wmic process where "CommandLine like \'%%SYSACK%%agent.js%%\'" get ProcessId /value 2^>nul ^| find "ProcessId"\') do taskkill /PID %%P /F >nul 2>&1',
-    'timeout /t 2 /nobreak >nul',
-    'echo [3/5] Baixando agente atualizado da Vercel...',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri (\'%AGENT_URL%?ts=\' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -OutFile \'%AGENT_FILE%\'"',
-    'if not exist "%AGENT_FILE%" (',
-    '  echo ERRO: agent.js nao foi baixado.',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'echo [4/5] Verificando Node.js...',
+    'if not exist "%NODE_EXE%" set "NODE_EXE=C:\\Program Files (x86)\\nodejs\\node.exe"',
     'if not exist "%NODE_EXE%" (',
-    '  echo ERRO: Node.js nao encontrado em %NODE_EXE%.',
-    '  echo Instale Node.js 18+ e execute novamente.',
+    '  where node >nul 2>&1',
+    '  if errorlevel 1 (',
+    '    echo ERRO: Node.js nao encontrado.',
+    '    echo Instale Node.js 18+ em https://nodejs.org e execute novamente.',
+    '    pause',
+    '    exit /b 1',
+    '  )',
+    '  for /f "delims=" %%P in (\'where node\') do set "NODE_EXE=%%P"',
+    ')',
+    'echo [0/6] Node.js: %NODE_EXE%',
+    'for /f "tokens=*" %%V in (\'"%NODE_EXE%" --version 2^>nul\') do echo [0/6] Versao: %%V',
+    '',
+    'echo [1/6] Preparando pasta %SYSACK_DIR%...',
+    'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
+    'echo %date% %time% - Instalacao iniciada > "%LOG_FILE%"',
+    '',
+    'echo [2/6] Parando agente anterior...',
+    'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
+    'timeout /t 2 /nobreak >nul',
+    'for /f "tokens=2 delims==" %%P in (\'wmic process where "CommandLine like \'\'%%SYSACK%%agent%%\'\'" get ProcessId /value 2^>nul ^| find "ProcessId"\') do taskkill /PID %%P /F >nul 2>&1',
+    'timeout /t 2 /nobreak >nul',
+    '',
+    'echo [3/6] Verificando conectividade...',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri \'https://firestore.googleapis.com/\' -UseBasicParsing -TimeoutSec 10 -EA Stop; Write-Host \'OK: Firestore acessivel\' } catch { Write-Host \'AVISO: \' $_.Exception.Message }"',
+    '',
+    'echo [4/6] Baixando agente da Vercel...',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'%AGENT_URL%?v=2.2&ts=\'+$ts) -OutFile \'%AGENT_FILE%\' -UseBasicParsing"',
+    '',
+    'if not exist "%AGENT_FILE%" (',
+    '  echo ERRO: agent.js nao foi baixado. Verifique acesso a sysack.vercel.app',
+    '  echo %date% %time% - ERRO: Download falhou >> "%LOG_FILE%"',
     '  pause',
     '  exit /b 1',
     ')',
-    'echo [5/5] Criando/atualizando tarefa agendada...',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$Action = New-ScheduledTaskAction -Execute \"%NODE_EXE%\" -Argument \"%AGENT_FILE%\"; $Trigger = New-ScheduledTaskTrigger -AtStartup; Register-ScheduledTask -TaskName \"SYSACK-Agent\" -Action $Action -Trigger $Trigger -User \"SYSTEM\" -RunLevel Highest -Force | Out-Null"',
+    '',
+    ':: Verifica tamanho minimo (arquivo valido tem mais de 50KB)',
+    'for %%F in ("%AGENT_FILE%") do set AGENT_SIZE=%%~zF',
+    'if %AGENT_SIZE% LSS 50000 (',
+    '  echo ERRO: arquivo baixado parece corrompido ^(%AGENT_SIZE% bytes^).',
+    '  echo %date% %time% - ERRO: arquivo pequeno: %AGENT_SIZE% bytes >> "%LOG_FILE%"',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'echo [4/6] Download OK: %AGENT_SIZE% bytes',
+    '',
+    'echo [5/6] Criando tarefa agendada SYSACK-Agent...',
+    'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
+    'timeout /t 1 /nobreak >nul',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$A=New-ScheduledTaskAction -Execute \'%NODE_EXE%\' -Argument \'%AGENT_FILE%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null; Write-Host \'Tarefa criada com restart automatico\'"',
+    '',
     'if errorlevel 1 (',
-    '  echo ERRO: falha ao criar a tarefa agendada SYSACK-Agent.',
+    '  echo ERRO: falha ao criar tarefa agendada.',
+    '  echo %date% %time% - ERRO: falha na tarefa >> "%LOG_FILE%"',
     '  pause',
     '  exit /b 1',
     ')',
+    '',
+    'echo [6/6] Iniciando agente...',
     'schtasks /Run /TN "SYSACK-Agent"',
+    'timeout /t 4 /nobreak >nul',
+    '',
+    ':: Verifica se Node.exe esta rodando',
+    'tasklist /FI "IMAGENAME eq node.exe" 2>nul | find "node.exe" >nul',
+    'if errorlevel 1 (',
+    '  echo AVISO: node.exe nao detectado. Iniciando diretamente...',
+    '  start "SYSACK Agent" /min "%NODE_EXE%" "%AGENT_FILE%"',
+    ') else (',
+    '  echo     Agente iniciado com sucesso!',
+    ')',
+    '',
+    'echo %date% %time% - Instalacao concluida >> "%LOG_FILE%"',
     'echo.',
     'echo ============================================',
-    'echo  Instalacao concluida.',
-    'echo  O computador aparecera no SYSACK em ~60 segundos.',
+    'echo  Instalacao concluida!',
+    'echo.',
+    'echo  Aguarde ~60 segundos para o computador',
+    'echo  aparecer online no SYSACK.',
+    'echo.',
+    'echo  Se nao aparecer, verifique:',
+    'echo  1) Acesso a firestore.googleapis.com:443',
+    'echo  2) Log: %LOG_FILE%',
+    'echo  3) schtasks /Query /TN "SYSACK-Agent"',
     'echo ============================================',
-    'pause'
+    'pause',
   ];
 
   const script = linhas.join('\r\n');
-  const blob = new Blob([script], { type: 'application/x-bat;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url;
+  const blob   = new Blob(['\ufeff' + script], { type: 'application/octet-stream' });
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
+  a.href     = url;
   a.download = 'Instalar-SYSACK-Agent.bat';
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
-  showToast('Instalador gerado. Execute como Administrador no PC alvo.', 'success', 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast('✅ Instalador gerado! Execute como Administrador no PC alvo.', 'success', 6000);
 }
 
 
