@@ -3278,11 +3278,13 @@ async function _autenticarAD(login, senha) {
         setor:       u.setor    || sysackUser.setor || '',
         cargo:       u.cargo    || sysackUser.cargo || '',
         // Role e permissões VÊM DO SYSACK (não do AD)
-        role:        sysackUser.role        || 'viewer',
-        permissions: sysackUser.permissions || permissionsForRole(sysackUser.role || 'viewer'),
-        fonte:       'ad',
-        adToken:     adData.token,
-        sysackId:    sysackUser.id,
+        role:           sysackUser.role           || 'viewer',
+        permissions:    sysackUser.permissions    || permissionsForRole(sysackUser.role || 'viewer'),
+        moduloPerms:    sysackUser.moduloPerms    || {},
+        permsEspeciais: sysackUser.permsEspeciais || {},
+        fonte:          'ad',
+        adToken:        adData.token,
+        sysackId:       sysackUser.id,
       }
     };
 
@@ -10194,7 +10196,8 @@ async function executarAtualizacaoCliente() {
 
     const pendentes = new Map(comandos.map(c => [c.cmdId, c]));
     const inicio = Date.now();
-    const TIMEOUT_MS = 120000; // 2 min — download + restart leva tempo
+    const TIMEOUT_MS     = 240000; // 4 min — parar serviço + download + reiniciar
+    const processandoViu = new Set();
 
     while (pendentes.size && Date.now() - inicio < TIMEOUT_MS) {
       await new Promise(r => setTimeout(r, 2000));
@@ -10212,9 +10215,14 @@ async function executarAtualizacaoCliente() {
             resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:d.resultado || d.erro || st });
             updLog(`✗ ${item.agent.hostname||item.agent.id}: ${d.resultado || d.erro || st}`);
             pendentes.delete(cmdId);
-          } else if (st === 'executando' || st === 'processando') {
-            updLog(`… ${item.agent.hostname||item.agent.id}: ${st} (${elapsed}s)`);
-          } else if (st === 'pendente' && elapsed % 20 === 0) {
+          } else if (st === 'processando') {
+            if (!processandoViu.has(cmdId)) {
+              processandoViu.add(cmdId);
+              updLog(`🔄 ${item.agent.hostname||item.agent.id}: agente baixando nova versão e reiniciando... (${elapsed}s)`);
+            }
+          } else if (st === 'executando') {
+            updLog(`… ${item.agent.hostname||item.agent.id}: executando (${elapsed}s)`);
+          } else if (st === 'pendente' && elapsed > 0 && elapsed % 15 === 0) {
             updLog(`⏳ ${item.agent.hostname||item.agent.id}: aguardando agente processar... (${elapsed}s)`);
           }
         } catch(e) {
@@ -10226,13 +10234,17 @@ async function executarAtualizacaoCliente() {
     }
 
     for (const item of pendentes.values()) {
-      const ag = STATE_AGENTS?.list?.find(a => a.id === item.agent.id);
+      const ag      = STATE_AGENTS?.list?.find(a => a.id === item.agent.id);
       const statusAg = ag?.status || 'desconhecido';
+      const viuCmd   = processandoViu.has(item.cmdId);
       const dica = statusAg !== 'online'
-        ? 'Agente offline — verifique se SYSACK está rodando na máquina.'
-        : 'Agente online mas não processou. Pode estar em versão antiga ou PowerShell bloqueado.';
-      resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:`Timeout (120s) — ${dica}` });
-      updLog(`✗ ${item.agent.hostname||item.agent.id}: timeout — ${dica}`);
+        ? 'Agente offline — verifique se o serviço SYSACK-Agent está rodando.'
+        : viuCmd
+          ? 'Agente iniciou a atualização mas não confirmou. Verifique se o serviço reiniciou na máquina.'
+          : 'Agente online mas não processou. Verifique logs em C:\SYSACK\agent.log';
+      const statusFinal = viuCmd ? 'possivelmente_atualizado' : 'nao_atualizado';
+      resultados.push({ agent:item.agent, status:statusFinal, motivo:`Timeout (240s)${viuCmd?' [PROCESSANDO visto]':''} — ${dica}` });
+      updLog(`${viuCmd?'⚠':'✗'} ${item.agent.hostname||item.agent.id}: timeout — ${dica}`);
     }
 
     renderResultadoAtualizacaoCliente(resultados, versao);
@@ -17683,7 +17695,7 @@ function slaHtml(chamado) {
 
 // Verifica SLAs e gera alertas — roda a cada 15 min
 function verificarSLAs() {
-  // Não alertar se o usuário ainda não está logado
+  // Não exibe alertas antes do usuário estar logado
   if (!SESSION_USER && !CURRENT_USER?.uid) return;
   const abertos = (STATE.chamados||[]).filter(c => c.status === 'aberto' || c.status === 'em-atendimento');
   let alertas = 0;
@@ -33729,10 +33741,17 @@ function baixarInstaladorSYSACKCorrigido() {
       ')',
       '',
       'echo [3/6] Parando versao anterior do agente...',
+      'sc stop "SYSACK Agent"  >nul 2>&1',
+      'sc stop "SYSACK-Agent"  >nul 2>&1',
+      'timeout /t 3 /nobreak >nul',
       'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
       'timeout /t 2 /nobreak >nul',
-      'for /f "tokens=2 delims==" %%P in (\'wmic process where "CommandLine like \'\'%%SYSACK%%agent%%\'\'" get ProcessId /value 2^>nul ^| find "ProcessId"\') do taskkill /PID %%P /F >nul 2>&1',
+      'for /f "tokens=2 delims=," %%P in (\'tasklist /fi "imagename eq node.exe" /fo csv /nh 2^>nul\') do (',
+      '  taskkill /PID %%~P /F >nul 2>&1',
+      ')',
       'timeout /t 2 /nobreak >nul',
+      'if exist "%AGENT_FILE%.new.js" del /f /q "%AGENT_FILE%.new.js" >nul 2>&1',
+      'echo     Agente anterior parado.',
       '',
       'echo [4/6] Baixando agente SYSACK...',
       'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'%AGENT_URL%?ts=\'+$ts) -OutFile \'%AGENT_FILE%\' -UseBasicParsing"',
@@ -33772,7 +33791,7 @@ function baixarInstaladorSYSACKCorrigido() {
       '  echo   "firebaseApiKey": "AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww",',
       '  echo   "intervalSeconds": 60',
       '  echo }',
-      ') > "%SYSACK_DIR%\config.json"',
+      ') > "%SYSACK_DIR%\\config.json"',
       'echo     config.json criado.',
       '',
       'echo [6/6] Iniciando agente...',

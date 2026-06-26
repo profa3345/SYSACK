@@ -56,8 +56,8 @@ function isWindowsAdminContext() {
   if (process.platform !== 'win32') return process.getuid && process.getuid() === 0;
   try {
     const who = execSync('whoami', { timeout: 3000, windowsHide: true }).toString().toUpperCase().trim();
-    // Roda como SYSTEM (schtasks/serviço Windows) — sempre tem privilégio admin
-    if (who.includes('SYSTEM') || who.includes('NT AUTHORITY\\SYSTEM') || who.includes('S-1-5-18')) return true;
+    // Quando roda como SYSTEM via schtasks, nome contém SYSTEM
+    if (who.includes('SYSTEM')) return true;
   } catch(e) {}
   try {
     const who2 = execSync('whoami /user', { timeout: 3000, windowsHide: true }).toString().toUpperCase();
@@ -164,14 +164,14 @@ async function validarComandoSeguro(id, tipo, fields, dados) {
   }
 
   const role = (fields.requestedByRole || {}).stringValue || dados.requestedByRole || '';
-  // Aceita role vazio para compatibilidade com versões antigas do painel que não enviam o campo
+  // Aceita role vazio — só rejeita se vier preenchido com valor inválido
   if (requiresAdmin && role && !['admin','gestor','tecnico','mdm_admin'].includes(role)) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'perfil_sem_permissao', requestedByRole: role });
     await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Perfil do solicitante sem permissão para comando administrativo.' }).catch(() => {});
     return false;
   }
 
-  // Motivo obrigatório apenas para bloqueio/desbloqueio — não para atualizar_agente
+  // Motivo obrigatório apenas para bloqueio/desbloqueio/powershell, não para atualizar_agente
   const tiposComJustificativa = new Set(['bloquear_maquina','desbloquear_maquina','powershell']);
   if (tiposComJustificativa.has(tipo) && !String((fields.motivo || {}).stringValue || dados.motivo || '').trim()) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'justificativa_obrigatoria' });
@@ -234,49 +234,52 @@ function agendarReinicioAgent() {
     const script   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
     const bat      = path.join(__dirname, '_restart_sysack_agent.cmd');
     const pidClean = 'del /f /q "' + PID_FILE + '" >nul 2>nul';
-    // Cascata de reinício:
-    // 1) Tenta via sc stop + sc start (serviço Windows)
-    // 2) Tenta via schtasks (task agendada)
-    // 3) Fallback: start direto do node
     const nodeCmd  = '"' + nodeExe + '" "' + script + '"';
-    const body = '@echo off
-' +
-      'timeout /t 4 /nobreak >nul
-' +
-      pidClean + '
-' +
-      // Tenta reiniciar como serviço Windows (nome SYSACK-Agent ou SYSACKAgent)
-      'sc stop SYSACK-Agent >nul 2>nul
-' +
-      'timeout /t 2 /nobreak >nul
-' +
-      'sc start SYSACK-Agent >nul 2>nul
-' +
-      'if not errorlevel 1 goto :FIM
-' +
-      // Tenta via task scheduler
-      'schtasks /Run /TN "SYSACK-Agent" >nul 2>nul
-' +
-      'if not errorlevel 1 goto :FIM
-' +
-      // Fallback: inicia direto
-      'start "SYSACK Agent" /min ' + nodeCmd + '
-' +
-      ':FIM
-';
-    fs.writeFileSync(bat, body, 'utf8');
+
+    // Ordem: para servico → mata node residuais → move .new.js→.js → reinicia
+    const linhas = [
+      '@echo off',
+      'timeout /t 5 /nobreak >nul',
+      pidClean,
+      '',
+      ':: Para o servico Windows (ambos os nomes possiveis)',
+      'sc stop "SYSACK Agent"  >nul 2>nul',
+      'sc stop "SYSACK-Agent"  >nul 2>nul',
+      'timeout /t 3 /nobreak >nul',
+      'schtasks /End /TN "SYSACK-Agent" >nul 2>nul',
+      'timeout /t 2 /nobreak >nul',
+      '',
+      ':: Mata processos node residuais com lock no arquivo .js',
+      'for /f "tokens=2 delims=," %%P in (\'tasklist /fi "imagename eq node.exe" /fo csv /nh 2^>nul\') do (',
+      '  taskkill /PID %%~P /F >nul 2>nul',
+      ')',
+      'timeout /t 2 /nobreak >nul',
+      '',
+      ':: Move arquivo temporario para o definitivo',
+      ''if exist "' + script + '.new.js" (',
+      '  move /y "' + script + '.new.js" "' + script + '" >nul',
+      ')',
+      '',
+      ':: Reinicia — servico → schtasks → direto',
+      'sc start "SYSACK Agent"  >nul 2>nul',
+      'if not errorlevel 1 goto :FIM',
+      'sc start "SYSACK-Agent"  >nul 2>nul',
+      'if not errorlevel 1 goto :FIM',
+      'schtasks /Run /TN "SYSACK-Agent" >nul 2>nul',
+      'if not errorlevel 1 goto :FIM',
+      'start "SYSACK Agent" /min ' + nodeCmd,
+      ':FIM',
+    ].join('\r\n');
+
+    fs.writeFileSync(bat, linhas, 'utf8');
     exec('cmd /c start "" /min "' + bat + '"', { windowsHide: true });
     log('[UPDATE] Reinício agendado — bat: ' + bat + ' | script: ' + script);
   } catch(e) {
     log('[UPDATE] Falha ao agendar reinício: ' + e.message);
-    // Último recurso: tenta reiniciar via spawn desacoplado
     try {
       const { spawn } = require('child_process');
-      const nodeExe2 = process.execPath;
-      const script2  = process.argv[1];
-      const child = spawn(nodeExe2, [script2], {
-        detached: true, stdio: 'ignore',
-        windowsHide: true
+      const child = spawn(process.execPath, [process.argv[1]], {
+        detached: true, stdio: 'ignore', windowsHide: true
       });
       child.unref();
       log('[UPDATE] Spawn desacoplado iniciado como último recurso.');
@@ -2263,46 +2266,57 @@ $out | ConvertTo-Json -Depth 4 -Compress
       const versaoNova = dados.versao || '';
       if (!urlNova) throw new Error('URL do novo agente não informada');
       log(`[UPDATE] Iniciando atualização para v${versaoNova} via ${urlNova}`);
+
+      // Heartbeat imediato — painel sabe que agente recebeu antes do timeout de 240s
+      await firestorePatch('agent_commands/' + id, {
+        status: 'processando',
+        resultado: 'Agente recebeu o comando — baixando nova versão...',
+        processandoEm: new Date().toISOString(),
+      }).catch(() => {});
+
       const novoConteudo = await new Promise((resolve, reject) => {
-        const urlObj = new URL(urlNova);
-        const mod = urlNova.startsWith('https') ? require('https') : require('http');
-        const req = mod.get({ hostname:urlObj.hostname, path:urlObj.pathname+urlObj.search, headers:{'User-Agent':'SYSACK-Agent/auto-update'}, rejectUnauthorized:false }, res => {
-          if (res.statusCode>=300 && res.statusCode<400 && res.headers.location) {
-            const r2=mod.get(res.headers.location, res2=>{let d='';res2.on('data',c=>d+=c);res2.on('end',()=>res2.statusCode===200?resolve(d):reject(new Error('HTTP '+res2.statusCode)));});
-            r2.on('error',reject);r2.end();return;
-          }
-          if (res.statusCode!==200) return reject(new Error('HTTP '+res.statusCode));
-          let d=''; res.on('data',c=>d+=c); res.on('end',()=>resolve(d));
-        });
-        req.on('error',reject);
-        req.setTimeout(30000,()=>{req.destroy();reject(new Error('Timeout'));});
-        req.end();
+        function baixar(url, redirects) {
+          if (redirects > 5) return reject(new Error('Muitos redirecionamentos'));
+          const mod  = url.startsWith('https') ? require('https') : require('http');
+          const urlO = new URL(url);
+          const req  = mod.get({
+            hostname: urlO.hostname, path: urlO.pathname + urlO.search,
+            headers: { 'User-Agent': 'SYSACK-Agent/auto-update', 'Cache-Control': 'no-cache' },
+            rejectUnauthorized: false,
+          }, res => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) return baixar(res.headers.location, redirects + 1);
+            if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
+            let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
+          });
+          req.on('error', reject);
+          req.setTimeout(45000, () => { req.destroy(); reject(new Error('Timeout download')); });
+          req.end();
+        }
+        baixar(urlNova, 0);
       });
-      if (!novoConteudo || novoConteudo.length<1000) throw new Error('Arquivo inválido');
-      // Usa o arquivo atualmente em execução (pode ser agent.js ou agent-desktop.js)
+
+      if (!novoConteudo || novoConteudo.length < 1000) throw new Error(`Arquivo inválido (${novoConteudo?.length ?? 0} bytes)`);
+
+      // Grava em arquivo temporário — o .cmd move .new.js→.js após parar todos os processos
       const selfPath   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
+      const tempPath   = selfPath + '.new.js';
       const backupPath = selfPath.replace(/\.js$/, '.backup.js');
       try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
-      fs.writeFileSync(selfPath, novoConteudo, 'utf8');
-      // Verifica se o arquivo foi realmente escrito com o novo conteúdo
-      const verificacao = fs.readFileSync(selfPath, 'utf8');
-      if (verificacao.length < 1000 || verificacao === novoConteudo.slice(0, verificacao.length)) {
-        log(`[UPDATE] Verificação OK — ${selfPath} tem ${verificacao.length} bytes.`);
-      } else {
-        throw new Error('Arquivo escrito mas verificação falhou — tamanho inesperado.');
-      }
-      log(`[UPDATE] Substituído em ${selfPath} (${novoConteudo.length} bytes). Gravando confirmação...`);
-      resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
-      // CRÍTICO: grava status ANTES do exit — caso contrário o processo morre antes de confirmar
-      await firestorePatch('agents/'+AGENT_ID, {
+      fs.writeFileSync(tempPath, novoConteudo, 'utf8');
+      if (fs.readFileSync(tempPath, 'utf8').length < 1000) throw new Error('Arquivo temporário inválido após gravação');
+
+      log(`[UPDATE] Temp OK — ${tempPath} (${novoConteudo.length} bytes). Agendando reinício...`);
+      resultado = `Atualização v${versaoNova} agendada. Reiniciando serviço.`;
+
+      await firestorePatch('agents/' + AGENT_ID, {
         versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
-      }).catch(()=>{});
-      await firestorePatch('agent_commands/'+id, {
+      }).catch(() => {});
+      await firestorePatch('agent_commands/' + id, {
         status: 'concluido', resultado: resultado
-      }).catch(()=>{});
-      log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 3s...');
+      }).catch(() => {});
+      log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 2s...');
       agendarReinicioAgent();
-      setTimeout(()=>process.exit(0), 3000);
+      setTimeout(() => process.exit(0), 2000);
 
     } else if (tipo === 'screenshot') {
       const ps = [
@@ -2356,8 +2370,8 @@ async function pollComandos() {
   } catch(e) {}
 }
 
-setInterval(pollComandos, 1000);
-setTimeout(pollComandos, 250);
+setInterval(pollComandos, 800);
+setTimeout(pollComandos, 200);
 
 
 // ── Atualiza ativo correspondente com hostname ────────────────────
