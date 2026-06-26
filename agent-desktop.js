@@ -56,7 +56,6 @@ function isWindowsAdminContext() {
   if (process.platform !== 'win32') return process.getuid && process.getuid() === 0;
   try {
     const who = execSync('whoami', { timeout: 3000, windowsHide: true }).toString().toUpperCase().trim();
-    // Quando roda como SYSTEM via schtasks, nome contém SYSTEM
     if (who.includes('SYSTEM')) return true;
   } catch(e) {}
   try {
@@ -164,14 +163,14 @@ async function validarComandoSeguro(id, tipo, fields, dados) {
   }
 
   const role = (fields.requestedByRole || {}).stringValue || dados.requestedByRole || '';
-  // Aceita role vazio — só rejeita se vier preenchido com valor inválido
+  // Aceita role vazio para compatibilidade com versões antigas do painel
   if (requiresAdmin && role && !['admin','gestor','tecnico','mdm_admin'].includes(role)) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'perfil_sem_permissao', requestedByRole: role });
     await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Perfil do solicitante sem permissão para comando administrativo.' }).catch(() => {});
     return false;
   }
 
-  // Motivo obrigatório apenas para bloqueio/desbloqueio/powershell, não para atualizar_agente
+  // Motivo obrigatório apenas para bloqueio/desbloqueio/powershell — não para atualizar_agente
   const tiposComJustificativa = new Set(['bloquear_maquina','desbloquear_maquina','powershell']);
   if (tiposComJustificativa.has(tipo) && !String((fields.motivo || {}).stringValue || dados.motivo || '').trim()) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'justificativa_obrigatoria' });
@@ -235,8 +234,6 @@ function agendarReinicioAgent() {
     const bat      = path.join(__dirname, '_restart_sysack_agent.cmd');
     const pidClean = 'del /f /q "' + PID_FILE + '" >nul 2>nul';
     const nodeCmd  = '"' + nodeExe + '" "' + script + '"';
-
-    // Ordem: para servico → mata node residuais → move .new.js→.js → reinicia
     const linhas = [
       '@echo off',
       'timeout /t 5 /nobreak >nul',
@@ -250,13 +247,13 @@ function agendarReinicioAgent() {
       'timeout /t 2 /nobreak >nul',
       '',
       ':: Mata processos node residuais com lock no arquivo .js',
-      'for /f "tokens=2 delims=," %%P in (\'tasklist /fi "imagename eq node.exe" /fo csv /nh 2^>nul\') do (',
+      'for /f "tokens=2 delims=," %%P in ('tasklist /fi "imagename eq node.exe" /fo csv /nh 2^>nul') do (',
       '  taskkill /PID %%~P /F >nul 2>nul',
       ')',
       'timeout /t 2 /nobreak >nul',
       '',
       ':: Move arquivo temporario para o definitivo',
-      ''if exist "' + script + '.new.js" (',
+      'if exist "' + script + '.new.js" (',
       '  move /y "' + script + '.new.js" "' + script + '" >nul',
       ')',
       '',
@@ -270,7 +267,6 @@ function agendarReinicioAgent() {
       'start "SYSACK Agent" /min ' + nodeCmd,
       ':FIM',
     ].join('\r\n');
-
     fs.writeFileSync(bat, linhas, 'utf8');
     exec('cmd /c start "" /min "' + bat + '"', { windowsHide: true });
     log('[UPDATE] Reinício agendado — bat: ' + bat + ' | script: ' + script);

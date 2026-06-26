@@ -10186,7 +10186,7 @@ async function executarAtualizacaoCliente() {
             criadoPorNome:   _u?.nome || _u?.email || '',
           });
           comandos.push({ cmdId, agent: ag });
-          updLog(`→ ${ag.hostname||ag.id}: comando enviado (via Firestore)`);
+          updLog(`→ ${ag.hostname||ag.id}: comando enviado`);
         }
       } catch(e) {
         resultados.push({ agent: ag, status:'nao_atualizado', motivo:'Erro: ' + e.message });
@@ -10241,7 +10241,7 @@ async function executarAtualizacaoCliente() {
         ? 'Agente offline — verifique se o serviço SYSACK-Agent está rodando.'
         : viuCmd
           ? 'Agente iniciou a atualização mas não confirmou. Verifique se o serviço reiniciou na máquina.'
-          : 'Agente online mas não processou. Verifique logs em C:\SYSACK\agent.log';
+          : 'Agente online mas não processou o comando. Verifique logs em C:\SYSACK\agent.log';
       const statusFinal = viuCmd ? 'possivelmente_atualizado' : 'nao_atualizado';
       resultados.push({ agent:item.agent, status:statusFinal, motivo:`Timeout (240s)${viuCmd?' [PROCESSANDO visto]':''} — ${dica}` });
       updLog(`${viuCmd?'⚠':'✗'} ${item.agent.hostname||item.agent.id}: timeout — ${dica}`);
@@ -17695,7 +17695,6 @@ function slaHtml(chamado) {
 
 // Verifica SLAs e gera alertas — roda a cada 15 min
 function verificarSLAs() {
-  // Não exibe alertas antes do usuário estar logado
   if (!SESSION_USER && !CURRENT_USER?.uid) return;
   const abertos = (STATE.chamados||[]).filter(c => c.status === 'aberto' || c.status === 'em-atendimento');
   let alertas = 0;
