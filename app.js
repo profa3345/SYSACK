@@ -24949,19 +24949,7 @@ async function detectarEventos() {
       var ls = new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen);
       var diffDias = Math.floor((agora-ls)/(1000*60*60*24));
       if (diffDias > 5 && status==='em-uso') {
-        // Cruza com agentes — não alerta se agente está online ou com contato recente
-        var hnLower = (a.hostname||a.computador||a.id||'').toLowerCase();
-        var agente = (STATE_AGENTS?.list||[]).find(function(ag){
-          return (ag.hostname||ag.id||'').toLowerCase() === hnLower;
-        });
-        var agenteOnline = agente && (agente.status||'').toLowerCase() === 'online';
-        var agenteRecente = agente && agente.lastSeen && (function(){
-          var agLs = new Date(agente.lastSeen.seconds?agente.lastSeen.seconds*1000:agente.lastSeen);
-          return (agora - agLs) < 5 * 86400000; // contato nos últimos 5 dias
-        })();
-        if (!agenteOnline && !agenteRecente) {
-          alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
-        }
+        alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
       }
     }
 
@@ -33731,9 +33719,16 @@ function baixarInstaladorSYSACKCorrigido() {
       'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
       'sc stop "SYSACK Agent" >nul 2>&1',
       'sc stop "SYSACK-Agent" >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      'taskkill /F /IM node.exe >nul 2>&1',
       'timeout /t 3 /nobreak >nul',
       'taskkill /F /IM node.exe >nul 2>&1',
-      'timeout /t 2 /nobreak >nul',
+      'timeout /t 3 /nobreak >nul',
+      ':: Aguarda o arquivo ser liberado (testa renomeando)',
+      ':AGUARDA_LOCK',
+      'ren "%AGENT_FILE%" "_agent_lock_test.js" >nul 2>&1',
+      'if errorlevel 1 (timeout /t 2 /nobreak >nul & goto :AGUARDA_LOCK)',
+      'ren "%SYSACK_DIR%\_agent_lock_test.js" "agent.js" >nul 2>&1',
       'if exist "%AGENT_FILE%.new.js" del /f /q "%AGENT_FILE%.new.js" >nul 2>&1',
       'echo     Agente anterior encerrado.',
       '',
