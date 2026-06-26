@@ -24949,7 +24949,19 @@ async function detectarEventos() {
       var ls = new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen);
       var diffDias = Math.floor((agora-ls)/(1000*60*60*24));
       if (diffDias > 5 && status==='em-uso') {
-        alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
+        // Cruza com agentes — não alerta se agente está online ou com contato recente
+        var hnLower = (a.hostname||a.computador||a.id||'').toLowerCase();
+        var agente = (STATE_AGENTS?.list||[]).find(function(ag){
+          return (ag.hostname||ag.id||'').toLowerCase() === hnLower;
+        });
+        var agenteOnline = agente && (agente.status||'').toLowerCase() === 'online';
+        var agenteRecente = agente && agente.lastSeen && (function(){
+          var agLs = new Date(agente.lastSeen.seconds?agente.lastSeen.seconds*1000:agente.lastSeen);
+          return (agora - agLs) < 5 * 86400000; // contato nos últimos 5 dias
+        })();
+        if (!agenteOnline && !agenteRecente) {
+          alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
+        }
       }
     }
 
