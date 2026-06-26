@@ -10240,7 +10240,7 @@ async function executarAtualizacaoCliente() {
       const dica = statusAg !== 'online'
         ? 'Agente offline — verifique se o serviço SYSACK-Agent está rodando.'
         : viuCmd
-          ? 'Agente iniciou a atualização mas não confirmou. Verifique se o serviço reiniciou na máquina.'
+          ? 'Agente iniciou a atualização mas não confirmou. Verifique se o serviço reiniciou.'
           : 'Agente online mas não processou o comando. Verifique logs em C:\SYSACK\agent.log';
       const statusFinal = viuCmd ? 'possivelmente_atualizado' : 'nao_atualizado';
       resultados.push({ agent:item.agent, status:statusFinal, motivo:`Timeout (240s)${viuCmd?' [PROCESSANDO visto]':''} — ${dica}` });
@@ -33664,25 +33664,29 @@ async function sysackObterVersaoNode() {
 }
 
 function baixarInstaladorSYSACKCorrigido() {
-  // Obtém a versão atual do Node.js para embutir no instalador
   sysackObterVersaoNode().then(nodeInfo => {
-    const AGENT_URL  = window.SYSACK_AGENT_JS_URL || 'https://sysack.vercel.app/agent-desktop.js';
-    const NODE_VER   = nodeInfo?.versao   || 'v22.14.0';
-    const NODE_MSI   = nodeInfo?.urlWin64 || `https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-x64.msi`;
+    const AGENT_URL = window.SYSACK_AGENT_JS_URL || 'https://sysack.vercel.app/agent-desktop.js';
+    const NODE_VER  = nodeInfo?.versao   || 'v22.14.0';
+    const NODE_MSI  = nodeInfo?.urlWin64 || `https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-x64.msi`;
 
-    const linhas = [
+    // Gera o bat como string direta — sem BOM, sem chcp, sem net session
+    // Usa PowerShell para tudo que precisa de privilégio
+    const bat = [
       '@echo off',
-      'chcp 65001 >nul',
-      'title SYSACK Agent Desktop - Instalador',
+      'title SYSACK Agent - Instalador',
       'echo ============================================',
       'echo  SYSACK Agent Desktop - Instalacao',
       'echo ============================================',
       'echo.',
       '',
-      ':: Verifica privilegio de administrador',
-      'net session >nul 2>&1',
+      ':: Detecta se tem privilegio de admin verificando acesso a pasta System32',
+      'openfiles >nul 2>&1',
       'if errorlevel 1 (',
-      '  echo ERRO: Execute como Administrador (botao direito ^> Executar como administrador).',
+      '  echo.',
+      '  echo  ERRO: Execute como Administrador.',
+      '  echo  Clique com botao direito no arquivo .bat',
+      '  echo  e escolha "Executar como administrador".',
+      '  echo.',
       '  pause',
       '  exit /b 1',
       ')',
@@ -33691,99 +33695,42 @@ function baixarInstaladorSYSACKCorrigido() {
       'set "AGENT_URL=' + AGENT_URL + '"',
       'set "AGENT_FILE=%SYSACK_DIR%\\agent.js"',
       'set "LOG_FILE=%SYSACK_DIR%\\install.log"',
-      'set "NODE_MSI_URL=' + NODE_MSI + '"',
-      'set "NODE_MSI_FILE=%TEMP%\\node_sysack_setup.msi"',
       '',
-      'echo [1/6] Verificando ambiente...',
+      'echo [1/5] Preparando pasta %SYSACK_DIR%...',
       'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
-      'echo %date% %time% - Instalacao SYSACK iniciada > "%LOG_FILE%"',
+      'echo %date% %time% - Instalacao iniciada > "%LOG_FILE%"',
       '',
-      ':: Detecta Node.js em qualquer localizacao',
-      'set "NODE_EXE="',
-      'for %%P in ("%ProgramFiles%\\nodejs\\node.exe" "%ProgramFiles(x86)%\\nodejs\\node.exe") do (',
-      '  if exist "%%~P" set "NODE_EXE=%%~P"',
-      ')',
-      'if "%NODE_EXE%"=="" (',
-      '  where node >nul 2>&1',
-      '  if not errorlevel 1 for /f "delims=" %%P in (\'where node\') do set "NODE_EXE=%%P"',
-      ')',
-      '',
-      'echo [2/6] Verificando plataforma necessaria...',
-      'if "%NODE_EXE%"=="" (',
-      '  echo     Instalando componente de execucao necessario...',
-      '  echo     (Isso pode levar 1-2 minutos)',
-      '  powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'%NODE_MSI_URL%\' -OutFile \'%NODE_MSI_FILE%\' -UseBasicParsing"',
-      '  if not exist "%NODE_MSI_FILE%" (',
-      '    echo ERRO: Nao foi possivel baixar componente de execucao.',
-      '    echo Verifique a conexao com a internet e tente novamente.',
-      '    echo %date% %time% - ERRO: Download componente falhou >> "%LOG_FILE%"',
-      '    pause',
-      '    exit /b 1',
+      'echo [2/5] Verificando Node.js...',
+      'where node >nul 2>&1',
+      'if errorlevel 1 (',
+      '  echo     Node.js nao encontrado. Instalando...',
+      '  powershell -NoProfile -ExecutionPolicy Bypass -Command "& {[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' + NODE_MSI + '\' -OutFile \'%TEMP%\\node_setup.msi\' -UseBasicParsing; Start-Process msiexec -ArgumentList \'/i\',\'%TEMP%\\node_setup.msi\',\'/qn\',\'/norestart\' -Wait; Remove-Item \'%TEMP%\\node_setup.msi\' -Force -ErrorAction SilentlyContinue}"',
+      '  :: Recarrega PATH',
+      '  for /f "delims=" %%P in (\'where /r "%ProgramFiles%\\nodejs" node.exe 2^>nul\') do set "NODE_PATH=%%P"',
+      '  if not defined NODE_PATH (',
+      '    echo ERRO: Node.js nao encontrado apos instalacao. Reinicie e tente novamente.',
+      '    pause & exit /b 1',
       '  )',
-      '  echo     Instalando componente... (aguarde)',
-      '  msiexec /i "%NODE_MSI_FILE%" /qn /norestart ADDLOCAL=ALL',
-      '  timeout /t 5 /nobreak >nul',
-      '  del /f /q "%NODE_MSI_FILE%" >nul 2>nul',
-      '  :: Re-detecta apos instalacao',
-      '  for %%P in ("%ProgramFiles%\\nodejs\\node.exe" "%ProgramFiles(x86)%\\nodejs\\node.exe") do (',
-      '    if exist "%%~P" set "NODE_EXE=%%~P"',
-      '  )',
-      '  if "%NODE_EXE%"=="" (',
-      '    echo ERRO: Componente instalado mas nao localizado. Reinicie e tente novamente.',
-      '    echo %date% %time% - ERRO: Componente nao localizado apos instalacao >> "%LOG_FILE%"',
-      '    pause',
-      '    exit /b 1',
-      '  )',
-      '  echo     Componente instalado com sucesso!',
       ') else (',
-      '  echo     Componente de execucao ja presente.',
+      '  echo     Node.js encontrado.',
       ')',
       '',
-      'echo [3/6] Parando versao anterior do agente...',
-      'sc stop "SYSACK Agent"  >nul 2>&1',
-      'sc stop "SYSACK-Agent"  >nul 2>&1',
-      'timeout /t 3 /nobreak >nul',
+      'echo [3/5] Encerrando versao anterior do agente...',
       'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
-      'timeout /t 2 /nobreak >nul',
-      'for /f "tokens=2 delims=," %%P in (\'tasklist /fi "imagename eq node.exe" /fo csv /nh 2^>nul\') do (',
-      '  taskkill /PID %%~P /F >nul 2>&1',
-      ')',
+      'sc stop "SYSACK Agent" >nul 2>&1',
+      'sc stop "SYSACK-Agent" >nul 2>&1',
+      'timeout /t 3 /nobreak >nul',
+      'taskkill /F /IM node.exe >nul 2>&1',
       'timeout /t 2 /nobreak >nul',
       'if exist "%AGENT_FILE%.new.js" del /f /q "%AGENT_FILE%.new.js" >nul 2>&1',
-      'echo     Agente anterior parado.',
+      'echo     Agente anterior encerrado.',
       '',
-      'echo [4/6] Baixando agente SYSACK...',
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'%AGENT_URL%?ts=\'+$ts) -OutFile \'%AGENT_FILE%\' -UseBasicParsing"',
+      'echo [4/5] Baixando agente SYSACK...',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& {[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'' + AGENT_URL + '?ts=\'+$ts) -OutFile \'%AGENT_FILE%\' -UseBasicParsing}"',
+      'if not exist "%AGENT_FILE%" (echo ERRO: Falha no download. & echo %date% %time% - ERRO: download falhou >> "%LOG_FILE%" & pause & exit /b 1)',
+      'for %%F in ("%AGENT_FILE%") do if %%~zF LSS 50000 (echo ERRO: Arquivo corrompido. & pause & exit /b 1)',
       '',
-      'if not exist "%AGENT_FILE%" (',
-      '  echo ERRO: Falha ao baixar o agente SYSACK.',
-      '  echo Verifique o acesso a sysack.vercel.app e tente novamente.',
-      '  echo %date% %time% - ERRO: Download agente falhou >> "%LOG_FILE%"',
-      '  pause',
-      '  exit /b 1',
-      ')',
-      'for %%F in ("%AGENT_FILE%") do set AGENT_SIZE=%%~zF',
-      'if %AGENT_SIZE% LSS 50000 (',
-      '  echo ERRO: Arquivo do agente parece corrompido (%AGENT_SIZE% bytes).',
-      '  echo %date% %time% - ERRO: Arquivo pequeno: %AGENT_SIZE% bytes >> "%LOG_FILE%"',
-      '  pause',
-      '  exit /b 1',
-      ')',
-      'echo     Agente baixado com sucesso (%AGENT_SIZE% bytes).',
-      '',
-      'echo [5/6] Criando servico do agente...',
-      'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
-      'timeout /t 1 /nobreak >nul',
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$A=New-ScheduledTaskAction -Execute \'%NODE_EXE%\' -Argument \'%AGENT_FILE%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null"',
-      '',
-      'if errorlevel 1 (',
-      '  echo ERRO: Falha ao registrar servico do agente.',
-      '  echo %date% %time% - ERRO: falha ao registrar servico >> "%LOG_FILE%"',
-      '  pause',
-      '  exit /b 1',
-      ')',
-      '',
-      'echo [5b/6] Criando config.json do agente...',
+      ':: Cria config.json com credenciais Firebase',
       '(',
       '  echo {',
       '  echo   "firebaseProjectId": "sysack-829e2",',
@@ -33791,43 +33738,40 @@ function baixarInstaladorSYSACKCorrigido() {
       '  echo   "intervalSeconds": 60',
       '  echo }',
       ') > "%SYSACK_DIR%\\config.json"',
-      'echo     config.json criado.',
       '',
-      'echo [6/6] Iniciando agente...',
-      'schtasks /Run /TN "SYSACK-Agent"',
-      'timeout /t 4 /nobreak >nul',
+      'echo [5/5] Registrando e iniciando servico...',
+      'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& {$node=(Get-Command node -ErrorAction SilentlyContinue).Source; if(-not $node){$node=\'C:\\Program Files\\nodejs\\node.exe\'}; $A=New-ScheduledTaskAction -Execute $node -Argument \'%AGENT_FILE%\' -WorkingDirectory \'%SYSACK_DIR%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null; Start-ScheduledTask -TaskName \'SYSACK-Agent\'}"',
+      'timeout /t 3 /nobreak >nul',
       '',
-      ':: Verifica se esta rodando',
-      'tasklist /FI "IMAGENAME eq node.exe" 2>nul | find "node.exe" >nul',
+      ':: Verifica se iniciou, se nao tenta direto',
+      'tasklist /FI "IMAGENAME eq node.exe" 2>nul | find /i "node.exe" >nul',
       'if errorlevel 1 (',
       '  echo     Iniciando agente diretamente...',
-      '  start "" /min "%NODE_EXE%" "%AGENT_FILE%"',
-      ') else (',
-      '  echo     Agente iniciado!',
+      '  for /f "delims=" %%P in (\'where node 2^>nul\') do start "" /min "%%P" "%AGENT_FILE%"',
       ')',
       '',
-      'echo %date% %time% - Instalacao concluida com sucesso >> "%LOG_FILE%"',
+      'echo %date% %time% - Instalacao concluida >> "%LOG_FILE%"',
       'echo.',
       'echo ============================================',
-      'echo  Instalacao concluida!',
+      'echo  Instalacao concluida com sucesso!',
       'echo.',
       'echo  O computador aparecera no SYSACK em',
       'echo  aproximadamente 60 segundos.',
       'echo ============================================',
+      'echo.',
       'pause',
-    ];
+    ].join('\r\n');
 
-    const script = linhas.join('\r\n');
-    const blob   = new Blob(['\ufeff' + script], { type: 'application/octet-stream' });
-    const url    = URL.createObjectURL(blob);
-    const a      = document.createElement('a');
+    const blob = new Blob([bat], { type: 'application/octet-stream' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
     a.href = url; a.download = 'Instalar-SYSACK-Agent.bat';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
     showToast('✅ Instalador gerado! Execute como Administrador no PC alvo.', 'success', 6000);
   });
 }
-
 
 /* =====================================================================
    SYSACK v2.1.7 — ALERTAS CONFIGURÁVEIS

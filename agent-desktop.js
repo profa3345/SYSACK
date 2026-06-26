@@ -163,14 +163,13 @@ async function validarComandoSeguro(id, tipo, fields, dados) {
   }
 
   const role = (fields.requestedByRole || {}).stringValue || dados.requestedByRole || '';
-  // Aceita role vazio para compatibilidade com versões antigas do painel
   if (requiresAdmin && role && !['admin','gestor','tecnico','mdm_admin'].includes(role)) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'perfil_sem_permissao', requestedByRole: role });
     await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Perfil do solicitante sem permissão para comando administrativo.' }).catch(() => {});
     return false;
   }
 
-  // Motivo obrigatório apenas para bloqueio/desbloqueio/powershell — não para atualizar_agente
+  // Motivo obrigatório apenas para bloqueio/desbloqueio/powershell
   const tiposComJustificativa = new Set(['bloquear_maquina','desbloquear_maquina','powershell']);
   if (tiposComJustificativa.has(tipo) && !String((fields.motivo || {}).stringValue || dados.motivo || '').trim()) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'justificativa_obrigatoria' });
@@ -239,17 +238,12 @@ function agendarReinicioAgent() {
       'timeout /t 5 /nobreak >nul',
       pidClean,
       '',
-      ':: Para o servico Windows (ambos os nomes possiveis)',
-      'sc stop "SYSACK Agent"  >nul 2>nul',
-      'sc stop "SYSACK-Agent"  >nul 2>nul',
-      'timeout /t 3 /nobreak >nul',
+      ':: Para o servico e mata processos node antes de mover o arquivo',
       'schtasks /End /TN "SYSACK-Agent" >nul 2>nul',
-      'timeout /t 2 /nobreak >nul',
-      '',
-      ':: Mata processos node residuais com lock no arquivo .js',
-      'for /f "tokens=2 delims=," %%P in ('tasklist /fi "imagename eq node.exe" /fo csv /nh 2^>nul') do (',
-      '  taskkill /PID %%~P /F >nul 2>nul',
-      ')',
+      'sc stop "SYSACK Agent" >nul 2>nul',
+      'sc stop "SYSACK-Agent" >nul 2>nul',
+      'timeout /t 3 /nobreak >nul',
+      'taskkill /F /IM node.exe >nul 2>nul',
       'timeout /t 2 /nobreak >nul',
       '',
       ':: Move arquivo temporario para o definitivo',
@@ -257,31 +251,24 @@ function agendarReinicioAgent() {
       '  move /y "' + script + '.new.js" "' + script + '" >nul',
       ')',
       '',
-      ':: Reinicia — servico → schtasks → direto',
-      'sc start "SYSACK Agent"  >nul 2>nul',
-      'if not errorlevel 1 goto :FIM',
-      'sc start "SYSACK-Agent"  >nul 2>nul',
-      'if not errorlevel 1 goto :FIM',
+      ':: Reinicia — schtasks → direto',
       'schtasks /Run /TN "SYSACK-Agent" >nul 2>nul',
+      'if not errorlevel 1 goto :FIM',
+      'sc start "SYSACK Agent" >nul 2>nul',
       'if not errorlevel 1 goto :FIM',
       'start "SYSACK Agent" /min ' + nodeCmd,
       ':FIM',
     ].join('\r\n');
     fs.writeFileSync(bat, linhas, 'utf8');
     exec('cmd /c start "" /min "' + bat + '"', { windowsHide: true });
-    log('[UPDATE] Reinício agendado — bat: ' + bat + ' | script: ' + script);
+    log('[UPDATE] Reinício agendado — bat: ' + bat);
   } catch(e) {
     log('[UPDATE] Falha ao agendar reinício: ' + e.message);
     try {
       const { spawn } = require('child_process');
-      const child = spawn(process.execPath, [process.argv[1]], {
-        detached: true, stdio: 'ignore', windowsHide: true
-      });
+      const child = spawn(process.execPath, [process.argv[1]], { detached: true, stdio: 'ignore', windowsHide: true });
       child.unref();
-      log('[UPDATE] Spawn desacoplado iniciado como último recurso.');
-    } catch(e2) {
-      log('[UPDATE] Spawn também falhou: ' + e2.message);
-    }
+    } catch(e2) { log('[UPDATE] Spawn também falhou: ' + e2.message); }
   }
 }
 
@@ -2263,7 +2250,7 @@ $out | ConvertTo-Json -Depth 4 -Compress
       if (!urlNova) throw new Error('URL do novo agente não informada');
       log(`[UPDATE] Iniciando atualização para v${versaoNova} via ${urlNova}`);
 
-      // Heartbeat imediato — painel sabe que agente recebeu antes do timeout de 240s
+      // Heartbeat imediato — painel sabe que agente recebeu antes do timeout
       await firestorePatch('agent_commands/' + id, {
         status: 'processando',
         resultado: 'Agente recebeu o comando — baixando nova versão...',
@@ -2299,7 +2286,7 @@ $out | ConvertTo-Json -Depth 4 -Compress
       const backupPath = selfPath.replace(/\.js$/, '.backup.js');
       try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
       fs.writeFileSync(tempPath, novoConteudo, 'utf8');
-      if (fs.readFileSync(tempPath, 'utf8').length < 1000) throw new Error('Arquivo temporário inválido após gravação');
+      if (fs.readFileSync(tempPath, 'utf8').length < 1000) throw new Error('Arquivo temporário inválido');
 
       log(`[UPDATE] Temp OK — ${tempPath} (${novoConteudo.length} bytes). Agendando reinício...`);
       resultado = `Atualização v${versaoNova} agendada. Reiniciando serviço.`;
