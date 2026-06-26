@@ -1117,7 +1117,8 @@ function detectarSessoesRDP() {
   try {
     const out = require('child_process').execSync('query session', { timeout: 5000, windowsHide: true }).toString();
     const sessoes = [];
-    for (const line of out.split('\n').slice(1)) {
+    for (const line of out.split('
+').slice(1)) {
       const l = line.trim().replace(/^>/, '').trim();
       if (!l) continue;
       const parts = l.split(/\s+/);
