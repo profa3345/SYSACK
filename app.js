@@ -24945,11 +24945,27 @@ async function detectarEventos() {
     var status = (a.status||'').toLowerCase();
 
     // 1. Máquina offline > 5 dias
+    // Cruza com coleção agents — evita falso positivo quando agente está
+    // online mas não conseguiu atualizar ativos.lastSeen no Firestore
     if (a.lastSeen) {
       var ls = new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen);
       var diffDias = Math.floor((agora-ls)/(1000*60*60*24));
       if (diffDias > 5 && status==='em-uso') {
-        alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
+        var hnLower = hn.toLowerCase();
+        var agente = (STATE_AGENTS?.list||[]).find(function(ag){
+          return (ag.hostname||ag.id||'').toLowerCase() === hnLower ||
+                 ((a.ip||'') && (ag.ip||'') === a.ip);
+        });
+        var agenteOnline  = agente && (agente.status||'').toLowerCase() === 'online';
+        var agenteRecente = agente && agente.lastSeen && (function(){
+          var d = agente.lastSeen.seconds
+            ? agente.lastSeen.seconds * 1000
+            : new Date(agente.lastSeen).getTime();
+          return (agora - d) < 6 * 86400000;
+        })();
+        if (!agenteOnline && !agenteRecente) {
+          alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
+        }
       }
     }
 
@@ -24967,6 +24983,16 @@ async function detectarEventos() {
     if (!a.pat && status==='em-uso') {
       alertas.push({tipo:'sem-pat',ativo:a,msg:(hn||a.ip||a.id)+' não tem número patrimonial'});
     }
+  });
+
+  // Deduplica alertas offline — mesma máquina pode ter 2 docs em ativos
+  var _seenOffline = new Set();
+  alertas = alertas.filter(function(al) {
+    if (al.tipo !== 'offline') return true;
+    var key = (al.ativo?.hostname||al.ativo?.computador||al.ativo?.id||'').toLowerCase();
+    if (_seenOffline.has(key)) return false;
+    _seenOffline.add(key);
+    return true;
   });
 
   // 5. SLA Mindworks
@@ -33669,6 +33695,8 @@ function baixarInstaladorSYSACKCorrigido() {
     const NODE_VER  = nodeInfo?.versao   || 'v22.14.0';
     const NODE_MSI  = nodeInfo?.urlWin64 || `https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-x64.msi`;
 
+    // Gera o bat como string direta — sem BOM, sem chcp, sem net session
+    // Usa PowerShell para tudo que precisa de privilégio
     const bat = [
       '@echo off',
       'title SYSACK Agent - Instalador',
@@ -33677,14 +33705,16 @@ function baixarInstaladorSYSACKCorrigido() {
       'echo ============================================',
       'echo.',
       '',
-      ':: Verifica privilegio admin',
+      ':: Detecta se tem privilegio de admin verificando acesso a pasta System32',
       'openfiles >nul 2>&1',
       'if errorlevel 1 (',
       '  echo.',
       '  echo  ERRO: Execute como Administrador.',
-      '  echo  Clique com botao direito ^> Executar como administrador',
+      '  echo  Clique com botao direito no arquivo .bat',
+      '  echo  e escolha "Executar como administrador".',
       '  echo.',
-      '  pause & exit /b 1',
+      '  pause',
+      '  exit /b 1',
       ')',
       '',
       'set "SYSACK_DIR=C:\\SYSACK"',
@@ -33702,8 +33732,12 @@ function baixarInstaladorSYSACKCorrigido() {
       'if errorlevel 1 (',
       '  echo     Node.js nao encontrado. Instalando...',
       '  powershell -NoProfile -ExecutionPolicy Bypass -Command "& {[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' + NODE_MSI + '\' -OutFile \'%TEMP%\\node_setup.msi\' -UseBasicParsing; Start-Process msiexec -ArgumentList \'/i\',\'%TEMP%\\node_setup.msi\',\'/qn\',\'/norestart\' -Wait; Remove-Item \'%TEMP%\\node_setup.msi\' -Force -ErrorAction SilentlyContinue}"',
-      '  where node >nul 2>&1',
-      '  if errorlevel 1 (echo ERRO: Node.js nao encontrado apos instalacao. & pause & exit /b 1)',
+      '  :: Recarrega PATH',
+      '  for /f "delims=" %%P in (\'where /r "%ProgramFiles%\\nodejs" node.exe 2^>nul\') do set "NODE_PATH=%%P"',
+      '  if not defined NODE_PATH (',
+      '    echo ERRO: Node.js nao encontrado apos instalacao. Reinicie e tente novamente.',
+      '    pause & exit /b 1',
+      '  )',
       ') else (',
       '  echo     Node.js encontrado.',
       ')',
@@ -33712,22 +33746,24 @@ function baixarInstaladorSYSACKCorrigido() {
       'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
       'sc stop "SYSACK Agent" >nul 2>&1',
       'sc stop "SYSACK-Agent" >nul 2>&1',
-      'taskkill /F /IM node.exe >nul 2>&1',
-      'timeout /t 5 /nobreak >nul',
-      'taskkill /F /IM node.exe >nul 2>&1',
       'timeout /t 3 /nobreak >nul',
+      'taskkill /F /IM node.exe >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      'if exist "%AGENT_FILE%.new.js" del /f /q "%AGENT_FILE%.new.js" >nul 2>&1',
       'echo     Agente anterior encerrado.',
       '',
       'echo [4/5] Baixando agente SYSACK...',
-      ':: Baixa para arquivo TEMPORARIO (evita lock no agent.js em uso)',
+      ':: Baixa para arquivo temporario — nunca bloqueia o agent.js em uso',
       'if exist "%AGENT_TEMP%" del /f /q "%AGENT_TEMP%" >nul 2>&1',
       'powershell -NoProfile -ExecutionPolicy Bypass -Command "& {[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'' + AGENT_URL + '?ts=\'+$ts) -OutFile \'%AGENT_TEMP%\' -UseBasicParsing}"',
       'if not exist "%AGENT_TEMP%" (echo ERRO: Falha no download. & echo %date% %time% - ERRO: download falhou >> "%LOG_FILE%" & pause & exit /b 1)',
+      'for %%F in ("%AGENT_TEMP%") do if %%~zF LSS 50000 (echo ERRO: Arquivo corrompido. & pause & exit /b 1)',
       ':: Substitui o arquivo definitivo',
       'if exist "%AGENT_FILE%" del /f /q "%AGENT_FILE%" >nul 2>&1',
-      'move /y "%AGENT_TEMP%" "%AGENT_FILE%" >nul',
+      'move /y "%AGENT_TEMP%" "%AGENT_FILE%" >nul 2>&1',
       'if not exist "%AGENT_FILE%" (echo ERRO: Falha ao mover arquivo. & pause & exit /b 1)',
-      ':: Cria config.json',
+      '',
+      ':: Cria config.json com credenciais Firebase',
       '(',
       '  echo {',
       '  echo   "firebaseProjectId": "sysack-829e2",',
@@ -33735,17 +33771,19 @@ function baixarInstaladorSYSACKCorrigido() {
       '  echo   "intervalSeconds": 60',
       '  echo }',
       ') > "%SYSACK_DIR%\\config.json"',
-      'echo     Agente baixado com sucesso.',
       '',
       'echo [5/5] Registrando e iniciando servico...',
       'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
       'powershell -NoProfile -ExecutionPolicy Bypass -Command "& {$node=(Get-Command node -ErrorAction SilentlyContinue).Source; if(-not $node){$node=\'C:\\Program Files\\nodejs\\node.exe\'}; $A=New-ScheduledTaskAction -Execute $node -Argument \'%AGENT_FILE%\' -WorkingDirectory \'%SYSACK_DIR%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null; Start-ScheduledTask -TaskName \'SYSACK-Agent\'}"',
       'timeout /t 3 /nobreak >nul',
+      '',
+      ':: Verifica se iniciou, se nao tenta direto',
       'tasklist /FI "IMAGENAME eq node.exe" 2>nul | find /i "node.exe" >nul',
       'if errorlevel 1 (',
       '  echo     Iniciando agente diretamente...',
       '  for /f "delims=" %%P in (\'where node 2^>nul\') do start "" /min "%%P" "%AGENT_FILE%"',
       ')',
+      '',
       'echo %date% %time% - Instalacao concluida >> "%LOG_FILE%"',
       'echo.',
       'echo ============================================',
@@ -33767,8 +33805,6 @@ function baixarInstaladorSYSACKCorrigido() {
     showToast('✅ Instalador gerado! Execute como Administrador no PC alvo.', 'success', 6000);
   });
 }
-
-
 
 /* =====================================================================
    SYSACK v2.1.7 — ALERTAS CONFIGURÁVEIS
