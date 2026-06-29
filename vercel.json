@@ -21,11 +21,28 @@
       "destination": "/api/$1"
     },
     {
+      "source": "/agent-desktop.js",
+      "destination": "/agent-desktop.js"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
+    {
+      "source": "/agent-desktop.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        }
+      ]
+    },
     {
       "source": "/sw.js",
       "headers": [
