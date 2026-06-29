@@ -1302,6 +1302,11 @@ async function reportar() {
     await firestoreSet(`agents/${AGENT_ID}`, dados);
     // Espelho para compatibilidade com telas/consultas que usam agentes_desktop
     await firestoreSet(`agentes_desktop/${AGENT_ID}`, dados).catch(e => log('[WARN] Falha ao gravar agentes_desktop: ' + e.message));
+    // Heartbeat dedicado — garante que lastSeen e status chegam mesmo se o payload completo falhar
+    await firestorePatch(`agents/${AGENT_ID}`, {
+      lastSeen: now, status: 'online', versaoAgente: '2.2.0',
+      uptimeH: dados.uptimeH, cpuPct: dados.cpuPct, ramPct: dados.ramPct,
+    }).catch(() => {});
 
     log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user || '-'} | Principal 90d: ${dados.usuarioPrincipal || '-'}`);
     // Atualiza ativo correspondente com hostname (roda apenas uma vez por sessão)
