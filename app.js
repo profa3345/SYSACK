@@ -8281,20 +8281,23 @@ function renderAssistenciaRemota() {
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
       </td>
-      <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
-      <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
+      <td style="font-family:monospace;font-size:12px;color:var(--g500)" title="${escapeHtml(a.ip||'')}">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
+      <td style="font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(a.osNome||'—')}">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
       <td style="font-size:12px;color:var(--g600);max-width:95px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioLogado)}">${escapeHtml(usuarioLogado)}</td>
       <td style="font-size:12px;color:var(--g700);max-width:115px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioPrincipal)}">${escapeHtml(usuarioPrincipal)}${ativoRel?.maquinaCompartilhada ? '<span style="font-size:10px;background:#EDE9FE;color:#6D28D9;padding:1px 5px;border-radius:8px;margin-left:4px">comp.</span>' : ''}</td>
-      <td style="font-size:11px;color:var(--g500)">${escapeHtml(ultimoLogin)}</td>
+      <td style="font-size:11px;color:var(--g500);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ultimoLogin)}">${escapeHtml(ultimoLogin)}</td>
       <td style="font-size:12px;font-weight:700;color:var(--accent);text-align:center">${escapeHtml(String(diasAno))}</td>
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
-      <td style="font-size:10.5px;color:var(--g500)">${(()=>{
+      <td style="font-size:10.5px;color:var(--g500);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(()=>{
+        if (!Array.isArray(a.outrosDiscos) || !a.outrosDiscos.length) return '';
+        return escapeHtml(a.outrosDiscos.map(d => (d.drive||'?')+': '+(d.freeGB||'?')+' GB').join(' | '));
+      })()}">${(()=>{
         if (!Array.isArray(a.outrosDiscos) || !a.outrosDiscos.length) return '—';
         return a.outrosDiscos.map(d => '<div>'+escapeHtml(d.drive||'?')+': '+escapeHtml(String(d.freeGB||'?'))+' GB</div>').join('');
       })()}</td>
-      <td class="monitor-cell">${Array.isArray(a.monitores) && a.monitores.length ?
+      <td class="monitor-cell" title="${Array.isArray(a.monitores) && a.monitores.length ? escapeHtml(a.monitores.map(m => (m.nome||m.caption||'Monitor')+(m.serial?' #'+m.serial:'')).join(' | ')) : ''}">${Array.isArray(a.monitores) && a.monitores.length ?
         a.monitores.map(m => {
           const nome   = escapeHtml(m.nome || m.caption || 'Monitor');
           const serial = m.serial ? '<span style="font-family:monospace;color:var(--g400);font-size:10px;display:block">#'+escapeHtml(m.serial)+'</span>' : '';

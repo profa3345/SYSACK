@@ -970,6 +970,7 @@ async function localizarAtivoRelacionado(dados) {
 
 function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
   const cutoff = yyyyMmDdLocal(addDays(new Date(), -LOGIN_PRINCIPAL_DIAS + 1));
+  const anoAtual = String(new Date().getFullYear());
   const porUsuario = new Map();
 
   for (const d of docs || []) {
@@ -981,6 +982,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
       porUsuario.set(usuario, {
         usuario,
         diasSet: new Set(),
+        diasAnoSet: new Set(), // dias logados apenas no ano corrente
         primeiroDia: dia,
         ultimoDia: dia,
         ultimoLoginEm: d.ultimoLogin || d.ultimoLoginEm || '',
@@ -989,6 +991,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
 
     const item = porUsuario.get(usuario);
     item.diasSet.add(dia);
+    if (dia.startsWith(anoAtual)) item.diasAnoSet.add(dia);
     if (dia < item.primeiroDia) item.primeiroDia = dia;
     if (dia > item.ultimoDia) item.ultimoDia = dia;
     const ult = d.ultimoLogin || d.ultimoLoginEm || '';
@@ -1002,6 +1005,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
       porUsuario.set(uAtualNorm, {
         usuario: uAtualNorm,
         diasSet: new Set(),
+        diasAnoSet: new Set(),
         primeiroDia: diaAtual,
         ultimoDia: diaAtual,
         ultimoLoginEm: new Date().toISOString(),
@@ -1009,6 +1013,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
     }
     const item = porUsuario.get(uAtualNorm);
     item.diasSet.add(diaAtual);
+    if (String(diaAtual).startsWith(anoAtual)) item.diasAnoSet.add(diaAtual);
     if (diaAtual < item.primeiroDia) item.primeiroDia = diaAtual;
     if (diaAtual > item.ultimoDia) item.ultimoDia = diaAtual;
   }
@@ -1017,6 +1022,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
     .map(x => ({
       usuario: x.usuario,
       diasLogados90d: x.diasSet.size,
+      diasLogadosAno: x.diasAnoSet.size,
       primeiroDia: x.primeiroDia,
       ultimoDia: x.ultimoDia,
       ultimoLoginEm: x.ultimoLoginEm || '',
@@ -1027,10 +1033,14 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
     });
 
   const principal = usuarios[0] || null;
+  // Soma de todos os usuários que logaram nessa máquina no ano corrente —
+  // representa o total de dias com atividade na máquina, usado na coluna "Dias A."
+  const diasAnoTotal = usuarios.reduce((acc, u) => Math.max(acc, u.diasLogadosAno), 0);
   return {
     usuarios,
     usuarioPrincipal: principal ? principal.usuario : '',
     usuarioPrincipalDias90d: principal ? principal.diasLogados90d : 0,
+    diasLogadosAno: diasAnoTotal,
   };
 }
 
@@ -1121,6 +1131,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     usuariosLogin90d: JSON.stringify(resumo.usuarios),
     usuariosLogin90dArray: resumo.usuarios,
     totalUsuarios90d: resumo.usuarios.length,
+    diasLogadosAno: resumo.diasLogadosAno, // total de dias com login na máquina no ano corrente
   };
 
   try {
