@@ -1887,7 +1887,7 @@ $cred    = New-Object System.Management.Automation.PSCredential ($adminUserRaw, 
 
 # Valida usuário/senha antes de fazer qualquer alteração.
 # Correção v2.1.12:
-# - aceita usuário de domínio CESAN\usuario e usuario@dominio;
+# - aceita usuario de dominio CESAN\\usuario e usuario@dominio;
 # - tenta vários tipos de logon, pois alguns domínios bloqueiam logon interativo;
 # - NÃO reprova falsamente domínio admin que chega por grupo AD aninhado;
 # - o bloqueio local é executado pelo próprio agente rodando como SYSTEM/admin.
@@ -1920,7 +1920,7 @@ if ($adminUserRaw -match '\\') {
 # MÉTODO 1 — net use IPC$ local (funciona mesmo via SYSTEM, valida senha AD/local)
 if (-not $ok) {
   try {
-    $share = "\\\\$($env:COMPUTERNAME)\\IPC`$"
+    $share = "\\\\$($env:COMPUTERNAME)\\IPC\`$"
     net use $share /delete /y 2>$null | Out-Null
     $out = net use $share /user:$adminUserRaw $adminPassRaw 2>&1
     if ($LASTEXITCODE -eq 0) {
@@ -1934,7 +1934,7 @@ if (-not $ok) {
 # MÉTODO 2 — net use IPC$ no DC (para contas de domínio)
 if (-not $ok -and $isDomain -and $domain) {
   try {
-    $dcShare = "\\\\$domain\\IPC`$"
+    $dcShare = "\\\\$domain\\IPC\`$"
     net use $dcShare /delete /y 2>$null | Out-Null
     $out2 = net use $dcShare /user:$adminUserRaw $adminPassRaw 2>&1
     if ($LASTEXITCODE -eq 0) {
@@ -2033,7 +2033,7 @@ if ($ainda.Count -gt 0) {
 }
 
 # ETAPA 4 — Escrever chave de aviso no Registry
-$regPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+$regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System'
 try {
   Set-ItemProperty -Path $regPath -Name 'legalnoticecaption' -Value 'MAQUINA BLOQUEADA - TI CESAN' -Type String -Force -ErrorAction Stop
   Set-ItemProperty -Path $regPath -Name 'legalnoticetext'    -Value 'Esta maquina foi bloqueada pelo TI. Motivo: ${motivoSafe}. Para desbloquear, contate o TI CESAN.' -Type String -Force -ErrorAction Stop
