@@ -317,27 +317,21 @@ function getDiskInfo() {
 function getLoggedUser() {
   try {
     if (process.platform === 'win32') {
-      // MÉTODO 1: query session — mais confiável em Windows Server com RDP,
-      // funciona mesmo rodando como SYSTEM, detecta sessões Active e Disc
+      // MÉTODO 1: query session — funciona com RDP, mas exige Remote Desktop Services ativo
       try {
         const out = execSync('query session', { timeout: 5000, windowsHide: true }).toString();
-        const lines = out.split('\n').slice(1); // pula header
-        // Primeiro tenta achar sessão com estado "Active" ou "Ativo" e usuário preenchido
+        const lines = out.split('\n').slice(1);
         for (const line of lines) {
           const trimmed = line.trim().replace(/^>/, '').trim();
           if (!trimmed) continue;
-          // Formato: SESSIONNAME USERNAME ID STATE TYPE DEVICE
-          // username pode estar ausente em sessões desconectadas (console sem login, services)
           const cols = trimmed.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
-          // fallback se não tiver 2+ espaços consistentes
           const parts = cols.length >= 3 ? cols : trimmed.split(/\s+/);
-          // Acha a coluna que parece ser usuário (não é número puro, não é estado conhecido)
           const estados = ['active','ativo','disc','desconectado','listen','conn'];
           let usuario = '';
           for (const p of parts) {
             const pl = p.toLowerCase();
             if (estados.includes(pl)) continue;
-            if (/^\d+$/.test(p)) continue; // ID de sessão
+            if (/^\d+$/.test(p)) continue;
             if (['console','rdp-tcp','services','sistema','system'].includes(pl)) continue;
             usuario = p;
             break;
@@ -350,7 +344,7 @@ function getLoggedUser() {
         log('[getLoggedUser] query session falhou: ' + e1.message);
       }
 
-      // MÉTODO 2: query user (equivalente ao query session em alguns SOs)
+      // MÉTODO 2: query user
       try {
         const out = execSync('query user', { timeout: 5000, windowsHide: true }).toString();
         for (const line of out.split('\n').slice(1)) {
@@ -373,7 +367,7 @@ function getLoggedUser() {
         log('[getLoggedUser] query user falhou: ' + e2.message);
       }
 
-      // MÉTODO 3: WMIC computersystem — pega usuário logado no console local
+      // MÉTODO 3: WMIC computersystem — usuário logado no console local
       try {
         const out = execSync('wmic computersystem get username /format:value', { timeout: 5000, windowsHide: true }).toString();
         const match = out.match(/UserName=(.+)/i);
@@ -385,7 +379,7 @@ function getLoggedUser() {
         log('[getLoggedUser] wmic computersystem falhou: ' + e3.message);
       }
 
-      // MÉTODO 4: PowerShell Get-CimInstance (mais moderno, funciona em Server Core)
+      // MÉTODO 4: PowerShell Get-CimInstance — funciona em Server Core e quando WMIC falha
       try {
         const out = execSync(
           'powershell -NoProfile -Command "(Get-CimInstance -ClassName Win32_ComputerSystem).UserName"',
@@ -398,7 +392,7 @@ function getLoggedUser() {
         log('[getLoggedUser] PowerShell Get-CimInstance falhou: ' + e4.message);
       }
 
-      // MÉTODO 5: explorer.exe owner — último recurso, detecta quem está com sessão gráfica
+      // MÉTODO 5: dono do processo explorer.exe — último recurso
       try {
         const out = execSync(
           'powershell -NoProfile -Command "Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty UserName"',
@@ -411,7 +405,7 @@ function getLoggedUser() {
         log('[getLoggedUser] explorer owner falhou: ' + e5.message);
       }
 
-      log('[getLoggedUser] Nenhum método detectou usuário logado — máquina sem sessão interativa ativa no momento.');
+      log('[getLoggedUser] Nenhum método detectou usuário logado nesta coleta.');
       return '';
     }
     return os.userInfo().username;
@@ -1875,6 +1869,8 @@ function encerrarRelayRtdb(sessaoId) {
 // pollComandos    — poll 5s só para iniciar/encerrar sessões
 // ════════════════════════════════════════════════════════════════
 
+const _comandosEmProcessamento = new Set(); // lock em memória — evita reprocessar o mesmo doc concorrentemente
+
 async function executarComando(doc) {
   const fields = doc.document?.fields || {};
   const getId  = f => f?.stringValue || '';
@@ -1884,24 +1880,55 @@ async function executarComando(doc) {
   const aId    = getId(fields.agentId);
 
   if (aId !== AGENT_ID) return;
+  if (!id) return;
 
-  // Marca imediatamente para não processar duas vezes
-  await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
+  // Lock em memória — evita que pollComandos (Firestore) e o relay RTDB
+  // processem o mesmo comando ao mesmo tempo, gerando race condition
+  if (_comandosEmProcessamento.has(id)) return;
+  _comandosEmProcessamento.add(id);
 
-  // Segurança corporativa: não aceita token fixo nem senha enviada pelo portal.
-  // Valida tipo, expiração, perfil solicitante, justificativa e contexto administrativo local.
-  if (!(await validarComandoSeguro(id, tipo, fields, dados))) return;
+  try {
+    // Ignora comandos de atualização "presos" há muito tempo na fila —
+    // evita reprocessar lixo acumulado de tentativas antigas que falharam
+    if (tipo === 'atualizar_agente') {
+      const criadoEmStr = getId(fields.criadoEm) || dados.criadoEm || '';
+      if (criadoEmStr) {
+        const idadeMs = Date.now() - new Date(criadoEmStr).getTime();
+        if (idadeMs > 10 * 60 * 1000) { // mais de 10 minutos = comando obsoleto
+          log(`[UPDATE] Ignorando comando obsoleto (${Math.round(idadeMs/60000)} min) — id: ${id}`);
+          await firestorePatch('agent_commands/' + id, {
+            status: 'descartado', resultado: 'Comando expirado — não processado por estar obsoleto.'
+          }).catch(() => {});
+          return;
+        }
+      }
+    }
 
-  const requestedBy = getId(fields.requestedBy) || dados.requestedBy || dados.operador || '';
-  log('[Relay] Comando Firestore seguro: ' + tipo + ' solicitado por ' + requestedBy);
-  await auditAgentCommand(id, 'AGENT_COMMAND_ACCEPTED', {
-    tipo,
-    requestedBy: sanitizeAuditText(requestedBy),
-    requestedByRole: sanitizeAuditText(getId(fields.requestedByRole) || dados.requestedByRole || ''),
-    motivo: sanitizeAuditText(getId(fields.motivo) || dados.motivo || '')
-  });
-  await firestorePatch('agent_commands/' + id, { status: 'executando', executandoEm: new Date().toISOString() }).catch(() => {});
+    // Marca imediatamente para não processar duas vezes
+    await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
 
+    // Segurança corporativa: não aceita token fixo nem senha enviada pelo portal.
+    // Valida tipo, expiração, perfil solicitante, justificativa e contexto administrativo local.
+    if (!(await validarComandoSeguro(id, tipo, fields, dados))) return;
+
+    const requestedBy = getId(fields.requestedBy) || dados.requestedBy || dados.operador || '';
+    log('[Relay] Comando Firestore seguro: ' + tipo + ' solicitado por ' + requestedBy);
+    await auditAgentCommand(id, 'AGENT_COMMAND_ACCEPTED', {
+      tipo,
+      requestedBy: sanitizeAuditText(requestedBy),
+      requestedByRole: sanitizeAuditText(getId(fields.requestedByRole) || dados.requestedByRole || ''),
+      motivo: sanitizeAuditText(getId(fields.motivo) || dados.motivo || '')
+    });
+    await firestorePatch('agent_commands/' + id, { status: 'executando', executandoEm: new Date().toISOString() }).catch(() => {});
+
+    return await _processarComandoInterno(id, tipo, dados, fields);
+  } finally {
+    // Libera o lock depois de um tempo — permite reprocessar se necessário no futuro
+    setTimeout(() => _comandosEmProcessamento.delete(id), 30000);
+  }
+}
+
+async function _processarComandoInterno(id, tipo, dados, fields) {
   const sessaoId = dados.sessaoId || '';
 
   if (tipo === 'iniciar_acesso_remoto' || tipo === 'usar_firebase_relay') {
@@ -2087,7 +2114,7 @@ if ($ainda.Count -gt 0) {
 }
 
 # ETAPA 4 — Escrever chave de aviso no Registry
-$regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System'
+$regPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 try {
   Set-ItemProperty -Path $regPath -Name 'legalnoticecaption' -Value 'MAQUINA BLOQUEADA - TI CESAN' -Type String -Force -ErrorAction Stop
   Set-ItemProperty -Path $regPath -Name 'legalnoticetext'    -Value 'Esta maquina foi bloqueada pelo TI. Motivo: ${motivoSafe}. Para desbloquear, contate o TI CESAN.' -Type String -Force -ErrorAction Stop
