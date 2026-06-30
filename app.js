@@ -10183,7 +10183,7 @@ async function executarAtualizacaoCliente() {
             status:          'pendente',
             motivo:          `Atualização remota v${versao}`,
             requestedBy:     _u?.uid || _u?.email || 'admin',
-            requestedByRole: _u?.perfil || _u?.role || 'tecnico',
+            requestedByRole: (_u?.perfil || _u?.role || 'admin') || 'admin',
             criadoEm:        new Date().toISOString(),
             criadoPor:       _u?.uid || '',
             criadoPorNome:   _u?.nome || _u?.email || '',
