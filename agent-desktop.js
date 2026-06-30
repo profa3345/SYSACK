@@ -317,7 +317,63 @@ function getDiskInfo() {
 function getLoggedUser() {
   try {
     if (process.platform === 'win32') {
-      // WMIC é mais confiável rodando como SYSTEM
+      // MÉTODO 1: query session — mais confiável em Windows Server com RDP,
+      // funciona mesmo rodando como SYSTEM, detecta sessões Active e Disc
+      try {
+        const out = execSync('query session', { timeout: 5000, windowsHide: true }).toString();
+        const lines = out.split('\n').slice(1); // pula header
+        // Primeiro tenta achar sessão com estado "Active" ou "Ativo" e usuário preenchido
+        for (const line of lines) {
+          const trimmed = line.trim().replace(/^>/, '').trim();
+          if (!trimmed) continue;
+          // Formato: SESSIONNAME USERNAME ID STATE TYPE DEVICE
+          // username pode estar ausente em sessões desconectadas (console sem login, services)
+          const cols = trimmed.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+          // fallback se não tiver 2+ espaços consistentes
+          const parts = cols.length >= 3 ? cols : trimmed.split(/\s+/);
+          // Acha a coluna que parece ser usuário (não é número puro, não é estado conhecido)
+          const estados = ['active','ativo','disc','desconectado','listen','conn'];
+          let usuario = '';
+          for (const p of parts) {
+            const pl = p.toLowerCase();
+            if (estados.includes(pl)) continue;
+            if (/^\d+$/.test(p)) continue; // ID de sessão
+            if (['console','rdp-tcp','services','sistema','system'].includes(pl)) continue;
+            usuario = p;
+            break;
+          }
+          if (usuario && (trimmed.toLowerCase().includes('active') || trimmed.toLowerCase().includes('ativo'))) {
+            return usuario;
+          }
+        }
+      } catch(e1) {
+        log('[getLoggedUser] query session falhou: ' + e1.message);
+      }
+
+      // MÉTODO 2: query user (equivalente ao query session em alguns SOs)
+      try {
+        const out = execSync('query user', { timeout: 5000, windowsHide: true }).toString();
+        for (const line of out.split('\n').slice(1)) {
+          const trimmed = line.trim().replace(/^>/, '').trim();
+          if (!trimmed) continue;
+          const parts = trimmed.split(/\s+/);
+          const user = parts[0];
+          if (user && !['services','sistema','system'].includes(user.toLowerCase())) {
+            if (line.toLowerCase().includes('active') || line.toLowerCase().includes('ativo')) {
+              return user;
+            }
+          }
+        }
+        const firstLine = out.split('\n').slice(1).find(l => l.trim());
+        if (firstLine) {
+          const user = firstLine.trim().replace(/^>/, '').trim().split(/\s+/)[0];
+          if (user && !['services','sistema','system'].includes(user.toLowerCase())) return user;
+        }
+      } catch(e2) {
+        log('[getLoggedUser] query user falhou: ' + e2.message);
+      }
+
+      // MÉTODO 3: WMIC computersystem — pega usuário logado no console local
       try {
         const out = execSync('wmic computersystem get username /format:value', { timeout: 5000, windowsHide: true }).toString();
         const match = out.match(/UserName=(.+)/i);
@@ -325,39 +381,37 @@ function getLoggedUser() {
           const full = match[1].trim();
           return full.includes('\\') ? full.split('\\').pop() : full;
         }
-      } catch(e2) {}
-      // fallback: query user (melhor para servidores Windows com RDP)
+      } catch(e3) {
+        log('[getLoggedUser] wmic computersystem falhou: ' + e3.message);
+      }
+
+      // MÉTODO 4: PowerShell Get-CimInstance (mais moderno, funciona em Server Core)
       try {
-        const out = execSync('query user', { timeout: 5000, windowsHide: true }).toString();
-        for (const line of out.split('\n').slice(1)) { // pula header
-          const trimmed = line.trim().replace(/^>/, '').trim();
-          if (!trimmed) continue;
-          const parts = trimmed.split(/\s+/);
-          const user = parts[0];
-          // Verifica se tem estado "Active" ou "Ativo"
-          if (user && !['services','sistema','system'].includes(user.toLowerCase())) {
-            if (line.toLowerCase().includes('active') || line.toLowerCase().includes('ativo')) {
-              return user;
-            }
-          }
+        const out = execSync(
+          'powershell -NoProfile -Command "(Get-CimInstance -ClassName Win32_ComputerSystem).UserName"',
+          { timeout: 8000, windowsHide: true }
+        ).toString().trim();
+        if (out && out.toLowerCase() !== 'null' && out.length > 0) {
+          return out.includes('\\') ? out.split('\\').pop() : out;
         }
-        // Se não tem Active, pega o primeiro usuário da lista
-        const firstLine = out.split('\n').slice(1).find(l => l.trim());
-        if (firstLine) {
-          const user = firstLine.trim().replace(/^>/, '').trim().split(/\s+/)[0];
-          if (user && !['services','sistema','system'].includes(user.toLowerCase())) return user;
-        }
-      } catch(e3) {}
-      // fallback: query session
+      } catch(e4) {
+        log('[getLoggedUser] PowerShell Get-CimInstance falhou: ' + e4.message);
+      }
+
+      // MÉTODO 5: explorer.exe owner — último recurso, detecta quem está com sessão gráfica
       try {
-        const out = execSync('query session', { timeout: 5000, windowsHide: true }).toString();
-        for (const line of out.split('\n')) {
-          if (line.toLowerCase().includes('active')) {
-            const user = line.trim().replace(/^>/, '').trim().split(/\s+/)[0];
-            if (user && !['services','sistema','system','services#'].includes(user.toLowerCase())) return user;
-          }
+        const out = execSync(
+          'powershell -NoProfile -Command "Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty UserName"',
+          { timeout: 8000, windowsHide: true }
+        ).toString().trim();
+        if (out && out.length > 0) {
+          return out.includes('\\') ? out.split('\\').pop() : out;
         }
-      } catch(e4) {}
+      } catch(e5) {
+        log('[getLoggedUser] explorer owner falhou: ' + e5.message);
+      }
+
+      log('[getLoggedUser] Nenhum método detectou usuário logado — máquina sem sessão interativa ativa no momento.');
       return '';
     }
     return os.userInfo().username;
