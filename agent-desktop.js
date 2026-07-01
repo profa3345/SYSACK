@@ -433,6 +433,25 @@ function getUptime() {
   return Math.round(os.uptime()); // segundos numérico — uptimeH calculado no payload
 }
 
+function getBootTimeIso(uptimeSec = getUptime()) {
+  return new Date(Date.now() - (Number(uptimeSec) || 0) * 1000).toISOString();
+}
+
+// Estado local para detectar mudanças técnicas mesmo quando o portal não está aberto.
+// Mantém a linha do tempo preenchida automaticamente em agents/{id}/historico.
+const STATE_FILE = path.join(__dirname, 'agent-state.json');
+function carregarEstadoLocal() {
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch(e) { return {}; }
+}
+function salvarEstadoLocal(st) {
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify(st || {}, null, 2), 'utf8'); } catch(e) {}
+}
+function monitoresAssinatura(monitores) {
+  if (!Array.isArray(monitores)) return '';
+  return monitores.map(m => [m.nome || m.caption || 'Monitor', m.serial || '', m.resolucao || ''].join('#'))
+    .sort().join('|');
+}
+
 // ── Monitores conectados ──────────────────────────────────────────
 function getMonitores() {
   try {
@@ -1265,25 +1284,81 @@ async function rastrearSessaoUsuario(userAtual, nowIso) {
   } catch {}
 }
 
-async function rastrearMudancasStatus(ip, nowIso) {
-  // Registra na subcoleção historico do agente quando IP ou status muda
-  if (_ipAnterior !== null && _ipAnterior !== ip && ip) {
-    const faixaAntes  = (_ipAnterior||'').split('.').slice(0,3).join('.');
-    const faixaDepois = ip.split('.').slice(0,3).join('.');
-    const tipoEvt = faixaAntes !== faixaDepois ? 'mudanca_faixa_ip' : 'mudanca_ip';
-    const desc = tipoEvt === 'mudanca_faixa_ip'
-      ? `Faixa de IP alterada: ${faixaAntes}.0/24 → ${faixaDepois}.0/24 · IP: ${_ipAnterior} → ${ip}`
-      : `IP alterado: ${_ipAnterior} → ${ip}`;
-    log(`[Status] ${desc}`);
+async function rastrearMudancasStatus(dados, nowIso) {
+  // Registra mudanças técnicas na subcoleção historico do agente.
+  // Isso independe do frontend estar aberto e alimenta a aba Histórico do painel.
+  const estado = carregarEstadoLocal();
+  const prev = estado.ultimoSnapshot || null;
+  const atual = {
+    ip: dados.ip || '',
+    hostname: dados.hostname || AGENT_ID,
+    usuarioPrincipal: dados.usuarioPrincipal || '',
+    usuarioLogado: dados.usuarioLogado || '',
+    monitorSig: monitoresAssinatura(dados.monitores),
+    monitores: Array.isArray(dados.monitores) ? dados.monitores : [],
+    mac: dados.macAddress || dados.mac || '',
+    gateway: dados.gateway || '',
+    bootTime: dados.bootTime || '',
+    uptime: dados.uptime || 0,
+  };
+
+  async function hist(tipo, titulo, desc, extras = {}) {
+    log(`[Historico] ${desc}`);
     await firestoreCreate(`agents/${AGENT_ID}/historico`, {
-      tipo: tipoEvt, titulo: tipoEvt === 'mudanca_faixa_ip' ? '🚨 Mudou de faixa de rede' : '✏️ IP alterado',
-      desc, dot: tipoEvt === 'mudanca_faixa_ip' ? 'red' : 'orange',
-      ipAnterior: _ipAnterior, ipNovo: ip,
-      faixaAnterior: faixaAntes + '.0/24', faixaNova: faixaDepois + '.0/24',
-      agentId: AGENT_ID, hostname: AGENT_ID, origem: 'agente', createdAt: nowIso, data: nowIso,
-    }).catch(() => {});
+      tipo, titulo, desc,
+      dot: extras.dot || 'orange',
+      agentId: AGENT_ID,
+      hostname: AGENT_ID,
+      origem: 'agente-desktop',
+      createdAt: nowIso,
+      data: nowIso,
+      ...extras,
+    }).catch(e => log('[Historico] Falha ao gravar: ' + e.message));
   }
-  _ipAnterior = ip || _ipAnterior;
+
+  if (prev) {
+    if (prev.ip && atual.ip && prev.ip !== atual.ip) {
+      const faixaAntes  = String(prev.ip).split('.').slice(0,3).join('.');
+      const faixaDepois = String(atual.ip).split('.').slice(0,3).join('.');
+      if (faixaAntes !== faixaDepois) {
+        await hist('mudanca_faixa_ip', '🚨 Mudou de faixa de rede',
+          `Faixa de IP alterada: ${faixaAntes}.0/24 → ${faixaDepois}.0/24 · IP: ${prev.ip} → ${atual.ip}`,
+          { dot:'red', ipAnterior:prev.ip, ipNovo:atual.ip, faixaAnterior:`${faixaAntes}.0/24`, faixaNova:`${faixaDepois}.0/24` });
+      } else {
+        await hist('mudanca_ip', '✏️ IP alterado', `IP alterado: ${prev.ip} → ${atual.ip}`,
+          { dot:'orange', ipAnterior:prev.ip, ipNovo:atual.ip });
+      }
+    }
+
+    if (prev.hostname && atual.hostname && prev.hostname !== atual.hostname) {
+      await hist('mudanca_hostname', '✏️ Hostname alterado', `Hostname: ${prev.hostname} → ${atual.hostname}`,
+        { dot:'orange', campo:'hostname', de:prev.hostname, para:atual.hostname });
+    }
+
+    if (prev.monitorSig && atual.monitorSig && prev.monitorSig !== atual.monitorSig) {
+      await hist('troca_monitor', '🖥️ Monitor alterado',
+        `Monitor(es) alterado(s): ${prev.monitorSig || '—'} → ${atual.monitorSig || '—'}`,
+        { dot:'blue', campo:'monitores', de:prev.monitorSig, para:atual.monitorSig, monitoresAntigos:prev.monitores || [], monitoresNovos:atual.monitores || [] });
+    }
+
+    if (prev.usuarioPrincipal && atual.usuarioPrincipal && prev.usuarioPrincipal !== atual.usuarioPrincipal) {
+      await hist('troca_responsavel', '👥 Usuário principal alterado',
+        `Usuário principal: ${prev.usuarioPrincipal} → ${atual.usuarioPrincipal}`,
+        { dot:'blue', campo:'usuarioPrincipal', de:prev.usuarioPrincipal, para:atual.usuarioPrincipal });
+    }
+
+    // Se o bootTime mudou, a máquina reiniciou. Útil para auditar uptime.
+    if (prev.bootTime && atual.bootTime && prev.bootTime !== atual.bootTime) {
+      await hist('reinicializacao', '🔄 Máquina reiniciada',
+        `Boot anterior: ${prev.bootTime} · boot atual: ${atual.bootTime}`,
+        { dot:'green', campo:'bootTime', de:prev.bootTime, para:atual.bootTime });
+    }
+  }
+
+  estado.ultimoSnapshot = atual;
+  estado.atualizadoEm = nowIso;
+  salvarEstadoLocal(estado);
+  _ipAnterior = atual.ip || _ipAnterior;
 }
 
 // ── Ciclo principal ───────────────────────────────────────────────
@@ -1297,6 +1372,7 @@ async function reportar() {
 
     const discoC = discos.find(d => d.drive === 'C:') || null;
     const uptimeSec = getUptime();
+    const bootTimeIso = getBootTimeIso(uptimeSec);
 
     const hw  = getHardwareInfo();
     const sec = getSegurancaInfo();
@@ -1338,7 +1414,10 @@ async function reportar() {
       outrosDiscos:      discos.filter(d => d.drive !== 'C:'),
       usuarioLogado:     user,
       uptime:            uptimeSec,
+      uptimeSeconds:     uptimeSec,
       uptimeH:           Math.floor(uptimeSec / 3600),
+      bootTime:          bootTimeIso,
+      lastBootTime:      bootTimeIso,
       monitores:         getMonitores(),
       software:          software,
       softwareCount:     software.length,
@@ -1356,7 +1435,7 @@ async function reportar() {
     // Rastreia sessão do usuário (horário de login/logout, RDP)
     await rastrearSessaoUsuario(user, now).catch(e => log('[Sessao] ' + e.message));
     // Rastreia mudanças de IP/faixa de rede
-    await rastrearMudancasStatus(dados.ip, now).catch(e => log('[Status] ' + e.message));
+    await rastrearMudancasStatus(dados, now).catch(e => log('[Status] ' + e.message));
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
     // Espelho para compatibilidade com telas/consultas que usam agentes_desktop
@@ -1364,7 +1443,7 @@ async function reportar() {
     // Heartbeat dedicado — garante que lastSeen e status chegam mesmo se o payload completo falhar
     await firestorePatch(`agents/${AGENT_ID}`, {
       lastSeen: now, status: 'online', versaoAgente: '2.2.0',
-      uptimeH: dados.uptimeH, cpuPct: dados.cpuPct, ramPct: dados.ramPct,
+      uptime: dados.uptime, uptimeSeconds: dados.uptimeSeconds, uptimeH: dados.uptimeH, bootTime: dados.bootTime, lastBootTime: dados.lastBootTime, cpuPct: dados.cpuPct, ramPct: dados.ramPct,
     }).catch(() => {});
 
     log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user || '-'} | Principal 90d: ${dados.usuarioPrincipal || '-'}`);
