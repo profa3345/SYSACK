@@ -1,5 +1,8 @@
-// SYSACK v2.1 — app.js
+// SYSACK v2.2.2 — app.js
 // Módulo principal de aplicação
+
+const SYSACK_APP_VERSION = '2.2.2';
+const SYSACK_AGENT_VERSION = '2.2.2';
 
 
 // ============================================================
@@ -1271,7 +1274,7 @@ function initSeedData() {
   STATE.scAtivos = [];
   STATE.notificacoes = [];
   STATE.terceirizadaAtivos = [];
-  console.log('[SYSACK] v2.1 - listeners Firebase corrigidos - Producao: aguardando Banco');
+  console.log('[SYSACK] v2.2.2 - listeners Firebase corrigidos - Producao: aguardando Banco');
 }
 
 // ============================================================
@@ -7964,6 +7967,8 @@ function startAgentsListener() {
           const data = d.data();
           // Garante que campos numéricos não virem string
           if (data.uptimeH != null) data.uptimeH = Number(data.uptimeH);
+          if (data.uptime != null) data.uptime = Number(data.uptime);
+          if (data.uptimeSeconds != null) data.uptimeSeconds = Number(data.uptimeSeconds);
           if (data.cpuPct  != null) data.cpuPct  = Number(data.cpuPct);
           if (data.ramPct  != null) data.ramPct  = Number(data.ramPct);
           if (data.memPct  != null) data.memPct  = Number(data.memPct);
@@ -8170,6 +8175,26 @@ function abrirHistoricoGeralDoAgente(agentId) {
   abrirHistorico((ativo && (ativo.pat || ativo.id)) || agentId);
 }
 
+function arFormatarUptimeAgente(a) {
+  if (!a) return '—';
+  const bootRaw = a.bootTime || a.lastBootTime || a.ultimoBoot || a.lastBoot;
+  let seconds = null;
+  if (bootRaw) {
+    const d = bootRaw?.toDate ? bootRaw.toDate() : bootRaw?.seconds ? new Date(bootRaw.seconds * 1000) : new Date(bootRaw);
+    if (d && !isNaN(d.getTime())) seconds = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  }
+  if (seconds == null && a.uptimeSeconds != null) seconds = Number(a.uptimeSeconds);
+  if (seconds == null && a.uptime != null) seconds = Number(a.uptime);
+  if (seconds == null && a.uptimeH != null) seconds = Number(a.uptimeH) * 3600;
+  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  const dias = Math.floor(seconds / 86400);
+  const horas = Math.floor((seconds % 86400) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (dias > 0) return dias + 'd ' + horas + 'h';
+  if (horas > 0) return horas + 'h ' + mins + 'min';
+  return mins + 'min';
+}
+
 function renderAssistenciaRemota() {
   const tbody = document.getElementById('ar-tbody');
   if (!tbody) return;
@@ -8304,7 +8329,7 @@ function renderAssistenciaRemota() {
           return '<div style="font-size:11px;line-height:1.4">'+nome+serial+'</div>';
         }).join('') : '<span style="color:var(--g300)">—</span>'
       }</td>
-      <td style="font-size:12px;color:var(--g500)">${a.uptimeH != null ? Math.round(a.uptimeH) + 'h' : '—'}</td>
+      <td style="font-size:12px;color:var(--g500)" title="Boot: ${escapeHtml(a.bootTime || a.lastBootTime || '—')}">${escapeHtml(arFormatarUptimeAgente(a))}</td>
       <td style="font-size:10.5px;color:var(--g400);font-family:monospace">${escapeHtml(a.versaoAgente || a.version || '—')}</td>
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
@@ -9591,7 +9616,7 @@ function arAbrirInventario(agentId) {
     ['Monitor(es)',   monitoresStr],
     ['— SESSÃO —', ''],
     ['Usuário',       v('usuarioLogado')],
-    ['Uptime',        v('uptimeH') ? Math.round(v('uptimeH')) + 'h (' + Math.round(v('uptime')/3600*10)/10 + 'h)' : '—'],
+    ['Uptime',        arFormatarUptimeAgente(a)],
     ['Versão Agente', v('versaoAgente') || v('version')],
     ['Último contato', a.lastSeen ? new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleString('pt-BR') : '—'],
   ];
@@ -9908,12 +9933,9 @@ function arAtualizarClientes() {
   const online = todos.filter(a => a.status === 'online');
   openModal('modal-atualizar-cliente');
 
-  // Calcula versão incrementada
-  const versaoAtual = todos.map(a=>a.versaoAgente||a.version||'2.1.0')
-    .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
-  const pts = versaoAtual.split('.').map(Number);
-  pts[2] = (pts[2] || 0) + 1;
-  const novaVersao = pts.join('.');
+  // Versão fixa do agente publicado no Vercel.
+  // Não incrementa automaticamente: a versão solicitada deve ser exatamente a publicada.
+  const novaVersao = SYSACK_AGENT_VERSION;
 
   const btn = document.getElementById('btn-upd-exec');
   if (btn) btn.dataset.versao = novaVersao;
@@ -10099,14 +10121,8 @@ async function executarAtualizacaoCliente() {
   const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js?ts=' + Date.now();
   const btn = document.getElementById('btn-upd-exec');
 
-  let versao = btn?.dataset?.versao || '';
-  if (!versao) {
-    const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-    const va = (online.length ? online : (STATE_AGENTS.list||[])).map(a=>a.versaoAgente||a.version||'2.1.0')
-      .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
-    const pts = va.split('.').map(Number); pts[2]=(pts[2]||0)+1;
-    versao = pts.join('.');
-  }
+  let versao = btn?.dataset?.versao || SYSACK_AGENT_VERSION;
+  if (!versao) versao = SYSACK_AGENT_VERSION;
   if (!versao) return showToast('Versão não definida — tente fechar e abrir o modal novamente.','warning');
 
   const todos   = STATE_AGENTS.list || [];
@@ -10468,6 +10484,8 @@ function _arEnsureLoaded() {
       STATE_AGENTS.list = snap.docs.map(d => {
         const data = d.data();
         if (data.uptimeH != null) data.uptimeH = Number(data.uptimeH);
+          if (data.uptime != null) data.uptime = Number(data.uptime);
+          if (data.uptimeSeconds != null) data.uptimeSeconds = Number(data.uptimeSeconds);
         if (data.cpuPct  != null) data.cpuPct  = Number(data.cpuPct);
         if (data.ramPct  != null) data.ramPct  = Number(data.ramPct);
         if (data.memPct  != null) data.memPct  = Number(data.memPct);
@@ -12992,7 +13010,7 @@ function initPWA() {
 // DOWNLOAD SYSACK CLIENT PARA WINDOWS
 // Gera e baixa o instalador atualizado sincronizado com a versão web
 // ═══════════════════════════════════════════════════════════
-const SYSACK_CLIENT_VERSION = '2.0.0'; // atualiza junto com a versão web
+const SYSACK_CLIENT_VERSION = SYSACK_AGENT_VERSION; // atualiza junto com a versão web
 
 function mostrarBotaoDownloadClient() {
   // Mostra o botão de download apenas em Windows
@@ -33208,7 +33226,7 @@ class SysackWebRTCViewer {
         <div class="stat-card"><div class="stat-label">Usuário logado</div><div class="stat-value" style="font-size:16px">${esc2(ag?.usuarioLogado || ativo?.usuarioLogado || '—')}</div></div>
         <div class="stat-card"><div class="stat-label">Usuário principal</div><div class="stat-value" style="font-size:16px">${esc2(usuariosPrincipaisTextoSYSACK(ativo, ag))}</div></div>
         <div class="stat-card"><div class="stat-label">Último login</div><div class="stat-value" style="font-size:15px">${esc2(fmt2(ultimoLoginSYSACK(ativo, ag)))}</div></div>
-        <div class="stat-card"><div class="stat-label">Dias logados no ano</div><div class="stat-value">${esc2(String(diasAnoSYSACK(ativo, ag)))}</div></div>
+        <div class="stat-card"><div class="stat-label">Dias logado</div><div class="stat-value">${esc2(String(diasAnoSYSACK(ativo, ag)))}</div></div>
       </div>`;
   }
 
@@ -33218,7 +33236,7 @@ class SysackWebRTCViewer {
     const icon = ({login:'👤', logout:'🚪', chamado:'🎫', chamado_aberto:'🎫', chamado_atualizado:'🎫', chamado_fechado:'✅',
       mudanca_faixa_ip:'🚨', alerta_ip:'🚨', troca_monitor:'🖥️', monitor:'🖥️', transferencia:'🚚',
       troca_responsavel:'👥', mudanca_campo:'✏️', mudanca_local:'📍', troca_area:'🏢', troca_grupo:'🧩',
-      troca_status:'📌', observacao:'📝', obs_tecnico:'📝', nota_tecnico:'📝'}[tipo] || '•');
+      troca_status:'📌', reinicializacao:'🔄', observacao:'📝', obs_tecnico:'📝', nota_tecnico:'📝'}[tipo] || '•');
     const data = e.createdAt || e.data || e.detecEm || e.atualizadoEm || e.ultimoLogin || e.dataLogin || e.time;
     const chamadoId = e.chamadoId || e.idChamado || e.chamado || (String(e.titulo||'').match(/#?([A-Za-z0-9_-]{3,})/)||[])[1];
     const isChamado = String(tipo).includes('chamado') || String(e.titulo||'').toLowerCase().includes('chamado');
@@ -33274,7 +33292,7 @@ class SysackWebRTCViewer {
       ['Hostname', v('hostname') || ag?.id || ativo?.id], ['Patrimônio', ativo?.pat || 'Sem patrimônio'], ['IP', v('ip')], ['Área', ativo?.area || v('area')], ['Responsável', ativo?.resp || ativo?.responsavel || '—'],
       ['Fabricante', v('fabricante') || v('fab')], ['Modelo', v('modelo')], ['Serial', v('serial') || v('serie')], ['Sistema', v('osNome') || v('so')], ['CPU', v('cpuModelo')],
       ['RAM', v('ramTotalGB') !== '—' ? `${v('ramTotalGB')} GB` : '—'], ['Disco C:', ag?.discoC_livreGB ? `${ag.discoC_livreGB} GB livres` : (ag?.discoC?.freeGB ? `${ag.discoC.freeGB} GB livres de ${ag.discoC.totalGB} GB` : '—')],
-      ['Monitor(es)', monitores], ['Usuário logado', ag?.usuarioLogado || ativo?.usuarioLogado || '—'], ['Usuário principal', usuariosPrincipaisTextoSYSACK(ativo, ag)], ['Último login', fmt2(ultimoLoginSYSACK(ativo, ag))], ['Dias logados no ano', diasAnoSYSACK(ativo, ag)], ['Último contato', fmt2(ag?.lastSeen || ativo?.lastSeen)]
+      ['Monitor(es)', monitores], ['Usuário logado', ag?.usuarioLogado || ativo?.usuarioLogado || '—'], ['Usuário principal', usuariosPrincipaisTextoSYSACK(ativo, ag)], ['Último login', fmt2(ultimoLoginSYSACK(ativo, ag))], ['Dias logado', diasAnoSYSACK(ativo, ag)], ['Uptime', arFormatarUptimeAgente(ag)], ['Boot', fmt2(ag?.bootTime || ag?.lastBootTime)], ['Último contato', fmt2(ag?.lastSeen || ativo?.lastSeen)]
     ];
     return '<table style="width:100%;border-collapse:collapse">' + rows.map(([k,v]) => `<tr><td style="padding:6px 0;color:var(--g500);font-size:12px;width:150px;border-bottom:1px solid var(--g100)">${esc2(k)}</td><td style="padding:6px 0;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--g100)">${esc2(v)}</td></tr>`).join('') + '</table>';
   }
@@ -33419,7 +33437,7 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
       'transferencia','movimentacao','troca_responsavel','mudanca_campo','mudanca_local',
       'troca_area','troca_grupo','troca_status','mudanca_ip','mudanca_hostname',
       'mudanca_nome','mudanca_card','card_movido','patrimonio','inventario',
-      'nota_tecnico','observacao','obs_tecnico'
+      'nota_tecnico','observacao','obs_tecnico','reinicializacao'
     ];
 
     const eventos = [];
@@ -33810,7 +33828,7 @@ function baixarInstaladorSYSACKCorrigido() {
 }
 
 /* =====================================================================
-   SYSACK v2.1.7 — ALERTAS CONFIGURÁVEIS
+   SYSACK v2.2.2 — ALERTAS CONFIGURÁVEIS
    Corrige botões da tela de Alertas, permite configurar destinatários,
    grupos, horário, intervalo, repetição e adiciona alertas de:
    - mudança de faixa de rede
