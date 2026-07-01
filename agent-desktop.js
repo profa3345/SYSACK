@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.2.0
+ * SYSACK Agent Desktop v2.2.1
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -246,9 +246,10 @@ function agendarReinicioAgent() {
       'taskkill /F /IM node.exe >nul 2>nul',
       'timeout /t 2 /nobreak >nul',
       '',
-      ':: Move arquivo temporario para o definitivo',
+      ':: Copia arquivo temporario para o definitivo e remove temporario',
       'if exist "' + script + '.new.js" (',
-      '  move /y "' + script + '.new.js" "' + script + '" >nul',
+      '  copy /y "' + script + '.new.js" "' + script + '" >nul',
+      '  del /f /q "' + script + '.new.js" >nul 2>nul',
       ')',
       '',
       ':: Reinicia — schtasks → direto',
@@ -1112,7 +1113,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
         primeiroLogin: nowIso,
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '', fonte: 'agent-desktop',
-        versaoAgente: '2.2.0',
+        versaoAgente: '2.2.1',
       });
       log(`[LoginHistory] Documento criado: ${loginDocId}`);
     } else {
@@ -1120,7 +1121,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
       await firestorePatch(docPath, {
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '',
-        versaoAgente: '2.2.0',
+        versaoAgente: '2.2.1',
       });
       log(`[LoginHistory] Documento atualizado (ultimoLogin): ${loginDocId}`);
     }
@@ -1422,7 +1423,8 @@ async function reportar() {
       software:          software,
       softwareCount:     software.length,
       softwareAtualizadoEm: _softwareCache.at ? new Date(_softwareCache.at).toISOString() : now,
-      versaoAgente:      '2.2.0',
+      versaoAgente:      '2.2.1',
+      agentVersion:       '2.2.1',
       ultimaAtualizacao: now,
       lastSeen:          now,
       status:            'online',
@@ -1442,7 +1444,7 @@ async function reportar() {
     await firestoreSet(`agentes_desktop/${AGENT_ID}`, dados).catch(e => log('[WARN] Falha ao gravar agentes_desktop: ' + e.message));
     // Heartbeat dedicado — garante que lastSeen e status chegam mesmo se o payload completo falhar
     await firestorePatch(`agents/${AGENT_ID}`, {
-      lastSeen: now, status: 'online', versaoAgente: '2.2.0',
+      lastSeen: now, status: 'online', versaoAgente: '2.2.1',
       uptime: dados.uptime, uptimeSeconds: dados.uptimeSeconds, uptimeH: dados.uptimeH, bootTime: dados.bootTime, lastBootTime: dados.lastBootTime, cpuPct: dados.cpuPct, ramPct: dados.ramPct,
     }).catch(() => {});
 
@@ -1458,7 +1460,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.2.0] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.1] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -2454,6 +2456,12 @@ $out | ConvertTo-Json -Depth 4 -Compress
       });
 
       if (!novoConteudo || novoConteudo.length < 1000) throw new Error(`Arquivo inválido (${novoConteudo?.length ?? 0} bytes)`);
+      const versaoBaixadaMatch = novoConteudo.match(/SYSACK Agent Desktop v([0-9.]+)/);
+      const versaoBaixada = versaoBaixadaMatch ? versaoBaixadaMatch[1] : '';
+      if (versaoNova && versaoBaixada && versaoBaixada !== String(versaoNova).replace(/^v/i,'')) {
+        throw new Error(`Versão baixada (${versaoBaixada}) diferente da solicitada (${versaoNova}) — verifique deploy/cache da Vercel`);
+      }
+      log(`[UPDATE] Versão baixada validada: ${versaoBaixada || 'não identificada'}`);
 
       // Grava em arquivo temporário — o .cmd move .new.js→.js após parar todos os processos
       const selfPath   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
