@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.2.1
+ * SYSACK Agent Desktop v2.2.2
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -246,10 +246,9 @@ function agendarReinicioAgent() {
       'taskkill /F /IM node.exe >nul 2>nul',
       'timeout /t 2 /nobreak >nul',
       '',
-      ':: Copia arquivo temporario para o definitivo e remove temporario',
+      ':: Move arquivo temporario para o definitivo',
       'if exist "' + script + '.new.js" (',
-      '  copy /y "' + script + '.new.js" "' + script + '" >nul',
-      '  del /f /q "' + script + '.new.js" >nul 2>nul',
+      '  move /y "' + script + '.new.js" "' + script + '" >nul',
       ')',
       '',
       ':: Reinicia — schtasks → direto',
@@ -1113,7 +1112,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
         primeiroLogin: nowIso,
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '', fonte: 'agent-desktop',
-        versaoAgente: '2.2.1',
+        versaoAgente: '2.2.0',
       });
       log(`[LoginHistory] Documento criado: ${loginDocId}`);
     } else {
@@ -1121,7 +1120,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
       await firestorePatch(docPath, {
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '',
-        versaoAgente: '2.2.1',
+        versaoAgente: '2.2.0',
       });
       log(`[LoginHistory] Documento atualizado (ultimoLogin): ${loginDocId}`);
     }
@@ -1423,8 +1422,7 @@ async function reportar() {
       software:          software,
       softwareCount:     software.length,
       softwareAtualizadoEm: _softwareCache.at ? new Date(_softwareCache.at).toISOString() : now,
-      versaoAgente:      '2.2.1',
-      agentVersion:       '2.2.1',
+      versaoAgente:      '2.2.0',
       ultimaAtualizacao: now,
       lastSeen:          now,
       status:            'online',
@@ -1444,7 +1442,7 @@ async function reportar() {
     await firestoreSet(`agentes_desktop/${AGENT_ID}`, dados).catch(e => log('[WARN] Falha ao gravar agentes_desktop: ' + e.message));
     // Heartbeat dedicado — garante que lastSeen e status chegam mesmo se o payload completo falhar
     await firestorePatch(`agents/${AGENT_ID}`, {
-      lastSeen: now, status: 'online', versaoAgente: '2.2.1',
+      lastSeen: now, status: 'online', versaoAgente: '2.2.0',
       uptime: dados.uptime, uptimeSeconds: dados.uptimeSeconds, uptimeH: dados.uptimeH, bootTime: dados.bootTime, lastBootTime: dados.lastBootTime, cpuPct: dados.cpuPct, ramPct: dados.ramPct,
     }).catch(() => {});
 
@@ -1460,7 +1458,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.2.1] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.2] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -2425,64 +2423,170 @@ $out | ConvertTo-Json -Depth 4 -Compress
       const urlNova    = dados.url    || '';
       const versaoNova = dados.versao || '';
       if (!urlNova) throw new Error('URL do novo agente não informada');
-      log(`[UPDATE] Iniciando atualização para v${versaoNova} via ${urlNova}`);
+      log(`[UPDATE] Iniciando atualização para v${versaoNova || '(sem versão informada)'} via ${urlNova}`);
 
-      // Heartbeat imediato — painel sabe que agente recebeu antes do timeout
-      await firestorePatch('agent_commands/' + id, {
-        status: 'processando',
-        resultado: 'Agente recebeu o comando — baixando nova versão...',
-        processandoEm: new Date().toISOString(),
-      }).catch(() => {});
-
-      const novoConteudo = await new Promise((resolve, reject) => {
-        function baixar(url, redirects) {
-          if (redirects > 5) return reject(new Error('Muitos redirecionamentos'));
-          const mod  = url.startsWith('https') ? require('https') : require('http');
-          const urlO = new URL(url);
-          const req  = mod.get({
-            hostname: urlO.hostname, path: urlO.pathname + urlO.search,
-            headers: { 'User-Agent': 'SYSACK-Agent/auto-update', 'Cache-Control': 'no-cache' },
-            rejectUnauthorized: false,
-          }, res => {
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) return baixar(res.headers.location, redirects + 1);
-            if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
-            let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
-          });
-          req.on('error', reject);
-          req.setTimeout(45000, () => { req.destroy(); reject(new Error('Timeout download')); });
-          req.end();
-        }
-        baixar(urlNova, 0);
-      });
-
-      if (!novoConteudo || novoConteudo.length < 1000) throw new Error(`Arquivo inválido (${novoConteudo?.length ?? 0} bytes)`);
-      const versaoBaixadaMatch = novoConteudo.match(/SYSACK Agent Desktop v([0-9.]+)/);
-      const versaoBaixada = versaoBaixadaMatch ? versaoBaixadaMatch[1] : '';
-      if (versaoNova && versaoBaixada && versaoBaixada !== String(versaoNova).replace(/^v/i,'')) {
-        throw new Error(`Versão baixada (${versaoBaixada}) diferente da solicitada (${versaoNova}) — verifique deploy/cache da Vercel`);
-      }
-      log(`[UPDATE] Versão baixada validada: ${versaoBaixada || 'não identificada'}`);
-
-      // Grava em arquivo temporário — o .cmd move .new.js→.js após parar todos os processos
-      const selfPath   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
+      const selfPath   = process.argv[1] || path.join(__dirname, 'agent.js');
       const tempPath   = selfPath + '.new.js';
-      const backupPath = selfPath.replace(/\.js$/, '.backup.js');
-      try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
-      fs.writeFileSync(tempPath, novoConteudo, 'utf8');
-      if (fs.readFileSync(tempPath, 'utf8').length < 1000) throw new Error('Arquivo temporário inválido');
+      const backupPath = selfPath.replace(/\.js$/i, '.backup.js');
 
-      log(`[UPDATE] Temp OK — ${tempPath} (${novoConteudo.length} bytes). Agendando reinício...`);
-      resultado = `Atualização v${versaoNova} agendada. Reiniciando serviço.`;
+      async function marcarUpdate(status, texto, extra = {}) {
+        try {
+          await firestorePatch('agent_commands/' + id, {
+            status,
+            resultado: texto,
+            atualizadoEm: new Date().toISOString(),
+            ...extra,
+          });
+        } catch(e) {
+          log('[UPDATE] Falha ao atualizar status do comando: ' + e.message);
+        }
+      }
 
-      await firestorePatch('agents/' + AGENT_ID, {
-        versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
-      }).catch(() => {});
-      await firestorePatch('agent_commands/' + id, {
-        status: 'concluido', resultado: resultado
-      }).catch(() => {});
-      log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 2s...');
-      agendarReinicioAgent();
-      setTimeout(() => process.exit(0), 2000);
+      try {
+        // Heartbeat imediato — painel sabe que agente recebeu antes do timeout
+        await marcarUpdate('processando', 'Agente recebeu o comando — preparando download...', {
+          processandoEm: new Date().toISOString(), etapa: 'preparando_download'
+        });
+
+        function baixarArquivoRobusto(urlInicial) {
+          return new Promise((resolve, reject) => {
+            const chunks = [];
+            let finalizado = false;
+            let total = 0;
+            const MAX_BYTES = 5 * 1024 * 1024; // proteção contra HTML/erro gigante
+
+            function falhar(err) {
+              if (finalizado) return;
+              finalizado = true;
+              reject(err instanceof Error ? err : new Error(String(err)));
+            }
+            function ok(txt) {
+              if (finalizado) return;
+              finalizado = true;
+              resolve(txt);
+            }
+            function baixar(urlAtual, redirects = 0) {
+              if (redirects > 8) return falhar(new Error('Muitos redirecionamentos no download'));
+              let urlObj;
+              try { urlObj = new URL(urlAtual); }
+              catch(e) { return falhar(new Error('URL inválida para atualização: ' + urlAtual)); }
+
+              const mod = urlObj.protocol === 'https:' ? require('https') : require('http');
+              log(`[UPDATE] Download passo ${redirects + 1}: ${urlObj.href}`);
+              const req = mod.get({
+                protocol: urlObj.protocol,
+                hostname: urlObj.hostname,
+                port: urlObj.port || undefined,
+                path: urlObj.pathname + urlObj.search,
+                headers: {
+                  'User-Agent': 'SYSACK-Agent/auto-update',
+                  'Cache-Control': 'no-cache, no-store, max-age=0',
+                  'Pragma': 'no-cache',
+                },
+                rejectUnauthorized: false,
+              }, res => {
+                log(`[UPDATE] HTTP ${res.statusCode} recebido de ${urlObj.hostname}`);
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                  res.resume();
+                  let prox;
+                  try { prox = new URL(res.headers.location, urlObj).href; }
+                  catch(e) { return falhar(new Error('Redirect inválido: ' + res.headers.location)); }
+                  return baixar(prox, redirects + 1);
+                }
+                if (res.statusCode !== 200) {
+                  let body = '';
+                  res.setEncoding('utf8');
+                  res.on('data', c => { body += c; if (body.length > 500) body = body.slice(0, 500); });
+                  res.on('end', () => falhar(new Error('HTTP ' + res.statusCode + ' ao baixar agente. Corpo: ' + body.slice(0, 200))));
+                  return;
+                }
+                res.on('data', c => {
+                  total += c.length;
+                  if (total > MAX_BYTES) {
+                    req.destroy();
+                    return falhar(new Error('Arquivo baixado excedeu limite de segurança (' + MAX_BYTES + ' bytes)'));
+                  }
+                  chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+                });
+                res.on('end', () => ok(Buffer.concat(chunks).toString('utf8')));
+                res.on('error', falhar);
+              });
+              req.on('error', falhar);
+              req.setTimeout(60000, () => {
+                req.destroy();
+                falhar(new Error('Timeout de 60s no download do agente'));
+              });
+            }
+            baixar(urlInicial, 0);
+          });
+        }
+
+        await marcarUpdate('processando', 'Baixando nova versão do agente...', { etapa: 'download' });
+        const novoConteudo = await baixarArquivoRobusto(urlNova);
+        log(`[UPDATE] Download concluído: ${novoConteudo.length} bytes`);
+
+        if (!novoConteudo || novoConteudo.length < 1000) {
+          throw new Error(`Arquivo inválido (${novoConteudo?.length ?? 0} bytes)`);
+        }
+        if (!novoConteudo.includes('SYSACK Agent Desktop')) {
+          throw new Error('Arquivo baixado não parece ser o agent-desktop.js do SYSACK');
+        }
+        const versaoBaixadaMatch = novoConteudo.match(/SYSACK Agent Desktop v([0-9.]+)/);
+        const versaoBaixada = versaoBaixadaMatch ? versaoBaixadaMatch[1] : '';
+        log(`[UPDATE] Versão detectada no arquivo baixado: ${versaoBaixada || 'não identificada'}`);
+        if (versaoNova && versaoBaixada && versaoBaixada !== versaoNova) {
+          throw new Error(`Versão baixada (${versaoBaixada}) diferente da solicitada (${versaoNova}). Verifique o deploy no Vercel.`);
+        }
+
+        await marcarUpdate('processando', 'Download concluído — gravando arquivo temporário...', { etapa: 'gravando_temp', versaoBaixada });
+        try {
+          fs.copyFileSync(selfPath, backupPath);
+          log('[UPDATE] Backup: ' + backupPath);
+        } catch(e) {
+          log('[UPDATE] Aviso: não foi possível criar backup: ' + e.message);
+        }
+        fs.writeFileSync(tempPath, novoConteudo, 'utf8');
+        const tempLen = fs.readFileSync(tempPath, 'utf8').length;
+        if (tempLen < 1000) throw new Error('Arquivo temporário inválido');
+        log(`[UPDATE] Temp OK — ${tempPath} (${tempLen} bytes). Agendando reinício...`);
+
+        resultado = `Atualização v${versaoNova || versaoBaixada || '?'} baixada e agendada. Reiniciando serviço.`;
+        await firestorePatch('agents/' + AGENT_ID, {
+          versaoAgente: versaoNova || versaoBaixada || '',
+          agentVersion: versaoNova || versaoBaixada || '',
+          ultimaAtualizacao: new Date().toISOString(),
+          updateStatus: 'reiniciando',
+          updateCommandId: id,
+        }).catch(e => log('[UPDATE] Aviso: falha ao atualizar agents/' + AGENT_ID + ': ' + e.message));
+
+        await marcarUpdate('concluido', resultado, {
+          etapa: 'reiniciando', concluidoEm: new Date().toISOString(), versaoBaixada,
+        });
+        log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 2s...');
+        agendarReinicioAgent();
+        setTimeout(() => process.exit(0), 2000);
+        return;
+      } catch(e) {
+        const msgErro = (e && (e.stack || e.message)) ? String(e.stack || e.message) : String(e);
+        erroExec = true;
+        resultado = 'Falha na atualização do agente: ' + msgErro.slice(0, 1500);
+        log('[UPDATE] ERRO: ' + msgErro);
+        try {
+          await firestorePatch('agent_commands/' + id, {
+            status: 'erro',
+            resultado,
+            erro: msgErro.slice(0, 1500),
+            etapa: 'erro_update',
+            erroEm: new Date().toISOString(),
+          });
+        } catch(e2) {
+          log('[UPDATE] Falha ao gravar erro no Firestore: ' + e2.message);
+        }
+        try {
+          await reportAgentResult(id, tipo, 'erro', resultado, { erro: msgErro.slice(0, 1500) });
+        } catch(e3) {}
+        return;
+      }
 
     } else if (tipo === 'screenshot') {
       const ps = [
