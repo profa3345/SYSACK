@@ -3861,8 +3861,24 @@ function aplicarModuloPermsMenu(user) {
 
 // ─── Logout ──────────────────────────────────────────────────
 function confirmarLogout() {
-  if (!confirm('Deseja sair do sistema?')) return;
-  fazerLogout();
+  // Usa showModal em vez de confirm() nativo para evitar que Enter
+  // acidental (foco no botão Sair) faça logout sem intenção do usuário
+  const html = `
+    <div class="modal-overlay" id="modal-confirmar-logout" style="display:flex;z-index:99999">
+      <div class="modal" style="max-width:340px;text-align:center">
+        <div class="modal-header"><h3>Sair do sistema</h3></div>
+        <div style="padding:24px 20px 8px;font-size:14px;color:var(--g600)">
+          Deseja realmente sair do SYSACK?
+        </div>
+        <div class="modal-footer" style="justify-content:center;gap:10px;padding:16px 20px">
+          <button class="btn btn-ghost" onclick="document.getElementById('modal-confirmar-logout')?.remove()">Cancelar</button>
+          <button class="btn btn-danger" onclick="document.getElementById('modal-confirmar-logout')?.remove();fazerLogout()">🚪 Sair</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  // Foca no botão Cancelar para evitar que Enter confirme o logout
+  setTimeout(() => document.querySelector('#modal-confirmar-logout .btn-ghost')?.focus(), 50);
 }
 
 async function fazerLogout() {
@@ -8052,30 +8068,27 @@ function verificarTrocaMonitores(agentes) {
     const monitores = ag.monitores;
     if (!Array.isArray(monitores) || !monitores.length) return;
 
-    const hostnameAtual = String(ag.hostname || '').toLowerCase(); // normaliza para evitar falso positivo maiúsculo/minúsculo
-
     monitores.forEach(mon => {
       const id = mon.serial || mon.nome || mon.caption;
       if (!id || id.length < 3) return; // ignora sem identificador
       const chave = CHAVE + id.replace(/[^a-zA-Z0-9]/g,'_');
-      const maquinaAnteriorRaw = localStorage.getItem(chave);
-      const maquinaAnterior = maquinaAnteriorRaw ? String(maquinaAnteriorRaw).toLowerCase() : null;
+      const maquinaAnterior = localStorage.getItem(chave);
 
-      if (maquinaAnterior && maquinaAnterior !== hostnameAtual) {
+      if (maquinaAnterior && maquinaAnterior !== ag.hostname) {
         // Monitor mudou de máquina!
         const nomeMonitor = mon.nome || mon.caption || id;
         showToast(
-          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${hostnameAtual}`,
+          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${ag.hostname}`,
           'warning', 10000
         );
-        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${hostnameAtual}`);
+        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${ag.hostname}`);
         // Registra no audit log
         auditLog('monitor_movido', 'assistencia-remota', id, 'monitor', {
-          monitor: nomeMonitor, de: maquinaAnterior, para: hostnameAtual
+          monitor: nomeMonitor, de: maquinaAnterior, para: ag.hostname
         });
       }
-      // Atualiza registro sempre em minúsculas
-      localStorage.setItem(chave, hostnameAtual);
+      // Atualiza registro
+      localStorage.setItem(chave, ag.hostname);
     });
   });
 }
