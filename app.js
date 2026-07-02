@@ -3861,24 +3861,8 @@ function aplicarModuloPermsMenu(user) {
 
 // ─── Logout ──────────────────────────────────────────────────
 function confirmarLogout() {
-  // Usa showModal em vez de confirm() nativo para evitar que Enter
-  // acidental (foco no botão Sair) faça logout sem intenção do usuário
-  const html = `
-    <div class="modal-overlay" id="modal-confirmar-logout" style="display:flex;z-index:99999">
-      <div class="modal" style="max-width:340px;text-align:center">
-        <div class="modal-header"><h3>Sair do sistema</h3></div>
-        <div style="padding:24px 20px 8px;font-size:14px;color:var(--g600)">
-          Deseja realmente sair do SYSACK?
-        </div>
-        <div class="modal-footer" style="justify-content:center;gap:10px;padding:16px 20px">
-          <button class="btn btn-ghost" onclick="document.getElementById('modal-confirmar-logout')?.remove()">Cancelar</button>
-          <button class="btn btn-danger" onclick="document.getElementById('modal-confirmar-logout')?.remove();fazerLogout()">🚪 Sair</button>
-        </div>
-      </div>
-    </div>`;
-  document.body.insertAdjacentHTML('beforeend', html);
-  // Foca no botão Cancelar para evitar que Enter confirme o logout
-  setTimeout(() => document.querySelector('#modal-confirmar-logout .btn-ghost')?.focus(), 50);
+  if (!confirm('Deseja sair do sistema?')) return;
+  fazerLogout();
 }
 
 async function fazerLogout() {
@@ -33282,10 +33266,15 @@ class SysackWebRTCViewer {
     const ativoId = ativo?.id || agentId;
 
     // Carrega histórico do ativo + histórico do agente (onde ficam eventos online/offline/IP)
-    const [historicoAtivo, historicoAgente] = await Promise.all([
+    // Tenta nos dois formatos: ID original (como aparece em STATE_AGENTS) e minúsculo (após fix lowercase)
+    const agentIdUpper = String(agentId).toUpperCase();
+    const agentIdLower = String(agentId).toLowerCase();
+    const historicoAgentePaths = [...new Set([agentId, agentIdUpper, agentIdLower])];
+    const [historicoAtivo, ...historicoAgenteParts] = await Promise.all([
       ativo?.id ? fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : Promise.resolve([]),
-      fsGetSubcolecaoSYSACK(`agents/${agentId}/historico`, 'createdAt'),
+      ...historicoAgentePaths.map(id => fsGetSubcolecaoSYSACK(`agents/${id}/historico`, 'createdAt')),
     ]);
+    const historicoAgente = historicoAgenteParts.flat();
     // Mescla e deduplica por createdAt+tipo
     const seenH = new Set();
     const historico = [...historicoAtivo, ...historicoAgente].filter(h => {
