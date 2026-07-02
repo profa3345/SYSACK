@@ -8052,27 +8052,30 @@ function verificarTrocaMonitores(agentes) {
     const monitores = ag.monitores;
     if (!Array.isArray(monitores) || !monitores.length) return;
 
+    const hostnameAtual = String(ag.hostname || '').toLowerCase(); // normaliza para evitar falso positivo maiúsculo/minúsculo
+
     monitores.forEach(mon => {
       const id = mon.serial || mon.nome || mon.caption;
       if (!id || id.length < 3) return; // ignora sem identificador
       const chave = CHAVE + id.replace(/[^a-zA-Z0-9]/g,'_');
-      const maquinaAnterior = localStorage.getItem(chave);
+      const maquinaAnteriorRaw = localStorage.getItem(chave);
+      const maquinaAnterior = maquinaAnteriorRaw ? String(maquinaAnteriorRaw).toLowerCase() : null;
 
-      if (maquinaAnterior && maquinaAnterior !== ag.hostname) {
+      if (maquinaAnterior && maquinaAnterior !== hostnameAtual) {
         // Monitor mudou de máquina!
         const nomeMonitor = mon.nome || mon.caption || id;
         showToast(
-          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${ag.hostname}`,
+          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${hostnameAtual}`,
           'warning', 10000
         );
-        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${ag.hostname}`);
+        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${hostnameAtual}`);
         // Registra no audit log
         auditLog('monitor_movido', 'assistencia-remota', id, 'monitor', {
-          monitor: nomeMonitor, de: maquinaAnterior, para: ag.hostname
+          monitor: nomeMonitor, de: maquinaAnterior, para: hostnameAtual
         });
       }
-      // Atualiza registro
-      localStorage.setItem(chave, ag.hostname);
+      // Atualiza registro sempre em minúsculas
+      localStorage.setItem(chave, hostnameAtual);
     });
   });
 }
