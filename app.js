@@ -33139,25 +33139,32 @@ class SysackWebRTCViewer {
     const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
     try {
       if (!window.db) return out;
-      // Busca com lowercase (agente novo) E maiúsculo (agente antigo, antes do fix)
-      const hostnamesLower = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean).map(h => String(h).toLowerCase());
-      const hostnamesUpper = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean).map(h => String(h).toUpperCase());
+      // Busca lowercase (agente novo) E uppercase (agente antigo, antes do fix de hostname)
+      const base = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean);
+      const hostnamesLower = base.map(h => String(h).toLowerCase());
+      const hostnamesUpper = base.map(h => String(h).toUpperCase());
       const todosHostnames = [...new Set([...hostnamesLower, ...hostnamesUpper])];
       const ids = [ativo?.id, ativo?.pat, ag?.id].filter(Boolean);
 
-      // 1) Busca login_history por hostname (minúsculo e maiúsculo)
+      console.log('[LoginHistory] Buscando hostnames:', todosHostnames);
+
+      // 1) Busca login_history por hostname (ambos os formatos)
       for (const hn of todosHostnames) {
         try {
           const snap = await db.collection('login_history').where('hostname','==',hn).orderBy('dia','desc').limit(400).get();
+          console.log('[LoginHistory] hostname=' + hn + ' orderBy:', snap.size, 'docs');
           snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
-        } catch {
+        } catch(e) {
+          console.warn('[LoginHistory] orderBy falhou para', hn, '— tentando sem orderBy:', e.message);
           try {
             const snap = await db.collection('login_history').where('hostname','==',hn).limit(400).get();
+            console.log('[LoginHistory] hostname=' + hn + ' sem orderBy:', snap.size, 'docs');
             snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
-          } catch {}
+          } catch(e2) { console.warn('[LoginHistory] falhou:', e2.message); }
         }
         try {
           const snap2 = await db.collection('login_history').where('agentId','==',hn).limit(200).get();
+          if (snap2.size) console.log('[LoginHistory] agentId=' + hn + ':', snap2.size, 'docs');
           snap2.docs.forEach(d => push({ id:d.id, ...d.data() }));
         } catch {}
       }
@@ -33170,10 +33177,11 @@ class SysackWebRTCViewer {
         } catch {}
       }
 
-      // 3) Busca login_sessions (minúsculo e maiúsculo)
+      // 3) Busca login_sessions (ambos os formatos)
       for (const hn of todosHostnames) {
         try {
           const snap = await db.collection('login_sessions').where('hostname','==',hn).orderBy('loginAt','desc').limit(300).get();
+          console.log('[LoginSessions] hostname=' + hn + ':', snap.size, 'docs');
           snap.docs.forEach(d => push({ id:d.id, _isSession:true, ...d.data() }));
         } catch {
           try {
@@ -33182,13 +33190,10 @@ class SysackWebRTCViewer {
           } catch {}
         }
       }
-    } catch {}
-    // Ordena no cliente
-    out.sort((a, b) => {
-      const da = a.dia || a.loginAt || a.createdAt || '';
-      const db2 = b.dia || b.loginAt || b.createdAt || '';
-      return String(db2).localeCompare(String(da));
-    });
+    } catch(e) { console.error('[LoginHistory] erro geral:', e.message); }
+    console.log('[LoginHistory] Total encontrado:', out.length, 'docs');
+    // Ordena no cliente — não depende de índice
+    out.sort((a, b) => String(b.dia || b.loginAt || b.createdAt || '').localeCompare(String(a.dia || a.loginAt || a.createdAt || '')));
     return out;
   }
 
@@ -33284,7 +33289,7 @@ class SysackWebRTCViewer {
     const ativoId = ativo?.id || agentId;
 
     // Carrega histórico do ativo + histórico do agente
-    // Busca nos três formatos: original, maiúsculo e minúsculo (fix hostname case)
+    // Busca maiúsculo E minúsculo — agente antigo gravava ID em maiúsculas
     const agentIdUpper = String(agentId).toUpperCase();
     const agentIdLower = String(agentId).toLowerCase();
     const historicoAgentePaths = [...new Set([agentId, agentIdUpper, agentIdLower])];
