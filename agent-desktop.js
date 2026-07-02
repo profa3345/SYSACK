@@ -405,6 +405,21 @@ function getLoggedUser() {
         log('[getLoggedUser] explorer owner falhou: ' + e5.message);
       }
 
+      // MÉTODO adicional: Win32_LogonSession — detecta sessões interativas no Windows Server
+      try {
+        const out = execSync(
+          'powershell -NoProfile -Command "' +
+          '$s=Get-CimInstance Win32_LogonSession|Where-Object{$_.LogonType -in @(2,10,11)}|Select-Object -First 1;' +
+          'if($s){$u=Get-CimInstance -Query(\'ASSOCIATORS OF {Win32_LogonSession.LogonId=\'+$s.LogonId+\'} WHERE AssocClass=Win32_LoggedOnUser\');if($u){$u[0].Name}}"',
+          { timeout: 10000, windowsHide: true }
+        ).toString().trim();
+        if (out && out.length > 0 && !['system','sistema'].includes(out.toLowerCase())) {
+          return out.includes('\\') ? out.split('\\').pop() : out;
+        }
+      } catch(e6) {
+        log('[getLoggedUser] Win32_LogonSession falhou: ' + e6.message);
+      }
+
       log('[getLoggedUser] Nenhum método detectou usuário logado nesta coleta.');
       return '';
     }
