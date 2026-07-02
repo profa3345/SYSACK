@@ -8056,25 +8056,23 @@ function verificarTrocaMonitores(agentes) {
       const id = mon.serial || mon.nome || mon.caption;
       if (!id || id.length < 3) return; // ignora sem identificador
       const chave = CHAVE + id.replace(/[^a-zA-Z0-9]/g,'_');
-      // Normaliza para minúsculas — evita falso positivo quando hostname muda de maiúsculo para minúsculo
-      const hostnameAtual = String(ag.hostname || ag.id || '').toLowerCase();
-      const maquinaAnteriorRaw = localStorage.getItem(chave);
-      const maquinaAnterior = maquinaAnteriorRaw ? maquinaAnteriorRaw.toLowerCase() : null;
+      const maquinaAnterior = localStorage.getItem(chave);
 
-      if (maquinaAnterior && maquinaAnterior !== hostnameAtual) {
+      if (maquinaAnterior && maquinaAnterior !== ag.hostname) {
         // Monitor mudou de máquina!
         const nomeMonitor = mon.nome || mon.caption || id;
         showToast(
-          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${hostnameAtual}`,
+          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${ag.hostname}`,
           'warning', 10000
         );
-        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${hostnameAtual}`);
+        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${ag.hostname}`);
+        // Registra no audit log
         auditLog('monitor_movido', 'assistencia-remota', id, 'monitor', {
-          monitor: nomeMonitor, de: maquinaAnterior, para: hostnameAtual
+          monitor: nomeMonitor, de: maquinaAnterior, para: ag.hostname
         });
       }
-      // Salva sempre em minúsculas
-      localStorage.setItem(chave, hostnameAtual);
+      // Atualiza registro
+      localStorage.setItem(chave, ag.hostname);
     });
   });
 }
@@ -33141,32 +33139,23 @@ class SysackWebRTCViewer {
     const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
     try {
       if (!window.db) return out;
-      // Busca lowercase (agente novo) E UPPERCASE (agente antigo — gravava hostname em maiúsculas)
-      const base = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean);
-      const todosHostnames = [...new Set([
-        ...base.map(h => String(h).toLowerCase()),
-        ...base.map(h => String(h).toUpperCase()),
-      ])];
+      const hostnames = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean).map(h => String(h).toLowerCase());
       const ids = [ativo?.id, ativo?.pat, ag?.id].filter(Boolean);
 
-      // 1) login_history — ambos os formatos, com fallback sem orderBy
-      for (const hn of todosHostnames) {
+      // 1) Busca por hostname — campo que o agente sempre grava
+      for (const hn of [...new Set(hostnames)]) {
         try {
           const snap = await db.collection('login_history').where('hostname','==',hn).orderBy('dia','desc').limit(400).get();
           snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
-        } catch {
-          try {
-            const snap = await db.collection('login_history').where('hostname','==',hn).limit(400).get();
-            snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
-          } catch {}
-        }
+        } catch {}
         try {
+          // Também tenta com o hostname como estava gravado (case original)
           const snap2 = await db.collection('login_history').where('agentId','==',hn).limit(200).get();
           snap2.docs.forEach(d => push({ id:d.id, ...d.data() }));
         } catch {}
       }
 
-      // 2) Busca por assetId
+      // 2) Busca por assetId (campos alternativos)
       for (const id of ids) {
         try {
           const snap = await db.collection('login_history').where('assetId','==',id).limit(200).get();
@@ -33174,21 +33163,14 @@ class SysackWebRTCViewer {
         } catch {}
       }
 
-      // 3) login_sessions — ambos os formatos
-      for (const hn of todosHostnames) {
+      // 3) Busca sessões de login com horário (coleção login_sessions)
+      for (const hn of [...new Set(hostnames)]) {
         try {
           const snap = await db.collection('login_sessions').where('hostname','==',hn).orderBy('loginAt','desc').limit(300).get();
           snap.docs.forEach(d => push({ id:d.id, _isSession:true, ...d.data() }));
-        } catch {
-          try {
-            const snap = await db.collection('login_sessions').where('hostname','==',hn).limit(300).get();
-            snap.docs.forEach(d => push({ id:d.id, _isSession:true, ...d.data() }));
-          } catch {}
-        }
+        } catch {}
       }
     } catch {}
-    // Ordena no cliente — não depende de índice composto
-    out.sort((a, b) => String(b.dia || b.loginAt || b.createdAt || '').localeCompare(String(a.dia || a.loginAt || a.createdAt || '')));
     return out;
   }
 
@@ -33283,15 +33265,11 @@ class SysackWebRTCViewer {
     const ativo = ativoDoAgenteSYSACK(ag) || (STATE.ativos || []).find(a => String(a.id) === String(agentId) || String(a.pat) === String(agentId)) || null;
     const ativoId = ativo?.id || agentId;
 
-    // Carrega histórico — busca maiúsculo E minúsculo (agente antigo gravava ID em maiúsculas)
-    const agentIdUpper = String(agentId).toUpperCase();
-    const agentIdLower = String(agentId).toLowerCase();
-    const historicoAgentePaths = [...new Set([agentId, agentIdUpper, agentIdLower])];
-    const [historicoAtivo, ...historicoAgenteParts] = await Promise.all([
+    // Carrega histórico do ativo + histórico do agente (onde ficam eventos online/offline/IP)
+    const [historicoAtivo, historicoAgente] = await Promise.all([
       ativo?.id ? fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : Promise.resolve([]),
-      ...historicoAgentePaths.map(id => fsGetSubcolecaoSYSACK(`agents/${id}/historico`, 'createdAt')),
+      fsGetSubcolecaoSYSACK(`agents/${agentId}/historico`, 'createdAt'),
     ]);
-    const historicoAgente = historicoAgenteParts.flat();
     // Mescla e deduplica por createdAt+tipo
     const seenH = new Set();
     const historico = [...historicoAtivo, ...historicoAgente].filter(h => {
@@ -33817,7 +33795,46 @@ function baixarInstaladorSYSACKCorrigido() {
       '',
       'echo [5/5] Registrando e iniciando servico...',
       'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
+      '',
+      ':: Detecta Windows Server (ProductType != 1) vs Desktop (ProductType = 1)',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "if ((Get-WmiObject Win32_OperatingSystem).ProductType -ne 1) { exit 1 } else { exit 0 }"',
+      'if %errorlevel%==1 goto :INSTALAR_SERVICO_WINDOWS',
+      '',
+      ':INSTALAR_SCHTASKS',
+      'echo     Windows Desktop detectado — registrando tarefa agendada (SYSTEM)...',
       'powershell -NoProfile -ExecutionPolicy Bypass -Command "& {$node=(Get-Command node -ErrorAction SilentlyContinue).Source; if(-not $node){$node=\'C:\\Program Files\\nodejs\\node.exe\'}; $A=New-ScheduledTaskAction -Execute $node -Argument \'%AGENT_FILE%\' -WorkingDirectory \'%SYSACK_DIR%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null; Start-ScheduledTask -TaskName \'SYSACK-Agent\'}"',
+      'goto :VERIFICAR',
+      '',
+      ':INSTALAR_SERVICO_WINDOWS',
+      'echo     Windows Server detectado — instalando como servico Windows (node-windows)...',
+      'cd /d "%SYSACK_DIR%"',
+      'if not exist "%SYSACK_DIR%\\node_modules\\node-windows" (',
+      '  echo     Instalando dependencia node-windows...',
+      '  npm install node-windows --save >nul 2>&1',
+      ')',
+      ':: Remove servico antigo se existir',
+      'sc stop "SYSACK-Agent" >nul 2>&1',
+      'sc delete "SYSACK-Agent" >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      ':: Script de instalacao do servico',
+      '(',
+      "  echo var Service=require('node-windows').Service;",
+      "  echo var svc=new Service({",
+      "  echo   name:'SYSACK-Agent',",
+      "  echo   description:'SYSACK Agent Desktop - Monitoramento de Ativos',",
+      "  echo   script:'C:\\\\SYSACK\\\\agent.js',",
+      "  echo   workingDirectory:'C:\\\\SYSACK',",
+      "  echo   allowServiceLogon:true",
+      "  echo });",
+      "  echo svc.on('install',function(){svc.start();console.log('Servico instalado!');process.exit(0);});",
+      "  echo svc.on('alreadyinstalled',function(){svc.start();console.log('Servico reiniciado!');process.exit(0);});",
+      "  echo svc.on('error',function(e){console.error('Erro:',e);process.exit(1);});",
+      "  echo svc.install();",
+      ') > "%SYSACK_DIR%\\instalar-servico-sysack.js"',
+      'node "%SYSACK_DIR%\\instalar-servico-sysack.js"',
+      'timeout /t 8 /nobreak >nul',
+      '',
+      ':VERIFICAR',
       'timeout /t 3 /nobreak >nul',
       '',
       ':: Verifica se iniciou, se nao tenta direto',
