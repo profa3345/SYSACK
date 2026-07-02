@@ -8056,23 +8056,25 @@ function verificarTrocaMonitores(agentes) {
       const id = mon.serial || mon.nome || mon.caption;
       if (!id || id.length < 3) return; // ignora sem identificador
       const chave = CHAVE + id.replace(/[^a-zA-Z0-9]/g,'_');
-      const maquinaAnterior = localStorage.getItem(chave);
+      // Normaliza para minúsculas — evita falso positivo quando hostname muda de maiúsculo para minúsculo
+      const hostnameAtual = String(ag.hostname || ag.id || '').toLowerCase();
+      const maquinaAnteriorRaw = localStorage.getItem(chave);
+      const maquinaAnterior = maquinaAnteriorRaw ? maquinaAnteriorRaw.toLowerCase() : null;
 
-      if (maquinaAnterior && maquinaAnterior !== ag.hostname) {
+      if (maquinaAnterior && maquinaAnterior !== hostnameAtual) {
         // Monitor mudou de máquina!
         const nomeMonitor = mon.nome || mon.caption || id;
         showToast(
-          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${ag.hostname}`,
+          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${hostnameAtual}`,
           'warning', 10000
         );
-        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${ag.hostname}`);
-        // Registra no audit log
+        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${hostnameAtual}`);
         auditLog('monitor_movido', 'assistencia-remota', id, 'monitor', {
-          monitor: nomeMonitor, de: maquinaAnterior, para: ag.hostname
+          monitor: nomeMonitor, de: maquinaAnterior, para: hostnameAtual
         });
       }
-      // Atualiza registro
-      localStorage.setItem(chave, ag.hostname);
+      // Salva sempre em minúsculas
+      localStorage.setItem(chave, hostnameAtual);
     });
   });
 }
@@ -33139,32 +33141,27 @@ class SysackWebRTCViewer {
     const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
     try {
       if (!window.db) return out;
-      // Busca lowercase (agente novo) E uppercase (agente antigo, antes do fix de hostname)
+      // Busca lowercase (agente novo) E UPPERCASE (agente antigo — gravava hostname em maiúsculas)
       const base = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean);
-      const hostnamesLower = base.map(h => String(h).toLowerCase());
-      const hostnamesUpper = base.map(h => String(h).toUpperCase());
-      const todosHostnames = [...new Set([...hostnamesLower, ...hostnamesUpper])];
+      const todosHostnames = [...new Set([
+        ...base.map(h => String(h).toLowerCase()),
+        ...base.map(h => String(h).toUpperCase()),
+      ])];
       const ids = [ativo?.id, ativo?.pat, ag?.id].filter(Boolean);
 
-      console.log('[LoginHistory] Buscando hostnames:', todosHostnames);
-
-      // 1) Busca login_history por hostname (ambos os formatos)
+      // 1) login_history — ambos os formatos, com fallback sem orderBy
       for (const hn of todosHostnames) {
         try {
           const snap = await db.collection('login_history').where('hostname','==',hn).orderBy('dia','desc').limit(400).get();
-          console.log('[LoginHistory] hostname=' + hn + ' orderBy:', snap.size, 'docs');
           snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
-        } catch(e) {
-          console.warn('[LoginHistory] orderBy falhou para', hn, '— tentando sem orderBy:', e.message);
+        } catch {
           try {
             const snap = await db.collection('login_history').where('hostname','==',hn).limit(400).get();
-            console.log('[LoginHistory] hostname=' + hn + ' sem orderBy:', snap.size, 'docs');
             snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
-          } catch(e2) { console.warn('[LoginHistory] falhou:', e2.message); }
+          } catch {}
         }
         try {
           const snap2 = await db.collection('login_history').where('agentId','==',hn).limit(200).get();
-          if (snap2.size) console.log('[LoginHistory] agentId=' + hn + ':', snap2.size, 'docs');
           snap2.docs.forEach(d => push({ id:d.id, ...d.data() }));
         } catch {}
       }
@@ -33177,11 +33174,10 @@ class SysackWebRTCViewer {
         } catch {}
       }
 
-      // 3) Busca login_sessions (ambos os formatos)
+      // 3) login_sessions — ambos os formatos
       for (const hn of todosHostnames) {
         try {
           const snap = await db.collection('login_sessions').where('hostname','==',hn).orderBy('loginAt','desc').limit(300).get();
-          console.log('[LoginSessions] hostname=' + hn + ':', snap.size, 'docs');
           snap.docs.forEach(d => push({ id:d.id, _isSession:true, ...d.data() }));
         } catch {
           try {
@@ -33190,9 +33186,8 @@ class SysackWebRTCViewer {
           } catch {}
         }
       }
-    } catch(e) { console.error('[LoginHistory] erro geral:', e.message); }
-    console.log('[LoginHistory] Total encontrado:', out.length, 'docs');
-    // Ordena no cliente — não depende de índice
+    } catch {}
+    // Ordena no cliente — não depende de índice composto
     out.sort((a, b) => String(b.dia || b.loginAt || b.createdAt || '').localeCompare(String(a.dia || a.loginAt || a.createdAt || '')));
     return out;
   }
@@ -33288,8 +33283,7 @@ class SysackWebRTCViewer {
     const ativo = ativoDoAgenteSYSACK(ag) || (STATE.ativos || []).find(a => String(a.id) === String(agentId) || String(a.pat) === String(agentId)) || null;
     const ativoId = ativo?.id || agentId;
 
-    // Carrega histórico do ativo + histórico do agente
-    // Busca maiúsculo E minúsculo — agente antigo gravava ID em maiúsculas
+    // Carrega histórico — busca maiúsculo E minúsculo (agente antigo gravava ID em maiúsculas)
     const agentIdUpper = String(agentId).toUpperCase();
     const agentIdLower = String(agentId).toLowerCase();
     const historicoAgentePaths = [...new Set([agentId, agentIdUpper, agentIdLower])];
