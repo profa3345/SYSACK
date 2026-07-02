@@ -7020,16 +7020,57 @@ function addAITyping() {
   const container = document.getElementById('ai-messages');
   if (!container) return null;
   const div = document.createElement('div');
-  div.className = 'ai-msg ai';
   div.id = 'typing-' + Date.now();
-  div.innerHTML = `<div class="ai-avatar">✨</div><div class="ai-bubble"><div class="ai-typing"><span></span><span></span><span></span></div></div>`;
+  div.style.cssText = 'display:flex;gap:8px;align-items:flex-start';
+  div.innerHTML = `
+    <div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#2563EB,#7C3AED);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:2px">✨</div>
+    <div style="background:var(--g50,#F8FAFC);border:1px solid var(--line,#e2e8f0);border-radius:0 12px 12px 12px;padding:10px 14px;display:flex;gap:4px;align-items:center">
+      <span style="width:7px;height:7px;border-radius:50%;background:#94A3B8;animation:aiDot .9s ease infinite"></span>
+      <span style="width:7px;height:7px;border-radius:50%;background:#94A3B8;animation:aiDot .9s ease .2s infinite"></span>
+      <span style="width:7px;height:7px;border-radius:50%;background:#94A3B8;animation:aiDot .9s ease .4s infinite"></span>
+    </div>`;
+  // Inject keyframe if not present
+  if (!document.getElementById('ai-dot-kf')) {
+    const s = document.createElement('style');
+    s.id = 'ai-dot-kf';
+    s.textContent = '@keyframes aiDot{0%,80%,100%{transform:scale(.8);opacity:.4}40%{transform:scale(1.1);opacity:1}}';
+    document.head.appendChild(s);
+  }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div.id;
 }
 
-function removeAITyping(id) {
-  document.getElementById(id)?.remove();
+function addAIMessage(role, text, acoes = []) {
+  const container = document.getElementById('ai-messages');
+  if (!container) return;
+  const isUser = role === 'user';
+  const div = document.createElement('div');
+  div.style.cssText = `display:flex;gap:8px;align-items:flex-start;${isUser ? 'flex-direction:row-reverse' : ''}`;
+
+  // Converte markdown simples para HTML
+  const html = text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+
+  const bubbleStyle = isUser
+    ? 'background:linear-gradient(135deg,#2563EB,#6D28D9);color:#fff;border-radius:12px 0 12px 12px;padding:10px 12px;font-size:13px;line-height:1.55;max-width:85%;word-break:break-word'
+    : 'background:var(--g50,#F8FAFC);border:1px solid var(--line,#e2e8f0);border-radius:0 12px 12px 12px;padding:10px 12px;font-size:13px;color:var(--g700,#374151);line-height:1.55;max-width:85%;word-break:break-word';
+
+  let acoesHtml = '';
+  if (!isUser && acoes && acoes.length) {
+    acoesHtml = `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">` +
+      acoes.map(a => `<button onclick="handleAIAction('${escapeHtml(a.action||'')}','${escapeHtml(a.label||'')}')}" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:8px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">${escapeHtml(a.label||a.action||'Ação')}</button>`).join('') +
+      `</div>`;
+  }
+
+  div.innerHTML = isUser
+    ? `<div style="${bubbleStyle}">${html}</div>`
+    : `<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#2563EB,#7C3AED);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:2px">✨</div>
+       <div><div style="${bubbleStyle}">${html}</div>${acoesHtml}</div>`;
+
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
 }
 
 // ─── ANÁLISE COMPLETA (Dashboard IA) ──────────────────────────
@@ -33266,15 +33307,10 @@ class SysackWebRTCViewer {
     const ativoId = ativo?.id || agentId;
 
     // Carrega histórico do ativo + histórico do agente (onde ficam eventos online/offline/IP)
-    // Tenta nos dois formatos: ID original (como aparece em STATE_AGENTS) e minúsculo (após fix lowercase)
-    const agentIdUpper = String(agentId).toUpperCase();
-    const agentIdLower = String(agentId).toLowerCase();
-    const historicoAgentePaths = [...new Set([agentId, agentIdUpper, agentIdLower])];
-    const [historicoAtivo, ...historicoAgenteParts] = await Promise.all([
+    const [historicoAtivo, historicoAgente] = await Promise.all([
       ativo?.id ? fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : Promise.resolve([]),
-      ...historicoAgentePaths.map(id => fsGetSubcolecaoSYSACK(`agents/${id}/historico`, 'createdAt')),
+      fsGetSubcolecaoSYSACK(`agents/${agentId}/historico`, 'createdAt'),
     ]);
-    const historicoAgente = historicoAgenteParts.flat();
     // Mescla e deduplica por createdAt+tipo
     const seenH = new Set();
     const historico = [...historicoAtivo, ...historicoAgente].filter(h => {

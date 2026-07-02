@@ -5767,53 +5767,63 @@ window.dispatchEvent(new Event('firebase-ready'));
 
 
 <!-- AI CHAT PANEL -->
-<div class="ai-panel" id="ai-panel" style="display:none">
-  <div class="ai-panel-header">
-    <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#2563EB,#7C3AED);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="white" stroke-width="1.5" opacity=".5"/><circle cx="12" cy="12" r="4" fill="white"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+<div id="ai-panel" style="display:none;position:fixed;bottom:0;right:0;width:380px;height:580px;max-height:calc(100vh - 60px);background:var(--panel,#fff);border-radius:16px 0 0 0;box-shadow:-4px -4px 32px rgba(15,23,42,.12);border:1px solid var(--line,#e2e8f0);border-right:none;border-bottom:none;flex-direction:column;z-index:1200;overflow:hidden;font-family:Inter,sans-serif">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1E40AF,#6D28D9);padding:14px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0">
+    <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="white" stroke-width="1.5" opacity=".6"/><circle cx="12" cy="12" r="4" fill="white"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
     </div>
-    <div>
-      <div class="ai-panel-title">Assistente IA — SYSACK</div>
-      <div class="ai-model-badge">Gemini 1.5 Flash · Banco Genkit</div>
+    <div style="flex:1;min-width:0">
+      <div style="color:#fff;font-weight:700;font-size:13.5px;line-height:1.2">Assistente IA — SYSACK</div>
+      <div style="color:rgba(255,255,255,.6);font-size:10.5px;margin-top:1px;display:flex;align-items:center;gap:5px">
+        <span style="width:6px;height:6px;border-radius:50%;background:#4ADE80;flex-shrink:0"></span>
+        Gemini · Online
+      </div>
     </div>
-    <button onclick="closeAIPanel()" title="Fechar assistente" style="background:rgba(255,255,255,.08);border:none;cursor:pointer;color:rgba(255,255,255,.7);font-size:14px;margin-left:auto;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:background .15s" onmouseover="this.style.background='rgba(255,255,255,.15)'" onmouseout="this.style.background='rgba(255,255,255,.08)'">✕</button>
+    <button onclick="closeAIPanel()" title="Fechar" style="background:rgba(255,255,255,.12);border:none;cursor:pointer;color:rgba(255,255,255,.8);font-size:16px;width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s;line-height:1" onmouseover="this.style.background='rgba(255,255,255,.22)'" onmouseout="this.style.background='rgba(255,255,255,.12)'">✕</button>
   </div>
 
-  <!-- Quick action chips -->
-  <div class="ai-quick-chips">
-    <div class="ai-quick-chip" onclick="aiQuickAction('quantos chamados estão abertos agora?')">📊 Chamados abertos</div>
-    <div class="ai-quick-chip" onclick="aiQuickAction('qual é o SLA atual?')">🎯 SLA atual</div>
-    <div class="ai-quick-chip" onclick="aiQuickAction('há algum ativo em manutenção?')">🔧 Ativos em manutenção</div>
-    <div class="ai-quick-chip" onclick="aiQuickAction('mostre os alertas críticos')">🚨 Alertas críticos</div>
-    <div class="ai-quick-chip" onclick="aiQuickAction('quais smartphones estão offline?')">📱 MDM status</div>
-    <div class="ai-quick-chip" onclick="aiQuickAction('gere um resumo executivo do dia')">📋 Resumo do dia</div>
+  <!-- Quick chips - compactos e organizados -->
+  <div style="padding:10px 12px;background:var(--g50,#F8FAFC);border-bottom:1px solid var(--line,#e2e8f0);display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0">
+    <button onclick="aiQuickAction('quantos chamados estão abertos agora?')" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">📊 Chamados</button>
+    <button onclick="aiQuickAction('qual é o SLA atual?')" style="background:#F0FDF4;color:#15803D;border:1px solid #BBF7D0;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">🎯 SLA</button>
+    <button onclick="aiQuickAction('mostre os alertas críticos')" style="background:#FFF7ED;color:#C2410C;border:1px solid #FED7AA;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">🚨 Alertas</button>
+    <button onclick="aiQuickAction('há algum ativo em manutenção?')" style="background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">🔧 Ativos</button>
+    <button onclick="aiQuickAction('quais smartphones estão offline?')" style="background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">📱 MDM</button>
+    <button onclick="aiQuickAction('gere um resumo executivo do dia')" style="background:#F0FDFA;color:#0F766E;border:1px solid #99F6E4;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">📋 Resumo</button>
   </div>
 
   <!-- Messages -->
-  <div class="ai-messages" id="ai-messages">
-    <div class="ai-msg ai">
-      <div class="ai-avatar">✨</div>
-      <div>
-        <div class="ai-bubble">
-          Olá! Sou o assistente de IA do <strong>SYSACK</strong>, operado por Gemini via Banco Genkit.<br><br>
-          Posso ajudar com análise de chamados, insights operacionais, status de ativos e muito mais.<br><br>
-          Como posso ajudar você hoje?
+  <div id="ai-messages" style="flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth">
+    <!-- Mensagem inicial -->
+    <div style="display:flex;gap:8px;align-items:flex-start">
+      <div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#2563EB,#7C3AED);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:2px">✨</div>
+      <div style="max-width:calc(100% - 42px)">
+        <div style="background:var(--g50,#F8FAFC);border:1px solid var(--line,#e2e8f0);border-radius:0 12px 12px 12px;padding:10px 12px;font-size:13px;color:var(--g700,#374151);line-height:1.55">
+          Olá! Sou o assistente de IA do <strong>SYSACK</strong>.<br><br>
+          Posso ajudar com <strong>chamados</strong>, <strong>ativos</strong>, <strong>alertas</strong>, busca por patrimônio e muito mais. Use os atalhos acima ou pergunte livremente.
         </div>
-        <div class="ai-actions-bar">
-          <div class="ai-action-btn" onclick="aiQuickAction('analise os chamados em aberto')">📊 Analisar chamados</div>
-          <div class="ai-action-btn" onclick="rodarAnaliseCompleta()">✨ Insights completos</div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button onclick="aiQuickAction('analise os chamados em aberto')" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">📊 Analisar chamados</button>
+          <button onclick="rodarAnaliseCompleta()" style="background:linear-gradient(135deg,#2563EB,#7C3AED);color:#fff;border:none;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">✨ Insights completos</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Input -->
-  <div class="ai-input-bar">
-    <textarea class="ai-input" id="ai-input" placeholder="Pergunte algo sobre o sistema..." rows="1"
+  <!-- Input bar -->
+  <div style="padding:10px 12px;border-top:1px solid var(--line,#e2e8f0);background:var(--panel,#fff);display:flex;gap:8px;align-items:flex-end;flex-shrink:0">
+    <textarea id="ai-input" rows="1" placeholder="Pergunte algo sobre o sistema..."
+      style="flex:1;resize:none;border:1.5px solid var(--line,#e2e8f0);border-radius:10px;padding:8px 12px;font-size:13px;font-family:Inter,sans-serif;color:var(--g800,#1e293b);background:var(--g50,#F8FAFC);outline:none;line-height:1.5;max-height:100px;overflow-y:auto;transition:border-color .15s"
+      onfocus="this.style.borderColor='#2563EB'"
+      onblur="this.style.borderColor='var(--line,#e2e8f0)'"
       onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMsgAI()}"
-      oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
-    <button class="ai-send-btn" onclick="enviarMsgAI()" title="Enviar">
-      <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+      oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
+    <button onclick="enviarMsgAI()" title="Enviar (Enter)"
+      style="width:36px;height:36px;background:linear-gradient(135deg,#2563EB,#7C3AED);border:none;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s"
+      onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
     </button>
   </div>
 </div>
@@ -6695,7 +6705,7 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="confirmarLogout()">🚪 Sair do sistema</button>
+      <button class="btn btn-ghost" onclick="fazerLogout()">🚪 Sair do sistema</button>
     </div>
   </div>
 </div>
