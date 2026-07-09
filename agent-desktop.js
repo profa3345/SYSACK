@@ -100,7 +100,16 @@ async function firestoreCreate(collectionPath, data) {
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
-      res.on('end', () => resolve(raw));
+      res.on('end', () => {
+        // CORREÇÃO: antes resolvia sempre, mesmo em 403/400, mascarando falhas
+        // silenciosas de permissão/índice em login_sessions e agents/{id}/historico.
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          log(`[Firestore] create HTTP ${res.statusCode} em ${collectionPath}: ${raw.slice(0, 300)}`);
+          log('[Firestore] DICA: HTTP 403 = verifique as Firestore Rules para esta coleção. HTTP 400 = payload/índice inválido.');
+          return reject(new Error(`HTTP ${res.statusCode} em ${collectionPath}: ${raw.slice(0, 200)}`));
+        }
+        resolve(raw);
+      });
     });
     req.on('error', reject);
     req.write(body);
@@ -968,26 +977,35 @@ function firestoreRunQuery(collectionId, filters = [], limitN = 500) {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
-        // CORREÇÃO: loga erros HTTP (400 = índice ausente, 403 = regras Firestore bloqueando)
+        // CORREÇÃO: loga erros HTTP (400 = índice ausente, 403 = regras Firestore bloqueando).
+        // Além disso, marcamos o array retornado com `.ok = false` quando a consulta
+        // FALHOU (em vez de simplesmente "não achou nada"), para que quem consome o
+        // resultado (ex.: cálculo de dias logados) possa distinguir "0 dias reais" de
+        // "não conseguimos consultar agora" e evitar sobrescrever um contador correto
+        // com um valor errado por causa de uma falha de rede/permissão passageira.
         if (res.statusCode < 200 || res.statusCode >= 300) {
           log(`[LoginHistory] runQuery HTTP ${res.statusCode} em ${collectionId}: ${raw.slice(0, 300)}`);
           log('[LoginHistory] DICA: HTTP 403 = verifique as Firestore Rules para login_history. HTTP 400 = crie o índice: login_history / hostname ASC');
-          return resolve([]);
+          const falhou = []; falhou.ok = false;
+          return resolve(falhou);
         }
         try {
           const arr = JSON.parse(raw);
-          if (!Array.isArray(arr)) return resolve([]);
+          if (!Array.isArray(arr)) { const falhou = []; falhou.ok = false; return resolve(falhou); }
           const docs = arr.map(x => x.document ? firestoreDocToJs(x.document) : null).filter(Boolean);
+          docs.ok = true;
           resolve(docs);
         } catch(e) {
           log('[LoginHistory] Erro parse runQuery: ' + e.message);
-          resolve([]);
+          const falhou = []; falhou.ok = false;
+          resolve(falhou);
         }
       });
     });
     req.on('error', e => {
       log('[LoginHistory] runQuery falhou: ' + e.message);
-      resolve([]);
+      const falhou = []; falhou.ok = false;
+      resolve(falhou);
     });
     req.write(body);
     req.end();
@@ -1164,6 +1182,20 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     log('[LoginHistory] Falha ao consultar histórico: ' + e.message);
   }
 
+  // CORREÇÃO: antes, qualquer falha na consulta acima (rede/DNS instável logo após o
+  // boot, timeout, erro de parse) fazia `docs` virar [] e o resumo era recalculado
+  // como se o usuário tivesse apenas 1 dia logado — esse valor errado então SOBRESCREVIA
+  // o contador correto em ativos/{id}.diasLogadosAno. É exatamente isso que fazia o
+  // "Dias logado" parecer reiniciar toda vez que o computador era desligado e ligado.
+  // Agora distinguimos "consulta falhou" de "consulta OK mas sem dados" via docs.ok,
+  // e em caso de falha NÃO enviamos os campos de contagem no PATCH — o Firestore mantém
+  // o valor anterior intacto (firestorePatch já usa updateMask, então campos omitidos
+  // não são tocados).
+  const consultaOk = docs.ok === true;
+  if (!consultaOk) {
+    log('[LoginHistory] Consulta a login_history falhou/incompleta — preservando diasLogadosAno anterior (não será sobrescrito nesse ciclo).');
+  }
+
   const resumo = calcularResumoUsuarios90d(docs, usuarioNorm, dia);
   const payloadResumo = {
     hostname,
@@ -1173,19 +1205,25 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     ultimoLoginUsuario: usuarioNorm,
     ultimoLoginEm: nowIso,
     loginAtualizadoEm: nowIso,
-    usuarioPrincipal: resumo.usuarioPrincipal,
-    usuarioPrincipalDias90d: resumo.usuarioPrincipalDias90d,
-    usuarioPrincipalPeriodoDias: LOGIN_PRINCIPAL_DIAS,
-    usuariosLogin90d: JSON.stringify(resumo.usuarios),
-    usuariosLogin90dArray: resumo.usuarios,
-    totalUsuarios90d: resumo.usuarios.length,
-    diasLogadosAno: resumo.diasLogadosAno, // total de dias com login na máquina no ano corrente
+    ...(consultaOk ? {
+      usuarioPrincipal: resumo.usuarioPrincipal,
+      usuarioPrincipalDias90d: resumo.usuarioPrincipalDias90d,
+      usuarioPrincipalPeriodoDias: LOGIN_PRINCIPAL_DIAS,
+      usuariosLogin90d: JSON.stringify(resumo.usuarios),
+      usuariosLogin90dArray: resumo.usuarios,
+      totalUsuarios90d: resumo.usuarios.length,
+      diasLogadosAno: resumo.diasLogadosAno, // total de dias com login na máquina no ano corrente
+    } : {}),
   };
 
-  try {
-    await firestoreSet(`login_resumo_maquina/${safeHost}`, payloadResumo);
-  } catch(e) {
-    log('[LoginHistory] Falha ao gravar resumo: ' + e.message);
+  if (consultaOk) {
+    // Só sobrescrevemos o resumo consolidado quando a consulta realmente teve sucesso —
+    // caso contrário manteríamos um doc degradado (sem os totais corretos) no lugar do bom.
+    try {
+      await firestoreSet(`login_resumo_maquina/${safeHost}`, payloadResumo);
+    } catch(e) {
+      log('[LoginHistory] Falha ao gravar resumo: ' + e.message);
+    }
   }
 
   try {
@@ -1198,7 +1236,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
         status: 'em-uso',
         ultimoAgente: nowIso,
       });
-      log(`[LoginHistory] Ativo ${ativoId} atualizado: atual=${usuarioNorm}, principal=${resumo.usuarioPrincipal || '-'} (${resumo.usuarioPrincipalDias90d} dias/90d)`);
+      log(`[LoginHistory] Ativo ${ativoId} atualizado: atual=${usuarioNorm}, principal=${resumo.usuarioPrincipal || '-'} (${resumo.usuarioPrincipalDias90d} dias/90d)${consultaOk ? '' : ' [contador de dias preservado — consulta falhou]'}`);
     }
   } catch(e) {
     log('[LoginHistory] Falha ao atualizar ativo: ' + e.message);
@@ -1239,23 +1277,101 @@ function detectarSessoesRDP() {
   } catch { return []; }
 }
 
+// CORREÇÃO: antes a sessão só era gravada no Firestore no momento do LOGOUT
+// (via firestoreCreate, que além disso nunca checava erro HTTP). Como _sessaoAtual
+// só existia em memória, um desligamento abrupto do computador — o caso mais comum —
+// fazia o processo morrer sem nunca chamar o "ramo de logout", então a sessão inteira
+// nunca era persistida no Firestore. Isso explicava a aba "Logins" ficar vazia mesmo
+// com usuários realmente logando na máquina todos os dias.
+//
+// Agora: a sessão é gravada (upsert) já na ABERTURA do login, com logoutAt:null, e o
+// caminho do documento é persistido em agent-state.json. No fechamento (logout/troca
+// de usuário) fazemos apenas um PATCH em logoutAt/duracaoMin. Se o agente reiniciar
+// com uma sessão aberta pendente no estado local, fechamos essa sessão com o melhor
+// horário disponível antes de abrir uma nova — assim nenhuma sessão fica órfã.
+
+function sessaoDocPath(hostname, usuarioNorm, loginAtIso) {
+  const safeHost = normalizarTextoId(hostname);
+  const safeUser = normalizarTextoId(usuarioNorm);
+  const safeTs   = String(loginAtIso).replace(/[^0-9]/g, '');
+  return `login_sessions/${safeHost}_${safeUser}_${safeTs}`;
+}
+
+async function abrirSessao(usuario, tipo, loginAtIso) {
+  const usuarioNorm = normalizarUsuarioLogin(usuario);
+  const docPath = sessaoDocPath(AGENT_ID.toLowerCase(), usuarioNorm, loginAtIso);
+  const payload = {
+    hostname:   AGENT_ID.toLowerCase(),
+    agentId:    AGENT_ID.toLowerCase(),
+    usuario,
+    usuarioNorm,
+    loginAt:    loginAtIso,
+    logoutAt:   null,
+    tipo:       tipo || 'local',
+    rdp:        tipo === 'remoto',
+    dia:        loginAtIso.slice(0, 10),
+    createdAt:  loginAtIso,
+  };
+  try {
+    await firestoreSet(docPath, payload);
+    log(`[Sessao] Sessão aberta e gravada: ${usuario} (${tipo}) — ${docPath}`);
+  } catch (e) {
+    log('[Sessao] Falha ao gravar abertura de sessão: ' + e.message);
+  }
+  const estado = carregarEstadoLocal();
+  estado.sessaoAberta = { docPath, usuario, usuarioNorm, loginAt: loginAtIso, tipo };
+  salvarEstadoLocal(estado);
+  return { usuario, usuarioNorm, loginAt: loginAtIso, tipo, docPath };
+}
+
+async function fecharSessao(sessao, logoutAtIso) {
+  if (!sessao || !sessao.docPath) return;
+  const loginMs  = new Date(sessao.loginAt).getTime();
+  const logoutMs = new Date(logoutAtIso).getTime();
+  const duracaoMin = (isFinite(loginMs) && isFinite(logoutMs) && logoutMs > loginMs)
+    ? Math.round((logoutMs - loginMs) / 60000) : null;
+  try {
+    await firestorePatch(sessao.docPath, {
+      logoutAt: logoutAtIso,
+      ...(duracaoMin != null ? { duracaoMin } : {}),
+    });
+    log(`[Sessao] Sessão fechada: ${sessao.usuario} (${duracaoMin != null ? duracaoMin + ' min' : '?'})`);
+  } catch (e) {
+    log('[Sessao] Falha ao gravar fechamento de sessão: ' + e.message);
+  }
+  const estado = carregarEstadoLocal();
+  if (estado.sessaoAberta && estado.sessaoAberta.docPath === sessao.docPath) {
+    delete estado.sessaoAberta;
+    salvarEstadoLocal(estado);
+  }
+}
+
 async function rastrearSessaoUsuario(userAtual, nowIso) {
+  // Na primeira execução após (re)início do agente, verifica se ficou uma sessão
+  // aberta pendente no estado local (ex.: computador foi desligado sem logout limpo).
+  if (_sessaoAtual === null) {
+    const estado = carregarEstadoLocal();
+    if (estado.sessaoAberta) {
+      const pendente = estado.sessaoAberta;
+      if (userAtual && normalizarUsuarioLogin(userAtual) === pendente.usuarioNorm) {
+        // Mesmo usuário continua logado — retoma a sessão em memória em vez de duplicar.
+        _sessaoAtual = { usuario: pendente.usuario, loginAt: pendente.loginAt, tipo: pendente.tipo, docPath: pendente.docPath };
+        log(`[Sessao] Sessão retomada após reinício do agente: ${pendente.usuario}`);
+      } else {
+        // Usuário mudou ou deslogou enquanto o agente estava fora do ar — fecha a
+        // sessão pendente com o melhor horário disponível (agora), para não perder
+        // o registro no login_sessions.
+        log(`[Sessao] Sessão órfã encontrada (reinício/desligamento) — fechando: ${pendente.usuario}`);
+        await fecharSessao(pendente, nowIso);
+      }
+    }
+  }
+
   if (!userAtual) {
     // Usuário deslogou
     if (_sessaoAtual) {
       log(`[Sessao] Logout detectado: ${_sessaoAtual.usuario}`);
-      await firestoreCreate('login_sessions', {
-        hostname:   AGENT_ID.toLowerCase(),
-        agentId:    AGENT_ID.toLowerCase(),
-        usuario:    _sessaoAtual.usuario,
-        usuarioNorm: normalizarUsuarioLogin(_sessaoAtual.usuario),
-        loginAt:    _sessaoAtual.loginAt,
-        logoutAt:   nowIso,
-        tipo:       _sessaoAtual.tipo || 'local',
-        rdp:        _sessaoAtual.tipo === 'remoto',
-        dia:        nowIso.slice(0, 10),
-        createdAt:  nowIso,
-      }).catch(() => {});
+      await fecharSessao(_sessaoAtual, nowIso);
       _sessaoAtual = null;
     }
     return;
@@ -1267,24 +1383,13 @@ async function rastrearSessaoUsuario(userAtual, nowIso) {
     // Novo login — fecha sessão anterior se havia
     if (_sessaoAtual) {
       log(`[Sessao] Troca de usuário: ${_sessaoAtual.usuario} → ${userAtual}`);
-      await firestoreCreate('login_sessions', {
-        hostname:   AGENT_ID.toLowerCase(),
-        agentId:    AGENT_ID.toLowerCase(),
-        usuario:    _sessaoAtual.usuario,
-        usuarioNorm: normalizarUsuarioLogin(_sessaoAtual.usuario),
-        loginAt:    _sessaoAtual.loginAt,
-        logoutAt:   nowIso,
-        tipo:       _sessaoAtual.tipo || 'local',
-        rdp:        _sessaoAtual.tipo === 'remoto',
-        dia:        _sessaoAtual.loginAt.slice(0, 10),
-        createdAt:  _sessaoAtual.loginAt,
-      }).catch(() => {});
+      await fecharSessao(_sessaoAtual, nowIso);
     }
     // Detecta se é sessão RDP
     const sessoesRdp = detectarSessoesRDP();
     const sessaoRdp  = sessoesRdp.find(s => normalizarUsuarioLogin(s.usuario) === userNorm);
     const tipo = sessaoRdp?.rdp ? 'remoto' : 'local';
-    _sessaoAtual = { usuario: userAtual, loginAt: nowIso, tipo };
+    _sessaoAtual = await abrirSessao(userAtual, tipo, nowIso);
     log(`[Sessao] Login detectado: ${userAtual} (${tipo})`);
   }
 
@@ -1295,8 +1400,9 @@ async function rastrearSessaoUsuario(userAtual, nowIso) {
       const sNorm = normalizarUsuarioLogin(s.usuario);
       if (sNorm === userNorm) continue; // já rastreado acima
       const chave = AGENT_ID + '_' + sNorm + '_' + nowIso.slice(0, 10);
-      // Grava uma entrada por dia por usuário remoto (não duplica)
-      await firestoreCreate('login_sessions', {
+      // Grava uma entrada por dia por usuário remoto (não duplica, upsert por dia)
+      const docPathRdp = `login_sessions/${normalizarTextoId(AGENT_ID.toLowerCase())}_${normalizarTextoId(sNorm)}_${nowIso.slice(0,10).replace(/-/g,'')}`;
+      await firestoreSet(docPathRdp, {
         hostname:   AGENT_ID.toLowerCase(),
         agentId:    AGENT_ID.toLowerCase(),
         usuario:    s.usuario,
@@ -1308,7 +1414,7 @@ async function rastrearSessaoUsuario(userAtual, nowIso) {
         dia:        nowIso.slice(0, 10),
         chaveDedup: chave,
         createdAt:  nowIso,
-      }).catch(() => {});
+      }).catch(e => log('[Sessao] Falha ao gravar sessão RDP paralela: ' + e.message));
     }
   } catch {}
 }
@@ -1707,7 +1813,16 @@ async function firestorePatch(docPath, data) {
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
-      res.on('end', () => resolve(raw));
+      res.on('end', () => {
+        // CORREÇÃO: antes resolvia sempre, mesmo em 403/400, mascarando falhas
+        // silenciosas de permissão nesse PATCH (usado em login_history e ativos/{id}).
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          log(`[Firestore] patch HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 300)}`);
+          log('[Firestore] DICA: HTTP 403 = verifique as Firestore Rules para esta coleção.');
+          return reject(new Error(`HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 200)}`));
+        }
+        resolve(raw);
+      });
     });
     req.on('error', reject);
     req.write(body);
