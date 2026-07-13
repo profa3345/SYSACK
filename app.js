@@ -1725,7 +1725,10 @@ function sysackCalcularUsuarioPrincipal(a, ag) {
   return arr[0]?.login || '';
 }
 async function sysackCarregarHistoricoLogin(q='', de='', ate='') {
-  if (!window.db) return [];
+  // CORREÇÃO: window.db nunca é atribuído neste app (só window._db) — esse guard
+  // checava a variável errada e SEMPRE retornava vazio silenciosamente, mesmo com
+  // dados existindo e permissões corretas no Firestore.
+  if (!window.db && !window._db) return [];
   const termo = sysackNormKey(q);
   const livre = String(q||'').toLowerCase().trim();
   const out = [];
@@ -33121,7 +33124,12 @@ class SysackWebRTCViewer {
 
   async function fsGetSubcolecaoSYSACK(path, orderField) {
     try {
-      if (!window.db) return [];
+      // CORREÇÃO: window.db nunca é atribuído neste app (só window._db) — esse guard
+      // checava a variável errada e SEMPRE retornava vazio silenciosamente. Isso
+      // afetava a aba Histórico (e qualquer outro chamador desta função) mesmo com
+      // dados existindo e permissões corretas no Firestore.
+      if (!window.db && !window._db) return [];
+      const db = window.db || window._db;
       let ref = db.collection(path);
       if (orderField) ref = ref.orderBy(orderField, 'desc');
       const snap = await ref.get();
@@ -33139,7 +33147,12 @@ class SysackWebRTCViewer {
     const seenIds = new Set();
     const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
     try {
-      if (!window.db) return out;
+      // CORREÇÃO: window.db nunca é atribuído neste app (só window._db) — esse guard
+      // checava a variável errada e SEMPRE retornava vazio silenciosamente, mesmo com
+      // os documentos existindo em login_history/login_sessions e as regras do
+      // Firestore corretas. Era a causa raiz da aba "Logins" ficar sempre vazia.
+      if (!window.db && !window._db) return out;
+      const db = window.db || window._db;
       const base = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean);
       const todosHostnames = [...new Set([
         ...base.map(h => String(h).toLowerCase()),
