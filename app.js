@@ -2,7 +2,7 @@
 // Módulo principal de aplicação
 
 const SYSACK_APP_VERSION = '2.2.2';
-const SYSACK_AGENT_VERSION = '2.2.2';
+const SYSACK_AGENT_VERSION = '2.2.3';
 
 
 // ============================================================
