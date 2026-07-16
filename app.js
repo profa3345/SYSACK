@@ -2,7 +2,7 @@
 // Módulo principal de aplicação
 
 const SYSACK_APP_VERSION = '2.2.2';
-const SYSACK_AGENT_VERSION = '2.2.3';
+const SYSACK_AGENT_VERSION = '2.2.4';
 
 
 // ============================================================
@@ -10282,11 +10282,24 @@ async function executarAtualizacaoCliente() {
     const msg = `✅ ${atualizados} atualizado(s) · ❌ ${naoAtualizados} não atualizado(s).`;
     showUpdStatus(naoAtualizados ? 'warning' : 'success', msg);
     showToast(msg, naoAtualizados ? 'warning' : 'success', 7000);
+    // Feedback direto no botão quando TODOS os agentes selecionados foram atualizados —
+    // fica assim por alguns segundos antes de voltar ao texto padrão, para o técnico
+    // ter confirmação visual imediata sem precisar ler o log/toast.
+    if (btn && resultados.length > 0 && naoAtualizados === 0) {
+      btn.textContent = '✅ Atualização realizada com sucesso';
+      btn.disabled = true;
+      setTimeout(() => {
+        if (btn) { btn.disabled = false; btn.textContent = '🚀 Aplicar Atualização Agora'; }
+      }, 6000);
+    } else if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Aplicar Atualização Agora';
+    }
     setTimeout(() => renderAssistenciaRemota(), 1500);
   } catch(e) {
     showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message);
-  } finally {
     if(btn){btn.disabled=false;btn.textContent='🚀 Aplicar Atualização Agora';}
+  } finally {
     // Limpa credenciais da memória após o uso
     const pu = document.getElementById('upd-cred-user');
     const pp = document.getElementById('upd-cred-pass');
@@ -23451,7 +23464,15 @@ function evAnalisarPayload(payload) {
   try {
     const raw = JSON.parse(payload);
     eventos = Array.isArray(raw) ? raw : [raw];
-  } catch { return { erro: 'Payload não é JSON válido', regras: [], resumo: [] }; }
+  } catch {
+    // CORREÇÃO: este caminho de erro retornava `regras` em vez de `regrasAplicadas`
+    // (nome usado por evColetarEAnalisar/evRenderizarResultado), causando
+    // "Cannot read properties of undefined (reading 'length')" sempre que o
+    // payload chegava corrompido — o que, por sua vez, era causado por um corte
+    // de string no agente que podia cortar o JSON no meio (corrigido em
+    // agent-desktop.js). Agora o formato bate e mostra um erro legível em vez de travar.
+    return { erro: 'Payload não é JSON válido', regrasAplicadas: [], resumo: ['❌ Não foi possível interpretar os eventos retornados pelo agente — tente coletar novamente.'], total: 0, criticos: 0, altos: 0 };
+  }
 
   // Conta ocorrências por EventID
   const contagem = new Map();

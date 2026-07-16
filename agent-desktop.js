@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.2.3
+ * SYSACK Agent Desktop v2.2.4
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -1593,7 +1593,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.2.3] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.4] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -2539,7 +2539,35 @@ $out | ConvertTo-Json -Depth 4 -Compress
       fs.writeFileSync(psPath, ps, 'utf8');
       const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 120000, windowsHide: true, maxBuffer: 15 * 1024 * 1024 }).toString();
       try { fs.unlinkSync(psPath); } catch {}
-      const saida = raw.slice(0, 900000); // evita documento gigante
+      // CORREÇÃO: antes cortava a STRING bruta em 900000 caracteres (raw.slice),
+      // o que frequentemente cortava o JSON no meio de um objeto/array — o
+      // resultado virava JSON inválido, o painel não conseguia interpretar e
+      // travava com "Cannot read properties of undefined (reading 'length')".
+      // Agora fazemos o parse primeiro e, se precisar reduzir, cortamos o ARRAY
+      // (mantendo os eventos mais recentes) e serializamos de novo — o payload
+      // final é sempre um JSON válido, não importa o tamanho da coleta.
+      const LIMITE_PAYLOAD = 900000;
+      let saida;
+      try {
+        const parsed = JSON.parse(raw);
+        let candidatos = (Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []))
+          .slice()
+          .sort((a, b) => new Date(b.TimeCreated || 0) - new Date(a.TimeCreated || 0));
+        let jsonStr = JSON.stringify(candidatos);
+        while (jsonStr.length > LIMITE_PAYLOAD && candidatos.length > 10) {
+          candidatos = candidatos.slice(0, Math.floor(candidatos.length * 0.8));
+          jsonStr = JSON.stringify(candidatos);
+        }
+        saida = jsonStr;
+        if (candidatos.length < (Array.isArray(parsed) ? parsed.length : 1)) {
+          log(`[EVENTVIEWER] Payload grande — reduzido de ${Array.isArray(parsed) ? parsed.length : 1} para ${candidatos.length} eventos (mantidos os mais recentes) para caber no limite de ${LIMITE_PAYLOAD} caracteres.`);
+        }
+      } catch (eParse) {
+        // Último recurso — só chega aqui se o PowerShell realmente devolveu algo
+        // não-JSON (não deveria acontecer com ConvertTo-Json, mas não custa proteger).
+        log('[EVENTVIEWER] Saída do PowerShell não era JSON válido: ' + eParse.message);
+        saida = '[]';
+      }
       await firestoreCreate('agent_eventviewer', {
         agentId: AGENT_ID,
         hostname: os.hostname(),
