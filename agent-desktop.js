@@ -2506,28 +2506,38 @@ Write-Host "DESBLOQUEIO_CONCLUIDO"
   }
 
 
-  // ── COLETA SEGURA DO EVENT VIEWER PARA ANÁLISE IA ───────────────
+  // ── COLETA SEGURA DO EVENT VIEWER PARA ANÁLISE (janela por período, não só contagem) ──
   if (tipo === 'coletar_eventviewer' || tipo === 'analisar_eventviewer_ia') {
     try {
-      const maxEvents = Math.min(Number(dados.maxEvents || 250), 1000);
-      const logs = Array.isArray(dados.logs) && dados.logs.length ? dados.logs : ['System', 'Application'];
+      // CORREÇÃO/RECURSO: antes só existia "-MaxEvents N" (últimos N eventos, sem
+      // relação com tempo real). Para o relatório de análise de 90 dias, precisamos
+      // de uma janela por DATA — usamos -FilterHashtable com StartTime, mantendo um
+      // teto por log (maxEventsPorLog) só como proteção contra logs muito verbosos
+      // (ex.: Security numa máquina bem movimentada) para não gerar payload gigante.
+      const dias = Math.min(Math.max(Number(dados.dias || 90), 1), 180);
+      const maxEventsPorLog = Math.min(Number(dados.maxEventsPorLog || dados.maxEvents || 3000), 5000);
+      const logs = Array.isArray(dados.logs) && dados.logs.length ? dados.logs : ['System', 'Application', 'Security'];
       const logsSafe = logs.map(x => String(x).replace(/[^A-Za-z0-9_\-]/g, '')).filter(Boolean).slice(0, 5);
       const ps = `
 $ErrorActionPreference = 'SilentlyContinue'
 $logs = @(${logsSafe.map(l => "'" + l + "'").join(',')})
+$startDate = (Get-Date).AddDays(-${dias})
 $out = @()
 foreach ($log in $logs) {
-  Get-WinEvent -LogName $log -MaxEvents ${maxEvents} | Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message | ForEach-Object {
-    $out += [pscustomobject]@{
-      Log=$log; TimeCreated=$_.TimeCreated; Provider=$_.ProviderName; Id=$_.Id; Level=$_.LevelDisplayName; Message=($_.Message -replace "[\r\n]", ' ')
-    }
-  }
+  try {
+    Get-WinEvent -FilterHashtable @{LogName=$log; StartTime=$startDate} -MaxEvents ${maxEventsPorLog} -ErrorAction Stop |
+      Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message | ForEach-Object {
+        $out += [pscustomobject]@{
+          Log=$log; TimeCreated=$_.TimeCreated; Provider=$_.ProviderName; Id=$_.Id; Level=$_.LevelDisplayName; Message=($_.Message -replace "[\r\n]", ' ')
+        }
+      }
+  } catch {}
 }
 $out | ConvertTo-Json -Depth 4 -Compress
 `.trim();
       const psPath = path.join(__dirname, '_sysack_eventviewer.ps1');
       fs.writeFileSync(psPath, ps, 'utf8');
-      const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 45000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).toString();
+      const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 120000, windowsHide: true, maxBuffer: 15 * 1024 * 1024 }).toString();
       try { fs.unlinkSync(psPath); } catch {}
       const saida = raw.slice(0, 900000); // evita documento gigante
       await firestoreCreate('agent_eventviewer', {
@@ -2536,7 +2546,8 @@ $out | ConvertTo-Json -Depth 4 -Compress
         commandId: id,
         requestedBy: sanitizeAuditText(dados.requestedBy || dados.operador || ''),
         logs: logsSafe.join(','),
-        maxEvents,
+        dias,
+        maxEventsPorLog,
         payload: saida,
         createdAt: new Date().toISOString(),
         status: 'coletado'
