@@ -8307,6 +8307,12 @@ function renderAssistenciaRemota() {
           ${escapeHtml(a.hostname||a.id)}
           ${a.bloqueado ? `<span title="Bloqueada: ${escapeHtml(a.bloqueadoMotivo||'')}" style="background:#DC2626;color:#fff;font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;letter-spacing:.3px">🔒 BLOQUEADA</span>` : ''}
         </div>
+        <div style="font-size:10.5px;color:var(--g400);display:flex;align-items:center;gap:4px;margin-top:2px">
+          <span title="Patrimônio">PAT ${escapeHtml(ativoRel?.pat || '—')}</span>
+          <span>·</span>
+          <span title="Unidade atual">${escapeHtml(ativoRel?.area || 'sem unidade')}</span>
+          <button class="btn btn-ghost btn-xs" onclick="abrirEditarUnidadeSYSACK('${a.id}','${escapeHtml(a.hostname||a.id)}','${escapeHtml(ativoRel?.id||'')}','${escapeHtml(ativoRel?.pat||'')}','${escapeHtml(ativoRel?.area||'')}')" title="Alterar unidade / patrimônio" style="padding:0 4px;font-size:10.5px;line-height:1.4;border:none;background:none;color:var(--accent);cursor:pointer">✏️</button>
+        </div>
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
       </td>
@@ -8340,7 +8346,7 @@ function renderAssistenciaRemota() {
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:2px 7px;font-size:12px">📋</button>
-          ${a.status==='online' ? `<button class="btn btn-secondary btn-xs" onclick="evAbrirAnalise('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Analisar Event Viewer — diagnóstico automático de erros" style="padding:2px 7px;font-size:12px">🔍</button>` : ''}
+          ${a.status==='online' ? `<button class="btn btn-secondary btn-xs" onclick="evAbrirAnalise('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Analisar Máquina — relatório de Event Viewer (até 90 dias) com ações preventivas e corretivas" style="padding:2px 7px;font-size:12px">🔍</button>` : ''}
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
           <button class="btn btn-secondary btn-xs" onclick="abrirInventarioAgente('${a.id}')" title="Inventário de Software" style="padding:2px 7px;font-size:12px">🗂️</button>
           <button class="btn btn-xs" onclick="arToggleBloqueio('${a.id}','${escapeHtml(a.hostname||a.id)}',${!!a.bloqueado})"
@@ -23360,35 +23366,84 @@ async function analisarAtivoPorIA(pat) {
 // ════════════════════════════════════════════════════════════
 
 // Regras: { ids: [EventID], log, nivel, categoria, titulo, desc, risco }
+// Cada regra agora inclui `preventiva` (o que fazer para reduzir a chance de
+// recorrência) e `corretiva` (o que fazer agora, diante da ocorrência já detectada).
+// Isso alimenta o relatório de análise de máquina (recurso "Analisar Máquina").
 const EV_REGRAS = [
   // ── Segurança ────────────────────────────────────────────
-  { ids:[4625],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Falha de login repetida',         desc:'Tentativas de login falharam — possível ataque de força bruta ou credencial errada.' },
-  { ids:[4648],       log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Login com credenciais explícitas', desc:'Usuário autenticou com credenciais explícitas (RunAs/RDP). Verificar se é uso legítimo.' },
-  { ids:[4672],       log:'Security', risco:'info',    categoria:'Segurança',    titulo:'Privilégios especiais atribuídos', desc:'Logon com privilégios especiais (Administrador/SYSTEM).' },
-  { ids:[4720,4726],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Conta local criada/excluída',      desc:'Conta de usuário local foi criada ou removida. Verificar se foi ação autorizada de TI.' },
-  { ids:[4732,4733],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Alteração em grupo Administradores',desc:'Membro adicionado ou removido do grupo Administradores local.' },
-  { ids:[4698,4699,4700,4701,4702], log:'Security', risco:'alto', categoria:'Segurança', titulo:'Task Agendada criada/alterada', desc:'Uma task agendada foi criada, deletada ou modificada — pode indicar persistência de malware.' },
-  { ids:[1102],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Log de auditoria limpo',           desc:'Alguém limpou o log de auditoria de segurança. Ação suspeita — investigar imediatamente.' },
-  { ids:[4946,4947,4950], log:'Security', risco:'medio', categoria:'Segurança', titulo:'Regra de firewall alterada',       desc:'Uma regra do Firewall do Windows foi criada ou modificada.' },
+  { ids:[4625],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Falha de login repetida',         desc:'Tentativas de login falharam — possível ataque de força bruta ou credencial errada.',
+    preventiva:'Habilitar política de bloqueio de conta após N tentativas (Account Lockout Policy) e exigir MFA para contas administrativas.',
+    corretiva:'Verificar com o usuário se as tentativas foram legítimas. Se não houve tentativa reconhecida, trocar a senha da conta imediatamente e revisar o IP de origem no log.' },
+  { ids:[4648],       log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Login com credenciais explícitas', desc:'Usuário autenticou com credenciais explícitas (RunAs/RDP). Verificar se é uso legítimo.',
+    preventiva:'Restringir o uso de "Executar como" a contas de suporte autorizadas e documentar quem tem essa permissão.',
+    corretiva:'Confirmar com o técnico/usuário responsável se a ação foi autorizada. Caso não seja reconhecida, tratar como possível uso indevido de credencial.' },
+  { ids:[4672],       log:'Security', risco:'info',    categoria:'Segurança',    titulo:'Privilégios especiais atribuídos', desc:'Logon com privilégios especiais (Administrador/SYSTEM).',
+    preventiva:'Aplicar o princípio de menor privilégio — contas do dia a dia não devem logar com privilégio administrativo.',
+    corretiva:'Nenhuma ação corretiva imediata necessária; apenas registrar para auditoria se o padrão for recorrente fora do horário comercial.' },
+  { ids:[4720,4726],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Conta local criada/excluída',      desc:'Conta de usuário local foi criada ou removida. Verificar se foi ação autorizada de TI.',
+    preventiva:'Restringir a criação/exclusão de contas locais a administradores de TI e manter changelog de contas.',
+    corretiva:'Confirmar com a equipe de TI se a alteração foi planejada. Se não foi, investigar a origem e considerar reverter a alteração.' },
+  { ids:[4732,4733],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Alteração em grupo Administradores',desc:'Membro adicionado ou removido do grupo Administradores local.',
+    preventiva:'Monitorar o grupo Administradores local via GPO/auditoria e limitar quem pode alterá-lo.',
+    corretiva:'Validar se a inclusão/remoção foi autorizada; se não foi, remover o acesso indevido imediatamente e investigar como ele foi concedido.' },
+  { ids:[4698,4699,4700,4701,4702], log:'Security', risco:'alto', categoria:'Segurança', titulo:'Task Agendada criada/alterada', desc:'Uma task agendada foi criada, deletada ou modificada — pode indicar persistência de malware.',
+    preventiva:'Restringir criação de tarefas agendadas a administradores e habilitar auditoria de Task Scheduler.',
+    corretiva:'Inspecionar a tarefa (Agendador de Tarefas) — comando executado, usuário, gatilho. Se não for reconhecida, desabilitar/remover e escanear a máquina.' },
+  { ids:[1102],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Log de auditoria limpo',           desc:'Alguém limpou o log de auditoria de segurança. Ação suspeita — investigar imediatamente.',
+    preventiva:'Encaminhar logs de segurança para um coletor centralizado (SIEM) para que a limpeza local não apague evidências.',
+    corretiva:'Tratar como incidente de segurança: identificar quem tinha acesso administrativo no momento, isolar a máquina se necessário e abrir investigação formal.' },
+  { ids:[4946,4947,4950], log:'Security', risco:'medio', categoria:'Segurança', titulo:'Regra de firewall alterada',       desc:'Uma regra do Firewall do Windows foi criada ou modificada.',
+    preventiva:'Gerenciar regras de firewall via GPO central em vez de alteração local, e restringir quem pode alterá-las na máquina.',
+    corretiva:'Revisar a regra alterada — se abriu portas/serviços não previstos, reverter e investigar o motivo da mudança.' },
   // ── Sistema ─────────────────────────────────────────────
-  { ids:[41],         log:'System',   risco:'critico', categoria:'Sistema',      titulo:'Desligamento inesperado (kernel)',  desc:'O sistema foi desligado sem sequência normal — falha de energia ou tela azul.' },
-  { ids:[1074],       log:'System',   risco:'info',    categoria:'Sistema',      titulo:'Reinicialização solicitada',        desc:'Usuário ou processo solicitou reinicialização do sistema.' },
-  { ids:[6008],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Desligamento sujo anterior',        desc:'Windows detectou que o desligamento anterior foi anormal (queda de energia / BSOD).' },
-  { ids:[7031,7034,7036], log:'System', risco:'medio', categoria:'Sistema',     titulo:'Serviço parou inesperadamente',     desc:'Um serviço do Windows parou de forma inesperada.' },
-  { ids:[7045],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Novo serviço instalado',            desc:'Um novo serviço foi instalado no sistema. Verificar se foi instalação legítima.' },
-  { ids:[55,98,153],  log:'System',   risco:'critico', categoria:'Disco/FS',    titulo:'Erro de sistema de arquivos',       desc:'NTFS detectou corrupção de disco. Risco imediato de perda de dados — fazer backup.' },
-  { ids:[129],        log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Reset de controlador de disco',     desc:'O controlador de armazenamento foi resetado — pode indicar problema de hardware.' },
-  { ids:[11,15],      log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Erro de driver de disco',           desc:'Erro de I/O no disco. Verificar saúde do HD/SSD com SMART.' },
-  { ids:[1001],       log:'System',   risco:'medio',   categoria:'Sistema',     titulo:'Windows Error Reporting',           desc:'Um aplicativo ou componente gerou relatório de erro.' },
+  { ids:[41],         log:'System',   risco:'critico', categoria:'Sistema',      titulo:'Desligamento inesperado (kernel)',  desc:'O sistema foi desligado sem sequência normal — falha de energia ou tela azul.',
+    preventiva:'Verificar nobreak/UPS da máquina e manter Windows Update e drivers de hardware atualizados para reduzir BSODs.',
+    corretiva:'Checar o Visualizador de Eventos por minidumps/BSOD associados, testar memória (Windows Memory Diagnostic) e revisar a fonte de alimentação.' },
+  { ids:[1074],       log:'System',   risco:'info',    categoria:'Sistema',      titulo:'Reinicialização solicitada',        desc:'Usuário ou processo solicitou reinicialização do sistema.',
+    preventiva:'Nenhuma ação preventiva necessária — é um evento normal de operação.',
+    corretiva:'Nenhuma ação corretiva necessária, a menos que a frequência seja anormalmente alta para o perfil da máquina.' },
+  { ids:[6008],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Desligamento sujo anterior',        desc:'Windows detectou que o desligamento anterior foi anormal (queda de energia / BSOD).',
+    preventiva:'Avaliar uso de nobreak e orientar o usuário a desligar a máquina corretamente pelo menu Iniciar.',
+    corretiva:'Rodar chkdsk na unidade C: e revisar o Visualizador de Eventos por travamentos ou BSOD próximos ao horário do evento.' },
+  { ids:[7031,7034,7036], log:'System', risco:'medio', categoria:'Sistema',     titulo:'Serviço parou inesperadamente',     desc:'Um serviço do Windows parou de forma inesperada.',
+    preventiva:'Configurar recuperação automática do serviço (aba Recuperação nas Propriedades do Serviço) para reiniciar sozinho em caso de falha.',
+    corretiva:'Identificar qual serviço parou, verificar dependências e reiniciá-lo manualmente; se recorrente, investigar logs específicos do serviço/aplicação.' },
+  { ids:[7045],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Novo serviço instalado',            desc:'Um novo serviço foi instalado no sistema. Verificar se foi instalação legítima.',
+    preventiva:'Restringir instalação de software/serviços a administradores e manter antivírus/EDR atualizado.',
+    corretiva:'Identificar o serviço pelo nome/binário. Se não for reconhecido pela TI, desabilitar e investigar como possível indício de malware/persistência.' },
+  { ids:[55,98,153],  log:'System',   risco:'critico', categoria:'Disco/FS',    titulo:'Erro de sistema de arquivos',       desc:'NTFS detectou corrupção de disco. Risco imediato de perda de dados — fazer backup.',
+    preventiva:'Agendar checagens periódicas de disco (chkdsk) e monitorar o SMART do disco preventivamente.',
+    corretiva:'Fazer backup dos dados IMEDIATAMENTE, depois rodar `chkdsk C: /f /r` (requer reinício) e avaliar substituição do disco se os erros persistirem.' },
+  { ids:[129],        log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Reset de controlador de disco',     desc:'O controlador de armazenamento foi resetado — pode indicar problema de hardware.',
+    preventiva:'Manter drivers de armazenamento/chipset atualizados e verificar cabos/conexões em desktops.',
+    corretiva:'Atualizar o driver do controlador de armazenamento e monitorar recorrência; se persistir, testar o disco em outra porta/máquina.' },
+  { ids:[11,15],      log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Erro de driver de disco',           desc:'Erro de I/O no disco. Verificar saúde do HD/SSD com SMART.',
+    preventiva:'Monitorar SMART do disco periodicamente e manter backup atualizado como rotina.',
+    corretiva:'Rodar diagnóstico SMART (via fabricante ou `wmic diskdrive get status`) e planejar substituição do disco se indicar falha iminente.' },
+  { ids:[1001],       log:'System',   risco:'medio',   categoria:'Sistema',     titulo:'Windows Error Reporting',           desc:'Um aplicativo ou componente gerou relatório de erro.',
+    preventiva:'Manter aplicativos e Windows atualizados para reduzir a taxa de erros reportados.',
+    corretiva:'Identificar o aplicativo/componente na mensagem do evento e verificar se há atualização/correção disponível do fabricante.' },
   // ── Aplicação ───────────────────────────────────────────
-  { ids:[1000,1001,1002], log:'Application', risco:'medio', categoria:'Aplicação', titulo:'Falha de aplicativo',           desc:'Um aplicativo travou ou gerou erro crítico.' },
-  { ids:[1026],       log:'Application', risco:'medio', categoria:'Aplicação',  titulo:'Erro .NET Runtime',                desc:'Aplicativo .NET encontrou erro de execução.' },
+  { ids:[1000,1001,1002], log:'Application', risco:'medio', categoria:'Aplicação', titulo:'Falha de aplicativo',           desc:'Um aplicativo travou ou gerou erro crítico.',
+    preventiva:'Manter o aplicativo atualizado e monitorar se o travamento está associado a um módulo/plugin específico.',
+    corretiva:'Reinstalar ou atualizar o aplicativo afetado; se recorrente, coletar o dump de falha e reportar ao fabricante/desenvolvedor.' },
+  { ids:[1026],       log:'Application', risco:'medio', categoria:'Aplicação',  titulo:'Erro .NET Runtime',                desc:'Aplicativo .NET encontrou erro de execução.',
+    preventiva:'Manter o .NET Runtime/Framework atualizado via Windows Update.',
+    corretiva:'Reparar/reinstalar o .NET Runtime correspondente e verificar se o aplicativo tem atualização disponível.' },
   // ── Windows Update ──────────────────────────────────────
-  { ids:[19,20,24,25],log:'System',   risco:'info',    categoria:'Atualização', titulo:'Windows Update instalado',          desc:'Uma atualização do Windows foi instalada com sucesso.' },
-  { ids:[20],         log:'System',   risco:'alto',    categoria:'Atualização', titulo:'Falha no Windows Update',           desc:'A instalação de uma atualização falhou.' },
+  { ids:[19,20,24,25],log:'System',   risco:'info',    categoria:'Atualização', titulo:'Windows Update instalado',          desc:'Uma atualização do Windows foi instalada com sucesso.',
+    preventiva:'Manter o Windows Update habilitado e com janela de manutenção definida.',
+    corretiva:'Nenhuma ação corretiva necessária — evento normal de operação.' },
+  { ids:[20],         log:'System',   risco:'alto',    categoria:'Atualização', titulo:'Falha no Windows Update',           desc:'A instalação de uma atualização falhou.',
+    preventiva:'Garantir espaço em disco suficiente e conectividade estável durante a janela de atualização.',
+    corretiva:'Rodar o solucionador de problemas do Windows Update ou `DISM /Online /Cleanup-Image /RestoreHealth` seguido de `sfc /scannow`, depois tentar a atualização novamente.' },
   // ── Rede ────────────────────────────────────────────────
-  { ids:[4199,4198],  log:'System',   risco:'medio',   categoria:'Rede',        titulo:'Conflito de IP detectado',          desc:'Outro dispositivo na rede usa o mesmo endereço IP.' },
-  { ids:[10400,10401],log:'System',   risco:'info',    categoria:'Rede',        titulo:'Conexão de rede alterada',          desc:'O estado da interface de rede mudou (conectado/desconectado).' },
+  { ids:[4199,4198],  log:'System',   risco:'medio',   categoria:'Rede',        titulo:'Conflito de IP detectado',          desc:'Outro dispositivo na rede usa o mesmo endereço IP.',
+    preventiva:'Migrar a máquina para atribuição de IP via DHCP com reserva, evitando IP fixo duplicado.',
+    corretiva:'Identificar o outro dispositivo com o mesmo IP e corrigir a configuração de rede de um dos dois imediatamente.' },
+  { ids:[10400,10401],log:'System',   risco:'info',    categoria:'Rede',        titulo:'Conexão de rede alterada',          desc:'O estado da interface de rede mudou (conectado/desconectado).',
+    preventiva:'Verificar estabilidade do cabo/Wi-Fi se o padrão de desconexão for muito frequente.',
+    corretiva:'Nenhuma ação corretiva imediata necessária, a menos que a frequência de quedas esteja impactando o usuário.' },
 ];
 
 function evAnalisarPayload(payload) {
@@ -23453,31 +23508,33 @@ function evAbrirAnalise(agentId, hostname) {
     <div style="background:#fff;border-radius:14px;width:900px;max-width:98vw;max-height:94vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.3)">
       <div style="padding:16px 20px;background:#0F172A;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:16px;font-weight:800;color:#fff">🔍 Análise de Event Viewer — ${escapeHtml(hostname||agentId)}</div>
+          <div style="font-size:16px;font-weight:800;color:#fff">🔍 Análise de Máquina — ${escapeHtml(hostname||agentId)}</div>
           <div style="font-size:11.5px;color:rgba(255,255,255,.5);margin-top:2px">Motor de regras automático — sem IA, sem custo, funciona offline</div>
         </div>
         <button onclick="document.getElementById('modal-ev-analise').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
       </div>
       <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--g50)">
-        <select id="ev-sel-log" class="form-control" style="width:160px;font-size:12px">
+        <select id="ev-sel-log" class="form-control" style="width:190px;font-size:12px">
           <option value="System,Application,Security">System + Application + Security</option>
           <option value="System">System</option>
           <option value="Application">Application</option>
           <option value="Security">Security</option>
         </select>
-        <select id="ev-sel-max" class="form-control" style="width:120px;font-size:12px">
-          <option value="250">250 eventos</option>
-          <option value="500">500 eventos</option>
-          <option value="1000">1000 eventos</option>
+        <select id="ev-sel-dias" class="form-control" style="width:150px;font-size:12px">
+          <option value="30">Últimos 30 dias</option>
+          <option value="60">Últimos 60 dias</option>
+          <option value="90" selected>Últimos 90 dias</option>
+          <option value="180">Últimos 180 dias</option>
         </select>
-        <button onclick="evColetarEAnalisar('${agentId}')" class="btn btn-primary btn-sm">🔍 Coletar e Analisar</button>
-        <span id="ev-status" style="font-size:12px;color:var(--g500)">Clique em "Coletar e Analisar" para iniciar</span>
+        <button onclick="evColetarEAnalisar('${agentId}','${escapeHtml(hostname||agentId)}')" class="btn btn-primary btn-sm">🔍 Coletar e Analisar</button>
+        <button id="ev-btn-imprimir" onclick="evImprimirRelatorio()" class="btn btn-secondary btn-sm" disabled>🖨️ Imprimir Relatório</button>
+        <span id="ev-status" style="font-size:12px;color:var(--g500)">Selecione o período e clique em "Coletar e Analisar"</span>
       </div>
       <div id="ev-resultado" style="flex:1;overflow:auto;padding:14px 18px">
         <div style="text-align:center;padding:32px;color:var(--g400)">
           <div style="font-size:32px;margin-bottom:8px">🔍</div>
-          <div>Selecione os logs e clique em "Coletar e Analisar"</div>
-          <div style="font-size:11.5px;margin-top:6px;color:var(--g300)">O agente vai buscar os eventos do Windows, o SYSACK vai analisar com base em ${EV_REGRAS.length} regras de segurança e estabilidade.</div>
+          <div>Selecione o período e clique em "Coletar e Analisar"</div>
+          <div style="font-size:11.5px;margin-top:6px;color:var(--g300)">O agente vai buscar os eventos do Windows no período selecionado (até 90 dias por padrão), o SYSACK vai analisar com base em ${EV_REGRAS.length} regras de segurança e estabilidade e sugerir ações preventivas e corretivas.</div>
         </div>
       </div>
       <div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end">
@@ -23488,37 +23545,44 @@ function evAbrirAnalise(agentId, hostname) {
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }
 
-async function evColetarEAnalisar(agentId) {
+// Guarda o resultado da última análise + metadados para o botão de impressão.
+let _evUltimaAnalise = null;
+
+async function evColetarEAnalisar(agentId, hostname) {
   const logs    = document.getElementById('ev-sel-log')?.value || 'System,Application,Security';
-  const max     = Number(document.getElementById('ev-sel-max')?.value || 250);
+  const dias    = Number(document.getElementById('ev-sel-dias')?.value || 90);
   const status  = document.getElementById('ev-status');
   const res     = document.getElementById('ev-resultado');
+  const btnImp  = document.getElementById('ev-btn-imprimir');
+  if (btnImp) btnImp.disabled = true;
 
   if (status) status.textContent = '⏳ Enviando comando ao agente...';
-  if (res)    res.innerHTML = '<div style="padding:32px;text-align:center;color:var(--g500)">⏳ Coletando eventos do Windows... (pode levar até 30s)</div>';
+  if (res)    res.innerHTML = `<div style="padding:32px;text-align:center;color:var(--g500)">⏳ Coletando eventos dos últimos ${dias} dias no Windows... (pode levar até 2 minutos, dependendo do volume de eventos)</div>`;
 
   try {
     const cmdId = 'ev_' + Date.now() + '_' + agentId;
     const u = SESSION_USER || CURRENT_USER || {};
+    const requestedBy = u.nome || u.email || '';
     await fsSet('agent_commands', cmdId, {
       agentId, tipo: 'coletar_eventviewer',
-      dados: JSON.stringify({ logs: logs.split(','), maxEvents: max, requestedBy: u.nome || u.email || '' }),
+      dados: JSON.stringify({ logs: logs.split(','), dias, requestedBy }),
       status: 'pendente', criadoEm: new Date().toISOString(),
     });
 
     if (status) status.textContent = '⏳ Aguardando resposta do agente...';
 
-    // Poll por resultado
+    // Poll por resultado — coleta de até 90/180 dias pode levar mais tempo que uma
+    // consulta simples, então damos uma janela maior (2m30s) que o timeout do agente (2min).
     const inicio = Date.now();
     let snap = null;
-    while (Date.now() - inicio < 60000) {
+    while (Date.now() - inicio < 150000) {
       await new Promise(r => setTimeout(r, 2000));
       const cmdSnap = await (window.db||window._db).collection('agent_commands').doc(cmdId).get();
       const st = cmdSnap.data()?.status;
       if (st === 'concluido') { snap = cmdSnap.data(); break; }
       if (st === 'erro') throw new Error(cmdSnap.data()?.resultado || 'Agente retornou erro');
     }
-    if (!snap) throw new Error('Timeout — agente não respondeu em 60s');
+    if (!snap) throw new Error('Timeout — agente não respondeu em 2m30s');
 
     // Busca o payload do Event Viewer
     if (status) status.textContent = '🔍 Analisando eventos...';
@@ -23530,7 +23594,14 @@ async function evColetarEAnalisar(agentId) {
 
     const analise = evAnalisarPayload(payload);
     evRenderizarResultado(analise, res);
-    if (status) status.textContent = `✅ ${analise.total} eventos analisados · ${analise.regrasAplicadas.length} ocorrências encontradas`;
+    if (status) status.textContent = `✅ ${analise.total} eventos analisados (últimos ${dias} dias) · ${analise.regrasAplicadas.length} ocorrências encontradas`;
+
+    // Guarda para o botão de impressão
+    _evUltimaAnalise = {
+      analise, hostname: hostname || agentId, agentId, dias, logs,
+      dataAnalise: new Date().toISOString(), requestedBy,
+    };
+    if (btnImp) btnImp.disabled = false;
   } catch(e) {
     if (status) status.textContent = '❌ ' + e.message;
     if (res) res.innerHTML = `<div style="padding:24px;color:#DC2626;font-size:13px">❌ ${escapeHtml(e.message)}</div>`;
@@ -23552,7 +23623,17 @@ function evRenderizarResultado(analise, container) {
         <span style="font-size:11px;color:var(--g500)">EventID ${r.eventId} · ${r.log} · ${r.count}x</span>
         ${r.ultimo ? `<span style="font-size:10.5px;color:var(--g400)">Último: ${new Date(r.ultimo).toLocaleString('pt-BR')}</span>` : ''}
       </div>
-      <div style="font-size:12.5px;color:var(--g700);margin-bottom:4px">${escapeHtml(r.desc)}</div>
+      <div style="font-size:12.5px;color:var(--g700);margin-bottom:8px">${escapeHtml(r.desc)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">
+        <div style="background:rgba(255,255,255,.6);border-radius:6px;padding:8px 10px">
+          <div style="font-size:10.5px;font-weight:700;color:#0369A1;margin-bottom:3px">🛡️ AÇÃO PREVENTIVA</div>
+          <div style="font-size:12px;color:var(--g700)">${escapeHtml(r.preventiva || '—')}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.6);border-radius:6px;padding:8px 10px">
+          <div style="font-size:10.5px;font-weight:700;color:#B91C1C;margin-bottom:3px">🔧 AÇÃO CORRETIVA</div>
+          <div style="font-size:12px;color:var(--g700)">${escapeHtml(r.corretiva || '—')}</div>
+        </div>
+      </div>
       ${r.msgs[0] ? `<details style="margin-top:6px"><summary style="font-size:11px;cursor:pointer;color:var(--g400)">Ver mensagem do evento</summary><pre style="font-size:10.5px;color:var(--g600);margin-top:6px;white-space:pre-wrap;background:rgba(0,0,0,.04);padding:8px;border-radius:6px">${escapeHtml(r.msgs[0])}</pre></details>` : ''}
     </div>`).join('')
     : '<div style="padding:20px;text-align:center;color:var(--g400)">✅ Nenhuma ocorrência encontrada nas regras configuradas.</div>';
@@ -23566,8 +23647,164 @@ function evRenderizarResultado(analise, container) {
     <div>${regraHtml}</div>`;
 }
 
-window.evAbrirAnalise    = evAbrirAnalise;
+// Gera um relatório limpo (sem o chrome do painel) numa nova aba e chama a impressão.
+function evImprimirRelatorio() {
+  if (!_evUltimaAnalise) { showToast?.('Rode uma análise antes de imprimir.', 'warning'); return; }
+  const { analise, hostname, dias, dataAnalise, requestedBy } = _evUltimaAnalise;
+  const corRisco = { critico:'#DC2626', alto:'#D97706', medio:'#2563EB', info:'#64748B' };
+  const bgRisco  = { critico:'#FEF2F2', alto:'#FFFBEB', medio:'#EFF6FF', info:'#F8FAFC' };
+
+  const linhasAchados = analise.regrasAplicadas.length ? analise.regrasAplicadas.map(r => `
+    <div style="page-break-inside:avoid;border:1px solid ${corRisco[r.risco]||'#E2E8F0'};border-left:5px solid ${corRisco[r.risco]||'#64748B'};border-radius:6px;padding:10px 12px;margin-bottom:10px;background:${bgRisco[r.risco]||'#fff'}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-family:Arial,sans-serif">
+        <span style="background:${corRisco[r.risco]};color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px">${(r.risco||'').toUpperCase()}</span>
+        <b style="font-size:12.5px">${escapeHtml(r.titulo)}</b>
+        <span style="font-size:10.5px;color:#64748B">EventID ${r.eventId} · ${r.log} · ${r.count} ocorrência(s)${r.ultimo ? ' · Último: ' + new Date(r.ultimo).toLocaleString('pt-BR') : ''}</span>
+      </div>
+      <div style="font-size:11.5px;color:#334155;margin-bottom:6px;font-family:Arial,sans-serif">${escapeHtml(r.desc)}</div>
+      <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
+        <tr>
+          <td style="width:50%;vertical-align:top;padding:6px 8px;background:rgba(255,255,255,.7);border-radius:4px 0 0 4px">
+            <div style="font-size:9.5px;font-weight:700;color:#0369A1;margin-bottom:2px">AÇÃO PREVENTIVA</div>
+            <div style="font-size:11px;color:#334155">${escapeHtml(r.preventiva || '—')}</div>
+          </td>
+          <td style="width:50%;vertical-align:top;padding:6px 8px;background:rgba(255,255,255,.7);border-radius:0 4px 4px 0">
+            <div style="font-size:9.5px;font-weight:700;color:#B91C1C;margin-bottom:2px">AÇÃO CORRETIVA</div>
+            <div style="font-size:11px;color:#334155">${escapeHtml(r.corretiva || '—')}</div>
+          </td>
+        </tr>
+      </table>
+    </div>`).join('')
+    : '<div style="padding:16px;text-align:center;color:#64748B;font-family:Arial,sans-serif">✅ Nenhuma ocorrência encontrada nas regras configuradas neste período.</div>';
+
+  const agora = new Date().toLocaleString('pt-BR');
+  const periodoInicio = new Date(Date.now() - dias * 86400000).toLocaleDateString('pt-BR');
+  const periodoFim = new Date().toLocaleDateString('pt-BR');
+
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+    <title>Relatório de Análise — ${escapeHtml(hostname)}</title>
+    <style>
+      @page { margin: 18mm 14mm; }
+      body { font-family: Arial, sans-serif; color:#0F172A; margin:0; }
+      .cabecalho { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #0F172A; padding-bottom:12px; margin-bottom:16px; }
+      .cabecalho h1 { font-size:18px; margin:0 0 4px 0; }
+      .cabecalho .sub { font-size:11px; color:#64748B; }
+      .info-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
+      .info-item { background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px; padding:8px 10px; }
+      .info-item .label { font-size:9.5px; color:#64748B; font-weight:700; text-transform:uppercase; }
+      .info-item .valor { font-size:13px; font-weight:700; margin-top:2px; }
+      .resumo-box { background:#F8FAFC; border-radius:6px; padding:12px 14px; margin-bottom:18px; font-size:12.5px; }
+      .rodape { margin-top:24px; padding-top:10px; border-top:1px solid #E2E8F0; font-size:10px; color:#94A3B8; text-align:center; }
+      h2.secao { font-size:13.5px; border-bottom:1px solid #E2E8F0; padding-bottom:6px; margin:20px 0 10px 0; }
+      @media print { .no-print { display:none !important; } }
+    </style></head>
+    <body>
+      <div class="cabecalho">
+        <div>
+          <h1>🔍 Relatório de Análise de Máquina</h1>
+          <div class="sub">SYSACK · Gerado em ${agora}${requestedBy ? ' · Solicitado por ' + escapeHtml(requestedBy) : ''}</div>
+        </div>
+        <button class="no-print" onclick="window.print()" style="padding:8px 16px;border-radius:6px;border:1px solid #0F172A;background:#0F172A;color:#fff;font-size:13px;cursor:pointer">🖨️ Imprimir / Salvar PDF</button>
+      </div>
+      <div class="info-grid">
+        <div class="info-item"><div class="label">Computador</div><div class="valor">${escapeHtml(hostname)}</div></div>
+        <div class="info-item"><div class="label">Período analisado</div><div class="valor">${periodoInicio} a ${periodoFim} (${dias} dias)</div></div>
+        <div class="info-item"><div class="label">Eventos coletados</div><div class="valor">${analise.total || 0}</div></div>
+        <div class="info-item"><div class="label">Ocorrências encontradas</div><div class="valor">${analise.regrasAplicadas.length}</div></div>
+      </div>
+      <div class="resumo-box">
+        <b>Resumo executivo</b><br>
+        ${analise.resumo.map(r => escapeHtml(r)).join('<br>')}
+      </div>
+      <h2 class="secao">Ocorrências e ações recomendadas</h2>
+      ${linhasAchados}
+      <div class="rodape">Relatório gerado automaticamente pelo motor de regras SYSACK — não substitui avaliação técnica presencial quando necessário.</div>
+    </body></html>`;
+
+  const janela = window.open('', '_blank');
+  if (!janela) { showToast?.('Permita pop-ups para abrir o relatório de impressão.', 'warning'); return; }
+  janela.document.write(html);
+  janela.document.close();
+}
+
+window.evAbrirAnalise     = evAbrirAnalise;
 window.evColetarEAnalisar = evColetarEAnalisar;
+window.evImprimirRelatorio = evImprimirRelatorio;
+
+// ════════════════════════════════════════════════════════════
+// MUDANÇA DE UNIDADE / PATRIMÔNIO — direto da tela de Assistência Remota
+// Reaproveita fsUpdate, que já faz update parcial e audita automaticamente
+// os campos 'area' e 'pat' em ativos/{id}/historico (sysackAuditarMudancaAtivo).
+// ════════════════════════════════════════════════════════════
+function abrirEditarUnidadeSYSACK(agentId, hostname, ativoId, patAtual, unidadeAtual) {
+  document.getElementById('modal-editar-unidade')?.remove();
+
+  if (!ativoId) {
+    showToast?.('Este agente ainda não está vinculado a um ativo cadastrado — não é possível editar unidade/patrimônio por aqui.', 'warning');
+    return;
+  }
+
+  const unidades = [...new Set((STATE.orgUnidades || []).map(u => u.sigla).filter(Boolean))].sort();
+  const opcoesHtml = unidades.map(s => `<option value="${escapeHtml(s)}" ${s === unidadeAtual ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-editar-unidade';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:420px;max-width:96vw;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.3)">
+      <div style="padding:16px 20px;background:#0F172A;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:800;color:#fff">🏢 Unidade / Patrimônio — ${escapeHtml(hostname)}</div>
+        <button onclick="document.getElementById('modal-editar-unidade').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+      </div>
+      <div style="padding:18px 20px">
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Patrimônio (PAT)</label>
+        <input id="eu-input-pat" class="form-control" type="text" value="${escapeHtml(patAtual)}" placeholder="Ex.: 12345" style="width:100%;margin-bottom:14px">
+
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Unidade</label>
+        <select id="eu-select-unidade" class="form-control" style="width:100%;margin-bottom:6px">
+          <option value="">— Selecione —</option>
+          ${opcoesHtml}
+        </select>
+        <div style="font-size:11px;color:var(--g400)">Unidade atual: ${escapeHtml(unidadeAtual || 'sem unidade cadastrada')} · Lista carregada de organograma_unidades (${unidades.length} cadastradas)</div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="document.getElementById('modal-editar-unidade').remove()" class="btn btn-ghost btn-sm">Cancelar</button>
+        <button id="eu-btn-salvar" onclick="salvarUnidadePatrimonioSYSACK('${ativoId}','${escapeHtml(hostname)}','${escapeHtml(patAtual)}','${escapeHtml(unidadeAtual)}')" class="btn btn-primary btn-sm">Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function salvarUnidadePatrimonioSYSACK(ativoId, hostname, patAntigo, unidadeAntiga) {
+  const btn = document.getElementById('eu-btn-salvar');
+  const novoPat = (document.getElementById('eu-input-pat')?.value || '').trim();
+  const novaUnidade = document.getElementById('eu-select-unidade')?.value || '';
+
+  // Só envia os campos que realmente mudaram — fsUpdate audita e grava no
+  // histórico do ativo automaticamente (só para os campos presentes no objeto).
+  const data = {};
+  if (novoPat !== (patAntigo || '')) data.pat = novoPat;
+  if (novaUnidade && novaUnidade !== (unidadeAntiga || '')) data.area = novaUnidade;
+
+  if (!Object.keys(data).length) {
+    showToast?.('Nenhuma alteração para salvar.', 'info');
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    await fsUpdate('ativos', ativoId, data);
+    showToast?.(`✅ ${hostname} atualizado. Alteração registrada no histórico do ativo.`, 'success');
+    document.getElementById('modal-editar-unidade')?.remove();
+  } catch(e) {
+    showToast?.('❌ Erro ao salvar: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+  }
+}
+
+window.abrirEditarUnidadeSYSACK = abrirEditarUnidadeSYSACK;
+window.salvarUnidadePatrimonioSYSACK = salvarUnidadePatrimonioSYSACK;
 
 // ════════════════════════════════════════════════════════════
 // IA MONITORING — Exibe alertas de anomalia no dashboard
