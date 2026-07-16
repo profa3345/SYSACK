@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.2.2
+ * SYSACK Agent Desktop v2.2.3
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -1593,7 +1593,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.2.2] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.3] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -2552,8 +2552,16 @@ $out | ConvertTo-Json -Depth 4 -Compress
         createdAt: new Date().toISOString(),
         status: 'coletado'
       });
-      resultado = `Event Viewer coletado com sucesso (${logsSafe.join(', ')} / até ${maxEvents} eventos por log).`;
-      await auditAgentCommand(id, 'EVENTVIEWER_COLLECTED', { tipo, logs: logsSafe.join(','), maxEvents, resultado });
+      // CORREÇÃO: 'resultado' aqui era uma atribuição solta (sem let/const) que na
+      // verdade se referia à variável 'let resultado' declarada mais abaixo, na
+      // seção de comandos legados — como esse bloco roda ANTES dessa declaração
+      // no fluxo de execução, o JS lança "Cannot access 'resultado' before
+      // initialization" (temporal dead zone), o catch abaixo captura esse erro
+      // e grava ele como se fosse a falha real — por isso a análise de máquina
+      // nunca funcionava, mesmo com Firestore Rules e payload corretos.
+      // Declarando localmente com const, resolve de vez.
+      const resultado = `Event Viewer coletado com sucesso (${logsSafe.join(', ')} · últimos ${dias} dias · até ${maxEventsPorLog} eventos por log).`;
+      await auditAgentCommand(id, 'EVENTVIEWER_COLLECTED', { tipo, logs: logsSafe.join(','), dias, maxEventsPorLog, resultado });
       await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado, concluidoEm: new Date().toISOString() }).catch(() => {});
     } catch(e) {
       log('[EVENTVIEWER] Erro: ' + e.message);
