@@ -1281,7 +1281,7 @@ function initSeedData() {
 // NAVIGATION
 // ============================================================
 const PAGE_LABELS = {
-  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', 'ai-dashboard':'IA & Insights', 'self-service':'Self-Service', 'mapa-ativos':'Mapa de Ativos', 'relatorios':'Relatórios','patrimonio':'Gestão Patrimonial','impressoras':'Gestão de Impressoras','wsus':'Patches (WSUS)','capacidade':'Relatório de Capacidade','backup-recovery':'Backup / Recovery','grupos-alerta':'Grupos de Alerta por E-mail','dashboard-tecnico':'Produtividade dos Técnicos','osd':'Deploy de SO (OSD)','metricas-historico':'Métricas Históricas','compliance-cis':'Compliance CIS', 'assistencia-remota':'Assistência Remota', 'monitor-rede':'Monitor de Rede', 'empregados':'Empregados & Ausências', chamados:'Chamados', ativos:'Ativos',
+  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', 'ai-dashboard':'IA & Insights', 'self-service':'Self-Service', 'mapa-ativos':'Mapa de Ativos', 'relatorios':'Relatórios','patrimonio':'Gestão Patrimonial','impressoras':'Gestão de Impressoras','wsus':'Patches (WSUS)','capacidade':'Relatório de Capacidade','backup-recovery':'Backup / Recovery','grupos-alerta':'Grupos de Alerta por E-mail','dashboard-tecnico':'Produtividade dos Técnicos','osd':'Deploy de SO (OSD)','metricas-historico':'Métricas Históricas','compliance-cis':'Compliance CIS', 'assistencia-remota':'Computadores com Agente', 'monitor-rede':'Monitor de Rede', 'empregados':'Empregados & Ausências', chamados:'Chamados', ativos:'Ativos',
   movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
@@ -1882,6 +1882,11 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
+    // Modo "Computadores sem Agente": mostra só quem NÃO tem agente SYSACK reportando.
+    if (window._semAgenteMode) {
+      const agExistente = sysackFindAgentForAtivo(a);
+      if (agExistente) return false;
+    }
     if (window._filtroLoginAtivoIds?.size || window._filtroLoginAtivoPats?.size || window._filtroLoginTexto) {
       const agFiltro = sysackFindAgentForAtivo(a);
       const hostFiltro = hostnameFromAtivo(a) || a.hostname || agFiltro?.hostname || agFiltro?.id || '';
@@ -1957,7 +1962,11 @@ function renderAtivos() {
         <td>${ip}</td>`;
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
-      <td class="td-acoes"><div class="flex gap-6 acoes-wrap">
+      <td class="td-acoes">${window._semAgenteMode ? `
+        <div style="display:flex;align-items:center;gap:6px;color:var(--g500);font-size:11.5px">
+          <span>⬇️ Instale o agente</span>
+          <button class="btn btn-primary btn-xs" onclick="arInstalarAgente()" title="Baixar instalador do agente SYSACK">Instalar</button>
+        </div>` : `<div class="flex gap-6 acoes-wrap">
         <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')" title="Histórico geral">📜</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirHistoricoUsuariosDoAtivo('${a.id}')" title="Histórico de logins">👥</button>` : ''}
         <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
@@ -1970,7 +1979,7 @@ function renderAtivos() {
           onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);if(!_ag)return showToast('Agente não conectado nesta máquina','warning');arToggleBloqueio(_ag.id,'${escapeHtml(a.hostname||a.desc||a.id)}',!!_ag.bloqueado)})()"
           title="Bloquear/Desbloquear máquina para todos os usuários"
           style="${`font-size:12px;`}">🔒</button>` : ''}
-      </div></td>
+      </div>`}</td>
     </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo — ${tipos.length?'tipo: '+_ativoFiltroTipo:'cadastrado'}</td></tr>`;
   nbUpdate('nb-ativos', lista.length);
 }
@@ -5669,10 +5678,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.nav-i[data-page]').forEach(el => {
     el.addEventListener('click', () => {
       const tipo = el.dataset.tipo || null;
+      const semAgente = el.dataset.semAgente === '1';
       goPage(el.dataset.page);
       // Se tiver data-tipo, aplica o filtro de categoria automaticamente
       if (tipo !== null && el.dataset.page === 'ativos') {
         _ativoFiltroTipo = tipo;
+        window._semAgenteMode = semAgente;
         // Destaca a aba correta dentro da página de ativos
         const tabMap = {
           'computador,workstation,notebook,desktop': 1,
@@ -5699,6 +5710,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (el.dataset.page === 'ativos' && !tipo) {
         // Clicou em "Ativos" sem tipo — mostra todos
         _ativoFiltroTipo = '';
+        window._semAgenteMode = false;
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
         if (tabs[0]) tabs[0].classList.add('active');
@@ -8236,6 +8248,21 @@ function renderAssistenciaRemota() {
     (a.osNome||'').toLowerCase().includes(q));
   if (fSt) lista = lista.filter(a => a.status === fSt);
   if (fOs) lista = lista.filter(a => (a.osNome||'').includes(fOs));
+
+  // Filtro de busca por login de usuário/período — reaproveita as mesmas variáveis
+  // globais preenchidas por buscarMaquinasPorUsuario() (widget movido pra esta página).
+  if (window._filtroLoginAtivoIds?.size || window._filtroLoginTexto) {
+    lista = lista.filter(a => {
+      const idsOk = window._filtroLoginAtivoIds?.size
+        ? (window._filtroLoginAtivoIds.has(a.id) || window._filtroLoginAtivoIds.has(a.hostname) || window._filtroLoginAtivoIds.has(sysackNormKey(a.hostname)))
+        : false;
+      const termoLogin = sysackNormKey(window._filtroLoginTexto || '');
+      const textoUsuarios = [a.usuarioLogado, a.usuarioPrincipal, a.usuarioPrincipalLogin, a.ultimoLoginUsuario, a.usuarioNome]
+        .filter(Boolean).map(v => String(v).toLowerCase()).join(' ');
+      const textoOk = termoLogin ? textoUsuarios.includes(termoLogin) : false;
+      return idsOk || textoOk;
+    });
+  }
 
   // Ordena: críticos primeiro
   const ORDER = { critico:0, alerta:1, online:2, offline:3 };
@@ -31009,7 +31036,7 @@ async function buscarMaquinasPorUsuario() {
     if (!ativos.length) ativos = filtrarMaquinasPorLoginLocal(q, de, ate);
 
     renderBuscaMaquinasUsuario(ativos, data?.resumo || resumoBuscaLoginLocal(ativos));
-    filtrarTabelaComputadoresPorResultadoLogin(ativos, q);
+    filtrarTabelaAssistenciaRemotaPorResultadoLogin(ativos, q);
   } catch(e) {
     console.warn('[LoginHist]', e);
     if (body) body.innerHTML = `<div style="padding:14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:var(--danger);font-size:12.5px">Erro ao buscar: ${escapeHtml(e.message)}</div>`;
@@ -31083,6 +31110,18 @@ function filtrarMaquinasPorLoginLocal(q, de, ate) {
 function resumoBuscaLoginLocal(ativos) {
   return { ultimoHostname: ativos[0]?.hostname || ativos[0]?.pat || '', ultimoLogin: ativos[0]?.ultimoLogin || null, semana: ativos.filter(a=>a.dias7>0).length, mes: ativos.filter(a=>a.dias30>0).length, ano: ativos.filter(a=>a.dias365>0).length };
 }
+function filtrarTabelaAssistenciaRemotaPorResultadoLogin(ativos, termoBusca = '') {
+  const ids = new Set();
+  (ativos || []).forEach(a => {
+    [a.ativoId, a.id, a.hostname].filter(Boolean).forEach(v => { ids.add(v); ids.add(sysackNormKey(v)); });
+  });
+  const qbox = document.getElementById('ar-search');
+  if (qbox) qbox.value = '';
+  window._filtroLoginAtivoIds = ids;
+  window._filtroLoginTexto = termoBusca || document.getElementById('loginhist-user')?.value || '';
+  renderAssistenciaRemota();
+}
+
 function filtrarTabelaComputadoresPorResultadoLogin(ativos, termoBusca = '') {
   const ids = new Set();
   const pats = new Set();
@@ -31136,6 +31175,7 @@ function limparBuscaMaquinasPorUsuario() {
   window._filtroLoginAtivoPats = null;
   window._filtroLoginTexto = '';
   renderAtivos?.();
+  renderAssistenciaRemota?.();
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -34134,7 +34174,7 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
     document.getElementById('comp-rast-sub').textContent = `${ativo?.pat ? 'PAT '+ativo.pat+' · ' : ''}${ag.ip || ativo?.ip || ''}`;
     document.getElementById('comp-rast-body').innerHTML = buildResumoComputadorSYSACK(ag, ativo) + `
       <div style="display:flex;gap:14px;border-bottom:1px solid var(--g100);margin-bottom:14px">
-        <button data-comp-tab="inventario" onclick="sysackCompTab('inventario')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Inventário</button>
+        <button data-comp-tab="inventario" onclick="sysackCompTab('inventario')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Geral</button>
         <button data-comp-tab="historico" onclick="sysackCompTab('historico')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Histórico</button>
         <button data-comp-tab="logins" onclick="sysackCompTab('logins')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Logins</button>
         <button data-comp-tab="chamados" onclick="sysackCompTab('chamados')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Chamados</button>
