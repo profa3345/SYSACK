@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.2.4
+ * SYSACK Agent Desktop v2.2.7
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -1593,7 +1593,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.2.4] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.7] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -1687,7 +1687,14 @@ function wsSend(socket, data) {
 }
 
 function handleRemoteCommand(msg, socket) {
-  const { type, cmd } = msg;
+  // CORREÇÃO: o frontend (rvSend) manda o campo em português ('tipo'), mas esta
+  // função só lia 'type' (inglês) — no caminho WS local, isso fazia TODO comando
+  // (screenshot, exec, etc.) ser silenciosamente ignorado. Na prática ficava
+  // mascarado porque o WS local quase nunca conecta (navegador bloqueia ws://
+  // a partir de https://), mas assim que o WSS com certificado estiver pronto,
+  // esse caminho passa a ser o principal — por isso corrijo aqui também.
+  const type = msg.type || msg.tipo;
+  const cmd = msg.cmd;
   
   if (type === 'ping') {
     wsSend(socket, { type: 'pong', ts: Date.now() });
@@ -1739,6 +1746,67 @@ function handleRemoteCommand(msg, socket) {
       wsSend(socket, { type: 'screenshot', data: b64 });
     } catch(e) {
       wsSend(socket, { type: 'error', msg: e.message });
+    }
+    return;
+  }
+
+  // ── Transferência de arquivos — mesma lógica do relay RTDB/Firestore ──
+  if (type === 'file_upload') {
+    try {
+      const nomeSafe = String(msg.filename || 'arquivo').replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').slice(0, 200) || 'arquivo';
+      const destDir = path.join(__dirname, 'transferencias');
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const destPath = path.join(destDir, nomeSafe);
+      const buf = Buffer.from(String(msg.data || ''), 'base64');
+      if (buf.length === 0) throw new Error('Arquivo vazio ou dado inválido recebido.');
+      if (buf.length > 2 * 1024 * 1024) throw new Error('Arquivo excede o limite de segurança do agente (2MB).');
+      fs.writeFileSync(destPath, buf);
+      wsSend(socket, { type: 'file_upload_result', ok: true, path: destPath });
+    } catch(e) {
+      wsSend(socket, { type: 'file_upload_result', ok: false, error: e.message });
+    }
+    return;
+  }
+
+  if (type === 'file_download') {
+    try {
+      const alvo = String(msg.path || '').trim();
+      if (!alvo) throw new Error('Caminho não informado.');
+      if (!fs.existsSync(alvo)) throw new Error('Arquivo não encontrado nessa máquina: ' + alvo);
+      const st = fs.statSync(alvo);
+      if (!st.isFile()) throw new Error('O caminho informado não é um arquivo.');
+      if (st.size > 700 * 1024) throw new Error(`Arquivo grande demais (${(st.size/1024).toFixed(0)}KB, limite 700KB).`);
+      const buf = fs.readFileSync(alvo);
+      wsSend(socket, { type: 'file_download_result', ok: true, filename: path.basename(alvo), data: buf.toString('base64') });
+    } catch(e) {
+      wsSend(socket, { type: 'file_download_result', ok: false, error: e.message });
+    }
+    return;
+  }
+
+  // ── Controle remoto (mouse/teclado) — mesmo motor usado no relay RTDB/Firestore ──
+  if (type === 'control_start') { garantirProcessoControle(); wsSend(socket, { type: 'control_ready' }); return; }
+  if (type === 'control_stop')  { encerrarProcessoControle(); wsSend(socket, { type: 'control_stopped' }); return; }
+
+  if (type === 'mouse') {
+    const x = Number(msg.x), y = Number(msg.y);
+    if (msg.action === 'move' && isFinite(x) && isFinite(y)) {
+      enviarComandoControle(`[SysackInput]::Move(${x},${y})`);
+    } else if (msg.action === 'down' || msg.action === 'up') {
+      if (isFinite(x) && isFinite(y)) enviarComandoControle(`[SysackInput]::Move(${x},${y})`);
+      const btn = ['left', 'right', 'middle'].includes(msg.button) ? msg.button : 'left';
+      enviarComandoControle(`[SysackInput]::Button('${btn}',$${msg.action === 'down' ? 'true' : 'false'})`);
+    } else if (msg.action === 'wheel') {
+      enviarComandoControle(`[SysackInput]::Wheel(${Math.round(-(Number(msg.deltaY) || 0))})`);
+    }
+    return;
+  }
+
+  if (type === 'key') {
+    if (msg.mode === 'unicode' && msg.char != null) {
+      enviarComandoControle(`[SysackInput]::Unicode(${Number(msg.char) || 0},$${msg.down ? 'true' : 'false'})`);
+    } else if (msg.mode === 'vk' && msg.code != null) {
+      enviarComandoControle(vkParaComando(msg.code, !!msg.down));
     }
     return;
   }
@@ -1932,6 +2000,134 @@ function rtdbEscrever(rtdbPath, data) {
 }
 
 // Processa comando recebido via RTDB e escreve resposta de volta
+// ════════════════════════════════════════════════════════════════
+// CONTROLE REMOTO — mouse e teclado via SendInput (Win32)
+// Usa um ÚNICO processo PowerShell persistente (não um novo por evento,
+// que seria lento demais — cada spawn de powershell.exe custa ~150-300ms).
+// O processo fica esperando comandos linha a linha via stdin e executa
+// via uma classe C# compilada uma vez só (Add-Type), então cada movimento
+// de mouse/tecla vira só uma chamada de método já compilada — poucos ms.
+// ════════════════════════════════════════════════════════════════
+const { spawn: spawnCtrl } = require('child_process');
+
+const SYSACK_INPUT_CS = `
+using System;
+using System.Runtime.InteropServices;
+public static class SysackInput {
+  [StructLayout(LayoutKind.Sequential)]
+  struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Sequential)]
+  struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Explicit)]
+  struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+  [StructLayout(LayoutKind.Sequential)]
+  struct INPUT { public uint type; public INPUTUNION u; }
+
+  [DllImport("user32.dll", SetLastError = true)]
+  static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+  const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
+  const uint MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_ABSOLUTE = 0x8000,
+             MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004,
+             MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010,
+             MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040,
+             MOUSEEVENTF_WHEEL = 0x0800;
+  const uint KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
+
+  static void Send(INPUT inp) { var arr = new INPUT[1] { inp }; SendInput(1, arr, Marshal.SizeOf(typeof(INPUT))); }
+
+  // x,y normalizados 0.0-1.0 relativos à tela primária — independe da resolução real.
+  public static void Move(double x, double y) {
+    var inp = new INPUT(); inp.type = INPUT_MOUSE;
+    inp.u.mi.dx = (int)(Math.Max(0, Math.Min(1, x)) * 65535);
+    inp.u.mi.dy = (int)(Math.Max(0, Math.Min(1, y)) * 65535);
+    inp.u.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    Send(inp);
+  }
+
+  public static void Button(string btn, bool down) {
+    uint flag = 0;
+    if (btn == "left") flag = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    else if (btn == "right") flag = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+    else if (btn == "middle") flag = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+    if (flag == 0) return;
+    var inp = new INPUT(); inp.type = INPUT_MOUSE; inp.u.mi.dwFlags = flag;
+    Send(inp);
+  }
+
+  public static void Wheel(int delta) {
+    var inp = new INPUT(); inp.type = INPUT_MOUSE;
+    inp.u.mi.dwFlags = MOUSEEVENTF_WHEEL; inp.u.mi.mouseData = unchecked((uint)delta);
+    Send(inp);
+  }
+
+  // vk = Virtual-Key code do Windows (teclas especiais: setas, Enter, Ctrl, F1-F12...)
+  public static void Key(int vk, bool down) {
+    var inp = new INPUT(); inp.type = INPUT_KEYBOARD;
+    inp.u.ki.wVk = (ushort)vk;
+    inp.u.ki.dwFlags = down ? 0u : KEYEVENTF_KEYUP;
+    Send(inp);
+  }
+
+  // Digitação de texto real (Unicode) — funciona independente do layout de
+  // teclado da máquina de origem x destino, ideal para caracteres normais.
+  public static void Unicode(int ch, bool down) {
+    var inp = new INPUT(); inp.type = INPUT_KEYBOARD;
+    inp.u.ki.wScan = (ushort)ch;
+    inp.u.ki.dwFlags = KEYEVENTF_UNICODE | (down ? 0u : KEYEVENTF_KEYUP);
+    Send(inp);
+  }
+}
+`;
+
+let _ctrlProc = null;
+
+function garantirProcessoControle() {
+  if (_ctrlProc && !_ctrlProc.killed && _ctrlProc.exitCode === null) return _ctrlProc;
+  try {
+    const csPath = path.join(__dirname, '_sysack_input.cs');
+    fs.writeFileSync(csPath, SYSACK_INPUT_CS, 'utf8');
+    // Bootstrap: compila a classe UMA vez e entra num loop lendo comandos do
+    // stdin linha a linha — cada linha subsequente é só uma chamada de método
+    // já compilada (rápido), sem nunca mais spawnar outro powershell.exe.
+    const bootstrap =
+      `Add-Type -Path "${csPath}"; ` +
+      `while ($true) { $l = [Console]::In.ReadLine(); if ($l -eq $null) { break }; try { Invoke-Expression $l } catch {} }`;
+    _ctrlProc = spawnCtrl('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', bootstrap], {
+      windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    _ctrlProc.on('exit', () => { _ctrlProc = null; });
+    _ctrlProc.on('error', e => { log('[Controle] Falha ao iniciar processo: ' + e.message); _ctrlProc = null; });
+    _ctrlProc.stderr.on('data', d => log('[Controle] stderr: ' + d.toString().slice(0, 200)));
+    log('[Controle] Processo de controle remoto iniciado (SendInput pronto).');
+  } catch(e) {
+    log('[Controle] Erro ao preparar processo: ' + e.message);
+  }
+  return _ctrlProc;
+}
+
+function enviarComandoControle(linha) {
+  try {
+    const p = garantirProcessoControle();
+    if (p && p.stdin && p.stdin.writable) p.stdin.write(linha + '\r\n');
+  } catch(e) { log('[Controle] Falha ao enviar comando: ' + e.message); }
+}
+
+function encerrarProcessoControle() {
+  if (_ctrlProc) {
+    try { _ctrlProc.stdin.end(); } catch {}
+    try { _ctrlProc.kill(); } catch {}
+    _ctrlProc = null;
+    log('[Controle] Processo de controle remoto encerrado.');
+  }
+}
+
+// Mapa de teclas especiais (Virtual-Key codes do Windows) usado pelo lado
+// mouse/teclado — precisa bater com o mapa equivalente no app.js (frontend).
+function vkParaComando(vk, down) {
+  return `[SysackInput]::Key(${Number(vk) || 0},$${down ? 'true' : 'false'})`;
+}
+
 async function processarComandoRtdb(sessaoId, msg) {
   if (!msg || !msg.tipo) return;
   log(`[RTDB] Sessão ${sessaoId} — tipo: ${msg.tipo}`);
@@ -1975,6 +2171,75 @@ async function processarComandoRtdb(sessaoId, msg) {
       ).toString().trim();
       try { fs.unlinkSync(psFile); } catch(e) {}
       resposta = { tipo: 'screenshot', data: b64 };
+
+    } else if (msg.tipo === 'file_upload') {
+      // CORREÇÃO/RECURSO: sem chunking nesta versão — o frontend já limita a
+      // ~700KB antes de mandar. Grava em C:\SYSACK\transferencias\, criando a
+      // pasta se não existir, e sanitiza o nome pra evitar path traversal.
+      try {
+        const nomeSafe = String(msg.filename || 'arquivo').replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').slice(0, 200) || 'arquivo';
+        const destDir = path.join(__dirname, 'transferencias');
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        const destPath = path.join(destDir, nomeSafe);
+        const buf = Buffer.from(String(msg.data || ''), 'base64');
+        if (buf.length === 0) throw new Error('Arquivo vazio ou dado inválido recebido.');
+        if (buf.length > 2 * 1024 * 1024) throw new Error('Arquivo excede o limite de segurança do agente (2MB).');
+        fs.writeFileSync(destPath, buf);
+        log(`[Arquivo] Recebido: ${nomeSafe} (${(buf.length/1024).toFixed(1)}KB) — salvo em ${destPath}`);
+        resposta = { tipo: 'file_upload_result', ok: true, path: destPath };
+      } catch(e) {
+        log('[Arquivo] Falha no upload: ' + e.message);
+        resposta = { tipo: 'file_upload_result', ok: false, error: e.message };
+      }
+
+    } else if (msg.tipo === 'file_download') {
+      try {
+        const alvo = String(msg.path || '').trim();
+        if (!alvo) throw new Error('Caminho não informado.');
+        if (!fs.existsSync(alvo)) throw new Error('Arquivo não encontrado nessa máquina: ' + alvo);
+        const st = fs.statSync(alvo);
+        if (!st.isFile()) throw new Error('O caminho informado não é um arquivo.');
+        if (st.size > 700 * 1024) throw new Error(`Arquivo grande demais para baixar por aqui (${(st.size/1024).toFixed(0)}KB, limite atual 700KB).`);
+        const buf = fs.readFileSync(alvo);
+        const nome = path.basename(alvo);
+        log(`[Arquivo] Enviando para download: ${nome} (${(buf.length/1024).toFixed(1)}KB)`);
+        resposta = { tipo: 'file_download_result', ok: true, filename: nome, data: buf.toString('base64') };
+      } catch(e) {
+        log('[Arquivo] Falha no download: ' + e.message);
+        resposta = { tipo: 'file_download_result', ok: false, error: e.message };
+      }
+
+    } else if (msg.tipo === 'control_start') {
+      garantirProcessoControle();
+      resposta = { tipo: 'control_ready' };
+
+    } else if (msg.tipo === 'control_stop') {
+      encerrarProcessoControle();
+      resposta = { tipo: 'control_stopped' };
+
+    } else if (msg.tipo === 'mouse') {
+      const x = Number(msg.x), y = Number(msg.y);
+      if (msg.action === 'move' && isFinite(x) && isFinite(y)) {
+        enviarComandoControle(`[SysackInput]::Move(${x},${y})`);
+      } else if (msg.action === 'down' || msg.action === 'up') {
+        if (isFinite(x) && isFinite(y)) enviarComandoControle(`[SysackInput]::Move(${x},${y})`);
+        const btn = ['left', 'right', 'middle'].includes(msg.button) ? msg.button : 'left';
+        enviarComandoControle(`[SysackInput]::Button('${btn}',$${msg.action === 'down' ? 'true' : 'false'})`);
+      } else if (msg.action === 'wheel') {
+        const delta = Number(msg.deltaY) || 0;
+        // Sinal invertido: scroll do navegador é positivo pra baixo, Windows é o oposto.
+        enviarComandoControle(`[SysackInput]::Wheel(${Math.round(-delta)})`);
+      }
+      // Sem resposta por evento — mantém o canal leve; a tela atualiza via 'screenshot' periódico.
+      return;
+
+    } else if (msg.tipo === 'key') {
+      if (msg.mode === 'unicode' && msg.char != null) {
+        enviarComandoControle(`[SysackInput]::Unicode(${Number(msg.char) || 0},$${msg.down ? 'true' : 'false'})`);
+      } else if (msg.mode === 'vk' && msg.code != null) {
+        enviarComandoControle(vkParaComando(msg.code, !!msg.down));
+      }
+      return;
 
     } else if (msg.tipo === 'metrics') {
       const mem = getMemoryInfo();
@@ -2095,6 +2360,9 @@ function encerrarRelayRtdb(sessaoId) {
   rtdbUnlisten(sessaoId);
   // Remove dados da sessão do RTDB
   rtdbEscrever(`relay/${sessaoId}`, null).catch(() => {});
+  // Se não houver mais nenhuma sessão ativa, encerra o processo de controle
+  // remoto (SendInput) — não deixa um PowerShell pendurado sem ninguém conectado.
+  if (_sessoesAtivas.size === 0) encerrarProcessoControle();
   log(`[RTDB] Relay encerrado — sessão ${sessaoId}`);
 }
 
@@ -2537,7 +2805,7 @@ $out | ConvertTo-Json -Depth 4 -Compress
 `.trim();
       const psPath = path.join(__dirname, '_sysack_eventviewer.ps1');
       fs.writeFileSync(psPath, ps, 'utf8');
-      const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 120000, windowsHide: true, maxBuffer: 15 * 1024 * 1024 }).toString();
+      const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 240000, windowsHide: true, maxBuffer: 20 * 1024 * 1024 }).toString();
       try { fs.unlinkSync(psPath); } catch {}
       // CORREÇÃO: antes cortava a STRING bruta em 900000 caracteres (raw.slice),
       // o que frequentemente cortava o JSON no meio de um objeto/array — o

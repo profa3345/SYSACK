@@ -2,7 +2,7 @@
 // Módulo principal de aplicação
 
 const SYSACK_APP_VERSION = '2.2.2';
-const SYSACK_AGENT_VERSION = '2.2.4';
+const SYSACK_AGENT_VERSION = '2.2.7';
 
 
 // ============================================================
@@ -8468,6 +8468,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         <button onclick="rvShowPanel('software')" class="rv-btn" title="Software">📦</button>
         <button onclick="rvShowPanel('patches')"  class="rv-btn" title="Patches">🔒</button>
         <button onclick="rvShowPanel('deploy')"   class="rv-btn" title="Deploy">📲</button>
+        <button onclick="rvShowPanel('arquivos')" class="rv-btn" title="Transferência de Arquivos">📁</button>
         <div style="width:1px;height:24px;background:#334155;margin:0 4px"></div>
         <button onclick="rvEncerrar('${sessaoId}')" style="background:#EF4444;color:#fff;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px">
           ✕ Encerrar Sessão
@@ -8481,9 +8482,11 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         <div style="background:#1E293B;padding:8px 14px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:10px;flex-shrink:0">
           <span style="color:#94A3B8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Tela Remota</span>
           <button onclick="rvCaptura()" style="background:#2563EB;color:#fff;border:none;padding:3px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">↺ Atualizar</button>
+          <button id="rv-btn-controle" onclick="rvToggleControle()" style="background:#334155;color:#fff;border:none;padding:3px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Ativar para controlar mouse e teclado da máquina remota">🖱️ Tomar Controle</button>
           <label style="color:#94A3B8;font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer">
             <input type="checkbox" id="rv-auto" onchange="rvToggleAuto(this.checked)" style="cursor:pointer"> Auto 5s
           </label>
+          <span id="rv-controle-status" style="color:#F59E0B;font-size:11px"></span>
           <span id="rv-capture-ts" style="color:#475569;font-size:11px;margin-left:auto"></span>
         </div>
         <div style="flex:1;overflow:auto;background:#0F172A;display:flex;align-items:center;justify-content:center;padding:12px">
@@ -8588,6 +8591,32 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
               <button onclick="rvDeployPersonalizado()" style="width:100%;background:#2563EB;color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">📦 Instalar Agora</button>
             </div>
             <div id="rv-deploy-log" style="display:none;background:#0F172A;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#94A3B8;max-height:140px;overflow-y:auto;margin-top:8px"></div>
+          </div>
+        </div>
+
+        <div id="rv-panel-arquivos" style="display:none;flex-direction:column;height:100%">
+          <div style="background:#1E293B;padding:8px 12px;border-bottom:1px solid #334155;flex-shrink:0">
+            <span style="color:#94A3B8;font-size:11px;font-weight:700;text-transform:uppercase">📁 Transferência de Arquivos</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:16px">
+
+            <div>
+              <div style="color:#94A3B8;font-size:12px;font-weight:700;margin-bottom:6px">⬆️ Enviar arquivo para a máquina</div>
+              <input type="file" id="rv-file-upload-input" style="width:100%;font-size:11px;color:#94A3B8;margin-bottom:6px">
+              <div style="font-size:10.5px;color:#64748B;margin-bottom:8px">Limite de ~700 KB por arquivo nesta versão. Vai para <code style="color:#94A3B8">C:\\SYSACK\\transferencias\\</code> na máquina remota.</div>
+              <button onclick="rvEnviarArquivo()" style="width:100%;background:#2563EB;color:#fff;border:none;padding:9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:700">⬆️ Enviar Agora</button>
+            </div>
+
+            <div style="height:1px;background:#334155"></div>
+
+            <div>
+              <div style="color:#94A3B8;font-size:12px;font-weight:700;margin-bottom:6px">⬇️ Baixar arquivo da máquina</div>
+              <input id="rv-file-download-path" style="width:100%;background:#1E293B;border:1px solid #334155;border-radius:6px;padding:7px 10px;color:#94A3B8;font-size:12px;margin-bottom:8px" placeholder="Caminho completo, ex: C:\Users\ana.penha\Desktop\log.txt">
+              <button onclick="rvBaixarArquivo()" style="width:100%;background:#2563EB;color:#fff;border:none;padding:9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:700">⬇️ Baixar Agora</button>
+            </div>
+
+            <div id="rv-file-status" style="font-size:11.5px;color:#94A3B8"></div>
+            <div id="rv-file-log" style="display:none;background:#0F172A;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#94A3B8;max-height:140px;overflow-y:auto"></div>
           </div>
         </div>
 
@@ -9061,6 +9090,8 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       if (d.tipo === 'screenshot') rvHandleScreen(d);
       if (d.tipo === 'result')     rvHandleResult(d);
       if (d.tipo === 'metrics')    rvHandleMetrics(d);
+      if (d.tipo === 'file_upload_result')   rvHandleFileUploadResult(d);
+      if (d.tipo === 'file_download_result') rvHandleFileDownloadResult(d);
     } catch {}
   }
 
@@ -9445,8 +9476,253 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     rvShellLog('Instalando ' + nome + '...', '#F59E0B');
   };
 
+  // ── TRANSFERÊNCIA DE ARQUIVOS ───────────────────────────────────
+  // Sem chunking nesta primeira versão — limite de ~700KB por arquivo,
+  // pra caber com folga no limite de 1MB por documento do Firestore
+  // (canal usado quando não há WS local nem RTDB disponível).
+  const RV_FILE_LIMITE_BYTES = 700 * 1024;
+  let _rvUploadEmAndamento = false;
+  let _rvDownloadEmAndamento = false;
+
+  function rvFileLog(msg, cor) {
+    const el = document.getElementById('rv-file-log');
+    if (!el) return;
+    el.style.display = 'block';
+    const linha = document.createElement('div');
+    linha.style.color = cor || '#94A3B8';
+    linha.textContent = `[${new Date().toLocaleTimeString('pt-BR')}] ${msg}`;
+    el.appendChild(linha);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  window.rvEnviarArquivo = () => {
+    const input = document.getElementById('rv-file-upload-input');
+    const status = document.getElementById('rv-file-status');
+    const file = input?.files?.[0];
+    if (!file) { showToast?.('Selecione um arquivo primeiro.', 'warning'); return; }
+    if (file.size > RV_FILE_LIMITE_BYTES) {
+      showToast?.(`Arquivo muito grande (${(file.size/1024).toFixed(0)}KB). Limite atual: 700KB.`, 'warning');
+      return;
+    }
+    if (_rvUploadEmAndamento) return;
+    _rvUploadEmAndamento = true;
+    if (status) status.textContent = `⏳ Enviando ${file.name}...`;
+    rvFileLog(`Enviando ${file.name} (${(file.size/1024).toFixed(1)}KB)...`, '#3B82F6');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      // reader.result é "data:<mime>;base64,AAAA..." — precisamos só da parte após a vírgula
+      const base64 = String(reader.result).split(',')[1] || '';
+      rvSend({ tipo: 'file_upload', filename: file.name, data: base64 });
+    };
+    reader.onerror = () => {
+      _rvUploadEmAndamento = false;
+      if (status) status.textContent = '';
+      rvFileLog('Falha ao ler o arquivo localmente.', '#EF4444');
+    };
+    reader.readAsDataURL(file);
+
+    // Timeout de segurança — se o agente não responder em 30s, libera o botão de novo
+    setTimeout(() => {
+      if (_rvUploadEmAndamento) {
+        _rvUploadEmAndamento = false;
+        if (status) status.textContent = '';
+        rvFileLog('Timeout — sem confirmação do agente em 30s.', '#F59E0B');
+      }
+    }, 30000);
+  };
+
+  window.rvHandleFileUploadResult = d => {
+    _rvUploadEmAndamento = false;
+    const status = document.getElementById('rv-file-status');
+    if (status) status.textContent = '';
+    if (d.ok) {
+      rvFileLog(`✅ Enviado com sucesso: ${d.path}`, '#22C55E');
+      showToast?.('Arquivo enviado com sucesso.', 'success');
+      const input = document.getElementById('rv-file-upload-input');
+      if (input) input.value = '';
+    } else {
+      rvFileLog(`❌ Falha ao enviar: ${d.error || 'erro desconhecido'}`, '#EF4444');
+      showToast?.('Falha ao enviar arquivo: ' + (d.error || ''), 'danger');
+    }
+  };
+
+  window.rvBaixarArquivo = () => {
+    const pathInput = document.getElementById('rv-file-download-path');
+    const status = document.getElementById('rv-file-status');
+    const remotePath = pathInput?.value?.trim();
+    if (!remotePath) { showToast?.('Informe o caminho completo do arquivo na máquina remota.', 'warning'); return; }
+    if (_rvDownloadEmAndamento) return;
+    _rvDownloadEmAndamento = true;
+    if (status) status.textContent = `⏳ Baixando ${remotePath}...`;
+    rvFileLog(`Solicitando ${remotePath}...`, '#3B82F6');
+    rvSend({ tipo: 'file_download', path: remotePath });
+
+    setTimeout(() => {
+      if (_rvDownloadEmAndamento) {
+        _rvDownloadEmAndamento = false;
+        if (status) status.textContent = '';
+        rvFileLog('Timeout — sem confirmação do agente em 30s.', '#F59E0B');
+      }
+    }, 30000);
+  };
+
+  window.rvHandleFileDownloadResult = d => {
+    _rvDownloadEmAndamento = false;
+    const status = document.getElementById('rv-file-status');
+    if (status) status.textContent = '';
+    if (!d.ok) {
+      rvFileLog(`❌ Falha ao baixar: ${d.error || 'erro desconhecido'}`, '#EF4444');
+      showToast?.('Falha ao baixar arquivo: ' + (d.error || ''), 'danger');
+      return;
+    }
+    try {
+      const byteChars = atob(d.data);
+      const bytes = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([bytes]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = d.filename || 'arquivo';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      rvFileLog(`✅ Baixado: ${d.filename}`, '#22C55E');
+      showToast?.('Download concluído.', 'success');
+    } catch(e) {
+      rvFileLog('❌ Erro ao processar arquivo recebido: ' + e.message, '#EF4444');
+    }
+  };
+
+  // ── CONTROLE REMOTO — mouse e teclado ──────────────────────────
+  // Funciona nos três canais (WS local, RTDB, Firestore) através do mesmo
+  // rvSend() já usado pelo resto da sessão. A fluidez real depende de qual
+  // canal está ativo: local/RTDB são rápidos, Firestore (fallback mais comum
+  // hoje) tem latência maior por ser baseado em escrita de documento — isso
+  // é uma limitação de infraestrutura, não do código de controle em si.
+  let _rvControlando = false;
+  let _rvUltimoMove = 0;
+  let _rvAutoControleTimer = null;
+  const RV_MOUSE_THROTTLE_MS = 45; // ~22 atualizações/s — suficiente pra sentir fluido sem sobrecarregar o canal
+
+  // Teclas especiais → Virtual-Key code do Windows (precisa bater com o mapa
+  // equivalente em agent-desktop.js). Caracteres normais vão por Unicode direto.
+  const RV_VK_MAP = {
+    Backspace: 0x08, Tab: 0x09, Enter: 0x0D, Shift: 0x10, Control: 0x11, Alt: 0x12,
+    Pause: 0x13, CapsLock: 0x14, Escape: 0x1B, PageUp: 0x21, PageDown: 0x22,
+    End: 0x23, Home: 0x24, ArrowLeft: 0x25, ArrowUp: 0x26, ArrowRight: 0x27, ArrowDown: 0x28,
+    Insert: 0x2D, Delete: 0x2E, Meta: 0x5B, ContextMenu: 0x5D,
+    F1:0x70, F2:0x71, F3:0x72, F4:0x73, F5:0x74, F6:0x75, F7:0x76, F8:0x77, F9:0x78, F10:0x79, F11:0x7A, F12:0x7B,
+  };
+
+  function rvCoordsNormalizadas(e) {
+    const img = document.getElementById('rv-img');
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    return { x, y };
+  }
+
+  function rvMouseMove(e) {
+    const now = Date.now();
+    if (now - _rvUltimoMove < RV_MOUSE_THROTTLE_MS) return;
+    _rvUltimoMove = now;
+    const c = rvCoordsNormalizadas(e);
+    if (!c) return;
+    rvSend({ tipo: 'mouse', action: 'move', x: c.x, y: c.y });
+  }
+
+  function rvMouseDown(e) {
+    e.preventDefault();
+    const c = rvCoordsNormalizadas(e);
+    if (!c) return;
+    const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
+    rvSend({ tipo: 'mouse', action: 'down', x: c.x, y: c.y, button: btn });
+  }
+
+  function rvMouseUp(e) {
+    e.preventDefault();
+    const c = rvCoordsNormalizadas(e);
+    if (!c) return;
+    const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
+    rvSend({ tipo: 'mouse', action: 'up', x: c.x, y: c.y, button: btn });
+  }
+
+  function rvWheel(e) {
+    e.preventDefault();
+    rvSend({ tipo: 'mouse', action: 'wheel', deltaY: e.deltaY });
+  }
+
+  function rvControleKeyDown(e) {
+    if (!_rvControlando) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key.length === 1) {
+      // Caractere normal — envia como Unicode (funciona independente do layout de teclado)
+      rvSend({ tipo: 'key', mode: 'unicode', char: e.key.codePointAt(0), down: true });
+      rvSend({ tipo: 'key', mode: 'unicode', char: e.key.codePointAt(0), down: false });
+    } else if (RV_VK_MAP[e.key] != null) {
+      rvSend({ tipo: 'key', mode: 'vk', code: RV_VK_MAP[e.key], down: true });
+    }
+  }
+
+  function rvControleKeyUp(e) {
+    if (!_rvControlando) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (RV_VK_MAP[e.key] != null) {
+      rvSend({ tipo: 'key', mode: 'vk', code: RV_VK_MAP[e.key], down: false });
+    }
+  }
+
+  window.rvToggleControle = () => {
+    const btn = document.getElementById('rv-btn-controle');
+    const status = document.getElementById('rv-controle-status');
+    const img = document.getElementById('rv-img');
+    if (!img) return;
+    _rvControlando = !_rvControlando;
+
+    if (_rvControlando) {
+      rvSend({ tipo: 'control_start' });
+      img.setAttribute('tabindex', '0');
+      img.style.cursor = 'none';
+      img.focus();
+      img.addEventListener('mousemove', rvMouseMove);
+      img.addEventListener('mousedown', rvMouseDown);
+      img.addEventListener('mouseup', rvMouseUp);
+      img.addEventListener('wheel', rvWheel, { passive: false });
+      img.addEventListener('contextmenu', e => e.preventDefault());
+      img.addEventListener('keydown', rvControleKeyDown);
+      img.addEventListener('keyup', rvControleKeyUp);
+      // Enquanto controlando, atualiza a tela com mais frequência para dar
+      // retorno visual do movimento — sem exagerar no canal Firestore.
+      clearInterval(_autoTimer);
+      _rvAutoControleTimer = setInterval(rvCaptura, 600);
+      if (btn) { btn.style.background = '#DC2626'; btn.textContent = '🖱️ Controlando (clique para sair)'; }
+      if (status) status.textContent = 'Modo controle ativo — clique na tela e use mouse/teclado normalmente.';
+      showToast?.('Controle remoto ativado.', 'info', 3000);
+    } else {
+      rvSend({ tipo: 'control_stop' });
+      img.removeAttribute('tabindex');
+      img.style.cursor = 'crosshair';
+      img.removeEventListener('mousemove', rvMouseMove);
+      img.removeEventListener('mousedown', rvMouseDown);
+      img.removeEventListener('mouseup', rvMouseUp);
+      img.removeEventListener('wheel', rvWheel);
+      img.removeEventListener('keydown', rvControleKeyDown);
+      img.removeEventListener('keyup', rvControleKeyUp);
+      clearInterval(_rvAutoControleTimer);
+      _rvAutoControleTimer = null;
+      if (document.getElementById('rv-auto')?.checked) _autoTimer = setInterval(rvCaptura, 5000);
+      if (btn) { btn.style.background = '#334155'; btn.textContent = '🖱️ Tomar Controle'; }
+      if (status) status.textContent = '';
+    }
+  };
+
   // ── Teclado ──────────────────────────────────────────────────
   function rvKeyHandler(e) {
+    if (_rvControlando) return; // enquanto controlando, teclas vão pro rvControleKeyDown/Up, não pra atalhos do painel
     if (e.key === 'F5')      { e.preventDefault(); rvCaptura(); }
     if (e.key === 'Escape')  { rvEncerrar(sessaoId); }
   }
@@ -9455,6 +9731,8 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── Encerrar ─────────────────────────────────────────────────
   window.rvEncerrar = async sid => {
     if (!confirm('Encerrar sessão remota?')) return;
+    if (_rvControlando) { rvSend({ tipo: 'control_stop' }); }
+    clearInterval(_rvAutoControleTimer);
     clearInterval(_autoTimer);
     document.removeEventListener('keydown', rvKeyHandler);
     _ws?.close();
@@ -23590,20 +23868,20 @@ async function evColetarEAnalisar(agentId, hostname) {
       status: 'pendente', criadoEm: new Date().toISOString(),
     });
 
-    if (status) status.textContent = '⏳ Aguardando resposta do agente...';
+    if (status) status.textContent = '⏳ Aguardando resposta do agente... (máquinas com muitos eventos podem levar até 4-5 minutos)';
 
     // Poll por resultado — coleta de até 90/180 dias pode levar mais tempo que uma
-    // consulta simples, então damos uma janela maior (2m30s) que o timeout do agente (2min).
+    // consulta simples, então damos uma janela maior (5min) que o timeout do agente (4min).
     const inicio = Date.now();
     let snap = null;
-    while (Date.now() - inicio < 150000) {
+    while (Date.now() - inicio < 300000) {
       await new Promise(r => setTimeout(r, 2000));
       const cmdSnap = await (window.db||window._db).collection('agent_commands').doc(cmdId).get();
       const st = cmdSnap.data()?.status;
       if (st === 'concluido') { snap = cmdSnap.data(); break; }
       if (st === 'erro') throw new Error(cmdSnap.data()?.resultado || 'Agente retornou erro');
     }
-    if (!snap) throw new Error('Timeout — agente não respondeu em 2m30s');
+    if (!snap) throw new Error('Timeout — agente não respondeu em 5min. Se a máquina tem histórico muito grande, tente reduzir o período para 30 dias.');
 
     // Busca o payload do Event Viewer
     if (status) status.textContent = '🔍 Analisando eventos...';
