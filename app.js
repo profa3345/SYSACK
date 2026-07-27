@@ -1,5 +1,8 @@
-// SYSACK v2.1 — app.js
+// SYSACK v2.2.2 — app.js
 // Módulo principal de aplicação
+
+const SYSACK_APP_VERSION = '2.2.2';
+const SYSACK_AGENT_VERSION = '2.2.7';
 
 
 // ============================================================
@@ -1271,14 +1274,14 @@ function initSeedData() {
   STATE.scAtivos = [];
   STATE.notificacoes = [];
   STATE.terceirizadaAtivos = [];
-  console.log('[SYSACK] v2.1 - listeners Firebase corrigidos - Producao: aguardando Banco');
+  console.log('[SYSACK] v2.2.2 - listeners Firebase corrigidos - Producao: aguardando Banco');
 }
 
 // ============================================================
 // NAVIGATION
 // ============================================================
 const PAGE_LABELS = {
-  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', 'ai-dashboard':'IA & Insights', 'self-service':'Self-Service', 'mapa-ativos':'Mapa de Ativos', 'relatorios':'Relatórios','patrimonio':'Gestão Patrimonial','impressoras':'Gestão de Impressoras','wsus':'Patches (WSUS)','capacidade':'Relatório de Capacidade','backup-recovery':'Backup / Recovery','grupos-alerta':'Grupos de Alerta por E-mail','dashboard-tecnico':'Produtividade dos Técnicos','osd':'Deploy de SO (OSD)','metricas-historico':'Métricas Históricas','compliance-cis':'Compliance CIS', 'assistencia-remota':'Assistência Remota', 'monitor-rede':'Monitor de Rede', 'empregados':'Empregados & Ausências', chamados:'Chamados', ativos:'Ativos',
+  dashboard:'Dashboard', 'exec-dashboard':'Dashboard Executivo', 'ai-dashboard':'IA & Insights', 'self-service':'Self-Service', 'mapa-ativos':'Mapa de Ativos', 'relatorios':'Relatórios','patrimonio':'Gestão Patrimonial','impressoras':'Gestão de Impressoras','wsus':'Patches (WSUS)','capacidade':'Relatório de Capacidade','backup-recovery':'Backup / Recovery','grupos-alerta':'Grupos de Alerta por E-mail','dashboard-tecnico':'Produtividade dos Técnicos','osd':'Deploy de SO (OSD)','metricas-historico':'Métricas Históricas','compliance-cis':'Compliance CIS', 'assistencia-remota':'Computadores com Agente', 'monitor-rede':'Monitor de Rede', 'empregados':'Empregados & Ausências', chamados:'Chamados', ativos:'Ativos',
   movimentacoes:'Movimentações', 'mudancas-itil':'Mudanças (ITIL)', terceirizada:'Empresa Terceirizada',
   'santa-clara':'Santa Clara', aprovacoes:'Aprovações',
   relatorios:'Relatórios', tecnicos:'Técnicos', kb:'Base de Conhecimento',
@@ -1450,7 +1453,155 @@ function renderDashboard() {
     {dot:'green',  title:'CH-003 concluído',                           desc:'Impressora HP LaserJet M428 — problema resolvido', time:'há 5 dias'},
     {dot:'violet', title:'PAT-0106 enviado para Santa Clara',          desc:'Lenovo ThinkPad E14 — localização e foto registradas', time:'há 30 dias'},
   ].map(i => `<div class="tl-item"><div class="tl-dot ${i.dot}"></div><div class="tl-title">${i.title}</div><div class="tl-desc">${i.desc}</div><div class="tl-time">${i.time}</div></div>`).join('');
+
+  // Carrega alertas do dia no dashboard de forma assíncrona
+  renderDashboardAlertasDia().catch(() => {});
 }
+
+// ── Widget: Alertas do Dia no Dashboard ────────────────────────────────────
+window.dashAlertasTab = function(tab) {
+  const isPend = tab === 'pendentes';
+  const lP = document.getElementById('dash-alertas-pend-list');
+  const lR = document.getElementById('dash-alertas-res-list');
+  const tP = document.getElementById('dash-alertas-tab-pend');
+  const tR = document.getElementById('dash-alertas-tab-res');
+  if (lP) lP.style.display = isPend ? '' : 'none';
+  if (lR) lR.style.display = isPend ? 'none' : '';
+  if (tP) { tP.style.borderBottomColor = isPend ? 'var(--accent)' : 'transparent'; tP.style.color = isPend ? 'var(--accent)' : 'var(--g500)'; tP.style.fontWeight = isPend ? '700' : '600'; }
+  if (tR) { tR.style.borderBottomColor = isPend ? 'transparent' : 'var(--accent)'; tR.style.color = isPend ? 'var(--g500)' : 'var(--accent)'; tR.style.fontWeight = isPend ? '600' : '700'; }
+};
+
+async function renderDashboardAlertasDia() {
+  const elPend = document.getElementById('dash-alertas-pend-list');
+  const elRes  = document.getElementById('dash-alertas-res-list');
+  const elBadgePend = document.getElementById('dash-alertas-badge-pend');
+  const elBadgeRes  = document.getElementById('dash-alertas-badge-res');
+  if (!elPend) return;
+
+  elPend.innerHTML = '<div style="padding:16px;text-align:center;color:var(--g400);font-size:12px">Carregando...</div>';
+
+  // Busca alertas do dia (reutiliza função do painel de alertas se disponível)
+  let alertas = [];
+  if (typeof _sysackBuscarAlertasDia === 'function') {
+    try { alertas = await _sysackBuscarAlertasDia(); } catch {}
+  } else {
+    // Fallback direto: lê Firestore
+    try {
+      const db = window.db || window._db;
+      if (db) {
+        const hoje = new Date(); hoje.setHours(0,0,0,0);
+        const snap = await db.collection('alertas').orderBy('createdAt','desc').limit(60).get().catch(()=>null);
+        if (snap) snap.docs.forEach(d => {
+          const dado = d.data();
+          if ((dado.createdAt||'') >= hoje.toISOString()) alertas.push({ id: d.id, ...dado });
+        });
+        const snap2 = await db.collection('eventos_detectados').orderBy('detecEm','desc').limit(40).get().catch(()=>null);
+        if (snap2) snap2.docs.forEach(d => {
+          const dado = d.data();
+          if ((dado.detecEm||'') >= hoje.toISOString()) alertas.push({ id:'ev_'+d.id, ...dado, createdAt: dado.detecEm });
+        });
+      }
+    } catch {}
+  }
+
+  const hoje = new Date().toISOString().slice(0,10);
+  const estado = window._sysackAlertasDiaEstado || {};
+
+  function getKey(al) {
+    return hoje + '_alerta_' + (al.id||al.tipo||'').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,60);
+  }
+  function isPausado(st) { return st?.tipo==='pausado' && new Date(st.pausaAte) > new Date(); }
+
+  const pendentes  = alertas.filter(al => { const st=estado[getKey(al)]; return !st||(st.tipo!=='resolvido'&&!isPausado(st)); });
+  const resolvidos = alertas.filter(al => { const st=estado[getKey(al)]; return st?.tipo==='resolvido'; });
+
+  // Atualiza badges
+  if (elBadgePend) { elBadgePend.textContent = pendentes.length + ' pendente(s)'; elBadgePend.style.display = pendentes.length ? '' : 'none'; }
+  if (elBadgeRes)  { elBadgeRes.textContent  = resolvidos.length + ' resolvido(s)'; elBadgeRes.style.display  = resolvidos.length ? '' : 'none'; }
+
+  // Também atualiza badge global no topo da página se existir
+  const badgeGlobal = document.getElementById('badge-alertas-dia');
+  if (badgeGlobal) { badgeGlobal.style.display = pendentes.length ? '' : 'none'; badgeGlobal.textContent = pendentes.length; }
+
+  const corMap = { maquina_offline:'#DC2626', mudanca_faixa_ip:'#DC2626', mudanca_ip:'#D97706', offline:'#DC2626', alerta_ip:'#D97706', troca_grupo:'#2563EB', maquina_online:'#16A34A' };
+  function cor(al) { return corMap[String(al.tipo||'').toLowerCase()] || '#64748B'; }
+  function hora(al) {
+    const v = al.createdAt || al.detecEm;
+    if (!v) return '';
+    const d = new Date(v?.seconds ? v.seconds*1000 : v);
+    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  }
+
+  function renderLinha(al, soResolvido) {
+    const key = getKey(al);
+    const st  = estado[key];
+    const titulo  = escapeHtml(al.titulo || al.msg || al.tipo || 'Alerta');
+    const maquina = al.hostname || al.pat || al.computador || al.agentId || '';
+    const det     = al.desc || al.detalhe || al.resultado || '';
+    const h       = hora(al);
+    const badgeSt = st?.tipo==='resolvido'
+      ? '<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;flex-shrink:0">✅</span>'
+      : isPausado(st) ? '<span style="background:#EEF2FF;color:#4338CA;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;flex-shrink:0">⏸️</span>' : '';
+    const botoes = soResolvido ? '' :
+      `<div style="display:flex;gap:4px;flex-shrink:0">
+        <button onclick="event.stopPropagation();window._dashAlertaResolvido && _dashAlertaResolvido('${key}')" title="Marcar como resolvido"
+          style="font-size:10px;padding:3px 8px;border-radius:6px;border:none;background:#D1FAE5;color:#047857;cursor:pointer;font-weight:700">✅</button>
+        <button onclick="event.stopPropagation();window._dashAlertaJustificar && _dashAlertaJustificar('${key}')" title="Justificar"
+          style="font-size:10px;padding:3px 8px;border-radius:6px;border:none;background:#EEF2FF;color:#4338CA;cursor:pointer;font-weight:700">📝</button>
+      </div>`;
+    return `<div data-alerta-dash-key="${key}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);border-left:3px solid ${cor(al)}">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <b style="font-size:12.5px;color:var(--g900)">${titulo}</b>
+          ${maquina ? `<span style="background:#F1F5F9;color:#475569;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:600">${escapeHtml(maquina)}</span>` : ''}
+          ${h ? `<span style="font-size:10.5px;color:var(--g400)">${h}</span>` : ''}
+          ${badgeSt}
+        </div>
+        ${det ? `<div style="font-size:11.5px;color:var(--g500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(det)}</div>` : ''}
+      </div>
+      ${botoes}
+    </div>`;
+  }
+
+  if (!alertas.length) {
+    elPend.innerHTML = '<div style="padding:24px;text-align:center;color:var(--g400);font-size:12px">✅ Nenhum alerta gerado hoje.</div>';
+    if (elRes) elRes.innerHTML = '';
+    return;
+  }
+
+  elPend.innerHTML = pendentes.length
+    ? pendentes.map(al => renderLinha(al, false)).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--g400);font-size:12px">✅ Todos os alertas estão resolvidos!</div>';
+  if (elRes) elRes.innerHTML = resolvidos.length
+    ? resolvidos.map(al => renderLinha(al, true)).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--g400);font-size:12px">Nenhum alerta resolvido ainda hoje.</div>';
+}
+
+// Resolvido direto do dashboard
+window._dashAlertaResolvido = function(key) {
+  if (typeof sysackDiaResolvido === 'function') {
+    sysackDiaResolvido(key);
+    // Após fechar o modal, re-renderiza o widget do dashboard
+    const orig = window.sysackDiaConfirmarResolvido;
+    if (orig) window.sysackDiaConfirmarResolvido = async function(k, btn) {
+      await orig(k, btn);
+      renderDashboardAlertasDia().catch(()=>{});
+      window.sysackDiaConfirmarResolvido = orig;
+    };
+  }
+};
+
+window._dashAlertaJustificar = function(key) {
+  if (typeof sysackDiaJustificar === 'function') {
+    sysackDiaJustificar(key);
+    const orig = window.sysackDiaConfirmarJustif;
+    if (orig) window.sysackDiaConfirmarJustif = async function(k, btn) {
+      await orig(k, btn);
+      renderDashboardAlertasDia().catch(()=>{});
+      window.sysackDiaConfirmarJustif = orig;
+    };
+  }
+};
 
 // ============================================================
 // CHAMADOS
@@ -1485,8 +1636,9 @@ function renderChamados(filter='abertos') {
 // Filtro de tipo ativo para as abas
 let _ativoFiltroTipo = '';
 
-function filtrarAtivosPorTipo(tipos, el) {
+function filtrarAtivosPorTipo(tipos, el, modoAgente) {
   _ativoFiltroTipo = tipos;
+  window._ativoAgenteFiltro = modoAgente || null; // 'com' | 'sem' | null
   // Atualiza tab ativa
   document.querySelectorAll('#ativos-tabs .tab').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
@@ -1574,7 +1726,10 @@ function sysackCalcularUsuarioPrincipal(a, ag) {
   return arr[0]?.login || '';
 }
 async function sysackCarregarHistoricoLogin(q='', de='', ate='') {
-  if (!window.db) return [];
+  // CORREÇÃO: window.db nunca é atribuído neste app (só window._db) — esse guard
+  // checava a variável errada e SEMPRE retornava vazio silenciosamente, mesmo com
+  // dados existindo e permissões corretas no Firestore.
+  if (!window.db && !window._db) return [];
   const termo = sysackNormKey(q);
   const livre = String(q||'').toLowerCase().trim();
   const out = [];
@@ -1728,6 +1883,15 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
+    // Filtro por presença de agente: 'sem' mostra só quem NÃO tem agente
+    // reportando; 'com' mostra só quem TEM. Sem esse `else` explícito, o
+    // estado ficava "preso" ao trocar de aba dentro do mesmo card (ex.: ir
+    // de "Computadores sem Agente" pra "Todos" mantinha o filtro antigo ativo).
+    if (window._ativoAgenteFiltro === 'sem' || window._ativoAgenteFiltro === 'com') {
+      const agExistente = sysackFindAgentForAtivo(a);
+      if (window._ativoAgenteFiltro === 'sem' && agExistente) return false;
+      if (window._ativoAgenteFiltro === 'com' && !agExistente) return false;
+    }
     if (window._filtroLoginAtivoIds?.size || window._filtroLoginAtivoPats?.size || window._filtroLoginTexto) {
       const agFiltro = sysackFindAgentForAtivo(a);
       const hostFiltro = hostnameFromAtivo(a) || a.hostname || agFiltro?.hostname || agFiltro?.id || '';
@@ -1760,6 +1924,7 @@ function renderAtivos() {
         if (a.pat) return a.pat;
         const _hn2 = hostnameFromAtivo(a);
         const _pp2 = extractPatrimonioFromHostname(_hn2);
+        if (_pp2.virtual) return '<span style="font-size:10px;background:#EDE9FE;color:#5B21B6;padding:2px 8px;border-radius:10px;font-weight:700;font-family:inherit">Servidor Virtual</span>';
         if (_pp2.pat) return _pp2.alerta
           ? '<span style="color:#EF4444;font-weight:700">'+_pp2.pat+' ⚠️</span>'
           : '<span style="color:#059669;font-weight:700">'+_pp2.pat+'</span>';
@@ -1803,20 +1968,26 @@ function renderAtivos() {
         <td>${ip}</td>`;
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
-      <td class="td-acoes"><div class="flex gap-6 acoes-wrap">
+      <td class="td-acoes">${window._ativoAgenteFiltro === 'sem' ? `
+        <div style="display:flex;align-items:center;gap:6px;color:var(--g500);font-size:11px;line-height:1.3">
+          <span>⬇️ Instalação inicial deve ser feita manualmente na máquina, ou via rede usando o instalador —</span>
+          <button class="btn btn-ghost btn-xs" style="text-decoration:underline;padding:0" onclick="document.querySelector('.nav-i[data-page=\\'assistencia-remota\\']')?.click()" title="Ir para Computadores com Agente para baixar o instalador">baixe em Computadores com Agente</button>
+        </div>` : `<div class="flex gap-6 acoes-wrap">
         <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')" title="Histórico geral">📜</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirHistoricoUsuariosDoAtivo('${a.id}')" title="Histórico de logins">👥</button>` : ''}
         <button class="btn btn-ghost btn-xs" onclick="gerarQRCode(${JSON.stringify({id:a.id,pat:a.pat||a.ip||'',desc:a.desc||''})})" title="QR Code">📱</button>
         <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
         <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="patAbrirBusca()" title="Vincular PAT">🏷️</button>` : ''}
+        ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirEditarPatrimonioSYSACK('${a.id}','${escapeHtml(hostnameFromAtivo(a)||a.id)}','${escapeHtml(a.pat||'')}')" title="Adicionar/alterar patrimônio (manual ou por foto)">🔢</button>` : ''}
+        ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirEditarUnidadeSYSACK('','${escapeHtml(hostnameFromAtivo(a)||a.id)}','${a.id}','${escapeHtml(a.pat||'')}','${escapeHtml(a.area||'')}')" title="Alterar área">🏢</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs" title="Ver softwares instalados" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag?swInvVerSoftwaresMaquina(_ag.id):showToast('Agente não conectado — sem dados de software','warning')})()">🗂️</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs" title="Acesso remoto" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag&&_ag.status==='online'?arAbrirViewer(_ag.id):showToast(_ag?'Agente offline':'Agente não conectado','warning')})()">🖥️</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs"
           onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);if(!_ag)return showToast('Agente não conectado nesta máquina','warning');arToggleBloqueio(_ag.id,'${escapeHtml(a.hostname||a.desc||a.id)}',!!_ag.bloqueado)})()"
           title="Bloquear/Desbloquear máquina para todos os usuários"
           style="${`font-size:12px;`}">🔒</button>` : ''}
-      </div></td>
+      </div>`}</td>
     </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;padding:24px;color:var(--g400)">Nenhum ativo — ${tipos.length?'tipo: '+_ativoFiltroTipo:'cadastrado'}</td></tr>`;
   nbUpdate('nb-ativos', lista.length);
 }
@@ -1827,8 +1998,17 @@ function renderAtivos() {
 // ============================================================
 function extractPatrimonioFromHostname(hostname) {
   if (!hostname) return { pat: null, alerta: true };
+  const hn = String(hostname).trim();
+  const hnLower = hn.toLowerCase();
+  // Servidores virtuais (VSERV/vserv/Vserv...) nunca têm patrimônio físico —
+  // não faz sentido tentar extrair número nenhum do hostname.
+  if (hnLower.startsWith('vserv')) return { pat: null, alerta: false, virtual: true };
+  // Servidores físicos (SERV, sem o "V" de virtual na frente) não seguem o
+  // padrão de patrimônio no hostname — precisa ser preenchido manualmente
+  // ou por foto da etiqueta física (ver abrirEditarPatrimonioSYSACK).
+  if (hnLower.startsWith('serv')) return { pat: null, alerta: false, manual: true };
   // Get trailing numeric digits after the last letter in hostname
-  const match = hostname.match(/[a-zA-Z]([0-9]+)$/);
+  const match = hn.match(/[a-zA-Z]([0-9]+)$/);
   if (!match) return { pat: null, alerta: true };
   const digits = match[1];
   if (digits.length < 4) return { pat: digits, alerta: true };
@@ -3130,11 +3310,13 @@ async function _autenticarAD(login, senha) {
         setor:       u.setor    || sysackUser.setor || '',
         cargo:       u.cargo    || sysackUser.cargo || '',
         // Role e permissões VÊM DO SYSACK (não do AD)
-        role:        sysackUser.role        || 'viewer',
-        permissions: sysackUser.permissions || permissionsForRole(sysackUser.role || 'viewer'),
-        fonte:       'ad',
-        adToken:     adData.token,
-        sysackId:    sysackUser.id,
+        role:           sysackUser.role           || 'viewer',
+        permissions:    sysackUser.permissions    || permissionsForRole(sysackUser.role || 'viewer'),
+        moduloPerms:    sysackUser.moduloPerms    || {},
+        permsEspeciais: sysackUser.permsEspeciais || {},
+        fonte:          'ad',
+        adToken:        adData.token,
+        sysackId:       sysackUser.id,
       }
     };
 
@@ -5513,20 +5695,22 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.nav-i[data-page]').forEach(el => {
     el.addEventListener('click', () => {
       const tipo = el.dataset.tipo || null;
+      const semAgente = el.dataset.semAgente === '1';
       goPage(el.dataset.page);
       // Se tiver data-tipo, aplica o filtro de categoria automaticamente
       if (tipo !== null && el.dataset.page === 'ativos') {
         _ativoFiltroTipo = tipo;
+        window._ativoAgenteFiltro = semAgente ? 'sem' : null;
         // Destaca a aba correta dentro da página de ativos
         const tabMap = {
-          'computador,workstation,notebook,desktop': 1,
-          'notebook': 2,
-          'monitor': 3,
-          'switch,router,ap,firewall,access point': 4,
+          'computador,workstation,notebook,desktop,servidor,server,server-linux': semAgente ? 2 : 1,
+          'notebook': 3,
+          'monitor': 4,
+          'switch,router,ap,firewall,access point': 7,
           'servidor,server-linux': 5,
-          'outro,rack,storage,appliance,ups,camera': 6,
+          'outro,rack,storage,appliance,ups,camera': 8,
           'impressora,printer': 6,
-          'software': 6,
+          'software': 8,
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
@@ -5543,6 +5727,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (el.dataset.page === 'ativos' && !tipo) {
         // Clicou em "Ativos" sem tipo — mostra todos
         _ativoFiltroTipo = '';
+        window._ativoAgenteFiltro = null;
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
         if (tabs[0]) tabs[0].classList.add('active');
@@ -7814,6 +7999,8 @@ function startAgentsListener() {
           const data = d.data();
           // Garante que campos numéricos não virem string
           if (data.uptimeH != null) data.uptimeH = Number(data.uptimeH);
+          if (data.uptime != null) data.uptime = Number(data.uptime);
+          if (data.uptimeSeconds != null) data.uptimeSeconds = Number(data.uptimeSeconds);
           if (data.cpuPct  != null) data.cpuPct  = Number(data.cpuPct);
           if (data.ramPct  != null) data.ramPct  = Number(data.ramPct);
           if (data.memPct  != null) data.memPct  = Number(data.memPct);
@@ -7901,23 +8088,24 @@ function verificarTrocaMonitores(agentes) {
       const id = mon.serial || mon.nome || mon.caption;
       if (!id || id.length < 3) return; // ignora sem identificador
       const chave = CHAVE + id.replace(/[^a-zA-Z0-9]/g,'_');
-      const maquinaAnterior = localStorage.getItem(chave);
+      // Normaliza para minúsculas — evita falso positivo de hostname maiúsculo vs minúsculo
+      const hostnameAtualMon = String(ag.hostname || ag.id || '').toLowerCase();
+      const maquinaAnteriorRaw = localStorage.getItem(chave);
+      const maquinaAnterior = maquinaAnteriorRaw ? maquinaAnteriorRaw.toLowerCase() : null;
 
-      if (maquinaAnterior && maquinaAnterior !== ag.hostname) {
-        // Monitor mudou de máquina!
+      if (maquinaAnterior && maquinaAnterior !== hostnameAtualMon) {
         const nomeMonitor = mon.nome || mon.caption || id;
         showToast(
-          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${ag.hostname}`,
+          `🖥️ Monitor movido! "${nomeMonitor}" saiu de ${maquinaAnterior} → ${hostnameAtualMon}`,
           'warning', 10000
         );
-        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${ag.hostname}`);
-        // Registra no audit log
+        console.warn(`[Monitor] ${nomeMonitor} movido: ${maquinaAnterior} → ${hostnameAtualMon}`);
         auditLog('monitor_movido', 'assistencia-remota', id, 'monitor', {
-          monitor: nomeMonitor, de: maquinaAnterior, para: ag.hostname
+          monitor: nomeMonitor, de: maquinaAnterior, para: hostnameAtualMon
         });
       }
-      // Atualiza registro
-      localStorage.setItem(chave, ag.hostname);
+      // Salva sempre em minúsculas
+      localStorage.setItem(chave, hostnameAtualMon);
     });
   });
 }
@@ -8020,6 +8208,26 @@ function abrirHistoricoGeralDoAgente(agentId) {
   abrirHistorico((ativo && (ativo.pat || ativo.id)) || agentId);
 }
 
+function arFormatarUptimeAgente(a) {
+  if (!a) return '—';
+  const bootRaw = a.bootTime || a.lastBootTime || a.ultimoBoot || a.lastBoot;
+  let seconds = null;
+  if (bootRaw) {
+    const d = bootRaw?.toDate ? bootRaw.toDate() : bootRaw?.seconds ? new Date(bootRaw.seconds * 1000) : new Date(bootRaw);
+    if (d && !isNaN(d.getTime())) seconds = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  }
+  if (seconds == null && a.uptimeSeconds != null) seconds = Number(a.uptimeSeconds);
+  if (seconds == null && a.uptime != null) seconds = Number(a.uptime);
+  if (seconds == null && a.uptimeH != null) seconds = Number(a.uptimeH) * 3600;
+  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  const dias = Math.floor(seconds / 86400);
+  const horas = Math.floor((seconds % 86400) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (dias > 0) return dias + 'd ' + horas + 'h';
+  if (horas > 0) return horas + 'h ' + mins + 'min';
+  return mins + 'min';
+}
+
 function renderAssistenciaRemota() {
   const tbody = document.getElementById('ar-tbody');
   if (!tbody) return;
@@ -8058,13 +8266,28 @@ function renderAssistenciaRemota() {
   if (fSt) lista = lista.filter(a => a.status === fSt);
   if (fOs) lista = lista.filter(a => (a.osNome||'').includes(fOs));
 
+  // Filtro de busca por login de usuário/período — reaproveita as mesmas variáveis
+  // globais preenchidas por buscarMaquinasPorUsuario() (widget movido pra esta página).
+  if (window._filtroLoginAtivoIds?.size || window._filtroLoginTexto) {
+    lista = lista.filter(a => {
+      const idsOk = window._filtroLoginAtivoIds?.size
+        ? (window._filtroLoginAtivoIds.has(a.id) || window._filtroLoginAtivoIds.has(a.hostname) || window._filtroLoginAtivoIds.has(sysackNormKey(a.hostname)))
+        : false;
+      const termoLogin = sysackNormKey(window._filtroLoginTexto || '');
+      const textoUsuarios = [a.usuarioLogado, a.usuarioPrincipal, a.usuarioPrincipalLogin, a.ultimoLoginUsuario, a.usuarioNome]
+        .filter(Boolean).map(v => String(v).toLowerCase()).join(' ');
+      const textoOk = termoLogin ? textoUsuarios.includes(termoLogin) : false;
+      return idsOk || textoOk;
+    });
+  }
+
   // Ordena: críticos primeiro
   const ORDER = { critico:0, alerta:1, online:2, offline:3 };
   lista.sort((a,b) => (ORDER[a.status]??4) - (ORDER[b.status]??4));
 
   if (!lista.length) {
     const carregando = !STATE_AGENTS._carregou;
-    tbody.innerHTML = `<tr><td colspan="16" style="text-align:center;padding:40px;color:var(--g400)">
+    tbody.innerHTML = `<tr><td colspan="17" style="text-align:center;padding:40px;color:var(--g400)">
       <div style="font-size:32px;margin-bottom:12px">${carregando ? '⏳' : '🖥️'}</div>
       <div style="font-weight:600;margin-bottom:6px">
         ${carregando ? 'Carregando agentes...' : (agentes.length ? 'Nenhum agente com esses filtros' : 'Nenhum agente instalado')}
@@ -8078,7 +8301,14 @@ function renderAssistenciaRemota() {
   tbody.innerHTML = lista.map(a => {
     const statusCls = a.status || 'sem-agente';
     const statusCor = {online:'badge-success',offline:'badge-danger',alerta:'badge-warning',critico:'badge-danger'}[a.status] || '';
-    const lastSeen  = a.lastSeen ? fmtRelative(new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen)) : '—';
+    const lastSeenDate = a.lastSeen ? new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen) : null;
+    const lastSeenMins = lastSeenDate ? Math.floor((Date.now() - lastSeenDate.getTime()) / 60000) : null;
+    const lastSeenLabel = lastSeenDate ? fmtRelative(lastSeenDate) : '—';
+    // Alerta quando status=online mas lastSeen desatualizado há >10min (agente não grava no Firestore)
+    const lastSeenStale = a.status === 'online' && lastSeenMins !== null && lastSeenMins > 30;
+    const lastSeen = lastSeenStale
+      ? `<span title="Agente online mas lastSeen desatualizado (${lastSeenLabel}). Verifique conectividade ao Firestore na máquina." style="color:#F59E0B;font-weight:600;cursor:help">⚠️ ${lastSeenLabel}</span>`
+      : lastSeenLabel;
     const ativoRel = arEncontrarAtivoDoAgente(a);
     const usuarioLogado = a.usuarioLogado || ativoRel?.usuarioLogado || ativoRel?.ultimoLoginUsuario || '—';
     const usuarioPrincipal = arListaUsuariosPrincipais(ativoRel, a);
@@ -8121,36 +8351,56 @@ function renderAssistenciaRemota() {
           ${escapeHtml(a.hostname||a.id)}
           ${a.bloqueado ? `<span title="Bloqueada: ${escapeHtml(a.bloqueadoMotivo||'')}" style="background:#DC2626;color:#fff;font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;letter-spacing:.3px">🔒 BLOQUEADA</span>` : ''}
         </div>
+        <div style="font-size:10.5px;color:var(--g400);display:flex;align-items:center;gap:4px;margin-top:2px">
+          <span title="Patrimônio">PAT ${escapeHtml(ativoRel?.pat || '—')}</span>
+          <span>·</span>
+          <span title="Unidade atual">${escapeHtml(ativoRel?.area || 'sem unidade')}</span>
+          <button class="btn btn-ghost btn-xs" onclick="abrirEditarUnidadeSYSACK('${a.id}','${escapeHtml(a.hostname||a.id)}','${escapeHtml(ativoRel?.id||'')}','${escapeHtml(ativoRel?.pat||'')}','${escapeHtml(ativoRel?.area||'')}')" title="Alterar unidade / patrimônio" style="padding:0 4px;font-size:10.5px;line-height:1.4;border:none;background:none;color:var(--accent);cursor:pointer">✏️</button>
+        </div>
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
       </td>
-      <td style="font-family:monospace;font-size:12px;color:var(--g500)">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
-      <td style="font-size:12px">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
+      <td class="td-mono fw-700" style="color:var(--accent);font-size:12px">${(()=>{
+        if (ativoRel?.pat) return escapeHtml(ativoRel.pat);
+        const _hn = a.hostname || ativoRel?.hostname || a.id;
+        const _pp = extractPatrimonioFromHostname(_hn);
+        if (_pp.virtual) return '<span style="font-size:9.5px;background:#EDE9FE;color:#5B21B6;padding:1px 6px;border-radius:10px;font-weight:700">Servidor Virtual</span>';
+        if (_pp.pat) return _pp.alerta
+          ? '<span style="color:#EF4444;font-weight:700">'+escapeHtml(_pp.pat)+' ⚠️</span>'
+          : '<span style="color:#059669;font-weight:700">'+escapeHtml(_pp.pat)+'</span>';
+        return '<span style="font-size:9.5px;background:#FEF3C7;color:#92400E;padding:1px 6px;border-radius:10px;font-weight:700">Sem Patrimônio</span>';
+      })()}</td>
+      <td style="font-family:monospace;font-size:12px;color:var(--g500)" title="${escapeHtml(a.ip||'')}">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
+      <td style="font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(a.osNome||'—')}">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
       <td style="font-size:12px;color:var(--g600);max-width:95px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioLogado)}">${escapeHtml(usuarioLogado)}</td>
       <td style="font-size:12px;color:var(--g700);max-width:115px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioPrincipal)}">${escapeHtml(usuarioPrincipal)}${ativoRel?.maquinaCompartilhada ? '<span style="font-size:10px;background:#EDE9FE;color:#6D28D9;padding:1px 5px;border-radius:8px;margin-left:4px">comp.</span>' : ''}</td>
-      <td style="font-size:11px;color:var(--g500)">${escapeHtml(ultimoLogin)}</td>
+      <td style="font-size:11px;color:var(--g500);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ultimoLogin)}">${escapeHtml(ultimoLogin)}</td>
       <td style="font-size:12px;font-weight:700;color:var(--accent);text-align:center">${escapeHtml(String(diasAno))}</td>
       <td>${cpuBar}</td>
       <td>${ramBar}</td>
       <td>${diskBar}</td>
-      <td style="font-size:10.5px;color:var(--g500)">${(()=>{
+      <td style="font-size:10.5px;color:var(--g500);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(()=>{
+        if (!Array.isArray(a.outrosDiscos) || !a.outrosDiscos.length) return '';
+        return escapeHtml(a.outrosDiscos.map(d => (d.drive||'?')+': '+(d.freeGB||'?')+' GB').join(' | '));
+      })()}">${(()=>{
         if (!Array.isArray(a.outrosDiscos) || !a.outrosDiscos.length) return '—';
         return a.outrosDiscos.map(d => '<div>'+escapeHtml(d.drive||'?')+': '+escapeHtml(String(d.freeGB||'?'))+' GB</div>').join('');
       })()}</td>
-      <td class="monitor-cell">${Array.isArray(a.monitores) && a.monitores.length ?
+      <td class="monitor-cell" title="${Array.isArray(a.monitores) && a.monitores.length ? escapeHtml(a.monitores.map(m => (m.nome||m.caption||'Monitor')+(m.serial?' #'+m.serial:'')).join(' | ')) : ''}">${Array.isArray(a.monitores) && a.monitores.length ?
         a.monitores.map(m => {
           const nome   = escapeHtml(m.nome || m.caption || 'Monitor');
           const serial = m.serial ? '<span style="font-family:monospace;color:var(--g400);font-size:10px;display:block">#'+escapeHtml(m.serial)+'</span>' : '';
           return '<div style="font-size:11px;line-height:1.4">'+nome+serial+'</div>';
         }).join('') : '<span style="color:var(--g300)">—</span>'
       }</td>
-      <td style="font-size:12px;color:var(--g500)">${a.uptimeH != null ? Math.round(a.uptimeH) + 'h' : '—'}</td>
+      <td style="font-size:12px;color:var(--g500)" title="Boot: ${escapeHtml(a.bootTime || a.lastBootTime || '—')}">${escapeHtml(arFormatarUptimeAgente(a))}</td>
       <td style="font-size:10.5px;color:var(--g400);font-family:monospace">${escapeHtml(a.versaoAgente || a.version || '—')}</td>
       <td style="font-size:11.5px;color:var(--g400)">${lastSeen}</td>
       <td>
         <div style="display:flex;gap:3px;align-items:center;flex-wrap:nowrap">
           <button class="btn btn-primary btn-xs" onclick="arAbrirViewer('${a.id}')" title="Acessar remotamente" ${a.status!=='online'?'disabled':''} style="padding:2px 7px;font-size:12px">🖥️</button>
           <button class="btn btn-secondary btn-xs" onclick="arAbrirInventario('${a.id}')" title="Informações" style="padding:2px 7px;font-size:12px">📋</button>
+          ${a.status==='online' ? `<button class="btn btn-secondary btn-xs" onclick="evAbrirAnalise('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Analisar Máquina — relatório de Event Viewer (até 90 dias) com ações preventivas e corretivas" style="padding:2px 7px;font-size:12px">🔍</button>` : ''}
           <button class="btn btn-secondary btn-xs" onclick="arInstalarSoftware('${a.id}','${escapeHtml(a.hostname||a.id)}')" title="Instalar software" style="padding:2px 7px;font-size:12px">📦</button>
           <button class="btn btn-secondary btn-xs" onclick="abrirInventarioAgente('${a.id}')" title="Inventário de Software" style="padding:2px 7px;font-size:12px">🗂️</button>
           <button class="btn btn-xs" onclick="arToggleBloqueio('${a.id}','${escapeHtml(a.hostname||a.id)}',${!!a.bloqueado})"
@@ -8272,6 +8522,7 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         <button onclick="rvShowPanel('software')" class="rv-btn" title="Software">📦</button>
         <button onclick="rvShowPanel('patches')"  class="rv-btn" title="Patches">🔒</button>
         <button onclick="rvShowPanel('deploy')"   class="rv-btn" title="Deploy">📲</button>
+        <button onclick="rvShowPanel('arquivos')" class="rv-btn" title="Transferência de Arquivos">📁</button>
         <div style="width:1px;height:24px;background:#334155;margin:0 4px"></div>
         <button onclick="rvEncerrar('${sessaoId}')" style="background:#EF4444;color:#fff;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px">
           ✕ Encerrar Sessão
@@ -8285,9 +8536,11 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
         <div style="background:#1E293B;padding:8px 14px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:10px;flex-shrink:0">
           <span style="color:#94A3B8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Tela Remota</span>
           <button onclick="rvCaptura()" style="background:#2563EB;color:#fff;border:none;padding:3px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">↺ Atualizar</button>
+          <button id="rv-btn-controle" onclick="rvToggleControle()" style="background:#334155;color:#fff;border:none;padding:3px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600" title="Ativar para controlar mouse e teclado da máquina remota">🖱️ Tomar Controle</button>
           <label style="color:#94A3B8;font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer">
             <input type="checkbox" id="rv-auto" onchange="rvToggleAuto(this.checked)" style="cursor:pointer"> Auto 5s
           </label>
+          <span id="rv-controle-status" style="color:#F59E0B;font-size:11px"></span>
           <span id="rv-capture-ts" style="color:#475569;font-size:11px;margin-left:auto"></span>
         </div>
         <div style="flex:1;overflow:auto;background:#0F172A;display:flex;align-items:center;justify-content:center;padding:12px">
@@ -8392,6 +8645,32 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
               <button onclick="rvDeployPersonalizado()" style="width:100%;background:#2563EB;color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">📦 Instalar Agora</button>
             </div>
             <div id="rv-deploy-log" style="display:none;background:#0F172A;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#94A3B8;max-height:140px;overflow-y:auto;margin-top:8px"></div>
+          </div>
+        </div>
+
+        <div id="rv-panel-arquivos" style="display:none;flex-direction:column;height:100%">
+          <div style="background:#1E293B;padding:8px 12px;border-bottom:1px solid #334155;flex-shrink:0">
+            <span style="color:#94A3B8;font-size:11px;font-weight:700;text-transform:uppercase">📁 Transferência de Arquivos</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:16px">
+
+            <div>
+              <div style="color:#94A3B8;font-size:12px;font-weight:700;margin-bottom:6px">⬆️ Enviar arquivo para a máquina</div>
+              <input type="file" id="rv-file-upload-input" style="width:100%;font-size:11px;color:#94A3B8;margin-bottom:6px">
+              <div style="font-size:10.5px;color:#64748B;margin-bottom:8px">Limite de ~700 KB por arquivo nesta versão. Vai para <code style="color:#94A3B8">C:\\SYSACK\\transferencias\\</code> na máquina remota.</div>
+              <button onclick="rvEnviarArquivo()" style="width:100%;background:#2563EB;color:#fff;border:none;padding:9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:700">⬆️ Enviar Agora</button>
+            </div>
+
+            <div style="height:1px;background:#334155"></div>
+
+            <div>
+              <div style="color:#94A3B8;font-size:12px;font-weight:700;margin-bottom:6px">⬇️ Baixar arquivo da máquina</div>
+              <input id="rv-file-download-path" style="width:100%;background:#1E293B;border:1px solid #334155;border-radius:6px;padding:7px 10px;color:#94A3B8;font-size:12px;margin-bottom:8px" placeholder="Caminho completo, ex: C:\Users\ana.penha\Desktop\log.txt">
+              <button onclick="rvBaixarArquivo()" style="width:100%;background:#2563EB;color:#fff;border:none;padding:9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:700">⬇️ Baixar Agora</button>
+            </div>
+
+            <div id="rv-file-status" style="font-size:11.5px;color:#94A3B8"></div>
+            <div id="rv-file-log" style="display:none;background:#0F172A;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#94A3B8;max-height:140px;overflow-y:auto"></div>
           </div>
         </div>
 
@@ -8865,6 +9144,8 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
       if (d.tipo === 'screenshot') rvHandleScreen(d);
       if (d.tipo === 'result')     rvHandleResult(d);
       if (d.tipo === 'metrics')    rvHandleMetrics(d);
+      if (d.tipo === 'file_upload_result')   rvHandleFileUploadResult(d);
+      if (d.tipo === 'file_download_result') rvHandleFileDownloadResult(d);
     } catch {}
   }
 
@@ -9249,8 +9530,253 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
     rvShellLog('Instalando ' + nome + '...', '#F59E0B');
   };
 
+  // ── TRANSFERÊNCIA DE ARQUIVOS ───────────────────────────────────
+  // Sem chunking nesta primeira versão — limite de ~700KB por arquivo,
+  // pra caber com folga no limite de 1MB por documento do Firestore
+  // (canal usado quando não há WS local nem RTDB disponível).
+  const RV_FILE_LIMITE_BYTES = 700 * 1024;
+  let _rvUploadEmAndamento = false;
+  let _rvDownloadEmAndamento = false;
+
+  function rvFileLog(msg, cor) {
+    const el = document.getElementById('rv-file-log');
+    if (!el) return;
+    el.style.display = 'block';
+    const linha = document.createElement('div');
+    linha.style.color = cor || '#94A3B8';
+    linha.textContent = `[${new Date().toLocaleTimeString('pt-BR')}] ${msg}`;
+    el.appendChild(linha);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  window.rvEnviarArquivo = () => {
+    const input = document.getElementById('rv-file-upload-input');
+    const status = document.getElementById('rv-file-status');
+    const file = input?.files?.[0];
+    if (!file) { showToast?.('Selecione um arquivo primeiro.', 'warning'); return; }
+    if (file.size > RV_FILE_LIMITE_BYTES) {
+      showToast?.(`Arquivo muito grande (${(file.size/1024).toFixed(0)}KB). Limite atual: 700KB.`, 'warning');
+      return;
+    }
+    if (_rvUploadEmAndamento) return;
+    _rvUploadEmAndamento = true;
+    if (status) status.textContent = `⏳ Enviando ${file.name}...`;
+    rvFileLog(`Enviando ${file.name} (${(file.size/1024).toFixed(1)}KB)...`, '#3B82F6');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      // reader.result é "data:<mime>;base64,AAAA..." — precisamos só da parte após a vírgula
+      const base64 = String(reader.result).split(',')[1] || '';
+      rvSend({ tipo: 'file_upload', filename: file.name, data: base64 });
+    };
+    reader.onerror = () => {
+      _rvUploadEmAndamento = false;
+      if (status) status.textContent = '';
+      rvFileLog('Falha ao ler o arquivo localmente.', '#EF4444');
+    };
+    reader.readAsDataURL(file);
+
+    // Timeout de segurança — se o agente não responder em 30s, libera o botão de novo
+    setTimeout(() => {
+      if (_rvUploadEmAndamento) {
+        _rvUploadEmAndamento = false;
+        if (status) status.textContent = '';
+        rvFileLog('Timeout — sem confirmação do agente em 30s.', '#F59E0B');
+      }
+    }, 30000);
+  };
+
+  window.rvHandleFileUploadResult = d => {
+    _rvUploadEmAndamento = false;
+    const status = document.getElementById('rv-file-status');
+    if (status) status.textContent = '';
+    if (d.ok) {
+      rvFileLog(`✅ Enviado com sucesso: ${d.path}`, '#22C55E');
+      showToast?.('Arquivo enviado com sucesso.', 'success');
+      const input = document.getElementById('rv-file-upload-input');
+      if (input) input.value = '';
+    } else {
+      rvFileLog(`❌ Falha ao enviar: ${d.error || 'erro desconhecido'}`, '#EF4444');
+      showToast?.('Falha ao enviar arquivo: ' + (d.error || ''), 'danger');
+    }
+  };
+
+  window.rvBaixarArquivo = () => {
+    const pathInput = document.getElementById('rv-file-download-path');
+    const status = document.getElementById('rv-file-status');
+    const remotePath = pathInput?.value?.trim();
+    if (!remotePath) { showToast?.('Informe o caminho completo do arquivo na máquina remota.', 'warning'); return; }
+    if (_rvDownloadEmAndamento) return;
+    _rvDownloadEmAndamento = true;
+    if (status) status.textContent = `⏳ Baixando ${remotePath}...`;
+    rvFileLog(`Solicitando ${remotePath}...`, '#3B82F6');
+    rvSend({ tipo: 'file_download', path: remotePath });
+
+    setTimeout(() => {
+      if (_rvDownloadEmAndamento) {
+        _rvDownloadEmAndamento = false;
+        if (status) status.textContent = '';
+        rvFileLog('Timeout — sem confirmação do agente em 30s.', '#F59E0B');
+      }
+    }, 30000);
+  };
+
+  window.rvHandleFileDownloadResult = d => {
+    _rvDownloadEmAndamento = false;
+    const status = document.getElementById('rv-file-status');
+    if (status) status.textContent = '';
+    if (!d.ok) {
+      rvFileLog(`❌ Falha ao baixar: ${d.error || 'erro desconhecido'}`, '#EF4444');
+      showToast?.('Falha ao baixar arquivo: ' + (d.error || ''), 'danger');
+      return;
+    }
+    try {
+      const byteChars = atob(d.data);
+      const bytes = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([bytes]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = d.filename || 'arquivo';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      rvFileLog(`✅ Baixado: ${d.filename}`, '#22C55E');
+      showToast?.('Download concluído.', 'success');
+    } catch(e) {
+      rvFileLog('❌ Erro ao processar arquivo recebido: ' + e.message, '#EF4444');
+    }
+  };
+
+  // ── CONTROLE REMOTO — mouse e teclado ──────────────────────────
+  // Funciona nos três canais (WS local, RTDB, Firestore) através do mesmo
+  // rvSend() já usado pelo resto da sessão. A fluidez real depende de qual
+  // canal está ativo: local/RTDB são rápidos, Firestore (fallback mais comum
+  // hoje) tem latência maior por ser baseado em escrita de documento — isso
+  // é uma limitação de infraestrutura, não do código de controle em si.
+  let _rvControlando = false;
+  let _rvUltimoMove = 0;
+  let _rvAutoControleTimer = null;
+  const RV_MOUSE_THROTTLE_MS = 45; // ~22 atualizações/s — suficiente pra sentir fluido sem sobrecarregar o canal
+
+  // Teclas especiais → Virtual-Key code do Windows (precisa bater com o mapa
+  // equivalente em agent-desktop.js). Caracteres normais vão por Unicode direto.
+  const RV_VK_MAP = {
+    Backspace: 0x08, Tab: 0x09, Enter: 0x0D, Shift: 0x10, Control: 0x11, Alt: 0x12,
+    Pause: 0x13, CapsLock: 0x14, Escape: 0x1B, PageUp: 0x21, PageDown: 0x22,
+    End: 0x23, Home: 0x24, ArrowLeft: 0x25, ArrowUp: 0x26, ArrowRight: 0x27, ArrowDown: 0x28,
+    Insert: 0x2D, Delete: 0x2E, Meta: 0x5B, ContextMenu: 0x5D,
+    F1:0x70, F2:0x71, F3:0x72, F4:0x73, F5:0x74, F6:0x75, F7:0x76, F8:0x77, F9:0x78, F10:0x79, F11:0x7A, F12:0x7B,
+  };
+
+  function rvCoordsNormalizadas(e) {
+    const img = document.getElementById('rv-img');
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    return { x, y };
+  }
+
+  function rvMouseMove(e) {
+    const now = Date.now();
+    if (now - _rvUltimoMove < RV_MOUSE_THROTTLE_MS) return;
+    _rvUltimoMove = now;
+    const c = rvCoordsNormalizadas(e);
+    if (!c) return;
+    rvSend({ tipo: 'mouse', action: 'move', x: c.x, y: c.y });
+  }
+
+  function rvMouseDown(e) {
+    e.preventDefault();
+    const c = rvCoordsNormalizadas(e);
+    if (!c) return;
+    const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
+    rvSend({ tipo: 'mouse', action: 'down', x: c.x, y: c.y, button: btn });
+  }
+
+  function rvMouseUp(e) {
+    e.preventDefault();
+    const c = rvCoordsNormalizadas(e);
+    if (!c) return;
+    const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
+    rvSend({ tipo: 'mouse', action: 'up', x: c.x, y: c.y, button: btn });
+  }
+
+  function rvWheel(e) {
+    e.preventDefault();
+    rvSend({ tipo: 'mouse', action: 'wheel', deltaY: e.deltaY });
+  }
+
+  function rvControleKeyDown(e) {
+    if (!_rvControlando) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key.length === 1) {
+      // Caractere normal — envia como Unicode (funciona independente do layout de teclado)
+      rvSend({ tipo: 'key', mode: 'unicode', char: e.key.codePointAt(0), down: true });
+      rvSend({ tipo: 'key', mode: 'unicode', char: e.key.codePointAt(0), down: false });
+    } else if (RV_VK_MAP[e.key] != null) {
+      rvSend({ tipo: 'key', mode: 'vk', code: RV_VK_MAP[e.key], down: true });
+    }
+  }
+
+  function rvControleKeyUp(e) {
+    if (!_rvControlando) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (RV_VK_MAP[e.key] != null) {
+      rvSend({ tipo: 'key', mode: 'vk', code: RV_VK_MAP[e.key], down: false });
+    }
+  }
+
+  window.rvToggleControle = () => {
+    const btn = document.getElementById('rv-btn-controle');
+    const status = document.getElementById('rv-controle-status');
+    const img = document.getElementById('rv-img');
+    if (!img) return;
+    _rvControlando = !_rvControlando;
+
+    if (_rvControlando) {
+      rvSend({ tipo: 'control_start' });
+      img.setAttribute('tabindex', '0');
+      img.style.cursor = 'none';
+      img.focus();
+      img.addEventListener('mousemove', rvMouseMove);
+      img.addEventListener('mousedown', rvMouseDown);
+      img.addEventListener('mouseup', rvMouseUp);
+      img.addEventListener('wheel', rvWheel, { passive: false });
+      img.addEventListener('contextmenu', e => e.preventDefault());
+      img.addEventListener('keydown', rvControleKeyDown);
+      img.addEventListener('keyup', rvControleKeyUp);
+      // Enquanto controlando, atualiza a tela com mais frequência para dar
+      // retorno visual do movimento — sem exagerar no canal Firestore.
+      clearInterval(_autoTimer);
+      _rvAutoControleTimer = setInterval(rvCaptura, 600);
+      if (btn) { btn.style.background = '#DC2626'; btn.textContent = '🖱️ Controlando (clique para sair)'; }
+      if (status) status.textContent = 'Modo controle ativo — clique na tela e use mouse/teclado normalmente.';
+      showToast?.('Controle remoto ativado.', 'info', 3000);
+    } else {
+      rvSend({ tipo: 'control_stop' });
+      img.removeAttribute('tabindex');
+      img.style.cursor = 'crosshair';
+      img.removeEventListener('mousemove', rvMouseMove);
+      img.removeEventListener('mousedown', rvMouseDown);
+      img.removeEventListener('mouseup', rvMouseUp);
+      img.removeEventListener('wheel', rvWheel);
+      img.removeEventListener('keydown', rvControleKeyDown);
+      img.removeEventListener('keyup', rvControleKeyUp);
+      clearInterval(_rvAutoControleTimer);
+      _rvAutoControleTimer = null;
+      if (document.getElementById('rv-auto')?.checked) _autoTimer = setInterval(rvCaptura, 5000);
+      if (btn) { btn.style.background = '#334155'; btn.textContent = '🖱️ Tomar Controle'; }
+      if (status) status.textContent = '';
+    }
+  };
+
   // ── Teclado ──────────────────────────────────────────────────
   function rvKeyHandler(e) {
+    if (_rvControlando) return; // enquanto controlando, teclas vão pro rvControleKeyDown/Up, não pra atalhos do painel
     if (e.key === 'F5')      { e.preventDefault(); rvCaptura(); }
     if (e.key === 'Escape')  { rvEncerrar(sessaoId); }
   }
@@ -9259,6 +9785,8 @@ function iniciarViewerRemoto(agentId, sessaoId, agente) {
   // ── Encerrar ─────────────────────────────────────────────────
   window.rvEncerrar = async sid => {
     if (!confirm('Encerrar sessão remota?')) return;
+    if (_rvControlando) { rvSend({ tipo: 'control_stop' }); }
+    clearInterval(_rvAutoControleTimer);
     clearInterval(_autoTimer);
     document.removeEventListener('keydown', rvKeyHandler);
     _ws?.close();
@@ -9430,7 +9958,7 @@ function arAbrirInventario(agentId) {
     ['Monitor(es)',   monitoresStr],
     ['— SESSÃO —', ''],
     ['Usuário',       v('usuarioLogado')],
-    ['Uptime',        v('uptimeH') ? Math.round(v('uptimeH')) + 'h (' + Math.round(v('uptime')/3600*10)/10 + 'h)' : '—'],
+    ['Uptime',        arFormatarUptimeAgente(a)],
     ['Versão Agente', v('versaoAgente') || v('version')],
     ['Último contato', a.lastSeen ? new Date(a.lastSeen?.seconds ? a.lastSeen.seconds*1000 : a.lastSeen).toLocaleString('pt-BR') : '—'],
   ];
@@ -9529,8 +10057,8 @@ function arAbrirModalBloqueio(agentId, hostname) {
           </p>
           <div class="form-group" style="margin-bottom:10px">
             <label class="form-label req" style="font-size:12px">Usuário administrador</label>
-            <input class="form-control" id="bloqueio-admin-user" type="text" placeholder="CESAN\usuario.adm  ou  usuario@cesan.com.br  ou  Administrator" autocomplete="off" spellcheck="false" style="font-family:monospace">
-            <small style="color:#9CA3AF;font-size:11px;margin-top:3px;display:block">💡 Domínio AD: <code>CESAN\usuario.adm</code> &nbsp;·&nbsp; UPN: <code>usuario@cesan.com.br</code> &nbsp;·&nbsp; Local: <code>Administrator</code></small>
+            <input class="form-control" id="bloqueio-admin-user" type="text" placeholder="CESAN&#92;usuario.adm  ou  usuario@cesan.com.br  ou  Administrator" autocomplete="off" spellcheck="false" style="font-family:monospace">
+            <small style="color:#9CA3AF;font-size:11px;margin-top:3px;display:block">💡 Domínio AD: <code>CESAN&bsol;usuario.adm</code> &nbsp;·&nbsp; UPN: <code>usuario@cesan.com.br</code> &nbsp;·&nbsp; Local: <code>Administrator</code></small>
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label class="form-label req" style="font-size:12px">Senha</label>
@@ -9729,6 +10257,9 @@ async function arDesbloquearMaquina(agentId, hostname) {
 // ════════════════════════════════════════════════════════════
 // ATUALIZAR CLIENTE — auto-update remoto para todos os agentes
 // ════════════════════════════════════════════════════════════
+// ── Lista de agentes selecionados para atualização (IDs) ────────
+let _updSelecao = new Set();
+
 function arAtualizarClientes() {
   const u = SESSION_USER || CURRENT_USER;
   const role = u?.role || '';
@@ -9740,33 +10271,152 @@ function arAtualizarClientes() {
     console.warn('[arAtualizarClientes] role='+role+' email='+u?.email);
     return showToast('⛔ Acesso restrito: Admin, Gestor ou permissão "Atualizar Clientes" na Gestão de Contas.','error');
   }
-  const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-  if (!online.length) return showToast('Nenhum agente online para atualizar.','warning');
+  const todos  = STATE_AGENTS.list || [];
+  const online = todos.filter(a => a.status === 'online');
   openModal('modal-atualizar-cliente');
 
-  // Calcula versão: pega a mais alta dos agentes e incrementa patch
-  const versaoAtual = online.map(a=>a.versaoAgente||a.version||'2.1.0')
-    .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
-  const pts = versaoAtual.split('.').map(Number);
-  pts[2] = (pts[2] || 0) + 1;
-  const novaVersao = pts.join('.');
+  // Versão fixa do agente publicado no Vercel.
+  // Não incrementa automaticamente: a versão solicitada deve ser exatamente a publicada.
+  const novaVersao = SYSACK_AGENT_VERSION;
 
-  // Grava a versão no botão para o executarAtualizacaoCliente ler
   const btn = document.getElementById('btn-upd-exec');
   if (btn) btn.dataset.versao = novaVersao;
-
-  // Atualiza o label de versão no modal
   const vl = document.getElementById('upd-versao-label');
   if (vl) vl.textContent = 'v' + novaVersao;
-
-  // Atualiza contador de agentes online
-  const eo = document.getElementById('upd-qtd-online');
-  if (eo) eo.textContent = online.length;
 
   // Limpa estado anterior
   const lb = document.getElementById('upd-log-body'); if(lb) lb.innerHTML='';
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='none';
   const sb = document.getElementById('upd-status-bar'); if(sb) sb.style.display='none';
+  const busca = document.getElementById('upd-busca-agente'); if(busca) busca.value='';
+
+  // Pré-seleciona todos os online (padrão)
+  _updSelecao = new Set(online.map(a => a.id));
+
+  // Renderiza a lista de agentes
+  updRenderListaAgentes('');
+  updAtualizarContadores();
+}
+
+// Renderiza a lista de checkboxes de agentes
+function updRenderListaAgentes(filtro) {
+  const lista = document.getElementById('upd-lista-agentes');
+  if (!lista) return;
+  const todos = STATE_AGENTS.list || [];
+  const q = (filtro || '').toLowerCase();
+  const filtrados = q ? todos.filter(a =>
+    (a.hostname||a.id||'').toLowerCase().includes(q) ||
+    (a.ip||'').toLowerCase().includes(q) ||
+    (a.area||a.setor||'').toLowerCase().includes(q) ||
+    (a.usuarioLogado||a.usuario||'').toLowerCase().includes(q)
+  ) : todos;
+
+  if (!filtrados.length) {
+    lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--g400);font-size:12px">Nenhum agente encontrado</div>';
+    return;
+  }
+
+  // Ordena: online primeiro, depois por hostname
+  const ordenados = [...filtrados].sort((a,b) => {
+    if (a.status==='online' && b.status!=='online') return -1;
+    if (a.status!=='online' && b.status==='online') return 1;
+    return (a.hostname||a.id||'').localeCompare(b.hostname||b.id||'');
+  });
+
+  lista.innerHTML = ordenados.map(ag => {
+    const isOnline = ag.status === 'online';
+    const checked  = _updSelecao.has(ag.id) ? 'checked' : '';
+    const dot      = isOnline
+      ? '<span style="width:8px;height:8px;border-radius:50%;background:#16A34A;display:inline-block;flex-shrink:0"></span>'
+      : '<span style="width:8px;height:8px;border-radius:50%;background:#DC2626;display:inline-block;flex-shrink:0"></span>';
+    const versao   = ag.versaoAgente || ag.version || '—';
+    const usuario  = ag.usuarioLogado || ag.usuario || '';
+    const area     = ag.area || ag.setor || '';
+    const ip       = ag.ip || '';
+    return `<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--g100);cursor:pointer;transition:background .1s" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+      <input type="checkbox" ${checked} data-agent-id="${ag.id}"
+        onchange="updToggleAgente('${ag.id}', this.checked)"
+        style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+      ${dot}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <b style="font-size:12.5px;color:var(--g900)">${escapeHtml(ag.hostname||ag.id)}</b>
+          <span style="font-size:10px;font-family:monospace;color:var(--g500)">${escapeHtml(ip)}</span>
+          ${area ? `<span style="font-size:10px;background:#F1F5F9;color:#475569;padding:1px 5px;border-radius:4px">${escapeHtml(area)}</span>` : ''}
+          ${usuario ? `<span style="font-size:10px;color:var(--g400)">👤 ${escapeHtml(usuario)}</span>` : ''}
+        </div>
+        <div style="font-size:10.5px;color:var(--g400);margin-top:1px">
+          v${escapeHtml(versao)} · ${isOnline ? '<span style="color:#16A34A;font-weight:600">Online</span>' : '<span style="color:#DC2626">Offline</span>'}
+        </div>
+      </div>
+    </label>`;
+  }).join('');
+}
+
+function updToggleAgente(id, checked) {
+  if (checked) _updSelecao.add(id);
+  else _updSelecao.delete(id);
+  // Muda o select para "manual" quando usuário clica individualmente
+  const sel = document.getElementById('upd-agentes');
+  if (sel) sel.value = 'manual';
+  updAtualizarContadores();
+}
+
+function updSelecionarTodos(marcar) {
+  const todos = STATE_AGENTS.list || [];
+  const filtro = document.getElementById('upd-busca-agente')?.value || '';
+  const q = filtro.toLowerCase();
+  const visiveis = q ? todos.filter(a =>
+    (a.hostname||a.id||'').toLowerCase().includes(q) ||
+    (a.ip||'').toLowerCase().includes(q) ||
+    (a.area||a.setor||'').toLowerCase().includes(q)
+  ) : todos;
+  visiveis.forEach(a => { if (marcar) _updSelecao.add(a.id); else _updSelecao.delete(a.id); });
+  const sel = document.getElementById('upd-agentes');
+  if (sel) sel.value = 'manual';
+  updRenderListaAgentes(filtro);
+  updAtualizarContadores();
+}
+
+function updFiltrarOnline() {
+  const todos = STATE_AGENTS.list || [];
+  _updSelecao = new Set(todos.filter(a=>a.status==='online').map(a=>a.id));
+  const sel = document.getElementById('upd-agentes');
+  if (sel) sel.value = 'online';
+  const filtro = document.getElementById('upd-busca-agente')?.value || '';
+  updRenderListaAgentes(filtro);
+  updAtualizarContadores();
+}
+
+function updFiltrarListaAgentes(q) {
+  updRenderListaAgentes(q);
+}
+
+function updAplicarSelecaoRapida(valor) {
+  const todos  = STATE_AGENTS.list || [];
+  const online = todos.filter(a => a.status === 'online');
+  if (valor === 'online') {
+    _updSelecao = new Set(online.map(a => a.id));
+  } else if (valor === 'todos') {
+    _updSelecao = new Set(todos.map(a => a.id));
+  }
+  // 'manual' não altera a seleção atual
+  const filtro = document.getElementById('upd-busca-agente')?.value || '';
+  updRenderListaAgentes(filtro);
+  updAtualizarContadores();
+}
+
+function updAtualizarContadores() {
+  const todos  = STATE_AGENTS.list || [];
+  const selArr = todos.filter(a => _updSelecao.has(a.id));
+  const onSel  = selArr.filter(a => a.status === 'online').length;
+  const offSel = selArr.filter(a => a.status !== 'online').length;
+  const qs = document.getElementById('upd-qtd-sel');
+  const qo = document.getElementById('upd-qtd-online');
+  const qf = document.getElementById('upd-qtd-offline');
+  if (qs) qs.textContent = selArr.length;
+  if (qo) qo.textContent = onSel + ' online';
+  if (qf) qf.textContent = offSel + ' offline';
 }
 
 // ─── Helpers de credenciais do modal de atualização ─────────────────────────
@@ -9813,23 +10463,27 @@ async function executarAtualizacaoCliente() {
   const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js?ts=' + Date.now();
   const btn = document.getElementById('btn-upd-exec');
 
-  let versao = btn?.dataset?.versao || '';
-  if (!versao) {
-    const online = (STATE_AGENTS.list||[]).filter(a=>a.status==='online');
-    const va = (online.length ? online : (STATE_AGENTS.list||[])).map(a=>a.versaoAgente||a.version||'2.1.0')
-      .sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))[0] || '2.1.0';
-    const pts = va.split('.').map(Number); pts[2]=(pts[2]||0)+1;
-    versao = pts.join('.');
-  }
+  let versao = btn?.dataset?.versao || SYSACK_AGENT_VERSION;
+  if (!versao) versao = SYSACK_AGENT_VERSION;
   if (!versao) return showToast('Versão não definida — tente fechar e abrir o modal novamente.','warning');
 
-  const alvos  = document.getElementById('upd-agentes')?.value || 'online';
-  const todos  = STATE_AGENTS.list || [];
-  const online = todos.filter(a => a.status === 'online');
-  const offline = todos.filter(a => a.status !== 'online');
-  const listaEnviar = alvos === 'todos' ? online : online;
-  const listaNaoEnviada = alvos === 'todos' ? offline : [];
-  if (!listaEnviar.length && !listaNaoEnviada.length) return showToast('Nenhum agente disponível','warning');
+  const todos   = STATE_AGENTS.list || [];
+  // Usa a seleção individual (_updSelecao) se houver agentes marcados,
+  // caso contrário respeita o select de seleção rápida como fallback.
+  let listaEnviar, listaNaoEnviada;
+  if (_updSelecao && _updSelecao.size > 0) {
+    const sel = todos.filter(a => _updSelecao.has(a.id));
+    listaEnviar    = sel.filter(a => a.status === 'online');
+    listaNaoEnviada = sel.filter(a => a.status !== 'online');
+  } else {
+    const alvos = document.getElementById('upd-agentes')?.value || 'online';
+    const online  = todos.filter(a => a.status === 'online');
+    const offline = todos.filter(a => a.status !== 'online');
+    listaEnviar    = online;
+    listaNaoEnviada = alvos === 'todos' ? offline : [];
+  }
+  if (!listaEnviar.length && !listaNaoEnviada.length) return showToast('Nenhum agente selecionado ou disponível.','warning');
+  if (!listaEnviar.length) return showToast(`${listaNaoEnviada.length} agente(s) selecionado(s) estão offline. Selecione agentes online para atualizar agora.`,'warning');
 
   if(btn){btn.disabled=true;btn.textContent='Aplicando...';}
   const ll = document.getElementById('upd-log'); if(ll) ll.style.display='';
@@ -9887,13 +10541,13 @@ async function executarAtualizacaoCliente() {
             status:          'pendente',
             motivo:          `Atualização remota v${versao}`,
             requestedBy:     _u?.uid || _u?.email || 'admin',
-            requestedByRole: _u?.perfil || _u?.role || 'tecnico',
+            requestedByRole: (_u?.perfil || _u?.role || 'admin') || 'admin',
             criadoEm:        new Date().toISOString(),
             criadoPor:       _u?.uid || '',
             criadoPorNome:   _u?.nome || _u?.email || '',
           });
           comandos.push({ cmdId, agent: ag });
-          updLog(`→ ${ag.hostname||ag.id}: comando enviado (via Firestore)`);
+          updLog(`→ ${ag.hostname||ag.id}: comando enviado`);
         }
       } catch(e) {
         resultados.push({ agent: ag, status:'nao_atualizado', motivo:'Erro: ' + e.message });
@@ -9903,25 +10557,34 @@ async function executarAtualizacaoCliente() {
 
     const pendentes = new Map(comandos.map(c => [c.cmdId, c]));
     const inicio = Date.now();
-    const TIMEOUT_MS = 45000;
+    const TIMEOUT_MS     = 240000; // 4 min — parar serviço + download + reiniciar
+    const processandoViu = new Set();
 
     while (pendentes.size && Date.now() - inicio < TIMEOUT_MS) {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 2000));
       for (const [cmdId, item] of [...pendentes.entries()]) {
         try {
           const snap = await db.collection('agent_commands').doc(cmdId).get();
           const d = snap.data() || {};
           const st = d.status || 'pendente';
+          const elapsed = Math.round((Date.now() - inicio) / 1000);
           if (st === 'concluido') {
             resultados.push({ agent:item.agent, status:'atualizado', motivo:d.resultado || `Atualização v${versao} aplicada` });
-            updLog(`✓ ${item.agent.hostname||item.agent.id}: atualizado (${d.resultado || 'confirmado'})`);
+            updLog(`✓ ${item.agent.hostname||item.agent.id}: atualizado (${d.resultado || 'confirmado'}) — ${elapsed}s`);
             pendentes.delete(cmdId);
           } else if (['erro','falhou','descartado'].includes(st)) {
             resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:d.resultado || d.erro || st });
             updLog(`✗ ${item.agent.hostname||item.agent.id}: ${d.resultado || d.erro || st}`);
             pendentes.delete(cmdId);
-          } else if (st === 'executando' || st === 'processando') {
-            updLog(`… ${item.agent.hostname||item.agent.id}: ${st}`);
+          } else if (st === 'processando') {
+            if (!processandoViu.has(cmdId)) {
+              processandoViu.add(cmdId);
+              updLog(`🔄 ${item.agent.hostname||item.agent.id}: agente baixando nova versão e reiniciando... (${elapsed}s)`);
+            }
+          } else if (st === 'executando') {
+            updLog(`… ${item.agent.hostname||item.agent.id}: executando (${elapsed}s)`);
+          } else if (st === 'pendente' && elapsed > 0 && elapsed % 15 === 0) {
+            updLog(`⏳ ${item.agent.hostname||item.agent.id}: aguardando agente processar... (${elapsed}s)`);
           }
         } catch(e) {
           resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:'Erro ao consultar retorno: ' + e.message });
@@ -9932,8 +10595,17 @@ async function executarAtualizacaoCliente() {
     }
 
     for (const item of pendentes.values()) {
-      resultados.push({ agent:item.agent, status:'nao_atualizado', motivo:'Timeout — agente não respondeu em 45s' });
-      updLog(`✗ ${item.agent.hostname||item.agent.id}: timeout — não confirmou em 45s`);
+      const ag      = STATE_AGENTS?.list?.find(a => a.id === item.agent.id);
+      const statusAg = ag?.status || 'desconhecido';
+      const viuCmd   = processandoViu.has(item.cmdId);
+      const dica = statusAg !== 'online'
+        ? 'Agente offline — verifique se o serviço SYSACK-Agent está rodando.'
+        : viuCmd
+          ? 'Agente iniciou a atualização mas não confirmou. Verifique se o serviço reiniciou.'
+          : 'Agente online mas não processou o comando. Verifique logs em C:\SYSACK\agent.log';
+      const statusFinal = viuCmd ? 'possivelmente_atualizado' : 'nao_atualizado';
+      resultados.push({ agent:item.agent, status:statusFinal, motivo:`Timeout (240s)${viuCmd?' [PROCESSANDO visto]':''} — ${dica}` });
+      updLog(`${viuCmd?'⚠':'✗'} ${item.agent.hostname||item.agent.id}: timeout — ${dica}`);
     }
 
     renderResultadoAtualizacaoCliente(resultados, versao);
@@ -9942,11 +10614,24 @@ async function executarAtualizacaoCliente() {
     const msg = `✅ ${atualizados} atualizado(s) · ❌ ${naoAtualizados} não atualizado(s).`;
     showUpdStatus(naoAtualizados ? 'warning' : 'success', msg);
     showToast(msg, naoAtualizados ? 'warning' : 'success', 7000);
+    // Feedback direto no botão quando TODOS os agentes selecionados foram atualizados —
+    // fica assim por alguns segundos antes de voltar ao texto padrão, para o técnico
+    // ter confirmação visual imediata sem precisar ler o log/toast.
+    if (btn && resultados.length > 0 && naoAtualizados === 0) {
+      btn.textContent = '✅ Atualização realizada com sucesso';
+      btn.disabled = true;
+      setTimeout(() => {
+        if (btn) { btn.disabled = false; btn.textContent = '🚀 Aplicar Atualização Agora'; }
+      }, 6000);
+    } else if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Aplicar Atualização Agora';
+    }
     setTimeout(() => renderAssistenciaRemota(), 1500);
   } catch(e) {
     showUpdStatus('danger','Erro: '+e.message); updLog('ERRO: '+e.message);
-  } finally {
     if(btn){btn.disabled=false;btn.textContent='🚀 Aplicar Atualização Agora';}
+  } finally {
     // Limpa credenciais da memória após o uso
     const pu = document.getElementById('upd-cred-user');
     const pp = document.getElementById('upd-cred-pass');
@@ -10154,6 +10839,8 @@ function _arEnsureLoaded() {
       STATE_AGENTS.list = snap.docs.map(d => {
         const data = d.data();
         if (data.uptimeH != null) data.uptimeH = Number(data.uptimeH);
+          if (data.uptime != null) data.uptime = Number(data.uptime);
+          if (data.uptimeSeconds != null) data.uptimeSeconds = Number(data.uptimeSeconds);
         if (data.cpuPct  != null) data.cpuPct  = Number(data.cpuPct);
         if (data.ramPct  != null) data.ramPct  = Number(data.ramPct);
         if (data.memPct  != null) data.memPct  = Number(data.memPct);
@@ -12678,7 +13365,7 @@ function initPWA() {
 // DOWNLOAD SYSACK CLIENT PARA WINDOWS
 // Gera e baixa o instalador atualizado sincronizado com a versão web
 // ═══════════════════════════════════════════════════════════
-const SYSACK_CLIENT_VERSION = '2.0.0'; // atualiza junto com a versão web
+const SYSACK_CLIENT_VERSION = SYSACK_AGENT_VERSION; // atualiza junto com a versão web
 
 function mostrarBotaoDownloadClient() {
   // Mostra o botão de download apenas em Windows
@@ -16022,74 +16709,1081 @@ async function patConfirmarVincularNF(nfId, count, btn) {
 }
 
 // ── IMPORTAR PATs DO SAP (CSV/planilha) ───────────────────────
+// ═══════════════════════════════════════════════════════════════
+// IMPORTAÇÃO SAP — suporta XLSX, TXT tabulado, TXT com pipes (|), CSV
+// Campos SAP mapeados:
+//   Col 0 → Nº inventário (PAT)
+//   Col 1 → Imob. (número SAP)
+//   Col 2 → Sbnº (sub-número, ignorado)
+//   Col 3 → Descrição
+//   Col 4 → Nº de série
+//   Col 5 → Descrição Modelo
+//   Col 6 → Descrição Marca
+//   Col 7 → Descrição Local (localidade)
+//   Col 8 → Qtde
+// ═══════════════════════════════════════════════════════════════
+
 function patImportarSAP() {
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
-  const modal = document.createElement('div');
-  modal.style.cssText = 'background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.4)';
-  modal.innerHTML = `
-    <h3 style="margin:0 0 14px;font-size:16px">📥 Importar Patrimônios do SAP</h3>
-    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;font-size:12.5px;color:#64748B;margin-bottom:16px">
-      <strong>Formato esperado (CSV com ponto-e-vírgula):</strong><br>
-      <code style="font-family:monospace;color:#1E293B">PAT;Descricao;Categoria;Valor;DataAquisicao;Gerencia;Fornecedor;NF</code><br><br>
-      Exporte do SAP: <em>Módulo Patrimônio → Listar Ativos → Exportar CSV</em>
-    </div>
-    <div style="margin-bottom:14px">
-      <label class="form-label">Arquivo CSV do SAP</label>
-      <input type="file" id="sap-csv-input" accept=".csv,.txt" class="form-control" style="padding:8px">
-    </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button onclick="this.closest('[style*=fixed]').remove()" class="btn btn-ghost">Cancelar</button>
-      <button onclick="patProcessarCSVSAP(this)" class="btn btn-primary">📥 Importar</button>
+  overlay.id = 'modal-import-sap-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+
+  overlay.innerHTML = `
+    <div style="background:var(--panel,#fff);border-radius:16px;max-width:640px;width:100%;max-height:94vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.35)">
+      <!-- Cabeçalho -->
+      <div style="padding:18px 22px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:18px;font-weight:800;color:var(--g900)">📥 Importar dados do SAP</div>
+          <div style="font-size:12px;color:var(--g500);margin-top:3px">Ativo imobilizado — atualização de inventário patrimonial</div>
+        </div>
+        <button onclick="document.getElementById('modal-import-sap-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--g400);padding:0 4px;line-height:1">✕</button>
+      </div>
+
+      <!-- Corpo -->
+      <div style="padding:18px 22px;overflow-y:auto;flex:1">
+
+        <!-- Formatos aceitos -->
+        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:#166534">
+          <b>✅ Formatos aceitos:</b>
+          <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px">
+            <span>• <b>.xlsx</b> — Planilha Excel</span>
+            <span>• <b>.xls</b> — Excel legado</span>
+            <span>• <b>.txt</b> com tabuladores (SAP)</span>
+            <span>• <b>.txt</b> com pipes | (SAP)</span>
+            <span>• <b>.csv</b> com ponto-e-vírgula</span>
+            <span>• <b>.csv</b> com vírgula</span>
+          </div>
+        </div>
+
+        <!-- Colunas esperadas -->
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:11.5px;color:#1E40AF">
+          <b>📋 Colunas identificadas automaticamente:</b><br>
+          <span style="font-family:monospace;font-size:11px;display:block;margin-top:6px;color:#1D4ED8">
+            Nº invent. | Imob. | Sbnº | Descrição | Nº de série | Descrição Modelo | Descrição Marca | Descrição Local | Qtde
+          </span>
+          <div style="margin-top:6px;color:#3B82F6">O sistema detecta o formato automaticamente, incluindo cabeçalhos e rodapés do SAP.</div>
+        </div>
+
+        <!-- Modo de importação -->
+        <div style="margin-bottom:16px">
+          <label style="font-size:12px;font-weight:700;color:var(--g700);display:block;margin-bottom:8px">Modo de importação</label>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1.5px solid var(--accent);border-radius:8px;cursor:pointer;background:#EFF6FF">
+              <input type="radio" name="sap-modo" value="atualizar" checked style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:12.5px;font-weight:700;color:var(--g900)">🔄 Atualizar existentes + criar novos</div>
+                <div style="font-size:11px;color:var(--g500);margin-top:2px">PATs já cadastrados terão descrição, modelo, marca e localidade atualizados. PATs novos serão criados.</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;cursor:pointer">
+              <input type="radio" name="sap-modo" value="somente_novos" style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:12.5px;font-weight:700;color:var(--g900)">➕ Somente criar novos</div>
+                <div style="font-size:11px;color:var(--g500);margin-top:2px">Ignora PATs já existentes, importa apenas os que não estão no SYSACK.</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;cursor:pointer">
+              <input type="radio" name="sap-modo" value="sincronizar" style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:12.5px;font-weight:700;color:var(--g900)">🔁 Sincronização completa</div>
+                <div style="font-size:11px;color:var(--g500);margin-top:2px">Atualiza todos os campos dos existentes, cria novos e marca como "baixado no SAP" os que saíram da lista.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Upload -->
+        <div style="margin-bottom:14px">
+          <label style="font-size:12px;font-weight:700;color:var(--g700);display:block;margin-bottom:6px">Arquivo do SAP</label>
+          <div id="sap-drop-zone" style="border:2px dashed var(--accent);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:background .15s"
+            onclick="document.getElementById('sap-file-input').click()"
+            ondragover="event.preventDefault();this.style.background='#EFF6FF'"
+            ondragleave="this.style.background=''"
+            ondrop="event.preventDefault();this.style.background='';sapProcessarArquivo(event.dataTransfer.files[0])">
+            <div style="font-size:28px;margin-bottom:8px">📂</div>
+            <div style="font-size:13px;font-weight:600;color:var(--g700)">Clique ou arraste o arquivo aqui</div>
+            <div style="font-size:11px;color:var(--g500);margin-top:4px">.xlsx · .xls · .txt · .csv</div>
+          </div>
+          <input type="file" id="sap-file-input" accept=".xlsx,.xls,.txt,.csv" style="display:none"
+            onchange="sapProcessarArquivo(this.files[0])">
+        </div>
+
+        <!-- Preview -->
+        <div id="sap-preview" style="display:none">
+          <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:8px">Pré-visualização</div>
+          <div id="sap-preview-resumo" style="background:#F8FAFC;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px"></div>
+          <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;max-height:220px;overflow-y:auto">
+            <table style="width:100%;font-size:11px;border-collapse:collapse" id="sap-preview-table">
+              <thead style="background:var(--g50);position:sticky;top:0">
+                <tr>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">PAT</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Imob. SAP</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Descrição</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Modelo</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Marca</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Localidade SAP</th>
+                  <th style="padding:7px 10px;text-align:left;font-weight:700;color:var(--g600);border-bottom:1px solid var(--line)">Status</th>
+                </tr>
+              </thead>
+              <tbody id="sap-preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Log de importação -->
+        <div id="sap-log-wrap" style="display:none;margin-top:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--g700);margin-bottom:6px">Log de importação</div>
+          <pre id="sap-log" style="background:#0F172A;color:#94A3B8;border-radius:8px;padding:12px;font-size:11px;max-height:180px;overflow-y:auto;margin:0;white-space:pre-wrap;font-family:monospace"></pre>
+        </div>
+      </div>
+
+      <!-- Rodapé -->
+      <div style="padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+        <div id="sap-footer-info" style="font-size:12px;color:var(--g500)">Selecione um arquivo para continuar</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('modal-import-sap-overlay').remove()" class="btn btn-ghost btn-sm">Cancelar</button>
+          <button id="sap-btn-importar" onclick="sapConfirmarImportacao(this)" class="btn btn-primary btn-sm" disabled>📥 Importar</button>
+        </div>
+      </div>
     </div>`;
-  overlay.appendChild(modal);
+
   document.body.appendChild(overlay);
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  // Guarda dados parseados globalmente para o step de confirmação
+  window._sapDadosParsed = null;
 }
 
-async function patProcessarCSVSAP(btn) {
-  const file = document.getElementById('sap-csv-input')?.files?.[0];
-  if (!file) return showToast('Selecione um arquivo CSV', 'warning');
+// ── Parser universal de arquivos SAP ───────────────────────────
+async function sapProcessarArquivo(file) {
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  let linhas = [];
 
-  setButtonLoading(btn, true, 'Importando...');
-  const text = await file.text();
-  const linhas = text.split('\n').filter(l => l.trim());
-  let importados = 0;
+  try {
+    if (ext === 'xlsx' || ext === 'xls') {
+      const buf = await file.arrayBuffer();
+      linhas = await sapLerXLSX(buf);
+    } else {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
 
-  for (const linha of linhas.slice(1)) { // pula cabeçalho
-    const cols = linha.split(';').map(c => c.trim().replace(/^"|"$/g, ''));
-    if (cols.length < 3 || !cols[0]) continue;
+      // Detecta encoding testando se o texto decodificado tem caracteres válidos
+      // O SAP exporta em latin-1/cp1252 (nunca UTF-8 puro para PT-BR com acentos)
+      // TextDecoder('windows-1252') cobre cp1252 corretamente no browser
+      let text = '';
+      const temBomUtf8 = bytes[0]===0xEF && bytes[1]===0xBB && bytes[2]===0xBF;
+      const temBomUtf16LE = bytes[0]===0xFF && bytes[1]===0xFE;
+      const temBomUtf16BE = bytes[0]===0xFE && bytes[1]===0xFF;
 
-    const [pat, desc, categoria, valor, dataAq, gerencia, fornecedor, nf] = cols;
-    const novoPat = {
-      id:           'PAT-SAP-' + Date.now() + '-' + importados,
-      pat:          pat.replace(/[^0-9]/g, ''),
-      desc,
-      categoria:    categoria || 'outro',
-      valorAquisicao: parseFloat(valor?.replace(',','.')) || 0,
-      dataAquisicao:  dataAq || '',
-      gerencia:       gerencia || '',
-      fornecedor:     fornecedor || '',
-      nf:             nf || '',
-      status:         'ativo',
-      origem:         'sap-import',
-      createdAt:      new Date().toISOString(),
-    };
-    const dep = calcularDepreciacao(novoPat);
-    novoPat.valorAtual    = dep.valorAtual;
-    novoPat.pctDepreciado = dep.pctDepreciado;
+      if (temBomUtf8) {
+        text = new TextDecoder('utf-8').decode(buf);
+      } else if (temBomUtf16LE) {
+        text = new TextDecoder('utf-16le').decode(buf);
+      } else if (temBomUtf16BE) {
+        text = new TextDecoder('utf-16be').decode(buf);
+      } else {
+        // SAP PT-BR usa cp1252/latin-1 — testa se tem bytes > 0x7F (acentos)
+        const temHighBytes = bytes.some(b => b > 0x7F);
+        if (temHighBytes) {
+          // cp1252 (windows-1252) converte corretamente É=0xC9, Ã=0xC3, Ó=0xD3 etc.
+          // e também  → ' (aspas curvas) e  → – (travessão)
+          text = new TextDecoder('windows-1252').decode(buf);
+        } else {
+          text = new TextDecoder('utf-8').decode(buf);
+        }
+      }
 
-    if (!STATE.patrimonios) STATE.patrimonios = [];
-    STATE.patrimonios.unshift(novoPat);
-    await fsAdd('patrimonios', novoPat);
-    importados++;
+      linhas = sapParsearTexto(text);
+    }
+  } catch(e) {
+    showToast('Erro ao ler arquivo: ' + e.message, 'danger'); return;
   }
 
-  setButtonLoading(btn, false, '📥 Importar');
-  btn.closest('[style*=fixed]')?.remove();
-  renderPatrimonio();
-  showToast(`✅ ${importados} patrimônio(s) importado(s) do SAP!`, 'success', 5000);
+  if (!linhas.length) { showToast('Nenhum dado encontrado no arquivo.', 'warning'); return; }
+  window._sapDadosParsed = linhas;
+  sapMostrarPreview(linhas, file.name);
 }
+
+async function sapLerXLSX(buf) {
+  // Tenta usar SheetJS se disponível, senão usa openpyxl via FileReader manual
+  if (typeof XLSX !== 'undefined') {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    return raw.map(row => row.map(c => String(c ?? '').trim()));
+  }
+  // Fallback: lê como CSV tentando extrair valores
+  throw new Error('Biblioteca XLSX não carregada. Use arquivo .txt ou .csv.');
+}
+
+function sapParsearTexto(text) {
+  const linhas = text.split(/\r?\n/);
+  const resultado = [];
+
+  for (const linha of linhas) {
+    let cols = null;
+
+    // ── Formato com pipe (|...|...|) — noconvert.txt do SAP ──────────────
+    // Colunas FIXAS por posição no array após split('|'):
+    // [1]=PAT  [2]=Imob  [3]=Sbno  [4]=Desc  [5]=NrSerie  [6]=Modelo  [7]=Marca  [8]=Local  [9]=Qtde
+    if (linha.includes('|') && !linha.match(/^-+$/) && !linha.match(/^=+$/)) {
+      const partes = linha.split('|');
+      if (partes.length >= 9) {
+        const pat  = partes[1]?.trim() || '';
+        const imob = partes[2]?.trim() || '';
+        // Linha de dados: PAT é numérico 4-8 dígitos, Imob é numérico 6-12 dígitos
+        if (/^\d{4,8}$/.test(pat) && /^\d{6,12}$/.test(imob)) {
+          // Remonta como array na ordem padrão esperada pelo normalizador
+          cols = [
+            pat,            // [0] PAT
+            imob,           // [1] Imob
+            partes[3]?.trim() || '',  // [2] Sbno
+            partes[4]?.trim() || '',  // [3] Descrição
+            partes[5]?.trim() || '',  // [4] Nr Série
+            partes[6]?.trim() || '',  // [5] Modelo
+            partes[7]?.trim() || '',  // [6] Marca
+            partes[8]?.trim() || '',  // [7] Local
+            partes[9]?.trim() || '1', // [8] Qtde
+          ];
+        }
+      }
+    }
+
+    // ── Formato tabulado — texto_com_tabuladores.txt do SAP ──────────────
+    // Colunas FIXAS por índice de tab:
+    // [2]=PAT [4]=Imob [5]=Sbno [6]=Desc [7]=NrSerie [8]=Modelo [9]=Marca [10]=Local [11]=Qtde
+    else if (!cols && linha.includes('\t')) {
+      const tabs = linha.split('\t');
+      if (tabs.length >= 11) {
+        const pat  = tabs[2]?.trim() || '';
+        const imob = tabs[4]?.trim() || '';
+        if (/^\d{4,8}$/.test(pat) && /^\d{6,12}$/.test(imob)) {
+          cols = [
+            pat,
+            imob,
+            tabs[5]?.trim() || '',   // Sbno
+            tabs[6]?.trim() || '',   // Descrição
+            tabs[7]?.trim() || '',   // Nr Série
+            tabs[8]?.trim() || '',   // Modelo
+            tabs[9]?.trim() || '',   // Marca
+            tabs[10]?.trim() || '',  // Local
+            tabs[11]?.trim() || '1', // Qtde
+          ];
+        }
+      }
+    }
+
+    // ── CSV ponto-e-vírgula ──────────────────────────────────────────────
+    else if (!cols && linha.includes(';')) {
+      const partes = linha.split(';').map(v => v.replace(/^"|"$/g, '').trim());
+      if (partes.length >= 3) cols = partes;
+    }
+
+    // ── CSV vírgula ──────────────────────────────────────────────────────
+    else if (!cols && linha.includes(',') && linha.split(',').length >= 4) {
+      const partes = linha.split(',').map(v => v.replace(/^"|"$/g, '').trim());
+      if (partes.length >= 3) cols = partes;
+    }
+
+    if (cols && cols.length >= 3) resultado.push(cols);
+  }
+  return resultado;
+}
+
+// ── Filtra e normaliza linhas do SAP ────────────────────────────
+// O parser sapParsearTexto já garante que todos os formatos produzem
+// arrays na mesma ordem: [0]=PAT [1]=Imob [2]=Sbno [3]=Desc [4]=NrSerie
+// [5]=Modelo [6]=Marca [7]=Local [8]=Qtde
+function sapNormalizarLinhas(linhas) {
+  const resultado = [];
+  const patsSeen  = new Set(); // Deduplica pelo PAT dentro do mesmo arquivo
+  const imobsSeen = new Set(); // Deduplica pelo Imob. SAP também
+
+  for (const row of linhas) {
+    if (!row || row.length < 3) continue;
+    const pat  = String(row[0] || '').trim();
+    const imob = String(row[1] || '').trim();
+    // Valida: PAT deve ser numérico 4-8 dígitos, Imob 6-12 dígitos
+    if (!/^\d{4,8}$/.test(pat) || !/^\d{6,12}$/.test(imob)) continue;
+    // Pula duplicatas dentro do arquivo (mesmo PAT ou mesmo Imob.)
+    if (patsSeen.has(pat) || imobsSeen.has(imob)) continue;
+    patsSeen.add(pat);
+    imobsSeen.add(imob);
+    resultado.push({
+      pat,
+      imob,
+      sbno:   String(row[2] || '').trim(),
+      desc:   String(row[3] || '').trim(),
+      nSerie: String(row[4] || '').trim(),
+      modelo: String(row[5] || '').trim(),
+      marca:  String(row[6] || '').trim(),
+      local:  String(row[7] || '').trim(),
+      qtde:   parseInt(String(row[8] || '1').trim()) || 1,
+    });
+  }
+  return resultado;
+}
+
+// ── Classifica tipo de ativo pela descrição SAP ──────────────────
+function sapClassificarTipo(desc, modelo) {
+  const d = (desc + ' ' + modelo).toUpperCase();
+  if (/micro\s*comp|desktop|pentium|computador|workstation|pc\b/.test(d)) return 'computador';
+  if (/notebook|laptop|ultrabook/.test(d)) return 'notebook';
+  if (/servidor|server/.test(d)) return 'servidor';
+  if (/monitor|vídeo\s*\d|lcd|led\b/.test(d)) return 'monitor';
+  if (/impressora|printer|laser|jato/.test(d)) return 'impressora';
+  if (/switch|hub|roteador|router|gateway/.test(d)) return 'switch';
+  if (/no.?break|ups\b|estabilizador/.test(d)) return 'nobreak';
+  if (/firewall|fortigate|cisco\s*asa/.test(d)) return 'firewall';
+  if (/scanner/.test(d)) return 'scanner';
+  if (/tablet/.test(d)) return 'tablet';
+  if (/smartphone|celular/.test(d)) return 'smartphone';
+  if (/pabx|ramal|central\s*tel/.test(d)) return 'telefonia';
+  if (/ar.condicionado|split|evaporador|condensadora/.test(d)) return 'ar-condicionado';
+  if (/mesa|cadeira|armario|gaveteiro|estante/.test(d)) return 'mobiliario';
+  if (/projetor/.test(d)) return 'projetor';
+  return 'outro';
+}
+
+// ── Mostra preview antes de confirmar ───────────────────────────
+function sapMostrarPreview(linhas, nomeArquivo) {
+  const itens = sapNormalizarLinhas(linhas);
+  if (!itens.length) {
+    showToast('Nenhuma linha de dados reconhecida. Verifique o formato do arquivo.', 'warning');
+    return;
+  }
+
+  // Verifica quais já existem no SYSACK
+  const patsExistentes = new Set((STATE.patrimonios || []).map(p => String(p.pat || p.id || '')));
+  const ativos = STATE.ativos || [];
+  const ativosExistentes = new Set(ativos.map(a => String(a.pat || a.id || '')));
+
+  let novos = 0, existentes = 0, atualizarAtivos = 0;
+  const tbody = document.getElementById('sap-preview-tbody');
+  if (tbody) {
+    tbody.innerHTML = itens.slice(0, 50).map(it => {
+      const existePat   = patsExistentes.has(it.pat);
+      const existeAtivo = ativosExistentes.has(it.pat);
+      if (existePat || existeAtivo) { existentes++; if (existeAtivo) atualizarAtivos++; }
+      else novos++;
+      const tipo   = sapClassificarTipo(it.desc, it.modelo);
+      const status = existeAtivo ? '<span style="background:#DBEAFE;color:#1D4ED8;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700">✏️ Atualiza ativo</span>'
+                   : existePat   ? '<span style="background:#FEF3C7;color:#92400E;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700">🔄 Atualiza PAT</span>'
+                                 : '<span style="background:#D1FAE5;color:#047857;font-size:10px;padding:1px 6px;border-radius:5px;font-weight:700">➕ Novo</span>';
+      return `<tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px;font-family:monospace;font-weight:700;color:var(--accent)">${escapeHtml(it.pat)}</td>
+        <td style="padding:6px 10px;font-size:10.5px;color:var(--g500)">${escapeHtml(it.imob)}</td>
+        <td style="padding:6px 10px;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(it.desc)}">${escapeHtml(it.desc)}</td>
+        <td style="padding:6px 10px;font-size:11px;color:var(--g600)">${escapeHtml(it.modelo)}</td>
+        <td style="padding:6px 10px;font-size:11px;color:var(--g600)">${escapeHtml(it.marca)}</td>
+        <td style="padding:6px 10px;font-size:11px;color:var(--g600)">${escapeHtml(it.local)}</td>
+        <td style="padding:6px 10px">${status}</td>
+      </tr>`;
+    }).join('');
+    if (itens.length > 50) {
+      tbody.innerHTML += `<tr><td colspan="7" style="padding:8px 10px;text-align:center;color:var(--g400);font-size:11px">... e mais ${itens.length - 50} registros</td></tr>`;
+    }
+  }
+
+  const resumo = document.getElementById('sap-preview-resumo');
+  if (resumo) resumo.innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <span>📄 <b>Arquivo:</b> ${escapeHtml(nomeArquivo)}</span>
+      <span>📦 <b>Total:</b> ${itens.length} registros</span>
+      <span style="color:#047857">➕ <b>Novos:</b> ${novos}</span>
+      <span style="color:#1D4ED8">✏️ <b>Atualizar:</b> ${existentes}</span>
+      ${itens.length > 50 ? `<span style="color:var(--g400);font-size:11px">(mostrando 50 de ${itens.length})</span>` : ''}
+    </div>`;
+
+  const preview = document.getElementById('sap-preview');
+  if (preview) preview.style.display = '';
+
+  const footerInfo = document.getElementById('sap-footer-info');
+  if (footerInfo) footerInfo.innerHTML = `<b style="color:var(--g900)">${itens.length}</b> registros prontos · <span style="color:#047857">${novos} novos</span> · <span style="color:#1D4ED8">${existentes} a atualizar</span>`;
+
+  const btnImportar = document.getElementById('sap-btn-importar');
+  if (btnImportar) { btnImportar.disabled = false; btnImportar.dataset.total = itens.length; }
+
+  // Adiciona botão "Cruzar com Discovery" ao lado do botão Importar
+  const footerDiv = document.getElementById('sap-footer-info')?.parentElement;
+  if (footerDiv && !document.getElementById('sap-btn-cruzar')) {
+    const btnCruzar = document.createElement('button');
+    btnCruzar.id = 'sap-btn-cruzar';
+    btnCruzar.className = 'btn btn-secondary btn-sm';
+    btnCruzar.innerHTML = '🔗 Cruzar com Discovery';
+    btnCruzar.title = 'Analisa cada item SAP e tenta localizar o dispositivo correspondente capturado pelo Discovery, mostrando uma tela de revisão.';
+    btnCruzar.onclick = () => {
+      const res = sapCruzarComDiscovery(window._sapItensParsed || []);
+      sapAbrirTelaRevisao(res);
+    };
+    if (btnImportar) btnImportar.parentElement?.insertBefore(btnCruzar, btnImportar);
+  }
+
+  // Salva os itens normalizados para a importação
+  window._sapItensParsed = itens;
+}
+
+// ── Confirma e executa a importação ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// MOTOR DE CRUZAMENTO SAP × DISCOVERY
+// Tenta unificar cada item do SAP com ativos capturados via Discovery
+// usando múltiplos critérios com pontuação de confiança.
+//
+// Critérios (em ordem de confiança):
+//  1. Número de série idêntico              → 100 pts (CERTEZA)
+//  2. PAT idêntico                          → 100 pts (CERTEZA)
+//  3. Modelo + Marca + Localidade           →  85 pts (ALTA)
+//  4. Modelo + Marca (sem localidade)       →  65 pts (MÉDIA)
+//  5. Tipo + Localidade + Fabricante        →  55 pts (MÉDIA)
+//  6. Tipo + Localidade (sem marca)         →  40 pts (BAIXA — ambíguo)
+//
+// Resultado por item SAP:
+//  score >= 85 → VINCULADO automaticamente
+//  score 50-84 → REVISAR (sugestão, técnico confirma)
+//  score  < 50 → NÃO ENCONTRADO (importa como patrimônio sem vínculo)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function sapCruzarComDiscovery(itensSAP) {
+  const agentes  = STATE_AGENTS?.list || [];
+  const ativos   = STATE.ativos || [];
+
+  // Monta índices para busca rápida
+  const porSerial   = new Map(); // serial.lower → [ativo|agente, ...]
+  const porPat      = new Map(); // pat → ativo
+  const porModeloMarca = new Map(); // 'modelo|marca' → []
+  const porTipoLocal   = new Map(); // 'tipo|local' → []
+
+  const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const normSerial = s => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+  // Indexa ativos SYSACK (Discovery)
+  const fontes = [
+    ...ativos.map(a => ({ ...a, _fonte: 'ativo' })),
+    ...agentes.map(ag => ({ ...ag, _fonte: 'agente', id: ag.id,
+      pat: ag.pat || '', modelo: ag.modelo || '', marca: ag.fabricante || '',
+      nSerie: ag.serial || '', localidade: ag.area || ag.setor || '',
+      tipo: sapClassificarTipo(ag.modelo || '', ag.fabricante || '') })),
+  ];
+
+  for (const f of fontes) {
+    const serial = normSerial(f.nSerie || f.serial || '');
+    if (serial && serial.length >= 4) {
+      if (!porSerial.has(serial)) porSerial.set(serial, []);
+      porSerial.get(serial).push(f);
+    }
+    const pat = norm(f.pat || '');
+    if (pat) porPat.set(pat, f);
+
+    const mm = norm(f.modelo) + '|' + norm(f.marca || f.fabricante || '');
+    if (mm.length > 2) {
+      if (!porModeloMarca.has(mm)) porModeloMarca.set(mm, []);
+      porModeloMarca.get(mm).push(f);
+    }
+
+    const tl = (f.tipo || '') + '|' + norm(f.localidade || f.area || f.setor || '');
+    if (tl.length > 2) {
+      if (!porTipoLocal.has(tl)) porTipoLocal.set(tl, []);
+      porTipoLocal.get(tl).push(f);
+    }
+  }
+
+  const resultados = [];
+
+  for (const it of itensSAP) {
+    const serialSAP   = normSerial(it.nSerie || '');
+    const patSAP      = norm(it.pat);
+    const modeloSAP   = norm(it.modelo);
+    const marcaSAP    = norm(it.marca);
+    const tipoSAP     = it.tipo || sapClassificarTipo(it.desc, it.modelo);
+    const localSAP    = norm(sapMapearLocalidade(it.local));
+    const mmSAP       = modeloSAP + '|' + marcaSAP;
+    const tlSAP       = tipoSAP + '|' + localSAP;
+
+    let melhor = null;
+    let melhorScore = 0;
+    let melhorCriterio = '';
+    const candidatos = [];
+
+    // Critério 1: Número de série idêntico (100 pts)
+    if (serialSAP && serialSAP.length >= 4) {
+      const matches = porSerial.get(serialSAP) || [];
+      for (const m of matches) {
+        candidatos.push({ fonte: m, score: 100, criterio: 'Número de série idêntico', confianca: 'certeza' });
+      }
+    }
+
+    // Critério 2: PAT idêntico (100 pts)
+    if (patSAP) {
+      const m = porPat.get(patSAP);
+      if (m) candidatos.push({ fonte: m, score: 100, criterio: 'PAT idêntico', confianca: 'certeza' });
+    }
+
+    // Critério 3: Modelo + Marca idênticos (65 ou 85 pts dependendo do local)
+    if (modeloSAP && marcaSAP && mmSAP.length > 3) {
+      const matches = porModeloMarca.get(mmSAP) || [];
+      for (const m of matches) {
+        const localAtivo = norm(m.localidade || m.area || m.setor || '');
+        const localMatch = localSAP && localAtivo && localAtivo.includes(localSAP.split(' ')[0]);
+        const score = localMatch ? 85 : 65;
+        const criterio = localMatch ? 'Modelo + Marca + Localidade' : 'Modelo + Marca';
+        const confianca = localMatch ? 'alta' : 'media';
+        candidatos.push({ fonte: m, score, criterio, confianca });
+      }
+    }
+
+    // Critério 4: Tipo + Localidade + Fabricante (55 pts)
+    if (tipoSAP && localSAP) {
+      const matches = porTipoLocal.get(tlSAP) || [];
+      for (const m of matches) {
+        const fabAtivo = norm(m.marca || m.fabricante || '');
+        const fabSAP   = marcaSAP;
+        const fabMatch = fabSAP && fabAtivo && (fabAtivo.includes(fabSAP) || fabSAP.includes(fabAtivo));
+        const score = fabMatch ? 55 : 40;
+        const criterio = fabMatch ? 'Tipo + Localidade + Fabricante' : 'Tipo + Localidade';
+        const confianca = fabMatch ? 'media' : 'baixa';
+        // Evita duplicatas já encontradas por critérios anteriores
+        if (!candidatos.find(c => c.fonte.id === m.id)) {
+          candidatos.push({ fonte: m, score, criterio, confianca });
+        }
+      }
+    }
+
+    // Seleciona o melhor candidato
+    candidatos.sort((a, b) => b.score - a.score);
+    const top = candidatos[0];
+
+    if (top) {
+      melhor = top.fonte;
+      melhorScore = top.score;
+      melhorCriterio = top.criterio;
+    }
+
+    // Classifica o resultado
+    let situacao;
+    if (melhorScore >= 85) {
+      situacao = 'vinculado';        // Vincula automaticamente
+    } else if (melhorScore >= 50) {
+      situacao = 'revisar';          // Sugestão — técnico confirma
+    } else {
+      situacao = 'nao_encontrado';   // Sem correspondência
+    }
+
+    resultados.push({
+      it,                            // Item SAP
+      ativo: melhor,                 // Melhor candidato Discovery
+      score: melhorScore,
+      criterio: melhorCriterio,
+      situacao,
+      candidatos: candidatos.slice(0, 5), // Top 5 para exibir na revisão
+    });
+  }
+
+  return resultados;
+}
+
+// ── Tela de revisão de cruzamento SAP × Discovery ─────────────────
+function sapAbrirTelaRevisao(resultados) {
+  document.getElementById('modal-sap-revisao')?.remove();
+
+  const vinculados    = resultados.filter(r => r.situacao === 'vinculado');
+  const paraRevisar   = resultados.filter(r => r.situacao === 'revisar');
+  const naoEncontrado = resultados.filter(r => r.situacao === 'nao_encontrado');
+
+  // Confirmações manuais do técnico
+  window._sapRevisaoDecisoes = {}; // patSAP → { aceitar: true/false, ativoId }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-sap-revisao';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:12px';
+
+  const sevBadge = (s) => {
+    if (s >= 85) return `<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">✅ ${s} — CERTEZA</span>`;
+    if (s >= 65) return `<span style="background:#DBEAFE;color:#1D4ED8;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">🔵 ${s} — ALTA</span>`;
+    if (s >= 50) return `<span style="background:#FEF3C7;color:#92400E;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">⚠️ ${s} — REVISAR</span>`;
+    return `<span style="background:#FEE2E2;color:#991B1B;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">❌ ${s} — BAIXA</span>`;
+  };
+
+  const rowVinculado = (r) => `
+    <tr style="border-bottom:1px solid var(--line)">
+      <td style="padding:7px 10px;font-family:monospace;font-weight:700;color:var(--accent);font-size:12px">${escapeHtml(r.it.pat)}</td>
+      <td style="padding:7px 10px;font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.it.desc)}">${escapeHtml(r.it.desc)}</td>
+      <td style="padding:7px 10px;font-size:11.5px">${escapeHtml(r.ativo?.hostname || r.ativo?.pat || r.ativo?.id || '—')}</td>
+      <td style="padding:7px 10px;font-size:11.5px;color:var(--g500)">${escapeHtml(r.criterio)}</td>
+      <td style="padding:7px 10px">${sevBadge(r.score)}</td>
+    </tr>`;
+
+  const rowRevisar = (r, i) => `
+    <tr data-revisao-idx="${i}" style="border-bottom:1px solid var(--line)">
+      <td style="padding:8px 10px;font-family:monospace;font-weight:700;color:var(--accent);font-size:12px">${escapeHtml(r.it.pat)}</td>
+      <td style="padding:8px 10px;font-size:11.5px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.it.desc)}">${escapeHtml(r.it.desc)}</td>
+      <td style="padding:8px 10px">
+        <div style="font-size:12px;font-weight:600">${escapeHtml(r.ativo?.hostname || r.ativo?.pat || r.ativo?.id || '—')}</div>
+        <div style="font-size:10.5px;color:var(--g500)">${escapeHtml(r.ativo?.modelo || r.ativo?.desc || '')} · ${escapeHtml(r.ativo?.localidade || r.ativo?.area || '')}</div>
+      </td>
+      <td style="padding:8px 10px;font-size:11px;color:var(--g600)">${escapeHtml(r.criterio)}</td>
+      <td style="padding:8px 10px">${sevBadge(r.score)}</td>
+      <td style="padding:8px 10px">
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <button onclick="sapRevisaoAceitar(${i})" data-btn-aceitar="${i}"
+            style="font-size:11px;padding:4px 10px;border-radius:7px;border:none;background:#D1FAE5;color:#047857;cursor:pointer;font-weight:700">✅ Vincular</button>
+          <button onclick="sapRevisaoRejeitar(${i})" data-btn-rejeitar="${i}"
+            style="font-size:11px;padding:4px 10px;border-radius:7px;border:none;background:#FEE2E2;color:#991B1B;cursor:pointer;font-weight:700">❌ Ignorar</button>
+        </div>
+      </td>
+    </tr>`;
+
+  const rowNaoEncontrado = (r) => `
+    <tr style="border-bottom:1px solid var(--line)">
+      <td style="padding:7px 10px;font-family:monospace;font-weight:700;color:var(--accent);font-size:12px">${escapeHtml(r.it.pat)}</td>
+      <td style="padding:7px 10px;font-size:11.5px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.it.desc)}">${escapeHtml(r.it.desc)}</td>
+      <td style="padding:7px 10px;font-size:11px;color:var(--g400)">${escapeHtml(r.it.tipo || '—')}</td>
+      <td style="padding:7px 10px;font-size:11px;color:var(--g500)">${escapeHtml(r.it.local || '—')}</td>
+      <td style="padding:7px 10px">
+        <span style="background:#F1F5F9;color:#64748B;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">Sem vínculo</span>
+      </td>
+    </tr>`;
+
+  overlay.innerHTML = `
+    <div style="background:var(--panel,#fff);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.3);width:1100px;max-width:98vw;max-height:95vh;overflow:hidden;display:flex;flex-direction:column">
+      <div style="padding:16px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#0F172A;border-radius:16px 16px 0 0">
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#fff">🔗 Cruzamento SAP × Discovery</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.5);margin-top:2px">Revisão de vinculação automática — ${resultados.length} itens analisados</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="background:#D1FAE5;color:#047857;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">${vinculados.length} vinculados</span>
+          <span style="background:#FEF3C7;color:#92400E;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">${paraRevisar.length} a revisar</span>
+          <span style="background:#FEE2E2;color:#991B1B;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">${naoEncontrado.length} sem vínculo</span>
+          <button onclick="document.getElementById('modal-sap-revisao').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+        </div>
+      </div>
+
+      <div style="flex:1;overflow:auto;padding:0">
+        <!-- TABs -->
+        <div style="display:flex;border-bottom:1px solid var(--line);padding:0 22px;gap:2px;background:var(--g50)">
+          <button class="sap-rev-tab" onclick="sapRevTab('vinculado')" id="sap-rev-tab-vinculado"
+            style="padding:10px 14px;background:none;border:none;border-bottom:2px solid var(--accent);font-size:13px;font-weight:700;color:var(--accent);cursor:pointer">
+            ✅ Vinculados automaticamente (${vinculados.length})
+          </button>
+          <button class="sap-rev-tab" onclick="sapRevTab('revisar')" id="sap-rev-tab-revisar"
+            style="padding:10px 14px;background:none;border:none;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--g500);cursor:pointer">
+            ⚠️ Aguardando revisão (${paraRevisar.length})
+          </button>
+          <button class="sap-rev-tab" onclick="sapRevTab('nao_encontrado')" id="sap-rev-tab-nao_encontrado"
+            style="padding:10px 14px;background:none;border:none;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--g500);cursor:pointer">
+            ❌ Sem vínculo (${naoEncontrado.length})
+          </button>
+        </div>
+
+        <!-- Painel vinculados -->
+        <div id="sap-rev-pnl-vinculado" style="overflow:auto;max-height:calc(95vh - 220px)">
+          ${vinculados.length ? `
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="background:var(--g50);position:sticky;top:0">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">PAT SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Descrição SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Ativo Discovery</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Critério</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Confiança</th>
+              </tr>
+            </thead>
+            <tbody>${vinculados.map(r => rowVinculado(r)).join('')}</tbody>
+          </table>` : '<div style="padding:32px;text-align:center;color:var(--g400)">Nenhum vínculo automático encontrado.</div>'}
+        </div>
+
+        <!-- Painel revisar -->
+        <div id="sap-rev-pnl-revisar" style="display:none;overflow:auto;max-height:calc(95vh - 220px)">
+          ${paraRevisar.length ? `
+          <div style="padding:10px 16px;background:#FFFBEB;border-bottom:1px solid #FDE68A;font-size:12px;color:#92400E">
+            ⚠️ Estes itens têm uma correspondência possível mas com confiança média. Revise e confirme ou rejeite cada vínculo.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="background:var(--g50);position:sticky;top:0">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">PAT SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Descrição SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Sugestão Discovery</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Critério</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Score</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Decisão</th>
+              </tr>
+            </thead>
+            <tbody id="sap-rev-tbody-revisar">${paraRevisar.map((r, i) => rowRevisar(r, i)).join('')}</tbody>
+          </table>` : '<div style="padding:32px;text-align:center;color:var(--g400)">✅ Nenhum item aguardando revisão.</div>'}
+        </div>
+
+        <!-- Painel não encontrado -->
+        <div id="sap-rev-pnl-nao_encontrado" style="display:none;overflow:auto;max-height:calc(95vh - 220px)">
+          <div style="padding:10px 16px;background:#FEF2F2;border-bottom:1px solid #FECACA;font-size:12px;color:#991B1B">
+            ❌ Estes itens do SAP não encontraram correspondência no Discovery. Serão importados como patrimônios sem vínculo com ativo físico.
+          </div>
+          ${naoEncontrado.length ? `
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="background:var(--g50);position:sticky;top:0">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">PAT SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Descrição</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Tipo</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Localidade SAP</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--g500);border-bottom:1px solid var(--line)">Motivo</th>
+              </tr>
+            </thead>
+            <tbody>${naoEncontrado.map(r => rowNaoEncontrado(r)).join('')}</tbody>
+          </table>` : '<div style="padding:32px;text-align:center;color:var(--g400)">✅ Todos os itens foram vinculados.</div>'}
+        </div>
+      </div>
+
+      <div style="padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:12px;color:var(--g500)" id="sap-rev-footer-info">
+          Confirme os vínculos e clique em "Aplicar e Importar".
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('modal-sap-revisao').remove()" class="btn btn-ghost btn-sm">Cancelar</button>
+          <button onclick="sapRevisaoAceitarTodos()" class="btn btn-secondary btn-sm">✅ Aceitar todas as sugestões</button>
+          <button onclick="sapRevisaoAplicar()" class="btn btn-primary btn-sm" id="sap-rev-btn-aplicar">🔗 Aplicar e Importar</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Guarda resultados para uso nas callbacks
+  window._sapRevisaoResultados = resultados;
+  window._sapRevisaoParaRevisar = paraRevisar;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+// Alterna abas da tela de revisão
+window.sapRevTab = function(aba) {
+  ['vinculado', 'revisar', 'nao_encontrado'].forEach(a => {
+    document.getElementById('sap-rev-pnl-' + a).style.display  = a === aba ? '' : 'none';
+    const tab = document.getElementById('sap-rev-tab-' + a);
+    if (tab) {
+      tab.style.borderBottomColor = a === aba ? 'var(--accent)' : 'transparent';
+      tab.style.color = a === aba ? 'var(--accent)' : 'var(--g500)';
+      tab.style.fontWeight = a === aba ? '700' : '600';
+    }
+  });
+};
+
+// Técnico aceita um vínculo
+window.sapRevisaoAceitar = function(idx) {
+  const r = window._sapRevisaoParaRevisar[idx];
+  if (!r) return;
+  window._sapRevisaoDecisoes[r.it.pat] = { aceitar: true, ativoId: r.ativo?.id };
+  const row = document.querySelector(`[data-revisao-idx="${idx}"]`);
+  if (row) row.style.background = '#F0FDF4';
+  const btnA = document.querySelector(`[data-btn-aceitar="${idx}"]`);
+  const btnR = document.querySelector(`[data-btn-rejeitar="${idx}"]`);
+  if (btnA) { btnA.style.background = '#059669'; btnA.style.color = '#fff'; btnA.textContent = '✅ Aceito'; }
+  if (btnR) btnR.style.display = 'none';
+};
+
+// Técnico rejeita um vínculo
+window.sapRevisaoRejeitar = function(idx) {
+  const r = window._sapRevisaoParaRevisar[idx];
+  if (!r) return;
+  window._sapRevisaoDecisoes[r.it.pat] = { aceitar: false };
+  const row = document.querySelector(`[data-revisao-idx="${idx}"]`);
+  if (row) row.style.background = '#FEF2F2';
+  const btnA = document.querySelector(`[data-btn-aceitar="${idx}"]`);
+  const btnR = document.querySelector(`[data-btn-rejeitar="${idx}"]`);
+  if (btnR) { btnR.style.background = '#DC2626'; btnR.style.color = '#fff'; btnR.textContent = '❌ Rejeitado'; }
+  if (btnA) btnA.style.display = 'none';
+};
+
+// Aceita todas as sugestões da aba revisar
+window.sapRevisaoAceitarTodos = function() {
+  (window._sapRevisaoParaRevisar || []).forEach((r, i) => {
+    if (!window._sapRevisaoDecisoes[r.it.pat]) sapRevisaoAceitar(i);
+  });
+};
+
+// Aplica todas as decisões e executa a importação
+window.sapRevisaoAplicar = async function() {
+  const btn = document.getElementById('sap-rev-btn-aplicar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Importando...'; }
+
+  const resultados  = window._sapRevisaoResultados || [];
+  const decisoes    = window._sapRevisaoDecisoes || {};
+  const modo        = document.querySelector('[name="sap-modo"]:checked')?.value || 'atualizar';
+  const agora       = new Date().toISOString();
+
+  let vinculados = 0, criados = 0, atualizados = 0, erros = 0;
+
+  // Previne duplicatas: rastreia PATs e imobSAP já processados nesta aplicação
+  const patsProcessados = new Set();
+  const imobsProcessados = new Set();
+
+  for (const r of resultados) {
+    try {
+      const it = r.it;
+
+      // Já foi processado nesta rodada (arquivo com linhas duplicadas)?
+      if (patsProcessados.has(it.pat)) continue;
+      patsProcessados.add(it.pat);
+      if (it.imob) {
+        if (imobsProcessados.has(it.imob)) continue;
+        imobsProcessados.add(it.imob);
+      }
+      const localSysack = sapMapearLocalidade(it.local);
+      const dadosSAP = {
+        imobSAP: it.imob, desc: it.desc, modelo: it.modelo || '',
+        marca: it.marca || '', nSerie: it.nSerie || '',
+        localSAP: it.local || '', localidade: localSysack,
+        tipo: it.tipo || sapClassificarTipo(it.desc, it.modelo),
+        status: 'ativo', origem: 'sap-import', ultimoSyncSAP: agora,
+      };
+
+      // Determina o ativo a vincular
+      let ativoVincular = null;
+      if (r.situacao === 'vinculado') {
+        ativoVincular = r.ativo;
+      } else if (r.situacao === 'revisar') {
+        const dec = decisoes[it.pat];
+        if (dec?.aceitar && dec.ativoId) {
+          ativoVincular = (STATE.ativos || []).find(a => a.id === dec.ativoId)
+            || (STATE_AGENTS?.list || []).find(a => a.id === dec.ativoId);
+        }
+      }
+
+      // Atualiza o ativo Discovery com dados SAP
+      if (ativoVincular && ativoVincular.id) {
+        const upd = {
+          pat: it.pat, imobSAP: it.imob,
+          desc: ativoVincular.desc || it.desc,
+          modelo: it.modelo || ativoVincular.modelo || '',
+          marca: it.marca || ativoVincular.marca || ativoVincular.fabricante || '',
+          nSerie: it.nSerie || ativoVincular.nSerie || ativoVincular.serial || '',
+          localSAP: it.local, localidade: localSysack || ativoVincular.localidade || '',
+          ultimoSyncSAP: agora,
+          cruzamentoCriterio: r.criterio,
+          cruzamentoScore: r.score,
+        };
+        const col = ativoVincular._fonte === 'agente' ? 'agents' : 'ativos';
+        await fsUpdate(col, ativoVincular.id, upd).catch(() => {});
+        Object.assign(ativoVincular, upd);
+        vinculados++;
+        atualizados++;
+      }
+
+      // Grava/atualiza o patrimônio SAP
+      const patsMap = new Map((STATE.patrimonios || []).map(p => [String(p.pat || ''), p]));
+      const existePat = patsMap.get(it.pat);
+      if (existePat) {
+        const upd = { ...dadosSAP, ativoId: ativoVincular?.id || existePat.ativoId || '' };
+        Object.assign(existePat, upd);
+        await fsUpdate('patrimonios', existePat.id, upd).catch(() => {});
+        atualizados++;
+      } else {
+        const novo = {
+          id: 'SAP-' + it.pat + '-' + Date.now(),
+          pat: it.pat, ...dadosSAP,
+          ativoId: ativoVincular?.id || '',
+          createdAt: agora, atualizadoEm: agora,
+          valorAquisicao: 0, categoria: dadosSAP.tipo, category: dadosSAP.tipo,
+        };
+        if (!STATE.patrimonios) STATE.patrimonios = [];
+        STATE.patrimonios.unshift(novo);
+        await fsAdd('patrimonios', novo).catch(() => {});
+        criados++;
+      }
+    } catch(e) { erros++; }
+  }
+
+  document.getElementById('modal-sap-revisao')?.remove();
+  if (typeof renderPatrimonio === 'function') renderPatrimonio();
+  if (typeof renderAtivos === 'function') renderAtivos();
+  showToast(`✅ SAP importado — ${vinculados} vinculados · ${criados} novos · ${atualizados} atualizados · ${erros} erros`, 'success', 8000);
+};
+
+async function sapConfirmarImportacao(btn) {
+  const itens = window._sapItensParsed;
+  if (!itens || !itens.length) return showToast('Nenhum dado para importar.', 'warning');
+
+  const modo = document.querySelector('[name="sap-modo"]:checked')?.value || 'atualizar';
+  btn.disabled = true; btn.textContent = 'Importando...';
+
+  const logWrap = document.getElementById('sap-log-wrap');
+  const logEl   = document.getElementById('sap-log');
+  if (logWrap) logWrap.style.display = '';
+  const sapLog = (msg) => { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } };
+
+  sapLog(`[${new Date().toLocaleTimeString('pt-BR')}] Iniciando importação — modo: ${modo} — ${itens.length} registros`);
+
+  const patsExistentes = new Map();
+  (STATE.patrimonios || []).forEach(p => {
+    patsExistentes.set(String(p.pat || ''), p);
+    if (p.imobSAP) patsExistentes.set('imob:' + String(p.imobSAP), p);
+  });
+  const ativosExistentes = new Map();
+  (STATE.ativos || []).forEach(a => ativosExistentes.set(String(a.pat || ''), a));
+
+  // Para sincronização, coleta PATs da carga SAP para detectar baixas
+  const patsDaCarga = new Set(itens.map(it => it.pat));
+
+  // Controla PATs já processados nesta importação para evitar duplicatas
+  // quando o mesmo item aparece duas vezes no arquivo SAP
+  const patJaProcessado = new Set();
+
+  let criados = 0, atualizadosPat = 0, atualizadosAtivo = 0, ignorados = 0, erros = 0;
+
+  for (const it of itens) {
+    try {
+      // Ignora duplicatas dentro da mesma carga SAP
+      if (patJaProcessado.has(it.pat)) {
+        sapLog(`  ⏭️ Ignorado (duplicata na carga): PAT ${it.pat}`);
+        ignorados++;
+        continue;
+      }
+      patJaProcessado.add(it.pat);
+
+      const tipo          = sapClassificarTipo(it.desc, it.modelo);
+      const localSysack   = sapMapearLocalidade(it.local);
+      // Busca por PAT e também por número Imob. SAP para evitar importar o mesmo ativo com PAT diferente
+      const existePat     = patsExistentes.get(it.pat) || patsExistentes.get('imob:' + it.imob);
+      const existeAtivo   = ativosExistentes.get(it.pat);
+      const agora         = new Date().toISOString();
+
+      const dadosSAP = {
+        pat:          it.pat,
+        imobSAP:      it.imob,
+        desc:         it.desc,
+        modelo:       it.modelo || '',
+        marca:        it.marca  || '',
+        nSerie:       it.nSerie || '',
+        localSAP:     it.local  || '',
+        localidade:   localSysack,
+        tipo,
+        status:       'ativo',
+        origem:       'sap-import',
+        ultimoSyncSAP: agora,
+      };
+
+      if (modo === 'somente_novos' && (existePat || existeAtivo)) {
+        ignorados++;
+        continue;
+      }
+
+      // Atualiza ativo vinculado (aparece na aba Ativos/Computadores etc.)
+      if (existeAtivo) {
+        const upd = {
+          imobSAP:      it.imob,
+          desc:         existeAtivo.desc || it.desc, // não sobrescreve desc se já tem nome melhor
+          modelo:       it.modelo || existeAtivo.modelo || '',
+          marca:        it.marca  || existeAtivo.marca  || '',
+          nSerie:       it.nSerie || existeAtivo.nSerie || '',
+          localSAP:     it.local,
+          localidade:   localSysack || existeAtivo.localidade || '',
+          tipo:         existeAtivo.tipo || tipo,
+          ultimoSyncSAP: agora,
+        };
+        Object.assign(existeAtivo, upd);
+        await fsUpdate('ativos', existeAtivo.id, upd).catch(e => sapLog(`  ⚠️ Firestore ativo ${it.pat}: ${e.message}`));
+        atualizadosAtivo++;
+        sapLog(`  ✏️ Ativo atualizado: PAT ${it.pat} — ${it.desc.slice(0,40)}`);
+      }
+
+      // Atualiza ou cria o registro patrimonial
+      if (existePat) {
+        const upd = { imobSAP: it.imob, desc: it.desc, modelo: it.modelo, marca: it.marca, nSerie: it.nSerie, localSAP: it.local, localidade: localSysack, ultimoSyncSAP: agora };
+        Object.assign(existePat, upd);
+        await fsUpdate('patrimonios', existePat.id, upd).catch(e => sapLog(`  ⚠️ ${e.message}`));
+        atualizadosPat++;
+      } else {
+        // Cria novo patrimônio
+        const novoPat = {
+          id:             'SAP-' + it.pat + '-' + Date.now(),
+          ...dadosSAP,
+          createdAt:      agora,
+          atualizadoEm:  agora,
+          valorAquisicao: 0,
+          category:       tipo,
+          categoria:      tipo,
+        };
+        if (!STATE.patrimonios) STATE.patrimonios = [];
+        STATE.patrimonios.unshift(novoPat);
+        await fsAdd('patrimonios', novoPat).catch(e => sapLog(`  ⚠️ ${e.message}`));
+        criados++;
+        sapLog(`  ➕ Criado: PAT ${it.pat} — ${it.desc.slice(0,40)} (${tipo})`);
+      }
+    } catch(e) {
+      erros++;
+      sapLog(`  ✗ Erro PAT ${it.pat}: ${e.message}`);
+    }
+  }
+
+  // Sincronização completa: marca como "baixado no SAP" os que saíram
+  if (modo === 'sincronizar') {
+    const naoNaCarga = (STATE.patrimonios || []).filter(p =>
+      p.origem === 'sap-import' && p.status === 'ativo' && !patsDaCarga.has(String(p.pat || ''))
+    );
+    for (const p of naoNaCarga) {
+      p.status = 'baixado_sap';
+      await fsUpdate('patrimonios', p.id, { status: 'baixado_sap', baixadoSAPem: new Date().toISOString() }).catch(() => {});
+      sapLog(`  🗑️ Baixado no SAP: PAT ${p.pat} — ${p.desc?.slice(0,30)}`);
+    }
+    if (naoNaCarga.length) sapLog(`  ℹ️ ${naoNaCarga.length} PAT(s) marcados como baixados no SAP`);
+  }
+
+  sapLog(`\n✅ Importação concluída:`);
+  sapLog(`   Criados:             ${criados}`);
+  sapLog(`   Ativos atualizados:  ${atualizadosAtivo}`);
+  sapLog(`   PATs atualizados:    ${atualizadosPat}`);
+  sapLog(`   Ignorados:           ${ignorados}`);
+  sapLog(`   Erros:               ${erros}`);
+  sapLog(`   Data/hora:           ${new Date().toLocaleString('pt-BR')}`);
+
+  // Grava log de importação no Firestore para auditoria
+  try {
+    const u = SESSION_USER || CURRENT_USER || {};
+    await fsAdd('importacoes_sap', {
+      data: new Date().toISOString(),
+      modo,
+      total: itens.length,
+      criados, atualizadosPat, atualizadosAtivo, ignorados, erros,
+      operador: u.nome || u.email || '',
+      createdAt: new Date().toISOString(),
+    });
+  } catch {}
+
+  btn.disabled  = false;
+  btn.textContent = '✅ Concluído';
+  btn.style.background = '#059669';
+
+  const footerInfo = document.getElementById('sap-footer-info');
+  if (footerInfo) footerInfo.innerHTML = `<b style="color:#059669">✅ ${criados} criados · ${atualizadosAtivo + atualizadosPat} atualizados · ${erros} erros</b>`;
+
+  if (typeof renderPatrimonio === 'function') renderPatrimonio();
+  if (typeof renderAtivos     === 'function') renderAtivos();
+  showToast(`✅ SAP importado — ${criados} novos, ${atualizadosAtivo + atualizadosPat} atualizados`, 'success', 6000);
+}
+
+// ── Mapeia localidade SAP para campo de localidade SYSACK ───────
+function sapMapearLocalidade(localSAP) {
+  if (!localSAP) return '';
+  const l = localSAP.toUpperCase();
+  // Remove sufixo de ambiente (ESCRITÓRIO, SALA etc.) e extrai nome do local
+  // Exemplos: "SANTA CLARA-ESCRITÓRIO" → "SANTA CLARA"
+  //           "VITÓRIA-SANTA CLARA" → "VITÓRIA-SANTA CLARA"
+  //           "DATA CENTER" → "DATA CENTER"
+  const partes = l.split('-');
+  if (partes.length >= 2) {
+    const ultimo = partes[partes.length - 1].trim();
+    if (['ESCRITÓRIO', 'ESCRITORIO', 'SALA', 'ALMOXARIFADO', 'DEPÓSITO', 'DEPOSITO', 'COPA'].includes(ultimo)) {
+      return partes.slice(0, -1).join('-').trim();
+    }
+  }
+  return localSAP.trim();
+}
+
+// Mantém compat com código antigo
+async function patProcessarCSVSAP(btn) {
+  const file = document.getElementById('sap-csv-input')?.files?.[0];
+  if (file) await sapProcessarArquivo(file);
+}
+
 
 // ── NOTAS FISCAIS ─────────────────────────────────────────────
 function renderNotasFiscais() {
@@ -16377,6 +18071,7 @@ function slaHtml(chamado) {
 
 // Verifica SLAs e gera alertas — roda a cada 15 min
 function verificarSLAs() {
+  if (!SESSION_USER && !CURRENT_USER?.uid) return;
   const abertos = (STATE.chamados||[]).filter(c => c.status === 'aberto' || c.status === 'em-atendimento');
   let alertas = 0;
   abertos.forEach(ch => {
@@ -22010,6 +23705,585 @@ async function analisarAtivoPorIA(pat) {
 
 
 // ════════════════════════════════════════════════════════════
+// ANÁLISE DE EVENT VIEWER — motor de regras sem IA
+// Funciona offline, sem API externa, sem custo.
+// Classifica eventos do Windows em categorias de risco.
+// ════════════════════════════════════════════════════════════
+
+// Regras: { ids: [EventID], log, nivel, categoria, titulo, desc, risco }
+// Cada regra agora inclui `preventiva` (o que fazer para reduzir a chance de
+// recorrência) e `corretiva` (o que fazer agora, diante da ocorrência já detectada).
+// Isso alimenta o relatório de análise de máquina (recurso "Analisar Máquina").
+const EV_REGRAS = [
+  // ── Segurança ────────────────────────────────────────────
+  { ids:[4625],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Falha de login repetida',         desc:'Tentativas de login falharam — possível ataque de força bruta ou credencial errada.',
+    preventiva:'Habilitar política de bloqueio de conta após N tentativas (Account Lockout Policy) e exigir MFA para contas administrativas.',
+    corretiva:'Verificar com o usuário se as tentativas foram legítimas. Se não houve tentativa reconhecida, trocar a senha da conta imediatamente e revisar o IP de origem no log.' },
+  { ids:[4648],       log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Login com credenciais explícitas', desc:'Usuário autenticou com credenciais explícitas (RunAs/RDP). Verificar se é uso legítimo.',
+    preventiva:'Restringir o uso de "Executar como" a contas de suporte autorizadas e documentar quem tem essa permissão.',
+    corretiva:'Confirmar com o técnico/usuário responsável se a ação foi autorizada. Caso não seja reconhecida, tratar como possível uso indevido de credencial.' },
+  { ids:[4672],       log:'Security', risco:'info',    categoria:'Segurança',    titulo:'Privilégios especiais atribuídos', desc:'Logon com privilégios especiais (Administrador/SYSTEM).',
+    preventiva:'Aplicar o princípio de menor privilégio — contas do dia a dia não devem logar com privilégio administrativo.',
+    corretiva:'Nenhuma ação corretiva imediata necessária; apenas registrar para auditoria se o padrão for recorrente fora do horário comercial.' },
+  { ids:[4720,4726],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Conta local criada/excluída',      desc:'Conta de usuário local foi criada ou removida. Verificar se foi ação autorizada de TI.',
+    preventiva:'Restringir a criação/exclusão de contas locais a administradores de TI e manter changelog de contas.',
+    corretiva:'Confirmar com a equipe de TI se a alteração foi planejada. Se não foi, investigar a origem e considerar reverter a alteração.' },
+  { ids:[4732,4733],  log:'Security', risco:'alto',    categoria:'Segurança',    titulo:'Alteração em grupo Administradores',desc:'Membro adicionado ou removido do grupo Administradores local.',
+    preventiva:'Monitorar o grupo Administradores local via GPO/auditoria e limitar quem pode alterá-lo.',
+    corretiva:'Validar se a inclusão/remoção foi autorizada; se não foi, remover o acesso indevido imediatamente e investigar como ele foi concedido.' },
+  { ids:[4698,4699,4700,4701,4702], log:'Security', risco:'alto', categoria:'Segurança', titulo:'Task Agendada criada/alterada', desc:'Uma task agendada foi criada, deletada ou modificada — pode indicar persistência de malware.',
+    preventiva:'Restringir criação de tarefas agendadas a administradores e habilitar auditoria de Task Scheduler.',
+    corretiva:'Inspecionar a tarefa (Agendador de Tarefas) — comando executado, usuário, gatilho. Se não for reconhecida, desabilitar/remover e escanear a máquina.' },
+  { ids:[1102],       log:'Security', risco:'critico', categoria:'Segurança',    titulo:'Log de auditoria limpo',           desc:'Alguém limpou o log de auditoria de segurança. Ação suspeita — investigar imediatamente.',
+    preventiva:'Encaminhar logs de segurança para um coletor centralizado (SIEM) para que a limpeza local não apague evidências.',
+    corretiva:'Tratar como incidente de segurança: identificar quem tinha acesso administrativo no momento, isolar a máquina se necessário e abrir investigação formal.' },
+  { ids:[4946,4947,4950], log:'Security', risco:'medio', categoria:'Segurança', titulo:'Regra de firewall alterada',       desc:'Uma regra do Firewall do Windows foi criada ou modificada.',
+    preventiva:'Gerenciar regras de firewall via GPO central em vez de alteração local, e restringir quem pode alterá-las na máquina.',
+    corretiva:'Revisar a regra alterada — se abriu portas/serviços não previstos, reverter e investigar o motivo da mudança.' },
+  // ── Sistema ─────────────────────────────────────────────
+  { ids:[41],         log:'System',   risco:'critico', categoria:'Sistema',      titulo:'Desligamento inesperado (kernel)',  desc:'O sistema foi desligado sem sequência normal — falha de energia ou tela azul.',
+    preventiva:'Verificar nobreak/UPS da máquina e manter Windows Update e drivers de hardware atualizados para reduzir BSODs.',
+    corretiva:'Checar o Visualizador de Eventos por minidumps/BSOD associados, testar memória (Windows Memory Diagnostic) e revisar a fonte de alimentação.' },
+  { ids:[1074],       log:'System',   risco:'info',    categoria:'Sistema',      titulo:'Reinicialização solicitada',        desc:'Usuário ou processo solicitou reinicialização do sistema.',
+    preventiva:'Nenhuma ação preventiva necessária — é um evento normal de operação.',
+    corretiva:'Nenhuma ação corretiva necessária, a menos que a frequência seja anormalmente alta para o perfil da máquina.' },
+  { ids:[6008],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Desligamento sujo anterior',        desc:'Windows detectou que o desligamento anterior foi anormal (queda de energia / BSOD).',
+    preventiva:'Avaliar uso de nobreak e orientar o usuário a desligar a máquina corretamente pelo menu Iniciar.',
+    corretiva:'Rodar chkdsk na unidade C: e revisar o Visualizador de Eventos por travamentos ou BSOD próximos ao horário do evento.' },
+  { ids:[7031,7034,7036], log:'System', risco:'medio', categoria:'Sistema',     titulo:'Serviço parou inesperadamente',     desc:'Um serviço do Windows parou de forma inesperada.',
+    preventiva:'Configurar recuperação automática do serviço (aba Recuperação nas Propriedades do Serviço) para reiniciar sozinho em caso de falha.',
+    corretiva:'Identificar qual serviço parou, verificar dependências e reiniciá-lo manualmente; se recorrente, investigar logs específicos do serviço/aplicação.' },
+  { ids:[7045],       log:'System',   risco:'alto',    categoria:'Sistema',      titulo:'Novo serviço instalado',            desc:'Um novo serviço foi instalado no sistema. Verificar se foi instalação legítima.',
+    preventiva:'Restringir instalação de software/serviços a administradores e manter antivírus/EDR atualizado.',
+    corretiva:'Identificar o serviço pelo nome/binário. Se não for reconhecido pela TI, desabilitar e investigar como possível indício de malware/persistência.' },
+  { ids:[55,98,153],  log:'System',   risco:'critico', categoria:'Disco/FS',    titulo:'Erro de sistema de arquivos',       desc:'NTFS detectou corrupção de disco. Risco imediato de perda de dados — fazer backup.',
+    preventiva:'Agendar checagens periódicas de disco (chkdsk) e monitorar o SMART do disco preventivamente.',
+    corretiva:'Fazer backup dos dados IMEDIATAMENTE, depois rodar `chkdsk C: /f /r` (requer reinício) e avaliar substituição do disco se os erros persistirem.' },
+  { ids:[129],        log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Reset de controlador de disco',     desc:'O controlador de armazenamento foi resetado — pode indicar problema de hardware.',
+    preventiva:'Manter drivers de armazenamento/chipset atualizados e verificar cabos/conexões em desktops.',
+    corretiva:'Atualizar o driver do controlador de armazenamento e monitorar recorrência; se persistir, testar o disco em outra porta/máquina.' },
+  { ids:[11,15],      log:'System',   risco:'alto',    categoria:'Disco/FS',    titulo:'Erro de driver de disco',           desc:'Erro de I/O no disco. Verificar saúde do HD/SSD com SMART.',
+    preventiva:'Monitorar SMART do disco periodicamente e manter backup atualizado como rotina.',
+    corretiva:'Rodar diagnóstico SMART (via fabricante ou `wmic diskdrive get status`) e planejar substituição do disco se indicar falha iminente.' },
+  { ids:[1001],       log:'System',   risco:'medio',   categoria:'Sistema',     titulo:'Windows Error Reporting',           desc:'Um aplicativo ou componente gerou relatório de erro.',
+    preventiva:'Manter aplicativos e Windows atualizados para reduzir a taxa de erros reportados.',
+    corretiva:'Identificar o aplicativo/componente na mensagem do evento e verificar se há atualização/correção disponível do fabricante.' },
+  // ── Aplicação ───────────────────────────────────────────
+  { ids:[1000,1001,1002], log:'Application', risco:'medio', categoria:'Aplicação', titulo:'Falha de aplicativo',           desc:'Um aplicativo travou ou gerou erro crítico.',
+    preventiva:'Manter o aplicativo atualizado e monitorar se o travamento está associado a um módulo/plugin específico.',
+    corretiva:'Reinstalar ou atualizar o aplicativo afetado; se recorrente, coletar o dump de falha e reportar ao fabricante/desenvolvedor.' },
+  { ids:[1026],       log:'Application', risco:'medio', categoria:'Aplicação',  titulo:'Erro .NET Runtime',                desc:'Aplicativo .NET encontrou erro de execução.',
+    preventiva:'Manter o .NET Runtime/Framework atualizado via Windows Update.',
+    corretiva:'Reparar/reinstalar o .NET Runtime correspondente e verificar se o aplicativo tem atualização disponível.' },
+  // ── Windows Update ──────────────────────────────────────
+  { ids:[19,20,24,25],log:'System',   risco:'info',    categoria:'Atualização', titulo:'Windows Update instalado',          desc:'Uma atualização do Windows foi instalada com sucesso.',
+    preventiva:'Manter o Windows Update habilitado e com janela de manutenção definida.',
+    corretiva:'Nenhuma ação corretiva necessária — evento normal de operação.' },
+  { ids:[20],         log:'System',   risco:'alto',    categoria:'Atualização', titulo:'Falha no Windows Update',           desc:'A instalação de uma atualização falhou.',
+    preventiva:'Garantir espaço em disco suficiente e conectividade estável durante a janela de atualização.',
+    corretiva:'Rodar o solucionador de problemas do Windows Update ou `DISM /Online /Cleanup-Image /RestoreHealth` seguido de `sfc /scannow`, depois tentar a atualização novamente.' },
+  // ── Rede ────────────────────────────────────────────────
+  { ids:[4199,4198],  log:'System',   risco:'medio',   categoria:'Rede',        titulo:'Conflito de IP detectado',          desc:'Outro dispositivo na rede usa o mesmo endereço IP.',
+    preventiva:'Migrar a máquina para atribuição de IP via DHCP com reserva, evitando IP fixo duplicado.',
+    corretiva:'Identificar o outro dispositivo com o mesmo IP e corrigir a configuração de rede de um dos dois imediatamente.' },
+  { ids:[10400,10401],log:'System',   risco:'info',    categoria:'Rede',        titulo:'Conexão de rede alterada',          desc:'O estado da interface de rede mudou (conectado/desconectado).',
+    preventiva:'Verificar estabilidade do cabo/Wi-Fi se o padrão de desconexão for muito frequente.',
+    corretiva:'Nenhuma ação corretiva imediata necessária, a menos que a frequência de quedas esteja impactando o usuário.' },
+];
+
+function evAnalisarPayload(payload) {
+  let eventos = [];
+  try {
+    const raw = JSON.parse(payload);
+    eventos = Array.isArray(raw) ? raw : [raw];
+  } catch {
+    // CORREÇÃO: este caminho de erro retornava `regras` em vez de `regrasAplicadas`
+    // (nome usado por evColetarEAnalisar/evRenderizarResultado), causando
+    // "Cannot read properties of undefined (reading 'length')" sempre que o
+    // payload chegava corrompido — o que, por sua vez, era causado por um corte
+    // de string no agente que podia cortar o JSON no meio (corrigido em
+    // agent-desktop.js). Agora o formato bate e mostra um erro legível em vez de travar.
+    return { erro: 'Payload não é JSON válido', regrasAplicadas: [], resumo: ['❌ Não foi possível interpretar os eventos retornados pelo agente — tente coletar novamente.'], total: 0, criticos: 0, altos: 0 };
+  }
+
+  // Conta ocorrências por EventID
+  const contagem = new Map();
+  for (const ev of eventos) {
+    const id = Number(ev.Id || ev.id || ev.EventID || 0);
+    const log = String(ev.Log || ev.LogName || '');
+    const key = `${log}:${id}`;
+    if (!contagem.has(key)) contagem.set(key, { id, log, count: 0, ultimo: '', msgs: [] });
+    const entry = contagem.get(key);
+    entry.count++;
+    if (!entry.ultimo || ev.TimeCreated > entry.ultimo) entry.ultimo = ev.TimeCreated;
+    if (entry.msgs.length < 3) entry.msgs.push(String(ev.Message || '').slice(0, 200));
+  }
+
+  // Cruza com regras
+  const achados = [];
+  for (const regra of EV_REGRAS) {
+    for (const id of regra.ids) {
+      const key = `${regra.log}:${id}`;
+      const entry = contagem.get(key);
+      if (!entry) continue;
+      achados.push({
+        ...regra,
+        eventId: id,
+        count: entry.count,
+        ultimo: entry.ultimo,
+        msgs: entry.msgs,
+      });
+    }
+  }
+
+  // Ordena: crítico → alto → médio → info
+  const ordemRisco = { critico: 0, alto: 1, medio: 2, info: 3 };
+  achados.sort((a, b) => (ordemRisco[a.risco] ?? 9) - (ordemRisco[b.risco] ?? 9));
+
+  // Resumo executivo
+  const criticos = achados.filter(a => a.risco === 'critico').length;
+  const altos    = achados.filter(a => a.risco === 'alto').length;
+  const resumo   = [];
+  if (criticos) resumo.push(`🔴 ${criticos} evento(s) CRÍTICO(S) detectado(s)`);
+  if (altos)    resumo.push(`🟠 ${altos} evento(s) de risco ALTO`);
+  if (!criticos && !altos) resumo.push('✅ Nenhum evento crítico ou de alto risco detectado');
+
+  return { total: eventos.length, regrasAplicadas: achados, resumo, criticos, altos };
+}
+
+// Modal de análise de Event Viewer (regras, sem IA)
+function evAbrirAnalise(agentId, hostname) {
+  document.getElementById('modal-ev-analise')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-ev-analise';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:900px;max-width:98vw;max-height:94vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.3)">
+      <div style="padding:16px 20px;background:#0F172A;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#fff">🔍 Análise de Máquina — ${escapeHtml(hostname||agentId)}</div>
+          <div style="font-size:11.5px;color:rgba(255,255,255,.5);margin-top:2px">Motor de regras automático — sem IA, sem custo, funciona offline</div>
+        </div>
+        <button onclick="document.getElementById('modal-ev-analise').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+      </div>
+      <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--g50)">
+        <select id="ev-sel-log" class="form-control" style="width:190px;font-size:12px">
+          <option value="System,Application,Security">System + Application + Security</option>
+          <option value="System">System</option>
+          <option value="Application">Application</option>
+          <option value="Security">Security</option>
+        </select>
+        <select id="ev-sel-dias" class="form-control" style="width:150px;font-size:12px">
+          <option value="30">Últimos 30 dias</option>
+          <option value="60">Últimos 60 dias</option>
+          <option value="90" selected>Últimos 90 dias</option>
+          <option value="180">Últimos 180 dias</option>
+        </select>
+        <button onclick="evColetarEAnalisar('${agentId}','${escapeHtml(hostname||agentId)}')" class="btn btn-primary btn-sm">🔍 Coletar e Analisar</button>
+        <button id="ev-btn-imprimir" onclick="evImprimirRelatorio()" class="btn btn-secondary btn-sm" disabled>🖨️ Imprimir Relatório</button>
+        <span id="ev-status" style="font-size:12px;color:var(--g500)">Selecione o período e clique em "Coletar e Analisar"</span>
+      </div>
+      <div id="ev-resultado" style="flex:1;overflow:auto;padding:14px 18px">
+        <div style="text-align:center;padding:32px;color:var(--g400)">
+          <div style="font-size:32px;margin-bottom:8px">🔍</div>
+          <div>Selecione o período e clique em "Coletar e Analisar"</div>
+          <div style="font-size:11.5px;margin-top:6px;color:var(--g300)">O agente vai buscar os eventos do Windows no período selecionado (até 90 dias por padrão), o SYSACK vai analisar com base em ${EV_REGRAS.length} regras de segurança e estabilidade e sugerir ações preventivas e corretivas.</div>
+        </div>
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-ev-analise').remove()" class="btn btn-ghost btn-sm">Fechar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+// Guarda o resultado da última análise + metadados para o botão de impressão.
+let _evUltimaAnalise = null;
+
+async function evColetarEAnalisar(agentId, hostname) {
+  const logs    = document.getElementById('ev-sel-log')?.value || 'System,Application,Security';
+  const dias    = Number(document.getElementById('ev-sel-dias')?.value || 90);
+  const status  = document.getElementById('ev-status');
+  const res     = document.getElementById('ev-resultado');
+  const btnImp  = document.getElementById('ev-btn-imprimir');
+  if (btnImp) btnImp.disabled = true;
+
+  if (status) status.textContent = '⏳ Enviando comando ao agente...';
+  if (res)    res.innerHTML = `<div style="padding:32px;text-align:center;color:var(--g500)">⏳ Coletando eventos dos últimos ${dias} dias no Windows... (pode levar até 2 minutos, dependendo do volume de eventos)</div>`;
+
+  try {
+    const cmdId = 'ev_' + Date.now() + '_' + agentId;
+    const u = SESSION_USER || CURRENT_USER || {};
+    const requestedBy = u.nome || u.email || '';
+    await fsSet('agent_commands', cmdId, {
+      agentId, tipo: 'coletar_eventviewer',
+      dados: JSON.stringify({ logs: logs.split(','), dias, requestedBy }),
+      status: 'pendente', criadoEm: new Date().toISOString(),
+    });
+
+    if (status) status.textContent = '⏳ Aguardando resposta do agente... (máquinas com muitos eventos podem levar até 4-5 minutos)';
+
+    // Poll por resultado — coleta de até 90/180 dias pode levar mais tempo que uma
+    // consulta simples, então damos uma janela maior (5min) que o timeout do agente (4min).
+    const inicio = Date.now();
+    let snap = null;
+    while (Date.now() - inicio < 300000) {
+      await new Promise(r => setTimeout(r, 2000));
+      const cmdSnap = await (window.db||window._db).collection('agent_commands').doc(cmdId).get();
+      const st = cmdSnap.data()?.status;
+      if (st === 'concluido') { snap = cmdSnap.data(); break; }
+      if (st === 'erro') throw new Error(cmdSnap.data()?.resultado || 'Agente retornou erro');
+    }
+    if (!snap) throw new Error('Timeout — agente não respondeu em 5min. Se a máquina tem histórico muito grande, tente reduzir o período para 30 dias.');
+
+    // Busca o payload do Event Viewer
+    if (status) status.textContent = '🔍 Analisando eventos...';
+    const evSnap = await (window.db||window._db).collection('agent_eventviewer')
+      .where('commandId','==',cmdId).limit(1).get().catch(()=>null);
+
+    const payload = evSnap?.docs?.[0]?.data()?.payload || '';
+    if (!payload) throw new Error('Payload vazio retornado pelo agente');
+
+    const analise = evAnalisarPayload(payload);
+    evRenderizarResultado(analise, res);
+    if (status) status.textContent = `✅ ${analise.total} eventos analisados (últimos ${dias} dias) · ${analise.regrasAplicadas.length} ocorrências encontradas`;
+
+    // Guarda para o botão de impressão
+    _evUltimaAnalise = {
+      analise, hostname: hostname || agentId, agentId, dias, logs,
+      dataAnalise: new Date().toISOString(), requestedBy,
+    };
+    if (btnImp) btnImp.disabled = false;
+  } catch(e) {
+    if (status) status.textContent = '❌ ' + e.message;
+    if (res) res.innerHTML = `<div style="padding:24px;color:#DC2626;font-size:13px">❌ ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function evRenderizarResultado(analise, container) {
+  if (!container) return;
+  const corRisco = { critico:'#DC2626', alto:'#D97706', medio:'#2563EB', info:'#64748B' };
+  const bgRisco  = { critico:'#FEF2F2', alto:'#FFFBEB', medio:'#EFF6FF', info:'#F8FAFC' };
+
+  const resumoHtml = analise.resumo.map(r => `<div style="font-size:13px;font-weight:600;margin-bottom:4px">${escapeHtml(r)}</div>`).join('');
+
+  const regraHtml = analise.regrasAplicadas.length ? analise.regrasAplicadas.map(r => `
+    <div style="background:${bgRisco[r.risco]||'#F8FAFC'};border:1px solid ${corRisco[r.risco]||'#E2E8F0'};border-left:4px solid ${corRisco[r.risco]||'#64748B'};border-radius:8px;padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+        <span style="background:${corRisco[r.risco]};color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px">${(r.risco||'').toUpperCase()}</span>
+        <b style="font-size:13px">${escapeHtml(r.titulo)}</b>
+        <span style="font-size:11px;color:var(--g500)">EventID ${r.eventId} · ${r.log} · ${r.count}x</span>
+        ${r.ultimo ? `<span style="font-size:10.5px;color:var(--g400)">Último: ${new Date(r.ultimo).toLocaleString('pt-BR')}</span>` : ''}
+      </div>
+      <div style="font-size:12.5px;color:var(--g700);margin-bottom:8px">${escapeHtml(r.desc)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">
+        <div style="background:rgba(255,255,255,.6);border-radius:6px;padding:8px 10px">
+          <div style="font-size:10.5px;font-weight:700;color:#0369A1;margin-bottom:3px">🛡️ AÇÃO PREVENTIVA</div>
+          <div style="font-size:12px;color:var(--g700)">${escapeHtml(r.preventiva || '—')}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.6);border-radius:6px;padding:8px 10px">
+          <div style="font-size:10.5px;font-weight:700;color:#B91C1C;margin-bottom:3px">🔧 AÇÃO CORRETIVA</div>
+          <div style="font-size:12px;color:var(--g700)">${escapeHtml(r.corretiva || '—')}</div>
+        </div>
+      </div>
+      ${r.msgs[0] ? `<details style="margin-top:6px"><summary style="font-size:11px;cursor:pointer;color:var(--g400)">Ver mensagem do evento</summary><pre style="font-size:10.5px;color:var(--g600);margin-top:6px;white-space:pre-wrap;background:rgba(0,0,0,.04);padding:8px;border-radius:6px">${escapeHtml(r.msgs[0])}</pre></details>` : ''}
+    </div>`).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--g400)">✅ Nenhuma ocorrência encontrada nas regras configuradas.</div>';
+
+  container.innerHTML = `
+    <div style="background:var(--g50);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--g600);margin-bottom:6px">Resumo</div>
+      ${resumoHtml}
+      <div style="font-size:11.5px;color:var(--g400);margin-top:4px">${analise.total || 0} eventos coletados · ${analise.regrasAplicadas.length} regras ativadas de ${EV_REGRAS.length} disponíveis</div>
+    </div>
+    <div>${regraHtml}</div>`;
+}
+
+// Gera um relatório limpo (sem o chrome do painel) numa nova aba e chama a impressão.
+function evImprimirRelatorio() {
+  if (!_evUltimaAnalise) { showToast?.('Rode uma análise antes de imprimir.', 'warning'); return; }
+  const { analise, hostname, dias, dataAnalise, requestedBy } = _evUltimaAnalise;
+  const corRisco = { critico:'#DC2626', alto:'#D97706', medio:'#2563EB', info:'#64748B' };
+  const bgRisco  = { critico:'#FEF2F2', alto:'#FFFBEB', medio:'#EFF6FF', info:'#F8FAFC' };
+
+  const linhasAchados = analise.regrasAplicadas.length ? analise.regrasAplicadas.map(r => `
+    <div style="page-break-inside:avoid;border:1px solid ${corRisco[r.risco]||'#E2E8F0'};border-left:5px solid ${corRisco[r.risco]||'#64748B'};border-radius:6px;padding:10px 12px;margin-bottom:10px;background:${bgRisco[r.risco]||'#fff'}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-family:Arial,sans-serif">
+        <span style="background:${corRisco[r.risco]};color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px">${(r.risco||'').toUpperCase()}</span>
+        <b style="font-size:12.5px">${escapeHtml(r.titulo)}</b>
+        <span style="font-size:10.5px;color:#64748B">EventID ${r.eventId} · ${r.log} · ${r.count} ocorrência(s)${r.ultimo ? ' · Último: ' + new Date(r.ultimo).toLocaleString('pt-BR') : ''}</span>
+      </div>
+      <div style="font-size:11.5px;color:#334155;margin-bottom:6px;font-family:Arial,sans-serif">${escapeHtml(r.desc)}</div>
+      <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
+        <tr>
+          <td style="width:50%;vertical-align:top;padding:6px 8px;background:rgba(255,255,255,.7);border-radius:4px 0 0 4px">
+            <div style="font-size:9.5px;font-weight:700;color:#0369A1;margin-bottom:2px">AÇÃO PREVENTIVA</div>
+            <div style="font-size:11px;color:#334155">${escapeHtml(r.preventiva || '—')}</div>
+          </td>
+          <td style="width:50%;vertical-align:top;padding:6px 8px;background:rgba(255,255,255,.7);border-radius:0 4px 4px 0">
+            <div style="font-size:9.5px;font-weight:700;color:#B91C1C;margin-bottom:2px">AÇÃO CORRETIVA</div>
+            <div style="font-size:11px;color:#334155">${escapeHtml(r.corretiva || '—')}</div>
+          </td>
+        </tr>
+      </table>
+    </div>`).join('')
+    : '<div style="padding:16px;text-align:center;color:#64748B;font-family:Arial,sans-serif">✅ Nenhuma ocorrência encontrada nas regras configuradas neste período.</div>';
+
+  const agora = new Date().toLocaleString('pt-BR');
+  const periodoInicio = new Date(Date.now() - dias * 86400000).toLocaleDateString('pt-BR');
+  const periodoFim = new Date().toLocaleDateString('pt-BR');
+
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+    <title>Relatório de Análise — ${escapeHtml(hostname)}</title>
+    <style>
+      @page { margin: 18mm 14mm; }
+      body { font-family: Arial, sans-serif; color:#0F172A; margin:0; }
+      .cabecalho { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #0F172A; padding-bottom:12px; margin-bottom:16px; }
+      .cabecalho h1 { font-size:18px; margin:0 0 4px 0; }
+      .cabecalho .sub { font-size:11px; color:#64748B; }
+      .info-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
+      .info-item { background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px; padding:8px 10px; }
+      .info-item .label { font-size:9.5px; color:#64748B; font-weight:700; text-transform:uppercase; }
+      .info-item .valor { font-size:13px; font-weight:700; margin-top:2px; }
+      .resumo-box { background:#F8FAFC; border-radius:6px; padding:12px 14px; margin-bottom:18px; font-size:12.5px; }
+      .rodape { margin-top:24px; padding-top:10px; border-top:1px solid #E2E8F0; font-size:10px; color:#94A3B8; text-align:center; }
+      h2.secao { font-size:13.5px; border-bottom:1px solid #E2E8F0; padding-bottom:6px; margin:20px 0 10px 0; }
+      @media print { .no-print { display:none !important; } }
+    </style></head>
+    <body>
+      <div class="cabecalho">
+        <div>
+          <h1>🔍 Relatório de Análise de Máquina</h1>
+          <div class="sub">SYSACK · Gerado em ${agora}${requestedBy ? ' · Solicitado por ' + escapeHtml(requestedBy) : ''}</div>
+        </div>
+        <button class="no-print" onclick="window.print()" style="padding:8px 16px;border-radius:6px;border:1px solid #0F172A;background:#0F172A;color:#fff;font-size:13px;cursor:pointer">🖨️ Imprimir / Salvar PDF</button>
+      </div>
+      <div class="info-grid">
+        <div class="info-item"><div class="label">Computador</div><div class="valor">${escapeHtml(hostname)}</div></div>
+        <div class="info-item"><div class="label">Período analisado</div><div class="valor">${periodoInicio} a ${periodoFim} (${dias} dias)</div></div>
+        <div class="info-item"><div class="label">Eventos coletados</div><div class="valor">${analise.total || 0}</div></div>
+        <div class="info-item"><div class="label">Ocorrências encontradas</div><div class="valor">${analise.regrasAplicadas.length}</div></div>
+      </div>
+      <div class="resumo-box">
+        <b>Resumo executivo</b><br>
+        ${analise.resumo.map(r => escapeHtml(r)).join('<br>')}
+      </div>
+      <h2 class="secao">Ocorrências e ações recomendadas</h2>
+      ${linhasAchados}
+      <div class="rodape">Relatório gerado automaticamente pelo motor de regras SYSACK — não substitui avaliação técnica presencial quando necessário.</div>
+    </body></html>`;
+
+  const janela = window.open('', '_blank');
+  if (!janela) { showToast?.('Permita pop-ups para abrir o relatório de impressão.', 'warning'); return; }
+  janela.document.write(html);
+  janela.document.close();
+}
+
+window.evAbrirAnalise     = evAbrirAnalise;
+window.evColetarEAnalisar = evColetarEAnalisar;
+window.evImprimirRelatorio = evImprimirRelatorio;
+
+// ════════════════════════════════════════════════════════════
+// MUDANÇA DE UNIDADE / PATRIMÔNIO — direto da tela de Assistência Remota
+// Reaproveita fsUpdate, que já faz update parcial e audita automaticamente
+// os campos 'area' e 'pat' em ativos/{id}/historico (sysackAuditarMudancaAtivo).
+// ════════════════════════════════════════════════════════════
+async function abrirEditarUnidadeSYSACK(agentId, hostname, ativoId, patAtual, unidadeAtual) {
+  document.getElementById('modal-editar-unidade')?.remove();
+
+  if (!ativoId) {
+    showToast?.('Este agente ainda não está vinculado a um ativo cadastrado — não é possível editar área/patrimônio por aqui.', 'warning');
+    return;
+  }
+
+  // CORREÇÃO: a lista precisa vir de REDES_CESAN (mesma fonte usada pela
+  // validação automática de IP-vs-área, verificarIPArea/ipParaArea) — usar
+  // organograma_unidades aqui geraria áreas que o sistema não reconhece na
+  // hora de checar se o IP da máquina bate com a área escolhida.
+  await carregarRedesCesan();
+  const areasUnicas = new Map(); // nome -> codigo
+  (REDES_CESAN || []).forEach(([, codigo, nome]) => { if (nome) areasUnicas.set(nome, codigo); });
+  const nomesOrdenados = [...areasUnicas.keys()].sort();
+  const opcoesHtml = nomesOrdenados.map(n => `<option value="${escapeHtml(n)}" ${n === unidadeAtual ? 'selected' : ''}>${escapeHtml(n)}${areasUnicas.get(n) ? ' ('+escapeHtml(areasUnicas.get(n).toUpperCase())+')' : ''}</option>`).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-editar-unidade';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:420px;max-width:96vw;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.3)">
+      <div style="padding:16px 20px;background:#0F172A;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:800;color:#fff">🏢 Área / Patrimônio — ${escapeHtml(hostname)}</div>
+        <button onclick="document.getElementById('modal-editar-unidade').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+      </div>
+      <div style="padding:18px 20px">
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Patrimônio (PAT)</label>
+        <input id="eu-input-pat" class="form-control" type="text" value="${escapeHtml(patAtual)}" placeholder="Ex.: 12345" style="width:100%;margin-bottom:14px">
+
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Área</label>
+        <select id="eu-select-unidade" class="form-control" style="width:100%;margin-bottom:6px">
+          <option value="">— Selecione —</option>
+          ${opcoesHtml}
+        </select>
+        <div style="font-size:11px;color:var(--g400)">Área atual: ${escapeHtml(unidadeAtual || 'sem área cadastrada')} · ${nomesOrdenados.length} áreas cadastradas. Se a área escolhida não bater com a rede/IP da máquina, o sistema vai alertar.</div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="document.getElementById('modal-editar-unidade').remove()" class="btn btn-ghost btn-sm">Cancelar</button>
+        <button id="eu-btn-salvar" onclick="salvarUnidadePatrimonioSYSACK('${ativoId}','${escapeHtml(hostname)}','${escapeHtml(patAtual)}','${escapeHtml(unidadeAtual)}')" class="btn btn-primary btn-sm">Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function salvarUnidadePatrimonioSYSACK(ativoId, hostname, patAntigo, unidadeAntiga) {
+  const btn = document.getElementById('eu-btn-salvar');
+  const novoPat = (document.getElementById('eu-input-pat')?.value || '').trim();
+  const novaArea = document.getElementById('eu-select-unidade')?.value || '';
+
+  // Só envia os campos que realmente mudaram — fsUpdate audita e grava no
+  // histórico do ativo automaticamente (só para os campos presentes no objeto).
+  const data = {};
+  if (novoPat !== (patAntigo || '')) data.pat = novoPat;
+  const areaMudou = novaArea && novaArea !== (unidadeAntiga || '');
+  if (areaMudou) { data.area = novaArea; data.local = novaArea; }
+
+  if (!Object.keys(data).length) {
+    showToast?.('Nenhuma alteração para salvar.', 'info');
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    await fsUpdate('ativos', ativoId, data);
+    showToast?.(`✅ ${hostname} atualizado. Alteração registrada no histórico do ativo.`, 'success');
+    document.getElementById('modal-editar-unidade')?.remove();
+
+    // Reaproveita a checagem de IP-vs-área já existente no sistema: se a área
+    // escolhida manualmente não bater com a rede real da máquina, dispara o
+    // alerta padrão do SYSACK (com pedido de justificativa) até ser corrigido.
+    if (areaMudou) {
+      const ativoAtualizado = (STATE.ativos || []).find(x => x.id === ativoId) || { id: ativoId };
+      await verificarIPArea({ ...ativoAtualizado, area: novaArea, local: novaArea }).catch(() => {});
+    }
+    renderAssistenciaRemota?.();
+    renderAtivos?.();
+  } catch(e) {
+    showToast?.('❌ Erro ao salvar: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+  }
+}
+
+window.abrirEditarUnidadeSYSACK = abrirEditarUnidadeSYSACK;
+
+// ════════════════════════════════════════════════════════════
+// EDITAR PATRIMÔNIO — manual ou por foto/câmera (OCR), com confirmação
+// Botão único reaproveitado em "Computadores com Agente" e "sem Agente".
+// ════════════════════════════════════════════════════════════
+let _tesseractCarregado = false;
+async function garantirTesseractCarregado() {
+  if (_tesseractCarregado && window.Tesseract) return;
+  await new Promise((resolve, reject) => {
+    if (window.Tesseract) { _tesseractCarregado = true; return resolve(); }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = () => { _tesseractCarregado = true; resolve(); };
+    s.onerror = () => reject(new Error('Falha ao carregar leitor de imagem (OCR).'));
+    document.head.appendChild(s);
+  });
+}
+
+function abrirEditarPatrimonioSYSACK(ativoId, hostname, patAtual) {
+  document.getElementById('modal-editar-patrimonio')?.remove();
+  if (!ativoId) {
+    showToast?.('Este computador ainda não está vinculado a um ativo cadastrado — não é possível editar o patrimônio por aqui.', 'warning');
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-editar-patrimonio';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:440px;max-width:96vw;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.3)">
+      <div style="padding:16px 20px;background:#0F172A;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:800;color:#fff">🏷️ Patrimônio — ${escapeHtml(hostname)}</div>
+        <button onclick="document.getElementById('modal-editar-patrimonio').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+      </div>
+      <div style="padding:18px 20px">
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Patrimônio atual</label>
+        <div style="font-size:13px;color:var(--g500);margin-bottom:16px">${escapeHtml(patAtual || 'sem patrimônio cadastrado')}</div>
+
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Digitar manualmente</label>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <input id="ep-input-pat" class="form-control" type="text" placeholder="Ex.: 12345" style="flex:1">
+          <button onclick="epSalvarManual('${ativoId}','${escapeHtml(hostname)}')" class="btn btn-primary btn-sm">Salvar</button>
+        </div>
+
+        <div style="height:1px;background:var(--line);margin-bottom:16px"></div>
+
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Ou ler pela câmera / foto da etiqueta</label>
+        <input type="file" accept="image/*" capture="environment" id="ep-input-foto" style="width:100%;font-size:11.5px;margin-bottom:8px">
+        <button onclick="epLerFotoPatrimonio('${ativoId}','${escapeHtml(hostname)}')" class="btn btn-secondary btn-sm" style="width:100%">📷 Ler número da foto</button>
+        <div id="ep-ocr-status" style="font-size:11.5px;color:var(--g500);min-height:16px;margin-top:8px"></div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-editar-patrimonio').remove()" class="btn btn-ghost btn-sm">Fechar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function epSalvarManual(ativoId, hostname) {
+  const val = (document.getElementById('ep-input-pat')?.value || '').trim();
+  const soDigitos = val.replace(/[^0-9]/g, '');
+  if (!soDigitos) { showToast?.('Digite um número de patrimônio válido.', 'warning'); return; }
+  if (!confirm(`Confirma que o patrimônio de ${hostname} é ${soDigitos}?`)) return;
+  try {
+    await fsUpdate('ativos', ativoId, { pat: soDigitos });
+    showToast?.('✅ Patrimônio atualizado.', 'success');
+    document.getElementById('modal-editar-patrimonio')?.remove();
+  } catch(e) {
+    showToast?.('❌ Erro ao salvar: ' + e.message, 'danger');
+  }
+}
+
+async function epLerFotoPatrimonio(ativoId, hostname) {
+  const fileInput = document.getElementById('ep-input-foto');
+  const status = document.getElementById('ep-ocr-status');
+  const file = fileInput?.files?.[0];
+  if (!file) { showToast?.('Selecione ou tire uma foto da etiqueta primeiro.', 'warning'); return; }
+  if (status) status.textContent = '⏳ Carregando leitor de imagem...';
+  try {
+    await garantirTesseractCarregado();
+    if (status) status.textContent = '🔎 Lendo número na etiqueta...';
+    const { data: { text } } = await Tesseract.recognize(file, 'por', {});
+    // Etiquetas trazem formatos como "Patrimônio: 58.431" ou "58.438" — pega
+    // sequências de dígitos (ignorando pontos) com pelo menos 4 números.
+    const numeros = (text.match(/\d[\d.]{2,}\d|\d{4,}/g) || [])
+      .map(s => s.replace(/\./g, ''))
+      .filter(s => s.length >= 4 && s.length <= 8);
+    if (!numeros.length) {
+      if (status) status.textContent = '❌ Não consegui identificar um número de patrimônio nessa foto. Tente uma foto mais nítida ou digite manualmente.';
+      return;
+    }
+    // Prioriza o número mais longo (mais provável de ser o patrimônio, evita pegar CEP/CNPJ parcial)
+    const candidato = numeros.sort((a, b) => b.length - a.length)[0];
+    if (status) status.textContent = '';
+    if (!confirm(`Número identificado na foto: ${candidato}\n\nConfirma que este é o patrimônio de ${hostname}?`)) return;
+    await fsUpdate('ativos', ativoId, { pat: candidato });
+    showToast?.('✅ Patrimônio atualizado a partir da foto.', 'success');
+    document.getElementById('modal-editar-patrimonio')?.remove();
+  } catch(e) {
+    if (status) status.textContent = '❌ Erro na leitura: ' + e.message;
+  }
+}
+
+window.abrirEditarPatrimonioSYSACK = abrirEditarPatrimonioSYSACK;
+window.epSalvarManual = epSalvarManual;
+window.epLerFotoPatrimonio = epLerFotoPatrimonio;
+window.salvarUnidadePatrimonioSYSACK = salvarUnidadePatrimonioSYSACK;
+
+// ════════════════════════════════════════════════════════════
 // IA MONITORING — Exibe alertas de anomalia no dashboard
 // Dados vêm da CF detectarAnomalias (a cada hora)
 // ════════════════════════════════════════════════════════════
@@ -23410,11 +25684,27 @@ async function detectarEventos() {
     var status = (a.status||'').toLowerCase();
 
     // 1. Máquina offline > 5 dias
+    // Cruza com coleção agents — evita falso positivo quando agente está
+    // online mas não conseguiu atualizar ativos.lastSeen no Firestore
     if (a.lastSeen) {
       var ls = new Date(a.lastSeen.seconds?a.lastSeen.seconds*1000:a.lastSeen);
       var diffDias = Math.floor((agora-ls)/(1000*60*60*24));
       if (diffDias > 5 && status==='em-uso') {
-        alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
+        var hnLower = hn.toLowerCase();
+        var agente = (STATE_AGENTS?.list||[]).find(function(ag){
+          return (ag.hostname||ag.id||'').toLowerCase() === hnLower ||
+                 ((a.ip||'') && (ag.ip||'') === a.ip);
+        });
+        var agenteOnline  = agente && (agente.status||'').toLowerCase() === 'online';
+        var agenteRecente = agente && agente.lastSeen && (function(){
+          var d = agente.lastSeen.seconds
+            ? agente.lastSeen.seconds * 1000
+            : new Date(agente.lastSeen).getTime();
+          return (agora - d) < 6 * 86400000;
+        })();
+        if (!agenteOnline && !agenteRecente) {
+          alertas.push({tipo:'offline',ativo:a,diffDias,msg:hn+' está offline há '+diffDias+' dias'});
+        }
       }
     }
 
@@ -23432,6 +25722,16 @@ async function detectarEventos() {
     if (!a.pat && status==='em-uso') {
       alertas.push({tipo:'sem-pat',ativo:a,msg:(hn||a.ip||a.id)+' não tem número patrimonial'});
     }
+  });
+
+  // Deduplica alertas offline — mesma máquina pode ter 2 docs em ativos
+  var _seenOffline = new Set();
+  alertas = alertas.filter(function(al) {
+    if (al.tipo !== 'offline') return true;
+    var key = (al.ativo?.hostname||al.ativo?.computador||al.ativo?.id||'').toLowerCase();
+    if (_seenOffline.has(key)) return false;
+    _seenOffline.add(key);
+    return true;
   });
 
   // 5. SLA Mindworks
@@ -28887,7 +31187,7 @@ async function buscarMaquinasPorUsuario() {
     if (!ativos.length) ativos = filtrarMaquinasPorLoginLocal(q, de, ate);
 
     renderBuscaMaquinasUsuario(ativos, data?.resumo || resumoBuscaLoginLocal(ativos));
-    filtrarTabelaComputadoresPorResultadoLogin(ativos, q);
+    filtrarTabelaAssistenciaRemotaPorResultadoLogin(ativos, q);
   } catch(e) {
     console.warn('[LoginHist]', e);
     if (body) body.innerHTML = `<div style="padding:14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:var(--danger);font-size:12.5px">Erro ao buscar: ${escapeHtml(e.message)}</div>`;
@@ -28961,6 +31261,18 @@ function filtrarMaquinasPorLoginLocal(q, de, ate) {
 function resumoBuscaLoginLocal(ativos) {
   return { ultimoHostname: ativos[0]?.hostname || ativos[0]?.pat || '', ultimoLogin: ativos[0]?.ultimoLogin || null, semana: ativos.filter(a=>a.dias7>0).length, mes: ativos.filter(a=>a.dias30>0).length, ano: ativos.filter(a=>a.dias365>0).length };
 }
+function filtrarTabelaAssistenciaRemotaPorResultadoLogin(ativos, termoBusca = '') {
+  const ids = new Set();
+  (ativos || []).forEach(a => {
+    [a.ativoId, a.id, a.hostname].filter(Boolean).forEach(v => { ids.add(v); ids.add(sysackNormKey(v)); });
+  });
+  const qbox = document.getElementById('ar-search');
+  if (qbox) qbox.value = '';
+  window._filtroLoginAtivoIds = ids;
+  window._filtroLoginTexto = termoBusca || document.getElementById('loginhist-user')?.value || '';
+  renderAssistenciaRemota();
+}
+
 function filtrarTabelaComputadoresPorResultadoLogin(ativos, termoBusca = '') {
   const ids = new Set();
   const pats = new Set();
@@ -29014,6 +31326,7 @@ function limparBuscaMaquinasPorUsuario() {
   window._filtroLoginAtivoPats = null;
   window._filtroLoginTexto = '';
   renderAtivos?.();
+  renderAssistenciaRemota?.();
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -31538,7 +33851,12 @@ class SysackWebRTCViewer {
 
   async function fsGetSubcolecaoSYSACK(path, orderField) {
     try {
-      if (!window.db) return [];
+      // CORREÇÃO: window.db nunca é atribuído neste app (só window._db) — esse guard
+      // checava a variável errada e SEMPRE retornava vazio silenciosamente. Isso
+      // afetava a aba Histórico (e qualquer outro chamador desta função) mesmo com
+      // dados existindo e permissões corretas no Firestore.
+      if (!window.db && !window._db) return [];
+      const db = window.db || window._db;
       let ref = db.collection(path);
       if (orderField) ref = ref.orderBy(orderField, 'desc');
       const snap = await ref.get();
@@ -31556,24 +33874,37 @@ class SysackWebRTCViewer {
     const seenIds = new Set();
     const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
     try {
-      if (!window.db) return out;
-      const hostnames = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean).map(h => String(h).toLowerCase());
+      // CORREÇÃO: window.db nunca é atribuído neste app (só window._db) — esse guard
+      // checava a variável errada e SEMPRE retornava vazio silenciosamente, mesmo com
+      // os documentos existindo em login_history/login_sessions e as regras do
+      // Firestore corretas. Era a causa raiz da aba "Logins" ficar sempre vazia.
+      if (!window.db && !window._db) return out;
+      const db = window.db || window._db;
+      const base = [ag?.hostname, ag?.id, host2(ativo), ativo?.hostname].filter(Boolean);
+      const todosHostnames = [...new Set([
+        ...base.map(h => String(h).toLowerCase()),
+        ...base.map(h => String(h).toUpperCase()),
+      ])];
       const ids = [ativo?.id, ativo?.pat, ag?.id].filter(Boolean);
 
-      // 1) Busca por hostname — campo que o agente sempre grava
-      for (const hn of [...new Set(hostnames)]) {
+      // 1) login_history — lowercase E uppercase, com fallback sem orderBy
+      for (const hn of todosHostnames) {
         try {
           const snap = await db.collection('login_history').where('hostname','==',hn).orderBy('dia','desc').limit(400).get();
           snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
-        } catch {}
+        } catch {
+          try {
+            const snap = await db.collection('login_history').where('hostname','==',hn).limit(400).get();
+            snap.docs.forEach(d => push({ id:d.id, ...d.data() }));
+          } catch {}
+        }
         try {
-          // Também tenta com o hostname como estava gravado (case original)
           const snap2 = await db.collection('login_history').where('agentId','==',hn).limit(200).get();
           snap2.docs.forEach(d => push({ id:d.id, ...d.data() }));
         } catch {}
       }
 
-      // 2) Busca por assetId (campos alternativos)
+      // 2) Busca por assetId
       for (const id of ids) {
         try {
           const snap = await db.collection('login_history').where('assetId','==',id).limit(200).get();
@@ -31581,12 +33912,17 @@ class SysackWebRTCViewer {
         } catch {}
       }
 
-      // 3) Busca sessões de login com horário (coleção login_sessions)
-      for (const hn of [...new Set(hostnames)]) {
+      // 3) login_sessions — lowercase E uppercase, com fallback sem orderBy
+      for (const hn of todosHostnames) {
         try {
           const snap = await db.collection('login_sessions').where('hostname','==',hn).orderBy('loginAt','desc').limit(300).get();
           snap.docs.forEach(d => push({ id:d.id, _isSession:true, ...d.data() }));
-        } catch {}
+        } catch {
+          try {
+            const snap = await db.collection('login_sessions').where('hostname','==',hn).limit(300).get();
+            snap.docs.forEach(d => push({ id:d.id, _isSession:true, ...d.data() }));
+          } catch {}
+        }
       }
     } catch {}
     return out;
@@ -31644,7 +33980,7 @@ class SysackWebRTCViewer {
         <div class="stat-card"><div class="stat-label">Usuário logado</div><div class="stat-value" style="font-size:16px">${esc2(ag?.usuarioLogado || ativo?.usuarioLogado || '—')}</div></div>
         <div class="stat-card"><div class="stat-label">Usuário principal</div><div class="stat-value" style="font-size:16px">${esc2(usuariosPrincipaisTextoSYSACK(ativo, ag))}</div></div>
         <div class="stat-card"><div class="stat-label">Último login</div><div class="stat-value" style="font-size:15px">${esc2(fmt2(ultimoLoginSYSACK(ativo, ag)))}</div></div>
-        <div class="stat-card"><div class="stat-label">Dias logados no ano</div><div class="stat-value">${esc2(String(diasAnoSYSACK(ativo, ag)))}</div></div>
+        <div class="stat-card"><div class="stat-label">Dias logado</div><div class="stat-value">${esc2(String(diasAnoSYSACK(ativo, ag)))}</div></div>
       </div>`;
   }
 
@@ -31654,7 +33990,7 @@ class SysackWebRTCViewer {
     const icon = ({login:'👤', logout:'🚪', chamado:'🎫', chamado_aberto:'🎫', chamado_atualizado:'🎫', chamado_fechado:'✅',
       mudanca_faixa_ip:'🚨', alerta_ip:'🚨', troca_monitor:'🖥️', monitor:'🖥️', transferencia:'🚚',
       troca_responsavel:'👥', mudanca_campo:'✏️', mudanca_local:'📍', troca_area:'🏢', troca_grupo:'🧩',
-      troca_status:'📌', observacao:'📝', obs_tecnico:'📝', nota_tecnico:'📝'}[tipo] || '•');
+      troca_status:'📌', reinicializacao:'🔄', observacao:'📝', obs_tecnico:'📝', nota_tecnico:'📝'}[tipo] || '•');
     const data = e.createdAt || e.data || e.detecEm || e.atualizadoEm || e.ultimoLogin || e.dataLogin || e.time;
     const chamadoId = e.chamadoId || e.idChamado || e.chamado || (String(e.titulo||'').match(/#?([A-Za-z0-9_-]{3,})/)||[])[1];
     const isChamado = String(tipo).includes('chamado') || String(e.titulo||'').toLowerCase().includes('chamado');
@@ -31684,10 +34020,14 @@ class SysackWebRTCViewer {
     const ativoId = ativo?.id || agentId;
 
     // Carrega histórico do ativo + histórico do agente (onde ficam eventos online/offline/IP)
-    const [historicoAtivo, historicoAgente] = await Promise.all([
+    const agentIdUpper = String(agentId).toUpperCase();
+    const agentIdLower = String(agentId).toLowerCase();
+    const historicoAgentePaths = [...new Set([agentId, agentIdUpper, agentIdLower])];
+    const [historicoAtivo, ...historicoAgenteParts] = await Promise.all([
       ativo?.id ? fsGetSubcolecaoSYSACK(`ativos/${ativo.id}/historico`, 'createdAt') : Promise.resolve([]),
-      fsGetSubcolecaoSYSACK(`agents/${agentId}/historico`, 'createdAt'),
+      ...historicoAgentePaths.map(id => fsGetSubcolecaoSYSACK(`agents/${id}/historico`, 'createdAt')),
     ]);
+    const historicoAgente = historicoAgenteParts.flat();
     // Mescla e deduplica por createdAt+tipo
     const seenH = new Set();
     const historico = [...historicoAtivo, ...historicoAgente].filter(h => {
@@ -31710,7 +34050,7 @@ class SysackWebRTCViewer {
       ['Hostname', v('hostname') || ag?.id || ativo?.id], ['Patrimônio', ativo?.pat || 'Sem patrimônio'], ['IP', v('ip')], ['Área', ativo?.area || v('area')], ['Responsável', ativo?.resp || ativo?.responsavel || '—'],
       ['Fabricante', v('fabricante') || v('fab')], ['Modelo', v('modelo')], ['Serial', v('serial') || v('serie')], ['Sistema', v('osNome') || v('so')], ['CPU', v('cpuModelo')],
       ['RAM', v('ramTotalGB') !== '—' ? `${v('ramTotalGB')} GB` : '—'], ['Disco C:', ag?.discoC_livreGB ? `${ag.discoC_livreGB} GB livres` : (ag?.discoC?.freeGB ? `${ag.discoC.freeGB} GB livres de ${ag.discoC.totalGB} GB` : '—')],
-      ['Monitor(es)', monitores], ['Usuário logado', ag?.usuarioLogado || ativo?.usuarioLogado || '—'], ['Usuário principal', usuariosPrincipaisTextoSYSACK(ativo, ag)], ['Último login', fmt2(ultimoLoginSYSACK(ativo, ag))], ['Dias logados no ano', diasAnoSYSACK(ativo, ag)], ['Último contato', fmt2(ag?.lastSeen || ativo?.lastSeen)]
+      ['Monitor(es)', monitores], ['Usuário logado', ag?.usuarioLogado || ativo?.usuarioLogado || '—'], ['Usuário principal', usuariosPrincipaisTextoSYSACK(ativo, ag)], ['Último login', fmt2(ultimoLoginSYSACK(ativo, ag))], ['Dias logado', diasAnoSYSACK(ativo, ag)], ['Uptime', arFormatarUptimeAgente(ag)], ['Boot', fmt2(ag?.bootTime || ag?.lastBootTime)], ['Último contato', fmt2(ag?.lastSeen || ativo?.lastSeen)]
     ];
     return '<table style="width:100%;border-collapse:collapse">' + rows.map(([k,v]) => `<tr><td style="padding:6px 0;color:var(--g500);font-size:12px;width:150px;border-bottom:1px solid var(--g100)">${esc2(k)}</td><td style="padding:6px 0;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--g100)">${esc2(v)}</td></tr>`).join('') + '</table>';
   }
@@ -31855,7 +34195,7 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
       'transferencia','movimentacao','troca_responsavel','mudanca_campo','mudanca_local',
       'troca_area','troca_grupo','troca_status','mudanca_ip','mudanca_hostname',
       'mudanca_nome','mudanca_card','card_movido','patrimonio','inventario',
-      'nota_tecnico','observacao','obs_tecnico'
+      'nota_tecnico','observacao','obs_tecnico','reinicializacao'
     ];
 
     const eventos = [];
@@ -31985,7 +34325,7 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
     document.getElementById('comp-rast-sub').textContent = `${ativo?.pat ? 'PAT '+ativo.pat+' · ' : ''}${ag.ip || ativo?.ip || ''}`;
     document.getElementById('comp-rast-body').innerHTML = buildResumoComputadorSYSACK(ag, ativo) + `
       <div style="display:flex;gap:14px;border-bottom:1px solid var(--g100);margin-bottom:14px">
-        <button data-comp-tab="inventario" onclick="sysackCompTab('inventario')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Inventário</button>
+        <button data-comp-tab="inventario" onclick="sysackCompTab('inventario')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Geral</button>
         <button data-comp-tab="historico" onclick="sysackCompTab('historico')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Histórico</button>
         <button data-comp-tab="logins" onclick="sysackCompTab('logins')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Logins</button>
         <button data-comp-tab="chamados" onclick="sysackCompTab('chamados')" style="background:none;border:0;padding:10px 2px;cursor:pointer">Chamados</button>
@@ -32037,78 +34377,266 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
 window.SYSACK_AGENT_JS_URL = 'https://sysack.vercel.app/agent-desktop.js';
 window.SYSACK_AGENT_INSTALLER_URL = window.SYSACK_AGENT_JS_URL;
 
-function baixarInstaladorSYSACKCorrigido() {
-  const linhas = [
-    '@echo off',
-    'chcp 65001 >nul',
-    'title SYSACK Agent Desktop - Instalador',
-    'echo ============================================',
-    'echo  SYSACK Agent Desktop - Instalacao/Atualizacao',
-    'echo ============================================',
-    'echo.',
-    'net session >nul 2>&1',
-    'if errorlevel 1 (',
-    '  echo ERRO: Execute este arquivo como Administrador.',
-    '  echo Clique com o botao direito e escolha Executar como administrador.',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'set "SYSACK_DIR=C:\\SYSACK"',
-    'set "AGENT_URL=https://sysack.vercel.app/agent-desktop.js"',
-    'set "AGENT_FILE=%SYSACK_DIR%\\agent.js"',
-    'set "NODE_EXE=C:\\Program Files\\nodejs\\node.exe"',
-    'echo [1/5] Preparando pasta %SYSACK_DIR%...',
-    'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
-    'echo [2/5] Encerrando execucao anterior do agente...',
-    'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
-    'for /f "tokens=2 delims==" %%P in (\'wmic process where "CommandLine like \'%%SYSACK%%agent.js%%\'" get ProcessId /value 2^>nul ^| find "ProcessId"\') do taskkill /PID %%P /F >nul 2>&1',
-    'timeout /t 2 /nobreak >nul',
-    'echo [3/5] Baixando agente atualizado da Vercel...',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri (\'%AGENT_URL%?ts=\' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -OutFile \'%AGENT_FILE%\'"',
-    'if not exist "%AGENT_FILE%" (',
-    '  echo ERRO: agent.js nao foi baixado.',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'echo [4/5] Verificando Node.js...',
-    'if not exist "%NODE_EXE%" (',
-    '  echo ERRO: Node.js nao encontrado em %NODE_EXE%.',
-    '  echo Instale Node.js 18+ e execute novamente.',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'echo [5/5] Criando/atualizando tarefa agendada...',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$Action = New-ScheduledTaskAction -Execute \"%NODE_EXE%\" -Argument \"%AGENT_FILE%\"; $Trigger = New-ScheduledTaskTrigger -AtStartup; Register-ScheduledTask -TaskName \"SYSACK-Agent\" -Action $Action -Trigger $Trigger -User \"SYSTEM\" -RunLevel Highest -Force | Out-Null"',
-    'if errorlevel 1 (',
-    '  echo ERRO: falha ao criar a tarefa agendada SYSACK-Agent.',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'schtasks /Run /TN "SYSACK-Agent"',
-    'echo.',
-    'echo ============================================',
-    'echo  Instalacao concluida.',
-    'echo  O computador aparecera no SYSACK em ~60 segundos.',
-    'echo ============================================',
-    'pause'
-  ];
+// ── Verificação periódica de versão do Node.js (roda no frontend SYSACK, não no cliente) ──
+// O sistema verifica a versão LTS do Node.js a cada 24h e armazena em Firestore.
+// Quando há versão nova, exibe alerta e atualiza o instalador gerado automaticamente.
+window._nodeVersionCache = null;
 
-  const script = linhas.join('\r\n');
-  const blob = new Blob([script], { type: 'application/x-bat;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url;
-  a.download = 'Instalar-SYSACK-Agent.bat';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  showToast('Instalador gerado. Execute como Administrador no PC alvo.', 'success', 5000);
+async function sysackVerificarVersaoNode() {
+  const CACHE_KEY = 'sysack_node_version_check';
+  const ultima = localStorage.getItem(CACHE_KEY);
+  if (ultima && Date.now() - Number(ultima) < 86400000) return; // só 1x/dia
+
+  try {
+    // Usa a API pública do Node.js para obter a versão LTS atual
+    const resp = await fetch('https://nodejs.org/dist/index.json');
+    if (!resp.ok) return;
+    const releases = await resp.json();
+    const lts = releases.find(r => r.lts && r.version);
+    if (!lts) return;
+
+    const versao = lts.version; // ex: "v22.3.0"
+    const urlWin64 = `https://nodejs.org/dist/${versao}/node-${versao}-x64.msi`;
+    window._nodeVersionCache = { versao, urlWin64, data: new Date().toISOString() };
+    localStorage.setItem(CACHE_KEY, String(Date.now()));
+
+    // Grava no Firestore para todos os técnicos saberem
+    const db = window.db || window._db;
+    if (db) {
+      const snap = await db.collection('config').doc('node_version').get().catch(() => null);
+      const versaoAtual = snap?.data()?.versao || '';
+      if (versaoAtual !== versao) {
+        await db.collection('config').doc('node_version').set({
+          versao, urlWin64, atualizadoEm: new Date().toISOString(), lts: lts.lts
+        }, { merge: true }).catch(() => {});
+        // Alerta se versão mudou
+        if (versaoAtual) {
+          showToast(`🟢 Nova versão do Node.js disponível: ${versao}. O instalador do agente será atualizado automaticamente.`, 'info', 8000);
+          await (db.collection('alertas').add({
+            tipo: 'node_version_update', titulo: `Nova versão Node.js: ${versao}`,
+            desc: `Versão LTS atualizada de ${versaoAtual} para ${versao}. Instaladores gerados agora usam a nova versão.`,
+            severidade: 'media', createdAt: new Date().toISOString(), lida: false,
+          }).catch(() => {}));
+        }
+      }
+    }
+  } catch(e) {
+    // Silencioso — não é crítico
+  }
 }
 
+// Verifica ao carregar o sistema e depois a cada 24h
+setTimeout(sysackVerificarVersaoNode, 5000);
+
+setInterval(sysackVerificarVersaoNode, 86400000);
+
+// ── Teste de e-mail via painel SMTP ───────────────────────────────
+async function sysackTestarEmail() {
+  const para = (document.getElementById('smtp-test-email')?.value || '').trim();
+  if (!para) return showToast('Informe o e-mail de destino.', 'warning');
+  const res = document.getElementById('smtp-test-resultado');
+  if (res) { res.style.display = ''; res.style.background = '#F8FAFC'; res.textContent = '⏳ Enviando...'; }
+  try {
+    const fn = (await getFbFunctions()).httpsCallable('testarEmail');
+    const r  = await fn({ para });
+    const ok = r.data?.ok;
+    if (res) {
+      res.style.background = ok ? '#F0FDF4' : '#FEF2F2';
+      res.style.color      = ok ? '#065F46' : '#991B1B';
+      res.textContent      = r.data?.msg || (ok ? '✅ Enviado!' : '❌ Falha');
+    }
+    if (!ok) showToast('❌ Falha no envio. Verifique os Secrets SMTP no Firebase.', 'danger', 8000);
+  } catch(e) {
+    if (res) { res.style.display=''; res.style.background='#FEF2F2'; res.style.color='#991B1B'; res.textContent = '❌ ' + e.message; }
+    showToast('Erro: ' + e.message, 'danger', 6000);
+  }
+}
+
+async function sysackObterVersaoNode() {
+  if (window._nodeVersionCache) return window._nodeVersionCache;
+  try {
+    const db = window.db || window._db;
+    if (db) {
+      const snap = await db.collection('config').doc('node_version').get().catch(() => null);
+      if (snap?.exists) {
+        window._nodeVersionCache = snap.data();
+        return window._nodeVersionCache;
+      }
+    }
+  } catch {}
+  // Fallback: versão LTS estável conhecida
+  return { versao: 'v22.14.0', urlWin64: 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' };
+}
+
+function baixarInstaladorSYSACKCorrigido() {
+  sysackObterVersaoNode().then(nodeInfo => {
+    const AGENT_URL = window.SYSACK_AGENT_JS_URL || 'https://sysack.vercel.app/agent-desktop.js';
+    const NODE_VER  = nodeInfo?.versao   || 'v22.14.0';
+    const NODE_MSI  = nodeInfo?.urlWin64 || `https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-x64.msi`;
+
+    // Gera o bat como string direta — sem BOM, sem chcp, sem net session
+    // Usa PowerShell para tudo que precisa de privilégio
+    const bat = [
+      '@echo off',
+      'title SYSACK Agent - Instalador',
+      'echo ============================================',
+      'echo  SYSACK Agent Desktop - Instalacao',
+      'echo ============================================',
+      'echo.',
+      '',
+      ':: Detecta se tem privilegio de admin verificando acesso a pasta System32',
+      'openfiles >nul 2>&1',
+      'if errorlevel 1 (',
+      '  echo.',
+      '  echo  ERRO: Execute como Administrador.',
+      '  echo  Clique com botao direito no arquivo .bat',
+      '  echo  e escolha "Executar como administrador".',
+      '  echo.',
+      '  pause',
+      '  exit /b 1',
+      ')',
+      '',
+      'set "SYSACK_DIR=C:\\SYSACK"',
+      'set "AGENT_URL=' + AGENT_URL + '"',
+      'set "AGENT_FILE=%SYSACK_DIR%\\agent.js"',
+      'set "AGENT_TEMP=%SYSACK_DIR%\\agent_new.js"',
+      'set "LOG_FILE=%SYSACK_DIR%\\install.log"',
+      '',
+      'echo [1/5] Preparando pasta %SYSACK_DIR%...',
+      'if not exist "%SYSACK_DIR%" mkdir "%SYSACK_DIR%"',
+      'echo %date% %time% - Instalacao iniciada > "%LOG_FILE%"',
+      '',
+      'echo [2/5] Verificando Node.js...',
+      'where node >nul 2>&1',
+      'if errorlevel 1 (',
+      '  echo     Node.js nao encontrado. Instalando...',
+      '  powershell -NoProfile -ExecutionPolicy Bypass -Command "& {[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' + NODE_MSI + '\' -OutFile \'%TEMP%\\node_setup.msi\' -UseBasicParsing; Start-Process msiexec -ArgumentList \'/i\',\'%TEMP%\\node_setup.msi\',\'/qn\',\'/norestart\' -Wait; Remove-Item \'%TEMP%\\node_setup.msi\' -Force -ErrorAction SilentlyContinue}"',
+      '  :: Recarrega PATH',
+      '  for /f "delims=" %%P in (\'where /r "%ProgramFiles%\\nodejs" node.exe 2^>nul\') do set "NODE_PATH=%%P"',
+      '  if not defined NODE_PATH (',
+      '    echo ERRO: Node.js nao encontrado apos instalacao. Reinicie e tente novamente.',
+      '    pause & exit /b 1',
+      '  )',
+      ') else (',
+      '  echo     Node.js encontrado.',
+      ')',
+      '',
+      'echo [3/5] Encerrando versao anterior do agente...',
+      'schtasks /End /TN "SYSACK-Agent" >nul 2>&1',
+      'sc stop "SYSACK Agent" >nul 2>&1',
+      'sc stop "SYSACK-Agent" >nul 2>&1',
+      'timeout /t 3 /nobreak >nul',
+      'taskkill /F /IM node.exe >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      'if exist "%AGENT_FILE%.new.js" del /f /q "%AGENT_FILE%.new.js" >nul 2>&1',
+      'echo     Agente anterior encerrado.',
+      '',
+      'echo [4/5] Baixando agente SYSACK...',
+      ':: Baixa para arquivo temporario — nunca bloqueia o agent.js em uso',
+      'if exist "%AGENT_TEMP%" del /f /q "%AGENT_TEMP%" >nul 2>&1',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& {[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ts=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Invoke-WebRequest -Uri (\'' + AGENT_URL + '?ts=\'+$ts) -OutFile \'%AGENT_TEMP%\' -UseBasicParsing}"',
+      'if not exist "%AGENT_TEMP%" (echo ERRO: Falha no download. & echo %date% %time% - ERRO: download falhou >> "%LOG_FILE%" & pause & exit /b 1)',
+      'for %%F in ("%AGENT_TEMP%") do if %%~zF LSS 50000 (echo ERRO: Arquivo corrompido. & pause & exit /b 1)',
+      ':: Substitui o arquivo definitivo',
+      'if exist "%AGENT_FILE%" del /f /q "%AGENT_FILE%" >nul 2>&1',
+      'move /y "%AGENT_TEMP%" "%AGENT_FILE%" >nul 2>&1',
+      'if not exist "%AGENT_FILE%" (echo ERRO: Falha ao mover arquivo. & pause & exit /b 1)',
+      '',
+      ':: Cria config.json com credenciais Firebase',
+      '(',
+      '  echo {',
+      '  echo   "firebaseProjectId": "sysack-829e2",',
+      '  echo   "firebaseApiKey": "AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww",',
+      '  echo   "intervalSeconds": 60',
+      '  echo }',
+      ') > "%SYSACK_DIR%\\config.json"',
+      '',
+      'echo [5/5] Registrando e iniciando servico...',
+      'schtasks /Delete /TN "SYSACK-Agent" /F >nul 2>&1',
+      '',
+      ':: Detecta Windows Server (ProductType 2=DC, 3=Server) vs Desktop (ProductType 1)',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "if ((Get-WmiObject Win32_OperatingSystem).ProductType -ne 1) { exit 1 } else { exit 0 }"',
+      'if %errorlevel%==1 goto :INSTALAR_COMO_SERVICO',
+      '',
+      ':INSTALAR_SCHTASKS',
+      'echo     Windows Desktop — registrando tarefa agendada como SYSTEM...',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& {$node=(Get-Command node -ErrorAction SilentlyContinue).Source; if(-not $node){$node=\'C:\\Program Files\\nodejs\\node.exe\'}; $A=New-ScheduledTaskAction -Execute $node -Argument \'%AGENT_FILE%\' -WorkingDirectory \'%SYSACK_DIR%\'; $T=New-ScheduledTaskTrigger -AtStartup; $S=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable; $P=New-ScheduledTaskPrincipal -UserId \'SYSTEM\' -RunLevel Highest -LogonType ServiceAccount; Register-ScheduledTask -TaskName \'SYSACK-Agent\' -Action $A -Trigger $T -Settings $S -Principal $P -Force | Out-Null; Start-ScheduledTask -TaskName \'SYSACK-Agent\'}"',
+      'goto :VERIFICAR_INICIO',
+      '',
+      ':INSTALAR_COMO_SERVICO',
+      'echo     Windows Server detectado — instalando como servico Windows (node-windows)...',
+      'cd /d "%SYSACK_DIR%"',
+      'if exist "%SYSACK_DIR%\\node_modules\\node-windows" goto :SKIP_NPM_INSTALL',
+      'echo     Instalando node-windows... (log em npm-install.log, timeout 90s)',
+      'if exist "%SYSACK_DIR%\\npm.done" del /f /q "%SYSACK_DIR%\\npm.done" >nul 2>&1',
+      'start "" /min cmd /c "npm install node-windows --save > %SYSACK_DIR%\\npm-install.log 2>&1 & echo done > %SYSACK_DIR%\\npm.done"',
+      'set /a _WAIT=0',
+      ':WAIT_NPM',
+      'if exist "%SYSACK_DIR%\\npm.done" goto :NPM_DONE',
+      'timeout /t 1 /nobreak >nul',
+      'set /a _WAIT+=1',
+      'if %_WAIT% LSS 90 goto :WAIT_NPM',
+      'echo     AVISO: npm install excedeu 90s (veja npm-install.log), encerrando e prosseguindo...',
+      'taskkill /F /IM npm.cmd >nul 2>&1',
+      ':NPM_DONE',
+      'if exist "%SYSACK_DIR%\\npm.done" del /f /q "%SYSACK_DIR%\\npm.done" >nul 2>&1',
+      ':SKIP_NPM_INSTALL',
+      'sc stop "SYSACK-Agent" >nul 2>&1',
+      'sc delete "SYSACK-Agent" >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      '(',
+      "  echo var S=require('node-windows').Service;",
+      "  echo var s=new S({name:'SYSACK-Agent',description:'SYSACK Agent Desktop',script:'C:\\\\SYSACK\\\\agent.js',workingDirectory:'C:\\\\SYSACK',allowServiceLogon:true});",
+      "  echo s.on('install',function(){s.start();setTimeout(function(){process.exit(0);},3000);});",
+      "  echo s.on('alreadyinstalled',function(){s.start();setTimeout(function(){process.exit(0);},3000);});",
+      "  echo s.on('error',function(err){console.error('SERVICE_INSTALL_ERROR:',err&&err.message?err.message:err);process.exit(1);});",
+      "  echo s.install();",
+      ') > "%SYSACK_DIR%\\instalar-svc.js"',
+      'if exist "%SYSACK_DIR%\\svc.done" del /f /q "%SYSACK_DIR%\\svc.done" >nul 2>&1',
+      'echo     Registrando servico... (log em svc-install.log, timeout 30s)',
+      'start "" /min cmd /c "node %SYSACK_DIR%\\instalar-svc.js > %SYSACK_DIR%\\svc-install.log 2>&1 & echo done > %SYSACK_DIR%\\svc.done"',
+      'set /a _WAIT=0',
+      ':WAIT_SVC',
+      'if exist "%SYSACK_DIR%\\svc.done" goto :SVC_DONE',
+      'timeout /t 1 /nobreak >nul',
+      'set /a _WAIT+=1',
+      'if %_WAIT% LSS 30 goto :WAIT_SVC',
+      'echo     AVISO: instalacao do servico excedeu 30s (veja svc-install.log), prosseguindo com fallback direto...',
+      ':SVC_DONE',
+      'if exist "%SYSACK_DIR%\\svc.done" del /f /q "%SYSACK_DIR%\\svc.done" >nul 2>&1',
+      '',
+      ':VERIFICAR_INICIO',
+      'timeout /t 3 /nobreak >nul',
+      'tasklist /FI "IMAGENAME eq node.exe" 2>nul | find /i "node.exe" >nul',
+      'if errorlevel 1 (',
+      '  echo     Iniciando agente diretamente...',
+      '  for /f "delims=" %%P in (\'where node 2^>nul\') do start "" /min "%%P" "%AGENT_FILE%"',
+      ')',
+      '',
+      'echo %date% %time% - Instalacao concluida >> "%LOG_FILE%"',
+      'echo.',
+      'echo ============================================',
+      'echo  Instalacao concluida com sucesso!',
+      'echo.',
+      'echo  O computador aparecera no SYSACK em',
+      'echo  aproximadamente 60 segundos.',
+      'echo ============================================',
+      'echo.',
+      'pause',
+    ].join('\r\n');
+
+    const blob = new Blob([bat], { type: 'application/octet-stream' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'Instalar-SYSACK-Agent.bat';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast('✅ Instalador gerado! Execute como Administrador no PC alvo.', 'success', 6000);
+  });
+}
 
 /* =====================================================================
-   SYSACK v2.1.7 — ALERTAS CONFIGURÁVEIS
+   SYSACK v2.2.2 — ALERTAS CONFIGURÁVEIS
    Corrige botões da tela de Alertas, permite configurar destinatários,
    grupos, horário, intervalo, repetição e adiciona alertas de:
    - mudança de faixa de rede
@@ -32277,6 +34805,385 @@ function baixarInstaladorSYSACKCorrigido() {
     const d = new Date(v);
     return isNaN(d.getTime()) ? String(v) : d.toLocaleString('pt-BR');
   }
+
+  // ══════════════════════════════════════════════════════════════════
+  // PAINEL DE ALERTAS DO DIA — mostra todos os alertas gerados hoje
+  // com botões Resolvido e Justificar ao lado de cada um.
+  // ══════════════════════════════════════════════════════════════════
+
+  // Estado global dos alertas do dia
+  window._sysackAlertasDiaEstado = {}; // key → { tipo, descricao, ... }
+
+  async function _sysackCarregarEstadoDia(key) {
+    if (window._sysackAlertasDiaEstado[key] !== undefined)
+      return window._sysackAlertasDiaEstado[key];
+    try {
+      const db = window.db || window._db;
+      if (!db) return null;
+      const snap = await db.collection('alertas_resolucoes').doc(key).get();
+      window._sysackAlertasDiaEstado[key] = snap.exists ? snap.data() : null;
+    } catch { window._sysackAlertasDiaEstado[key] = null; }
+    return window._sysackAlertasDiaEstado[key];
+  }
+
+  async function _sysackSalvarEstadoDia(key, dados) {
+    window._sysackAlertasDiaEstado[key] = dados;
+    try {
+      const db = window.db || window._db;
+      if (db) await db.collection('alertas_resolucoes').doc(key).set(dados, { merge: true });
+    } catch {}
+  }
+
+  // Busca alertas do dia no Firestore — exposta no window para uso fora da IIFE
+  async function _sysackBuscarAlertasDia() {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const hojeIso = hoje.toISOString();
+    const db = window.db || window._db;
+    const out = [];
+    const seenIds = new Set();
+    const push = d => { if (!seenIds.has(d.id)) { seenIds.add(d.id); out.push(d); } };
+
+    if (db) {
+      // Busca por createdAt (string ISO) — sem orderBy para evitar exigir índice composto
+      try {
+        const snap = await db.collection('alertas')
+          .where('createdAt', '>=', hojeIso)
+          .limit(150).get().catch(() => null);
+        if (snap) snap.docs.forEach(d => push({ id: d.id, ...d.data() }));
+      } catch {}
+
+      // Fallback: busca por campo detecEm (usado pelo trigger v219)
+      try {
+        const snap2 = await db.collection('alertas')
+          .orderBy('createdAt', 'desc').limit(60).get().catch(() => null);
+        if (snap2) snap2.docs.forEach(d => {
+          const dado = d.data();
+          const dt = dado.createdAt || dado.detecEm || '';
+          if (dt >= hojeIso) push({ id: d.id, ...dado });
+        });
+      } catch {}
+
+      // Também lê eventos_detectados do dia
+      try {
+        const snap3 = await db.collection('eventos_detectados')
+          .orderBy('detecEm', 'desc').limit(60).get().catch(() => null);
+        if (snap3) snap3.docs.forEach(d => {
+          const dado = d.data();
+          const dt = dado.detecEm || dado.createdAt || '';
+          if (dt >= hojeIso) push({ id: 'ev_' + d.id, ...dado, createdAt: dado.detecEm || dado.createdAt });
+        });
+      } catch {}
+    }
+
+    // Fallback: STATE em memória
+    if (!out.length) {
+      const st = window.STATE || {};
+      [...(st.alertasEventos || []), ...(st.alertas || [])].forEach((a, i) => {
+        push({ id: a.id || ('estado_' + i), ...a });
+      });
+    }
+
+    // Ordena do mais recente para o mais antigo
+    out.sort((a, b) => String(b.createdAt || b.detecEm || '').localeCompare(String(a.createdAt || a.detecEm || '')));
+    return out;
+  }
+  // Expõe para uso no dashboard (fora da IIFE)
+  window._sysackBuscarAlertasDia  = _sysackBuscarAlertasDia;
+  window._sysackCarregarEstadoDia = _sysackCarregarEstadoDia;
+  window._sysackSalvarEstadoDia   = _sysackSalvarEstadoDia;
+
+  // Cria o painel inline via JS se o HTML ainda não foi atualizado
+  function _sysackCriarPainelDiaSeNecessario() {
+    if (document.getElementById('painel-alertas-dia-inline')) return true;
+    // Painel não encontrado no HTML — cria como modal overlay
+    const el = document.createElement('div');
+    el.id = 'painel-alertas-dia-inline';
+    el.style.cssText = 'display:none;margin-bottom:24px';
+    el.innerHTML = `<div style="background:var(--panel,#fff);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(15,23,42,.06)">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:#FAFAFA">
+        <div><b style="font-size:15px">🔔 Alertas do Dia</b><span id="painel-dia-data" style="font-size:12px;color:var(--g500);margin-left:8px"></span></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="painel-dia-pendentes" style="background:#FEE2E2;color:#991B1B;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">0 pendente(s)</span>
+          <span id="painel-dia-resolvidos" style="background:#D1FAE5;color:#047857;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">0 resolvido(s)</span>
+          <button onclick="document.getElementById('painel-alertas-dia-inline').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--g400);padding:0 4px">✕</button>
+        </div>
+      </div>
+      <div style="display:flex;border-bottom:1px solid var(--line)">
+        <button id="tab-dia-pendentes" onclick="sysackDiaTab('pendentes')" style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid var(--accent);font-size:13px;font-weight:700;color:var(--accent);cursor:pointer">🔴 Pendentes</button>
+        <button id="tab-dia-resolvidos" onclick="sysackDiaTab('resolvidos')" style="flex:1;padding:10px;background:none;border:none;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--g500);cursor:pointer">✅ Resolvidos</button>
+      </div>
+      <div id="painel-dia-lista-pendentes" style="max-height:420px;overflow:auto"></div>
+      <div id="painel-dia-lista-resolvidos" style="max-height:420px;overflow:auto;display:none"></div>
+      <div id="painel-dia-empty" style="display:none;padding:36px;text-align:center;color:var(--g400)">
+        <div style="font-size:32px;margin-bottom:8px">✅</div><b>Nenhum alerta gerado hoje</b>
+      </div>
+    </div>`;
+    // Insere antes do #alertas-list ou na página de alertas
+    const alvoLista = document.getElementById('alertas-list');
+    const alvoPagina = document.getElementById('page-alertas');
+    if (alvoLista) alvoLista.parentNode.insertBefore(el, alvoLista);
+    else if (alvoPagina) alvoPagina.insertBefore(el, alvoPagina.children[1] || alvoPagina.firstChild);
+    else document.body.appendChild(el);
+    return true;
+  }
+
+  // Garante que o botão "Alertas do Dia" existe no cabeçalho da página
+  function _sysackGarantirBotaoPainelDia() {
+    if (document.getElementById('btn-painel-alertas-dia')) return;
+    const btnConfigurar = [...document.querySelectorAll('#page-alertas button')].find(b =>
+      (b.textContent || '').includes('Configurar Alerta'));
+    if (!btnConfigurar) return;
+    const btnDia = document.createElement('button');
+    btnDia.id = 'btn-painel-alertas-dia';
+    btnDia.className = 'btn btn-secondary';
+    btnDia.innerHTML = '🔔 Alertas do Dia <span id="badge-alertas-dia" style="display:none;background:#DC2626;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px">0</span>';
+    btnDia.onclick = () => window.sysackAbrirPainelDia();
+    btnConfigurar.parentNode.insertBefore(btnDia, btnConfigurar);
+  }
+
+  // Abre/fecha o painel inline
+  window.sysackAbrirPainelDia = async function() {
+    _sysackGarantirBotaoPainelDia();
+    _sysackCriarPainelDiaSeNecessario();
+    const painel = document.getElementById('painel-alertas-dia-inline');
+    if (!painel) return;
+    const aberto = painel.style.display !== 'none';
+    if (aberto) { painel.style.display = 'none'; return; }
+    painel.style.display = '';
+    const elData = document.getElementById('painel-dia-data');
+    if (elData) elData.textContent = new Date().toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long' });
+    const elPend = document.getElementById('painel-dia-lista-pendentes');
+    if (elPend) elPend.innerHTML = '<div style="padding:24px;text-align:center;color:var(--g400)">Carregando alertas...</div>';
+    await sysackRenderizarPainelDia();
+  };
+
+  window.sysackDiaTab = function(tab) {
+    const isPend = tab === 'pendentes';
+    document.getElementById('painel-dia-lista-pendentes').style.display = isPend ? '' : 'none';
+    document.getElementById('painel-dia-lista-resolvidos').style.display = isPend ? 'none' : '';
+    const tPend = document.getElementById('tab-dia-pendentes');
+    const tRes  = document.getElementById('tab-dia-resolvidos');
+    if (tPend) { tPend.style.borderBottomColor = isPend ? 'var(--accent)' : 'transparent'; tPend.style.color = isPend ? 'var(--accent)' : 'var(--g500)'; tPend.style.fontWeight = isPend ? '700' : '600'; }
+    if (tRes)  { tRes.style.borderBottomColor  = isPend ? 'transparent' : 'var(--accent)'; tRes.style.color  = isPend ? 'var(--g500)' : 'var(--accent)'; tRes.style.fontWeight = isPend ? '600' : '700'; }
+  };
+
+  window.sysackRenderizarPainelDia = async function() {
+    const alertas = await _sysackBuscarAlertasDia();
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    function alertaKey(al) {
+      return hoje + '_alerta_' + (al.id || al.tipo || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+    }
+
+    // Carrega estados
+    await Promise.all(alertas.map(al => _sysackCarregarEstadoDia(alertaKey(al))));
+
+    function isPausado(st) {
+      return st?.tipo === 'pausado' && new Date(st.pausaAte) > new Date();
+    }
+
+    const pendentes  = alertas.filter(al => {
+      const st = window._sysackAlertasDiaEstado[alertaKey(al)];
+      return !st || (st.tipo !== 'resolvido' && !isPausado(st));
+    });
+    const resolvidos = alertas.filter(al => {
+      const st = window._sysackAlertasDiaEstado[alertaKey(al)];
+      return st?.tipo === 'resolvido';
+    });
+
+    // Atualiza badges
+    const elP = document.getElementById('painel-dia-pendentes');
+    const elR = document.getElementById('painel-dia-resolvidos');
+    const badge = document.getElementById('badge-alertas-dia');
+    if (elP) elP.textContent = pendentes.length + ' pendente(s)';
+    if (elR) elR.textContent = resolvidos.length + ' resolvido(s)';
+    if (badge) {
+      badge.style.display = pendentes.length ? '' : 'none';
+      badge.textContent = pendentes.length;
+    }
+
+    const corMap = {
+      offline:'#DC2626', maquina_offline:'#DC2626',
+      mudanca_faixa_ip:'#DC2626', mudanca_ip:'#D97706', alerta_ip:'#D97706',
+      troca_monitor:'#D97706', monitor:'#D97706',
+      troca_grupo:'#2563EB', troca_area:'#2563EB',
+      maquina_online:'#16A34A',
+    };
+    function corAlerta(al) {
+      const t = String(al.tipo || al.alertaId || '').toLowerCase();
+      return corMap[t] || (['crit','high','alta'].some(x => String(al.severidade||'').toLowerCase().includes(x)) ? '#DC2626' : '#64748B');
+    }
+
+    function renderCard(al, soResolvido) {
+      const key = alertaKey(al);
+      const st  = window._sysackAlertasDiaEstado[key];
+      const cor = corAlerta(al);
+      const titulo  = al.titulo || al.msg || al.mensagem || al.tipo || 'Alerta';
+      const detalhe = al.desc || al.detalhe || al.resultado || al.subtitulo || '';
+      const hora    = al.createdAt ? new Date(al.createdAt?.seconds ? al.createdAt.seconds * 1000 : al.createdAt)
+                        .toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) : '';
+      const maquina = al.hostname || al.pat || al.computador || al.agentId || '';
+
+      const badgeSt = st?.tipo === 'resolvido'
+        ? '<span style="background:#D1FAE5;color:#047857;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;margin-left:6px">✅ RESOLVIDO</span>'
+        : isPausado(st)
+          ? `<span style="background:#EEF2FF;color:#4338CA;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;margin-left:6px">⏸️ PAUSADO até ${new Date(st.pausaAte).toLocaleDateString('pt-BR')}</span>`
+          : '';
+
+      const descricaoResolvida = st?.descricao
+        ? `<div style="font-size:11.5px;color:var(--g500);margin-top:5px;font-style:italic;background:#F8FAFC;padding:5px 8px;border-radius:6px;border-left:3px solid #D1FAE5">📌 ${esc(st.descricao)} — <span style="font-size:10.5px;color:var(--g400)">${esc(st.resolvidoPor || st.justificadoPor || '')}</span></div>`
+        : '';
+
+      const botoesAcao = soResolvido ? '' : `
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;min-width:110px">
+          <button onclick="event.stopPropagation();sysackDiaResolvido('${key}')"
+            style="font-size:11px;padding:5px 10px;border-radius:8px;border:none;background:#D1FAE5;color:#047857;cursor:pointer;font-weight:700;white-space:nowrap">✅ Resolvido</button>
+          <button onclick="event.stopPropagation();sysackDiaJustificar('${key}')"
+            style="font-size:11px;padding:5px 10px;border-radius:8px;border:none;background:#EEF2FF;color:#4338CA;cursor:pointer;font-weight:700;white-space:nowrap">📝 Justificar</button>
+        </div>`;
+
+      return `<div data-alerta-dia-key="${key}" style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);border-left:4px solid ${cor}">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
+            <b style="font-size:13px;color:var(--g900)">${esc(titulo)}</b>
+            ${hora ? `<span style="font-size:11px;color:var(--g400)">${hora}</span>` : ''}
+            ${maquina ? `<span style="background:#F1F5F9;color:#475569;font-size:10px;padding:1px 7px;border-radius:6px;font-weight:600">${esc(maquina)}</span>` : ''}
+            ${badgeSt}
+          </div>
+          ${detalhe ? `<div style="font-size:12px;color:var(--g600);margin-bottom:2px">${esc(detalhe)}</div>` : ''}
+          ${descricaoResolvida}
+        </div>
+        ${botoesAcao}
+      </div>`;
+    }
+
+    // Renderiza pendentes
+    const elLstPend = document.getElementById('painel-dia-lista-pendentes');
+    const elLstRes  = document.getElementById('painel-dia-lista-resolvidos');
+    const elEmpty   = document.getElementById('painel-dia-empty');
+
+    if (!alertas.length) {
+      if (elLstPend) elLstPend.innerHTML = '';
+      if (elLstRes)  elLstRes.innerHTML  = '';
+      if (elEmpty)   elEmpty.style.display = '';
+    } else {
+      if (elEmpty)   elEmpty.style.display = 'none';
+      if (elLstPend) elLstPend.innerHTML = pendentes.length
+        ? pendentes.map(al => renderCard(al, false)).join('')
+        : '<div style="padding:28px;text-align:center;color:var(--g400)">✅ Nenhum alerta pendente agora.</div>';
+      if (elLstRes)  elLstRes.innerHTML = resolvidos.length
+        ? resolvidos.map(al => renderCard(al, true)).join('')
+        : '<div style="padding:28px;text-align:center;color:var(--g400)">Nenhum alerta resolvido ainda hoje.</div>';
+    }
+  };
+
+  // Modal: Resolvido (do painel do dia)
+  window.sysackDiaResolvido = function(key) {
+    document.getElementById('modal-alerta-resolvido')?.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-alerta-resolvido';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML = `<div style="background:var(--panel,#fff);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.22);width:480px;max-width:97vw;padding:24px">
+      <h3 style="margin:0 0 8px;font-size:17px">✅ Marcar como resolvido</h3>
+      <p style="font-size:13px;color:var(--g500);margin:0 0 12px">Descreva como o problema foi resolvido:</p>
+      <textarea id="ar-res-dia-texto" rows="4" class="form-control" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="Ex: Computador foi ligado pelo usuário após retorno de férias."></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-alerta-resolvido')?.remove()">Cancelar</button>
+        <button class="btn btn-sm" style="background:#059669;color:#fff" onclick="sysackDiaConfirmarResolvido(${JSON.stringify(key)}, this)">✅ Confirmar</button>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+    setTimeout(() => m.querySelector('textarea')?.focus(), 80);
+  };
+
+  window.sysackDiaConfirmarResolvido = async function(key, btn) {
+    const texto = document.getElementById('ar-res-dia-texto')?.value?.trim();
+    if (!texto) { showToast('Informe como foi resolvido.', 'warning'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    const u = SESSION_USER || CURRENT_USER || {};
+    await _sysackSalvarEstadoDia(key, {
+      tipo: 'resolvido', descricao: texto,
+      resolvidoPor: u.nome || u.email || 'técnico',
+      resolvidoEm: new Date().toISOString()
+    });
+    document.getElementById('modal-alerta-resolvido')?.remove();
+    showToast('✅ Alerta marcado como resolvido.', 'success', 3000);
+    await sysackRenderizarPainelDia();
+  };
+
+  // Modal: Justificar (do painel do dia)
+  window.sysackDiaJustificar = function(key) {
+    document.getElementById('modal-alerta-justif')?.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-alerta-justif';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML = `<div style="background:var(--panel,#fff);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.22);width:520px;max-width:97vw;padding:24px">
+      <h3 style="margin:0 0 8px;font-size:17px">📝 Justificar alerta</h3>
+      <p style="font-size:13px;color:var(--g500);margin:0 0 12px">Explique o motivo e defina o que deve acontecer com o alerta:</p>
+      <textarea id="aj-dia-texto" rows="3" class="form-control" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="Ex: Máquina em manutenção preventiva programada."></textarea>
+      <div style="margin:14px 0 6px;font-size:13px;font-weight:600">O alerta deve:</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="aj-dia-acao" value="continuar" checked> Continuar normalmente</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="aj-dia-acao" value="pausar"> Pausar por
+          <input id="aj-dia-dias" type="number" min="1" max="90" value="7" style="width:50px;margin:0 4px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;font-size:13px"> dias
+        </label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-alerta-justif')?.remove()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="sysackDiaConfirmarJustif(${JSON.stringify(key)}, this)">📝 Salvar</button>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+    setTimeout(() => m.querySelector('textarea')?.focus(), 80);
+  };
+
+  window.sysackDiaConfirmarJustif = async function(key, btn) {
+    const texto = document.getElementById('aj-dia-texto')?.value?.trim();
+    if (!texto) { showToast('Informe a justificativa.', 'warning'); return; }
+    const acao  = document.querySelector('[name="aj-dia-acao"]:checked')?.value || 'continuar';
+    const dias  = parseInt(document.getElementById('aj-dia-dias')?.value || '7');
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    const u = SESSION_USER || CURRENT_USER || {};
+    const pausaAte = acao === 'pausar' ? new Date(Date.now() + dias * 86400000).toISOString() : null;
+    await _sysackSalvarEstadoDia(key, {
+      tipo: acao === 'pausar' ? 'pausado' : 'justificado',
+      descricao: texto, pausaAte,
+      diasPausa: acao === 'pausar' ? dias : 0,
+      justificadoPor: u.nome || u.email || 'técnico',
+      justificadoEm: new Date().toISOString()
+    });
+    document.getElementById('modal-alerta-justif')?.remove();
+    showToast(acao === 'pausar' ? `⏸️ Alerta pausado por ${dias} dias.` : '📝 Justificativa registrada.', 'success', 3000);
+    await sysackRenderizarPainelDia();
+  };
+
+  // Atualiza o badge do botão "Alertas do Dia" sempre que a página de alertas é aberta
+  // Também garante que o botão existe mesmo sem o HTML atualizado
+  const _origRenderAlertasPag = window.renderAlertas;
+  window.renderAlertas = async function() {
+    if (_origRenderAlertasPag) await _origRenderAlertasPag();
+    // Injeta o botão "Alertas do Dia" se não existir ainda
+    setTimeout(() => {
+      _sysackGarantirBotaoPainelDia();
+    }, 200);
+    // Atualiza badge sem abrir o painel
+    try {
+      const alertas = await _sysackBuscarAlertasDia();
+      const hoje = new Date().toISOString().slice(0, 10);
+      const pendentes = alertas.filter(al => {
+        const key = hoje + '_alerta_' + (al.id || al.tipo || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+        const st  = window._sysackAlertasDiaEstado[key];
+        return !st || (st.tipo !== 'resolvido' && !(st.tipo === 'pausado' && new Date(st.pausaAte) > new Date()));
+      });
+      const badge = document.getElementById('badge-alertas-dia');
+      if (badge) {
+        badge.style.display = pendentes.length ? '' : 'none';
+        badge.textContent = pendentes.length;
+      }
+    } catch {}
+  };
 
   function ipFaixa24(ip) {
     const p = String(ip || '').trim().split('.');

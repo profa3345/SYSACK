@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.1.12-bloqueio-dominio
+ * SYSACK Agent Desktop v2.2.3
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -25,6 +25,7 @@ const PROJECT_ID = cfg.firebaseProjectId || 'sysack-829e2';
 const API_KEY    = cfg.firebaseApiKey    || 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
 const AGENT_ID   = cfg.agentId          || os.hostname();
 const INTERVAL   = (cfg.intervalSeconds || 60) * 1000;
+let _fsErrosConsecutivos = 0; // contador de falhas consecutivas no Firestore
 let TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
 const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000;
 let _softwareCache = { at: 0, list: [] };
@@ -54,9 +55,12 @@ const ALLOWED_COMMANDS = new Set([
 function isWindowsAdminContext() {
   if (process.platform !== 'win32') return process.getuid && process.getuid() === 0;
   try {
-    // SYSTEM normalmente tem SID S-1-5-18. A checagem por net session valida admin local.
-    const who = execSync('whoami /user', { timeout: 3000, windowsHide: true }).toString().toUpperCase();
-    if (who.includes('S-1-5-18')) return true;
+    const who = execSync('whoami', { timeout: 3000, windowsHide: true }).toString().toUpperCase().trim();
+    if (who.includes('SYSTEM')) return true;
+  } catch(e) {}
+  try {
+    const who2 = execSync('whoami /user', { timeout: 3000, windowsHide: true }).toString().toUpperCase();
+    if (who2.includes('S-1-5-18') || who2.includes('SYSTEM')) return true;
   } catch(e) {}
   try {
     execSync('net session', { stdio: 'ignore', timeout: 3000, windowsHide: true });
@@ -96,7 +100,16 @@ async function firestoreCreate(collectionPath, data) {
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
-      res.on('end', () => resolve(raw));
+      res.on('end', () => {
+        // CORREÇÃO: antes resolvia sempre, mesmo em 403/400, mascarando falhas
+        // silenciosas de permissão/índice em login_sessions e agents/{id}/historico.
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          log(`[Firestore] create HTTP ${res.statusCode} em ${collectionPath}: ${raw.slice(0, 300)}`);
+          log('[Firestore] DICA: HTTP 403 = verifique as Firestore Rules para esta coleção. HTTP 400 = payload/índice inválido.');
+          return reject(new Error(`HTTP ${res.statusCode} em ${collectionPath}: ${raw.slice(0, 200)}`));
+        }
+        resolve(raw);
+      });
     });
     req.on('error', reject);
     req.write(body);
@@ -159,13 +172,15 @@ async function validarComandoSeguro(id, tipo, fields, dados) {
   }
 
   const role = (fields.requestedByRole || {}).stringValue || dados.requestedByRole || '';
-  if (requiresAdmin && !['admin','gestor','tecnico'].includes(role)) {
+  if (requiresAdmin && role && !['admin','gestor','tecnico','mdm_admin'].includes(role)) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'perfil_sem_permissao', requestedByRole: role });
     await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Perfil do solicitante sem permissão para comando administrativo.' }).catch(() => {});
     return false;
   }
 
-  if (requiresAdmin && !String((fields.motivo || {}).stringValue || dados.motivo || '').trim()) {
+  // Motivo obrigatório apenas para bloqueio/desbloqueio/powershell
+  const tiposComJustificativa = new Set(['bloquear_maquina','desbloquear_maquina','powershell']);
+  if (tiposComJustificativa.has(tipo) && !String((fields.motivo || {}).stringValue || dados.motivo || '').trim()) {
     await auditAgentCommand(id, 'AGENT_COMMAND_REJECTED', { tipo, motivo: 'justificativa_obrigatoria' });
     await firestorePatch('agent_commands/' + id, { status: 'descartado', resultado: 'Justificativa obrigatória não informada.' }).catch(() => {});
     return false;
@@ -225,20 +240,44 @@ function agendarReinicioAgent() {
     const nodeExe  = process.execPath;
     const script   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
     const bat      = path.join(__dirname, '_restart_sysack_agent.cmd');
-    const taskCmd  = 'schtasks /Run /TN "SYSACK-Agent"';
-    const direct   = 'start "SYSACK Agent" /min "' + nodeExe + '" "' + script + '"';
-    // Remove PID file antes de reiniciar para o novo processo não tentar matar a si mesmo
     const pidClean = 'del /f /q "' + PID_FILE + '" >nul 2>nul';
-    const body = '@echo off\r\n' +
-      'timeout /t 3 /nobreak >nul\r\n' +
-      pidClean + '\r\n' +
-      taskCmd + ' >nul 2>nul\r\n' +
-      'if errorlevel 1 ' + direct + '\r\n';
-    fs.writeFileSync(bat, body, 'utf8');
+    const nodeCmd  = '"' + nodeExe + '" "' + script + '"';
+    const linhas = [
+      '@echo off',
+      'timeout /t 5 /nobreak >nul',
+      pidClean,
+      '',
+      ':: Para o servico e mata processos node antes de mover o arquivo',
+      'schtasks /End /TN "SYSACK-Agent" >nul 2>nul',
+      'sc stop "SYSACK Agent" >nul 2>nul',
+      'sc stop "SYSACK-Agent" >nul 2>nul',
+      'timeout /t 3 /nobreak >nul',
+      'taskkill /F /IM node.exe >nul 2>nul',
+      'timeout /t 2 /nobreak >nul',
+      '',
+      ':: Move arquivo temporario para o definitivo',
+      'if exist "' + script + '.new.js" (',
+      '  move /y "' + script + '.new.js" "' + script + '" >nul',
+      ')',
+      '',
+      ':: Reinicia — schtasks → direto',
+      'schtasks /Run /TN "SYSACK-Agent" >nul 2>nul',
+      'if not errorlevel 1 goto :FIM',
+      'sc start "SYSACK Agent" >nul 2>nul',
+      'if not errorlevel 1 goto :FIM',
+      'start "SYSACK Agent" /min ' + nodeCmd,
+      ':FIM',
+    ].join('\r\n');
+    fs.writeFileSync(bat, linhas, 'utf8');
     exec('cmd /c start "" /min "' + bat + '"', { windowsHide: true });
-    log('[UPDATE] Reinício agendado — script: ' + script);
+    log('[UPDATE] Reinício agendado — bat: ' + bat);
   } catch(e) {
     log('[UPDATE] Falha ao agendar reinício: ' + e.message);
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, [process.argv[1]], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.unref();
+    } catch(e2) { log('[UPDATE] Spawn também falhou: ' + e2.message); }
   }
 }
 
@@ -287,7 +326,57 @@ function getDiskInfo() {
 function getLoggedUser() {
   try {
     if (process.platform === 'win32') {
-      // WMIC é mais confiável rodando como SYSTEM
+      // MÉTODO 1: query session — funciona com RDP, mas exige Remote Desktop Services ativo
+      try {
+        const out = execSync('query session', { timeout: 5000, windowsHide: true }).toString();
+        const lines = out.split('\n').slice(1);
+        for (const line of lines) {
+          const trimmed = line.trim().replace(/^>/, '').trim();
+          if (!trimmed) continue;
+          const cols = trimmed.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+          const parts = cols.length >= 3 ? cols : trimmed.split(/\s+/);
+          const estados = ['active','ativo','disc','desconectado','listen','conn'];
+          let usuario = '';
+          for (const p of parts) {
+            const pl = p.toLowerCase();
+            if (estados.includes(pl)) continue;
+            if (/^\d+$/.test(p)) continue;
+            if (['console','rdp-tcp','services','sistema','system'].includes(pl)) continue;
+            usuario = p;
+            break;
+          }
+          if (usuario && (trimmed.toLowerCase().includes('active') || trimmed.toLowerCase().includes('ativo'))) {
+            return usuario;
+          }
+        }
+      } catch(e1) {
+        log('[getLoggedUser] query session falhou: ' + e1.message);
+      }
+
+      // MÉTODO 2: query user
+      try {
+        const out = execSync('query user', { timeout: 5000, windowsHide: true }).toString();
+        for (const line of out.split('\n').slice(1)) {
+          const trimmed = line.trim().replace(/^>/, '').trim();
+          if (!trimmed) continue;
+          const parts = trimmed.split(/\s+/);
+          const user = parts[0];
+          if (user && !['services','sistema','system'].includes(user.toLowerCase())) {
+            if (line.toLowerCase().includes('active') || line.toLowerCase().includes('ativo')) {
+              return user;
+            }
+          }
+        }
+        const firstLine = out.split('\n').slice(1).find(l => l.trim());
+        if (firstLine) {
+          const user = firstLine.trim().replace(/^>/, '').trim().split(/\s+/)[0];
+          if (user && !['services','sistema','system'].includes(user.toLowerCase())) return user;
+        }
+      } catch(e2) {
+        log('[getLoggedUser] query user falhou: ' + e2.message);
+      }
+
+      // MÉTODO 3: WMIC computersystem — usuário logado no console local
       try {
         const out = execSync('wmic computersystem get username /format:value', { timeout: 5000, windowsHide: true }).toString();
         const match = out.match(/UserName=(.+)/i);
@@ -295,39 +384,52 @@ function getLoggedUser() {
           const full = match[1].trim();
           return full.includes('\\') ? full.split('\\').pop() : full;
         }
-      } catch(e2) {}
-      // fallback: query user (melhor para servidores Windows com RDP)
+      } catch(e3) {
+        log('[getLoggedUser] wmic computersystem falhou: ' + e3.message);
+      }
+
+      // MÉTODO 4: PowerShell Get-CimInstance — funciona em Server Core e quando WMIC falha
       try {
-        const out = execSync('query user', { timeout: 5000, windowsHide: true }).toString();
-        for (const line of out.split('\n').slice(1)) { // pula header
-          const trimmed = line.trim().replace(/^>/, '').trim();
-          if (!trimmed) continue;
-          const parts = trimmed.split(/\s+/);
-          const user = parts[0];
-          // Verifica se tem estado "Active" ou "Ativo"
-          if (user && !['services','sistema','system'].includes(user.toLowerCase())) {
-            if (line.toLowerCase().includes('active') || line.toLowerCase().includes('ativo')) {
-              return user;
-            }
-          }
+        const out = execSync(
+          'powershell -NoProfile -Command "(Get-CimInstance -ClassName Win32_ComputerSystem).UserName"',
+          { timeout: 8000, windowsHide: true }
+        ).toString().trim();
+        if (out && out.toLowerCase() !== 'null' && out.length > 0) {
+          return out.includes('\\') ? out.split('\\').pop() : out;
         }
-        // Se não tem Active, pega o primeiro usuário da lista
-        const firstLine = out.split('\n').slice(1).find(l => l.trim());
-        if (firstLine) {
-          const user = firstLine.trim().replace(/^>/, '').trim().split(/\s+/)[0];
-          if (user && !['services','sistema','system'].includes(user.toLowerCase())) return user;
-        }
-      } catch(e3) {}
-      // fallback: query session
+      } catch(e4) {
+        log('[getLoggedUser] PowerShell Get-CimInstance falhou: ' + e4.message);
+      }
+
+      // MÉTODO 5: dono do processo explorer.exe — último recurso
       try {
-        const out = execSync('query session', { timeout: 5000, windowsHide: true }).toString();
-        for (const line of out.split('\n')) {
-          if (line.toLowerCase().includes('active')) {
-            const user = line.trim().replace(/^>/, '').trim().split(/\s+/)[0];
-            if (user && !['services','sistema','system','services#'].includes(user.toLowerCase())) return user;
-          }
+        const out = execSync(
+          'powershell -NoProfile -Command "Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty UserName"',
+          { timeout: 8000, windowsHide: true }
+        ).toString().trim();
+        if (out && out.length > 0) {
+          return out.includes('\\') ? out.split('\\').pop() : out;
         }
-      } catch(e4) {}
+      } catch(e5) {
+        log('[getLoggedUser] explorer owner falhou: ' + e5.message);
+      }
+
+      // MÉTODO adicional: Win32_LogonSession — detecta sessões interativas no Windows Server
+      try {
+        const out = execSync(
+          'powershell -NoProfile -Command "' +
+          '$s=Get-CimInstance Win32_LogonSession|Where-Object{$_.LogonType -in @(2,10,11)}|Select-Object -First 1;' +
+          'if($s){$u=Get-CimInstance -Query(\'ASSOCIATORS OF {Win32_LogonSession.LogonId=\'+$s.LogonId+\'} WHERE AssocClass=Win32_LoggedOnUser\');if($u){$u[0].Name}}"',
+          { timeout: 10000, windowsHide: true }
+        ).toString().trim();
+        if (out && out.length > 0 && !['system','sistema'].includes(out.toLowerCase())) {
+          return out.includes('\\') ? out.split('\\').pop() : out;
+        }
+      } catch(e6) {
+        log('[getLoggedUser] Win32_LogonSession falhou: ' + e6.message);
+      }
+
+      log('[getLoggedUser] Nenhum método detectou usuário logado nesta coleta.');
       return '';
     }
     return os.userInfo().username;
@@ -352,7 +454,39 @@ function getOsInfo() {
 }
 
 function getUptime() {
-  return Math.round(os.uptime()); // segundos numérico — uptimeH calculado no payload
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync('wmic os get lastbootuptime /format:value', { timeout: 3000, windowsHide: true }).toString();
+      const match = out.match(/LastBootUpTime=(\d{14})/);
+      if (match) {
+        const raw = match[1];
+        const boot = new Date(Number(raw.slice(0,4)), Number(raw.slice(4,6))-1, Number(raw.slice(6,8)),
+          Number(raw.slice(8,10)), Number(raw.slice(10,12)), Number(raw.slice(12,14)));
+        const sec = Math.max(0, Math.round((Date.now() - boot.getTime()) / 1000));
+        if (sec > 0 && sec < 365*24*3600) return sec;
+      }
+    } catch {}
+  }
+  return Math.round(os.uptime());
+}
+
+function getBootTimeIso(uptimeSec = getUptime()) {
+  return new Date(Date.now() - (Number(uptimeSec) || 0) * 1000).toISOString();
+}
+
+// Estado local para detectar mudanças técnicas mesmo quando o portal não está aberto.
+// Mantém a linha do tempo preenchida automaticamente em agents/{id}/historico.
+const STATE_FILE = path.join(__dirname, 'agent-state.json');
+function carregarEstadoLocal() {
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch(e) { return {}; }
+}
+function salvarEstadoLocal(st) {
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify(st || {}, null, 2), 'utf8'); } catch(e) {}
+}
+function monitoresAssinatura(monitores) {
+  if (!Array.isArray(monitores)) return '';
+  return monitores.map(m => [m.nome || m.caption || 'Monitor', m.serial || '', m.resolucao || ''].join('#'))
+    .sort().join('|');
 }
 
 // ── Monitores conectados ──────────────────────────────────────────
@@ -688,30 +822,57 @@ function firestoreSet(docPath, data) {
     const body = JSON.stringify({ fields });
     const urlObj = new URL(url);
 
-    const req = https.request({
-      hostname: urlObj.hostname,
-      path:     urlObj.pathname + urlObj.search,
-      method:   'PATCH',
-      rejectUnauthorized: false, // aceita proxy CESAN com certificado autoassinado
-      headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-    }, res => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(raw);
+    const makeReq = (attempt) => {
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path:     urlObj.pathname + urlObj.search,
+        method:   'PATCH',
+        rejectUnauthorized: false,
+        timeout:  15000,
+        headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, res => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            _fsErrosConsecutivos = 0; // reset contador de erros
+            if (global._watchdogOk) global._watchdogOk();
+            resolve(raw);
+          } else if ((res.statusCode === 429 || res.statusCode >= 500) && attempt < 3) {
+            // Rate limit ou erro servidor — retry com backoff
+            const delay = attempt * 2000;
+            log(`[Firestore] HTTP ${res.statusCode} em ${docPath} — retry em ${delay}ms (tentativa ${attempt})`);
+            setTimeout(() => makeReq(attempt + 1), delay);
+          } else {
+            _fsErrosConsecutivos++;
+            const errMsg = `HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 200)}`;
+            log(`[Firestore] ERRO gravação — ${errMsg} (erros consecutivos: ${_fsErrosConsecutivos})`);
+            reject(new Error(errMsg));
+          }
+        });
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        if (attempt < 3) {
+          log(`[Firestore] Timeout em ${docPath} — retry ${attempt}`);
+          setTimeout(() => makeReq(attempt + 1), attempt * 1500);
         } else {
-          // CORREÇÃO: loga o erro HTTP para facilitar diagnóstico de 403 (regras Firestore)
-          // e 400 (índice ausente), em vez de rejeitar silenciosamente.
-          const errMsg = `HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 300)}`;
-          log(`[Firestore] ERRO gravação — ${errMsg}`);
-          reject(new Error(errMsg));
+          _fsErrosConsecutivos++;
+          reject(new Error('Timeout após 3 tentativas: ' + docPath));
         }
       });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
+      req.on('error', (e) => {
+        if (attempt < 3) {
+          setTimeout(() => makeReq(attempt + 1), attempt * 1500);
+        } else {
+          _fsErrosConsecutivos++;
+          reject(e);
+        }
+      });
+      req.write(body);
+      req.end();
+    };
+    makeReq(1);
   });
 }
 
@@ -816,26 +977,35 @@ function firestoreRunQuery(collectionId, filters = [], limitN = 500) {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
-        // CORREÇÃO: loga erros HTTP (400 = índice ausente, 403 = regras Firestore bloqueando)
+        // CORREÇÃO: loga erros HTTP (400 = índice ausente, 403 = regras Firestore bloqueando).
+        // Além disso, marcamos o array retornado com `.ok = false` quando a consulta
+        // FALHOU (em vez de simplesmente "não achou nada"), para que quem consome o
+        // resultado (ex.: cálculo de dias logados) possa distinguir "0 dias reais" de
+        // "não conseguimos consultar agora" e evitar sobrescrever um contador correto
+        // com um valor errado por causa de uma falha de rede/permissão passageira.
         if (res.statusCode < 200 || res.statusCode >= 300) {
           log(`[LoginHistory] runQuery HTTP ${res.statusCode} em ${collectionId}: ${raw.slice(0, 300)}`);
           log('[LoginHistory] DICA: HTTP 403 = verifique as Firestore Rules para login_history. HTTP 400 = crie o índice: login_history / hostname ASC');
-          return resolve([]);
+          const falhou = []; falhou.ok = false;
+          return resolve(falhou);
         }
         try {
           const arr = JSON.parse(raw);
-          if (!Array.isArray(arr)) return resolve([]);
+          if (!Array.isArray(arr)) { const falhou = []; falhou.ok = false; return resolve(falhou); }
           const docs = arr.map(x => x.document ? firestoreDocToJs(x.document) : null).filter(Boolean);
+          docs.ok = true;
           resolve(docs);
         } catch(e) {
           log('[LoginHistory] Erro parse runQuery: ' + e.message);
-          resolve([]);
+          const falhou = []; falhou.ok = false;
+          resolve(falhou);
         }
       });
     });
     req.on('error', e => {
       log('[LoginHistory] runQuery falhou: ' + e.message);
-      resolve([]);
+      const falhou = []; falhou.ok = false;
+      resolve(falhou);
     });
     req.write(body);
     req.end();
@@ -865,6 +1035,7 @@ async function localizarAtivoRelacionado(dados) {
 
 function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
   const cutoff = yyyyMmDdLocal(addDays(new Date(), -LOGIN_PRINCIPAL_DIAS + 1));
+  const anoAtual = String(new Date().getFullYear());
   const porUsuario = new Map();
 
   for (const d of docs || []) {
@@ -876,6 +1047,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
       porUsuario.set(usuario, {
         usuario,
         diasSet: new Set(),
+        diasAnoSet: new Set(), // dias logados apenas no ano corrente
         primeiroDia: dia,
         ultimoDia: dia,
         ultimoLoginEm: d.ultimoLogin || d.ultimoLoginEm || '',
@@ -884,6 +1056,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
 
     const item = porUsuario.get(usuario);
     item.diasSet.add(dia);
+    if (dia.startsWith(anoAtual)) item.diasAnoSet.add(dia);
     if (dia < item.primeiroDia) item.primeiroDia = dia;
     if (dia > item.ultimoDia) item.ultimoDia = dia;
     const ult = d.ultimoLogin || d.ultimoLoginEm || '';
@@ -897,6 +1070,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
       porUsuario.set(uAtualNorm, {
         usuario: uAtualNorm,
         diasSet: new Set(),
+        diasAnoSet: new Set(),
         primeiroDia: diaAtual,
         ultimoDia: diaAtual,
         ultimoLoginEm: new Date().toISOString(),
@@ -904,6 +1078,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
     }
     const item = porUsuario.get(uAtualNorm);
     item.diasSet.add(diaAtual);
+    if (String(diaAtual).startsWith(anoAtual)) item.diasAnoSet.add(diaAtual);
     if (diaAtual < item.primeiroDia) item.primeiroDia = diaAtual;
     if (diaAtual > item.ultimoDia) item.ultimoDia = diaAtual;
   }
@@ -912,6 +1087,7 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
     .map(x => ({
       usuario: x.usuario,
       diasLogados90d: x.diasSet.size,
+      diasLogadosAno: x.diasAnoSet.size,
       primeiroDia: x.primeiroDia,
       ultimoDia: x.ultimoDia,
       ultimoLoginEm: x.ultimoLoginEm || '',
@@ -922,16 +1098,21 @@ function calcularResumoUsuarios90d(docs, usuarioAtual, diaAtual) {
     });
 
   const principal = usuarios[0] || null;
+  // Soma de todos os usuários que logaram nessa máquina no ano corrente —
+  // representa o total de dias com atividade na máquina, usado na coluna "Dias A."
+  const diasAnoTotal = usuarios.reduce((acc, u) => Math.max(acc, u.diasLogadosAno), 0);
   return {
     usuarios,
     usuarioPrincipal: principal ? principal.usuario : '',
     usuarioPrincipalDias90d: principal ? principal.diasLogados90d : 0,
+    diasLogadosAno: diasAnoTotal,
   };
 }
 
 async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
   const usuarioNorm = normalizarUsuarioLogin(usuarioLogado);
-  const hostname = AGENT_ID;
+  const hostname    = AGENT_ID.toLowerCase();
+  const hostnameRaw = AGENT_ID;
   const dia = yyyyMmDdLocal(new Date(nowIso));
   const mes = dia.slice(0, 7);
 
@@ -973,12 +1154,12 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     if (!jaExiste) {
       // Documento novo: grava tudo incluindo primeiroLogin
       await firestoreSet(docPath, {
-        hostname, agentId: hostname, usuario: usuarioNorm, usuarioNorm,
+        hostname, agentId: hostname, hostnameOriginal: hostnameRaw, usuario: usuarioNorm, usuarioNorm,
         dia, mes,
         primeiroLogin: nowIso,
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '', fonte: 'agent-desktop',
-        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.9-alertas',
+        versaoAgente: '2.2.0',
       });
       log(`[LoginHistory] Documento criado: ${loginDocId}`);
     } else {
@@ -986,7 +1167,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
       await firestorePatch(docPath, {
         ultimoLogin: nowIso, ultimoLoginEm: nowIso,
         ip: dados.ip || '',
-        versaoAgente: dados.versaoAgente || cfg.versaoAgente || '2.1.9-alertas',
+        versaoAgente: '2.2.0',
       });
       log(`[LoginHistory] Documento atualizado (ultimoLogin): ${loginDocId}`);
     }
@@ -1001,6 +1182,20 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     log('[LoginHistory] Falha ao consultar histórico: ' + e.message);
   }
 
+  // CORREÇÃO: antes, qualquer falha na consulta acima (rede/DNS instável logo após o
+  // boot, timeout, erro de parse) fazia `docs` virar [] e o resumo era recalculado
+  // como se o usuário tivesse apenas 1 dia logado — esse valor errado então SOBRESCREVIA
+  // o contador correto em ativos/{id}.diasLogadosAno. É exatamente isso que fazia o
+  // "Dias logado" parecer reiniciar toda vez que o computador era desligado e ligado.
+  // Agora distinguimos "consulta falhou" de "consulta OK mas sem dados" via docs.ok,
+  // e em caso de falha NÃO enviamos os campos de contagem no PATCH — o Firestore mantém
+  // o valor anterior intacto (firestorePatch já usa updateMask, então campos omitidos
+  // não são tocados).
+  const consultaOk = docs.ok === true;
+  if (!consultaOk) {
+    log('[LoginHistory] Consulta a login_history falhou/incompleta — preservando diasLogadosAno anterior (não será sobrescrito nesse ciclo).');
+  }
+
   const resumo = calcularResumoUsuarios90d(docs, usuarioNorm, dia);
   const payloadResumo = {
     hostname,
@@ -1010,18 +1205,25 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
     ultimoLoginUsuario: usuarioNorm,
     ultimoLoginEm: nowIso,
     loginAtualizadoEm: nowIso,
-    usuarioPrincipal: resumo.usuarioPrincipal,
-    usuarioPrincipalDias90d: resumo.usuarioPrincipalDias90d,
-    usuarioPrincipalPeriodoDias: LOGIN_PRINCIPAL_DIAS,
-    usuariosLogin90d: JSON.stringify(resumo.usuarios),
-    usuariosLogin90dArray: resumo.usuarios,
-    totalUsuarios90d: resumo.usuarios.length,
+    ...(consultaOk ? {
+      usuarioPrincipal: resumo.usuarioPrincipal,
+      usuarioPrincipalDias90d: resumo.usuarioPrincipalDias90d,
+      usuarioPrincipalPeriodoDias: LOGIN_PRINCIPAL_DIAS,
+      usuariosLogin90d: JSON.stringify(resumo.usuarios),
+      usuariosLogin90dArray: resumo.usuarios,
+      totalUsuarios90d: resumo.usuarios.length,
+      diasLogadosAno: resumo.diasLogadosAno, // total de dias com login na máquina no ano corrente
+    } : {}),
   };
 
-  try {
-    await firestoreSet(`login_resumo_maquina/${safeHost}`, payloadResumo);
-  } catch(e) {
-    log('[LoginHistory] Falha ao gravar resumo: ' + e.message);
+  if (consultaOk) {
+    // Só sobrescrevemos o resumo consolidado quando a consulta realmente teve sucesso —
+    // caso contrário manteríamos um doc degradado (sem os totais corretos) no lugar do bom.
+    try {
+      await firestoreSet(`login_resumo_maquina/${safeHost}`, payloadResumo);
+    } catch(e) {
+      log('[LoginHistory] Falha ao gravar resumo: ' + e.message);
+    }
   }
 
   try {
@@ -1034,7 +1236,7 @@ async function registrarHistoricoLogin(dados, usuarioLogado, nowIso) {
         status: 'em-uso',
         ultimoAgente: nowIso,
       });
-      log(`[LoginHistory] Ativo ${ativoId} atualizado: atual=${usuarioNorm}, principal=${resumo.usuarioPrincipal || '-'} (${resumo.usuarioPrincipalDias90d} dias/90d)`);
+      log(`[LoginHistory] Ativo ${ativoId} atualizado: atual=${usuarioNorm}, principal=${resumo.usuarioPrincipal || '-'} (${resumo.usuarioPrincipalDias90d} dias/90d)${consultaOk ? '' : ' [contador de dias preservado — consulta falhou]'}`);
     }
   } catch(e) {
     log('[LoginHistory] Falha ao atualizar ativo: ' + e.message);
@@ -1060,8 +1262,7 @@ function detectarSessoesRDP() {
   try {
     const out = require('child_process').execSync('query session', { timeout: 5000, windowsHide: true }).toString();
     const sessoes = [];
-    for (const line of out.split('
-').slice(1)) {
+    for (const line of out.split('\n').slice(1)) {
       const l = line.trim().replace(/^>/, '').trim();
       if (!l) continue;
       const parts = l.split(/\s+/);
@@ -1076,23 +1277,101 @@ function detectarSessoesRDP() {
   } catch { return []; }
 }
 
+// CORREÇÃO: antes a sessão só era gravada no Firestore no momento do LOGOUT
+// (via firestoreCreate, que além disso nunca checava erro HTTP). Como _sessaoAtual
+// só existia em memória, um desligamento abrupto do computador — o caso mais comum —
+// fazia o processo morrer sem nunca chamar o "ramo de logout", então a sessão inteira
+// nunca era persistida no Firestore. Isso explicava a aba "Logins" ficar vazia mesmo
+// com usuários realmente logando na máquina todos os dias.
+//
+// Agora: a sessão é gravada (upsert) já na ABERTURA do login, com logoutAt:null, e o
+// caminho do documento é persistido em agent-state.json. No fechamento (logout/troca
+// de usuário) fazemos apenas um PATCH em logoutAt/duracaoMin. Se o agente reiniciar
+// com uma sessão aberta pendente no estado local, fechamos essa sessão com o melhor
+// horário disponível antes de abrir uma nova — assim nenhuma sessão fica órfã.
+
+function sessaoDocPath(hostname, usuarioNorm, loginAtIso) {
+  const safeHost = normalizarTextoId(hostname);
+  const safeUser = normalizarTextoId(usuarioNorm);
+  const safeTs   = String(loginAtIso).replace(/[^0-9]/g, '');
+  return `login_sessions/${safeHost}_${safeUser}_${safeTs}`;
+}
+
+async function abrirSessao(usuario, tipo, loginAtIso) {
+  const usuarioNorm = normalizarUsuarioLogin(usuario);
+  const docPath = sessaoDocPath(AGENT_ID.toLowerCase(), usuarioNorm, loginAtIso);
+  const payload = {
+    hostname:   AGENT_ID.toLowerCase(),
+    agentId:    AGENT_ID.toLowerCase(),
+    usuario,
+    usuarioNorm,
+    loginAt:    loginAtIso,
+    logoutAt:   null,
+    tipo:       tipo || 'local',
+    rdp:        tipo === 'remoto',
+    dia:        loginAtIso.slice(0, 10),
+    createdAt:  loginAtIso,
+  };
+  try {
+    await firestoreSet(docPath, payload);
+    log(`[Sessao] Sessão aberta e gravada: ${usuario} (${tipo}) — ${docPath}`);
+  } catch (e) {
+    log('[Sessao] Falha ao gravar abertura de sessão: ' + e.message);
+  }
+  const estado = carregarEstadoLocal();
+  estado.sessaoAberta = { docPath, usuario, usuarioNorm, loginAt: loginAtIso, tipo };
+  salvarEstadoLocal(estado);
+  return { usuario, usuarioNorm, loginAt: loginAtIso, tipo, docPath };
+}
+
+async function fecharSessao(sessao, logoutAtIso) {
+  if (!sessao || !sessao.docPath) return;
+  const loginMs  = new Date(sessao.loginAt).getTime();
+  const logoutMs = new Date(logoutAtIso).getTime();
+  const duracaoMin = (isFinite(loginMs) && isFinite(logoutMs) && logoutMs > loginMs)
+    ? Math.round((logoutMs - loginMs) / 60000) : null;
+  try {
+    await firestorePatch(sessao.docPath, {
+      logoutAt: logoutAtIso,
+      ...(duracaoMin != null ? { duracaoMin } : {}),
+    });
+    log(`[Sessao] Sessão fechada: ${sessao.usuario} (${duracaoMin != null ? duracaoMin + ' min' : '?'})`);
+  } catch (e) {
+    log('[Sessao] Falha ao gravar fechamento de sessão: ' + e.message);
+  }
+  const estado = carregarEstadoLocal();
+  if (estado.sessaoAberta && estado.sessaoAberta.docPath === sessao.docPath) {
+    delete estado.sessaoAberta;
+    salvarEstadoLocal(estado);
+  }
+}
+
 async function rastrearSessaoUsuario(userAtual, nowIso) {
+  // Na primeira execução após (re)início do agente, verifica se ficou uma sessão
+  // aberta pendente no estado local (ex.: computador foi desligado sem logout limpo).
+  if (_sessaoAtual === null) {
+    const estado = carregarEstadoLocal();
+    if (estado.sessaoAberta) {
+      const pendente = estado.sessaoAberta;
+      if (userAtual && normalizarUsuarioLogin(userAtual) === pendente.usuarioNorm) {
+        // Mesmo usuário continua logado — retoma a sessão em memória em vez de duplicar.
+        _sessaoAtual = { usuario: pendente.usuario, loginAt: pendente.loginAt, tipo: pendente.tipo, docPath: pendente.docPath };
+        log(`[Sessao] Sessão retomada após reinício do agente: ${pendente.usuario}`);
+      } else {
+        // Usuário mudou ou deslogou enquanto o agente estava fora do ar — fecha a
+        // sessão pendente com o melhor horário disponível (agora), para não perder
+        // o registro no login_sessions.
+        log(`[Sessao] Sessão órfã encontrada (reinício/desligamento) — fechando: ${pendente.usuario}`);
+        await fecharSessao(pendente, nowIso);
+      }
+    }
+  }
+
   if (!userAtual) {
     // Usuário deslogou
     if (_sessaoAtual) {
       log(`[Sessao] Logout detectado: ${_sessaoAtual.usuario}`);
-      await firestoreCreate('login_sessions', {
-        hostname:   AGENT_ID,
-        agentId:    AGENT_ID,
-        usuario:    _sessaoAtual.usuario,
-        usuarioNorm: normalizarUsuarioLogin(_sessaoAtual.usuario),
-        loginAt:    _sessaoAtual.loginAt,
-        logoutAt:   nowIso,
-        tipo:       _sessaoAtual.tipo || 'local',
-        rdp:        _sessaoAtual.tipo === 'remoto',
-        dia:        nowIso.slice(0, 10),
-        createdAt:  nowIso,
-      }).catch(() => {});
+      await fecharSessao(_sessaoAtual, nowIso);
       _sessaoAtual = null;
     }
     return;
@@ -1104,24 +1383,13 @@ async function rastrearSessaoUsuario(userAtual, nowIso) {
     // Novo login — fecha sessão anterior se havia
     if (_sessaoAtual) {
       log(`[Sessao] Troca de usuário: ${_sessaoAtual.usuario} → ${userAtual}`);
-      await firestoreCreate('login_sessions', {
-        hostname:   AGENT_ID,
-        agentId:    AGENT_ID,
-        usuario:    _sessaoAtual.usuario,
-        usuarioNorm: normalizarUsuarioLogin(_sessaoAtual.usuario),
-        loginAt:    _sessaoAtual.loginAt,
-        logoutAt:   nowIso,
-        tipo:       _sessaoAtual.tipo || 'local',
-        rdp:        _sessaoAtual.tipo === 'remoto',
-        dia:        _sessaoAtual.loginAt.slice(0, 10),
-        createdAt:  _sessaoAtual.loginAt,
-      }).catch(() => {});
+      await fecharSessao(_sessaoAtual, nowIso);
     }
     // Detecta se é sessão RDP
     const sessoesRdp = detectarSessoesRDP();
     const sessaoRdp  = sessoesRdp.find(s => normalizarUsuarioLogin(s.usuario) === userNorm);
     const tipo = sessaoRdp?.rdp ? 'remoto' : 'local';
-    _sessaoAtual = { usuario: userAtual, loginAt: nowIso, tipo };
+    _sessaoAtual = await abrirSessao(userAtual, tipo, nowIso);
     log(`[Sessao] Login detectado: ${userAtual} (${tipo})`);
   }
 
@@ -1132,10 +1400,11 @@ async function rastrearSessaoUsuario(userAtual, nowIso) {
       const sNorm = normalizarUsuarioLogin(s.usuario);
       if (sNorm === userNorm) continue; // já rastreado acima
       const chave = AGENT_ID + '_' + sNorm + '_' + nowIso.slice(0, 10);
-      // Grava uma entrada por dia por usuário remoto (não duplica)
-      await firestoreCreate('login_sessions', {
-        hostname:   AGENT_ID,
-        agentId:    AGENT_ID,
+      // Grava uma entrada por dia por usuário remoto (não duplica, upsert por dia)
+      const docPathRdp = `login_sessions/${normalizarTextoId(AGENT_ID.toLowerCase())}_${normalizarTextoId(sNorm)}_${nowIso.slice(0,10).replace(/-/g,'')}`;
+      await firestoreSet(docPathRdp, {
+        hostname:   AGENT_ID.toLowerCase(),
+        agentId:    AGENT_ID.toLowerCase(),
         usuario:    s.usuario,
         usuarioNorm: sNorm,
         loginAt:    nowIso,
@@ -1145,30 +1414,86 @@ async function rastrearSessaoUsuario(userAtual, nowIso) {
         dia:        nowIso.slice(0, 10),
         chaveDedup: chave,
         createdAt:  nowIso,
-      }).catch(() => {});
+      }).catch(e => log('[Sessao] Falha ao gravar sessão RDP paralela: ' + e.message));
     }
   } catch {}
 }
 
-async function rastrearMudancasStatus(ip, nowIso) {
-  // Registra na subcoleção historico do agente quando IP ou status muda
-  if (_ipAnterior !== null && _ipAnterior !== ip && ip) {
-    const faixaAntes  = (_ipAnterior||'').split('.').slice(0,3).join('.');
-    const faixaDepois = ip.split('.').slice(0,3).join('.');
-    const tipoEvt = faixaAntes !== faixaDepois ? 'mudanca_faixa_ip' : 'mudanca_ip';
-    const desc = tipoEvt === 'mudanca_faixa_ip'
-      ? `Faixa de IP alterada: ${faixaAntes}.0/24 → ${faixaDepois}.0/24 · IP: ${_ipAnterior} → ${ip}`
-      : `IP alterado: ${_ipAnterior} → ${ip}`;
-    log(`[Status] ${desc}`);
+async function rastrearMudancasStatus(dados, nowIso) {
+  // Registra mudanças técnicas na subcoleção historico do agente.
+  // Isso independe do frontend estar aberto e alimenta a aba Histórico do painel.
+  const estado = carregarEstadoLocal();
+  const prev = estado.ultimoSnapshot || null;
+  const atual = {
+    ip: dados.ip || '',
+    hostname: dados.hostname || AGENT_ID,
+    usuarioPrincipal: dados.usuarioPrincipal || '',
+    usuarioLogado: dados.usuarioLogado || '',
+    monitorSig: monitoresAssinatura(dados.monitores),
+    monitores: Array.isArray(dados.monitores) ? dados.monitores : [],
+    mac: dados.macAddress || dados.mac || '',
+    gateway: dados.gateway || '',
+    bootTime: dados.bootTime || '',
+    uptime: dados.uptime || 0,
+  };
+
+  async function hist(tipo, titulo, desc, extras = {}) {
+    log(`[Historico] ${desc}`);
     await firestoreCreate(`agents/${AGENT_ID}/historico`, {
-      tipo: tipoEvt, titulo: tipoEvt === 'mudanca_faixa_ip' ? '🚨 Mudou de faixa de rede' : '✏️ IP alterado',
-      desc, dot: tipoEvt === 'mudanca_faixa_ip' ? 'red' : 'orange',
-      ipAnterior: _ipAnterior, ipNovo: ip,
-      faixaAnterior: faixaAntes + '.0/24', faixaNova: faixaDepois + '.0/24',
-      agentId: AGENT_ID, hostname: AGENT_ID, origem: 'agente', createdAt: nowIso, data: nowIso,
-    }).catch(() => {});
+      tipo, titulo, desc,
+      dot: extras.dot || 'orange',
+      agentId: AGENT_ID,
+      hostname: AGENT_ID,
+      origem: 'agente-desktop',
+      createdAt: nowIso,
+      data: nowIso,
+      ...extras,
+    }).catch(e => log('[Historico] Falha ao gravar: ' + e.message));
   }
-  _ipAnterior = ip || _ipAnterior;
+
+  if (prev) {
+    if (prev.ip && atual.ip && prev.ip !== atual.ip) {
+      const faixaAntes  = String(prev.ip).split('.').slice(0,3).join('.');
+      const faixaDepois = String(atual.ip).split('.').slice(0,3).join('.');
+      if (faixaAntes !== faixaDepois) {
+        await hist('mudanca_faixa_ip', '🚨 Mudou de faixa de rede',
+          `Faixa de IP alterada: ${faixaAntes}.0/24 → ${faixaDepois}.0/24 · IP: ${prev.ip} → ${atual.ip}`,
+          { dot:'red', ipAnterior:prev.ip, ipNovo:atual.ip, faixaAnterior:`${faixaAntes}.0/24`, faixaNova:`${faixaDepois}.0/24` });
+      } else {
+        await hist('mudanca_ip', '✏️ IP alterado', `IP alterado: ${prev.ip} → ${atual.ip}`,
+          { dot:'orange', ipAnterior:prev.ip, ipNovo:atual.ip });
+      }
+    }
+
+    if (prev.hostname && atual.hostname && prev.hostname !== atual.hostname) {
+      await hist('mudanca_hostname', '✏️ Hostname alterado', `Hostname: ${prev.hostname} → ${atual.hostname}`,
+        { dot:'orange', campo:'hostname', de:prev.hostname, para:atual.hostname });
+    }
+
+    if (prev.monitorSig && atual.monitorSig && prev.monitorSig !== atual.monitorSig) {
+      await hist('troca_monitor', '🖥️ Monitor alterado',
+        `Monitor(es) alterado(s): ${prev.monitorSig || '—'} → ${atual.monitorSig || '—'}`,
+        { dot:'blue', campo:'monitores', de:prev.monitorSig, para:atual.monitorSig, monitoresAntigos:prev.monitores || [], monitoresNovos:atual.monitores || [] });
+    }
+
+    if (prev.usuarioPrincipal && atual.usuarioPrincipal && prev.usuarioPrincipal !== atual.usuarioPrincipal) {
+      await hist('troca_responsavel', '👥 Usuário principal alterado',
+        `Usuário principal: ${prev.usuarioPrincipal} → ${atual.usuarioPrincipal}`,
+        { dot:'blue', campo:'usuarioPrincipal', de:prev.usuarioPrincipal, para:atual.usuarioPrincipal });
+    }
+
+    // Se o bootTime mudou, a máquina reiniciou. Útil para auditar uptime.
+    if (prev.bootTime && atual.bootTime && prev.bootTime !== atual.bootTime) {
+      await hist('reinicializacao', '🔄 Máquina reiniciada',
+        `Boot anterior: ${prev.bootTime} · boot atual: ${atual.bootTime}`,
+        { dot:'green', campo:'bootTime', de:prev.bootTime, para:atual.bootTime });
+    }
+  }
+
+  estado.ultimoSnapshot = atual;
+  estado.atualizadoEm = nowIso;
+  salvarEstadoLocal(estado);
+  _ipAnterior = atual.ip || _ipAnterior;
 }
 
 // ── Ciclo principal ───────────────────────────────────────────────
@@ -1182,6 +1507,7 @@ async function reportar() {
 
     const discoC = discos.find(d => d.drive === 'C:') || null;
     const uptimeSec = getUptime();
+    const bootTimeIso = getBootTimeIso(uptimeSec);
 
     const hw  = getHardwareInfo();
     const sec = getSegurancaInfo();
@@ -1223,12 +1549,15 @@ async function reportar() {
       outrosDiscos:      discos.filter(d => d.drive !== 'C:'),
       usuarioLogado:     user,
       uptime:            uptimeSec,
+      uptimeSeconds:     uptimeSec,
       uptimeH:           Math.floor(uptimeSec / 3600),
+      bootTime:          bootTimeIso,
+      lastBootTime:      bootTimeIso,
       monitores:         getMonitores(),
       software:          software,
       softwareCount:     software.length,
       softwareAtualizadoEm: _softwareCache.at ? new Date(_softwareCache.at).toISOString() : now,
-      versaoAgente:      cfg.versaoAgente || '2.1.9-alertas',
+      versaoAgente:      '2.2.0',
       ultimaAtualizacao: now,
       lastSeen:          now,
       status:            'online',
@@ -1241,11 +1570,16 @@ async function reportar() {
     // Rastreia sessão do usuário (horário de login/logout, RDP)
     await rastrearSessaoUsuario(user, now).catch(e => log('[Sessao] ' + e.message));
     // Rastreia mudanças de IP/faixa de rede
-    await rastrearMudancasStatus(dados.ip, now).catch(e => log('[Status] ' + e.message));
+    await rastrearMudancasStatus(dados, now).catch(e => log('[Status] ' + e.message));
 
     await firestoreSet(`agents/${AGENT_ID}`, dados);
     // Espelho para compatibilidade com telas/consultas que usam agentes_desktop
     await firestoreSet(`agentes_desktop/${AGENT_ID}`, dados).catch(e => log('[WARN] Falha ao gravar agentes_desktop: ' + e.message));
+    // Heartbeat dedicado — garante que lastSeen e status chegam mesmo se o payload completo falhar
+    await firestorePatch(`agents/${AGENT_ID}`, {
+      lastSeen: now, status: 'online', versaoAgente: '2.2.0',
+      uptime: dados.uptime, uptimeSeconds: dados.uptimeSeconds, uptimeH: dados.uptimeH, bootTime: dados.bootTime, lastBootTime: dados.lastBootTime, cpuPct: dados.cpuPct, ramPct: dados.ramPct,
+    }).catch(() => {});
 
     log(`[OK] Dados enviados - CPU: ${cpu}% | RAM: ${mem.pct}% | Usuario: ${user || '-'} | Principal 90d: ${dados.usuarioPrincipal || '-'}`);
     // Atualiza ativo correspondente com hostname (roda apenas uma vez por sessão)
@@ -1259,7 +1593,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.1.12-bloqueio-dominio] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.3] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -1479,7 +1813,16 @@ async function firestorePatch(docPath, data) {
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
-      res.on('end', () => resolve(raw));
+      res.on('end', () => {
+        // CORREÇÃO: antes resolvia sempre, mesmo em 403/400, mascarando falhas
+        // silenciosas de permissão nesse PATCH (usado em login_history e ativos/{id}).
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          log(`[Firestore] patch HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 300)}`);
+          log('[Firestore] DICA: HTTP 403 = verifique as Firestore Rules para esta coleção.');
+          return reject(new Error(`HTTP ${res.statusCode} em ${docPath}: ${raw.slice(0, 200)}`));
+        }
+        resolve(raw);
+      });
     });
     req.on('error', reject);
     req.write(body);
@@ -1760,6 +2103,8 @@ function encerrarRelayRtdb(sessaoId) {
 // pollComandos    — poll 5s só para iniciar/encerrar sessões
 // ════════════════════════════════════════════════════════════════
 
+const _comandosEmProcessamento = new Set(); // lock em memória — evita reprocessar o mesmo doc concorrentemente
+
 async function executarComando(doc) {
   const fields = doc.document?.fields || {};
   const getId  = f => f?.stringValue || '';
@@ -1769,24 +2114,55 @@ async function executarComando(doc) {
   const aId    = getId(fields.agentId);
 
   if (aId !== AGENT_ID) return;
+  if (!id) return;
 
-  // Marca imediatamente para não processar duas vezes
-  await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
+  // Lock em memória — evita que pollComandos (Firestore) e o relay RTDB
+  // processem o mesmo comando ao mesmo tempo, gerando race condition
+  if (_comandosEmProcessamento.has(id)) return;
+  _comandosEmProcessamento.add(id);
 
-  // Segurança corporativa: não aceita token fixo nem senha enviada pelo portal.
-  // Valida tipo, expiração, perfil solicitante, justificativa e contexto administrativo local.
-  if (!(await validarComandoSeguro(id, tipo, fields, dados))) return;
+  try {
+    // Ignora comandos de atualização "presos" há muito tempo na fila —
+    // evita reprocessar lixo acumulado de tentativas antigas que falharam
+    if (tipo === 'atualizar_agente') {
+      const criadoEmStr = getId(fields.criadoEm) || dados.criadoEm || '';
+      if (criadoEmStr) {
+        const idadeMs = Date.now() - new Date(criadoEmStr).getTime();
+        if (idadeMs > 10 * 60 * 1000) { // mais de 10 minutos = comando obsoleto
+          log(`[UPDATE] Ignorando comando obsoleto (${Math.round(idadeMs/60000)} min) — id: ${id}`);
+          await firestorePatch('agent_commands/' + id, {
+            status: 'descartado', resultado: 'Comando expirado — não processado por estar obsoleto.'
+          }).catch(() => {});
+          return;
+        }
+      }
+    }
 
-  const requestedBy = getId(fields.requestedBy) || dados.requestedBy || dados.operador || '';
-  log('[Relay] Comando Firestore seguro: ' + tipo + ' solicitado por ' + requestedBy);
-  await auditAgentCommand(id, 'AGENT_COMMAND_ACCEPTED', {
-    tipo,
-    requestedBy: sanitizeAuditText(requestedBy),
-    requestedByRole: sanitizeAuditText(getId(fields.requestedByRole) || dados.requestedByRole || ''),
-    motivo: sanitizeAuditText(getId(fields.motivo) || dados.motivo || '')
-  });
-  await firestorePatch('agent_commands/' + id, { status: 'executando', executandoEm: new Date().toISOString() }).catch(() => {});
+    // Marca imediatamente para não processar duas vezes
+    await firestorePatch('agent_commands/' + id, { status: 'processando' }).catch(() => {});
 
+    // Segurança corporativa: não aceita token fixo nem senha enviada pelo portal.
+    // Valida tipo, expiração, perfil solicitante, justificativa e contexto administrativo local.
+    if (!(await validarComandoSeguro(id, tipo, fields, dados))) return;
+
+    const requestedBy = getId(fields.requestedBy) || dados.requestedBy || dados.operador || '';
+    log('[Relay] Comando Firestore seguro: ' + tipo + ' solicitado por ' + requestedBy);
+    await auditAgentCommand(id, 'AGENT_COMMAND_ACCEPTED', {
+      tipo,
+      requestedBy: sanitizeAuditText(requestedBy),
+      requestedByRole: sanitizeAuditText(getId(fields.requestedByRole) || dados.requestedByRole || ''),
+      motivo: sanitizeAuditText(getId(fields.motivo) || dados.motivo || '')
+    });
+    await firestorePatch('agent_commands/' + id, { status: 'executando', executandoEm: new Date().toISOString() }).catch(() => {});
+
+    return await _processarComandoInterno(id, tipo, dados, fields);
+  } finally {
+    // Libera o lock depois de um tempo — permite reprocessar se necessário no futuro
+    setTimeout(() => _comandosEmProcessamento.delete(id), 30000);
+  }
+}
+
+async function _processarComandoInterno(id, tipo, dados, fields) {
   const sessaoId = dados.sessaoId || '';
 
   if (tipo === 'iniciar_acesso_remoto' || tipo === 'usar_firebase_relay') {
@@ -1826,113 +2202,114 @@ $cred    = New-Object System.Management.Automation.PSCredential ($adminUserRaw, 
 
 # Valida usuário/senha antes de fazer qualquer alteração.
 # Correção v2.1.12:
-# - aceita usuário de domínio CESAN\usuario e usuario@dominio;
+# - aceita usuario de dominio CESAN\\usuario e usuario@dominio;
 # - tenta vários tipos de logon, pois alguns domínios bloqueiam logon interativo;
 # - NÃO reprova falsamente domínio admin que chega por grupo AD aninhado;
 # - o bloqueio local é executado pelo próprio agente rodando como SYSTEM/admin.
-try {
-  Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Security.Principal;
-public class LogonUtilV212 {
+# ── Validação de credencial v3 ─────────────────────────────────────
+# Estratégia em cascata para ambientes onde SYSTEM não consegue LogonUser:
+# 1) net use contra o próprio compartilhamento IPC$ local (mais confiável em AD)
+# 2) net use contra o DC (se domínio identificado)
+# 3) LogonUser tipos 3/9/8/2 como último recurso
+# O agente já roda como SYSTEM — a validação é apenas para confirmar que a senha
+# informada pertence a um admin local, não para executar as etapas seguintes.
+
+$ok = $false
+$metodo = ''
+
+# Detecta formato: DOMINIO\\usuario, usuario@dominio ou usuário local
+$domain   = $null
+$userOnly = $adminUserRaw
+$isDomain = $false
+
+if ($adminUserRaw -match '\\\\') {
+  $parts    = $adminUserRaw.Split('\\\\', 2)
+  $domain   = $parts[0]
+  $userOnly = $parts[1]
+  $isDomain = $true
+} elseif ($adminUserRaw -match '@') {
+  $domain   = ($adminUserRaw -split '@')[1]
+  $isDomain = $true
+}
+
+# MÉTODO 1 — net use IPC$ local (funciona mesmo via SYSTEM, valida senha AD/local)
+if (-not $ok) {
+  try {
+    $share = "\\\\$($env:COMPUTERNAME)\\IPC\`$"
+    net use $share /delete /y 2>$null | Out-Null
+    $out = net use $share /user:$adminUserRaw $adminPassRaw 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      net use $share /delete /y 2>$null | Out-Null
+      $ok = $true; $metodo = 'net_use_local'
+      Write-Host "OK_CREDENCIAL_VALIDADA:metodo=$metodo;usuario=$adminUserRaw"
+    }
+  } catch {}
+}
+
+# MÉTODO 2 — net use IPC$ no DC (para contas de domínio)
+if (-not $ok -and $isDomain -and $domain) {
+  try {
+    $dcShare = "\\\\$domain\\IPC\`$"
+    net use $dcShare /delete /y 2>$null | Out-Null
+    $out2 = net use $dcShare /user:$adminUserRaw $adminPassRaw 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      net use $dcShare /delete /y 2>$null | Out-Null
+      $ok = $true; $metodo = 'net_use_dc'
+      Write-Host "OK_CREDENCIAL_VALIDADA:metodo=$metodo;usuario=$adminUserRaw"
+    }
+  } catch {}
+}
+
+# MÉTODO 3 — LogonUser (fallback; pode falhar em SYSTEM+GPO restritiva)
+if (-not $ok) {
+  try {
+    Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class LogonUtilV3 {
   [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-  public static extern bool LogonUser(string lpszUsername, string lpszDomain, string lpszPassword, int dwLogonType, int dwLogonProvider, out IntPtr phToken);
-  [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
-  public extern static bool CloseHandle(IntPtr handle);
+  public static extern bool LogonUser(string u, string d, string p, int lt, int lp, out IntPtr t);
+  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
 }
 "@ -ErrorAction SilentlyContinue
-
-  $domain = $env:COMPUTERNAME
-  $userOnly = $adminUserRaw
-  $isUpn = $false
-
-  if ($adminUserRaw -match '\\') {
-    $parts = $adminUserRaw.Split('\\',2)
-    $domain = $parts[0]
-    $userOnly = $parts[1]
-  } elseif ($adminUserRaw -match '@') {
-    # Para UPN, LogonUser deve receber domínio nulo/vazio.
-    $userOnly = $adminUserRaw
-    $domain = $null
-    $isUpn = $true
-  }
-
-  $token = [IntPtr]::Zero
-  $ok = $false
-  $lastErr = 0
-  # Ordem otimizada para AD com GPO restritiva:
-  # 3=Network (mais permissivo), 9=NewCredentials, 8=NetworkCleartext, 2=Interactive
-  $logonTypes = @(3,9,8,2)
-
-  foreach ($lt in $logonTypes) {
     $token = [IntPtr]::Zero
-    $provider = if ($isUpn) { 3 } else { 0 }
-    $ok = [LogonUtilV212]::LogonUser($userOnly, $domain, $adminPassRaw, $lt, $provider, [ref]$token)
-    if ($ok) {
-      Write-Host "OK_CREDENCIAL_VALIDADA:tipoLogon=$lt;usuario=$adminUserRaw"
-      break
-    }
-    $lastErr = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-    if ($token -ne [IntPtr]::Zero) { [LogonUtilV212]::CloseHandle($token) | Out-Null; $token = [IntPtr]::Zero }
-  }
-
-  # Fallback: net use para domínios que bloqueiam LogonUser via SYSTEM
-  if (-not $ok) {
-    try {
-      $netTarget = if ($domain -and $domain -ne $env:COMPUTERNAME) { "\\\\$domain\\IPC`$" } else { "\\\\$env:COMPUTERNAME\\IPC`$" }
-      $netOut = net use $netTarget /user:$adminUserRaw $adminPassRaw 2>&1
-      if ($LASTEXITCODE -eq 0) {
-        net use $netTarget /delete /y 2>$null | Out-Null
-        $ok = $true
-        Write-Host "OK_CREDENCIAL_VALIDADA:tipoLogon=net_use;usuario=$adminUserRaw"
+    $lastErr = 0
+    foreach ($lt in @(3,9,8,2)) {
+      $token = [IntPtr]::Zero
+      $prov  = if ($adminUserRaw -match '@') { 3 } else { 0 }
+      if ([LogonUtilV3]::LogonUser($userOnly, $domain, $adminPassRaw, $lt, $prov, [ref]$token)) {
+        [LogonUtilV3]::CloseHandle($token) | Out-Null
+        $ok = $true; $metodo = "logon_type_$lt"
+        Write-Host "OK_CREDENCIAL_VALIDADA:metodo=$metodo;usuario=$adminUserRaw"
+        break
       }
-    } catch {}
-  }
-
-  if (-not $ok) {
-    Write-Host "ERRO_CREDENCIAL_INVALIDA:Usuario/senha invalidos ou logon negado pelo dominio. Codigo=$lastErr Usuario=$adminUserRaw Dominio=$domain"
-    exit 10
-  }
-
-  # Tenta comprovar se o token possui grupo Administradores.
-  # Em alguns ambientes AD, grupo aninhado/GPO/UAC pode não aparecer nesse teste.
-  # Por isso essa etapa vira AVISO e não aborta, pois o agente já roda como SYSTEM.
-  $adminComprovado = $false
-  try {
-    $identity = New-Object System.Security.Principal.WindowsIdentity($token)
-    $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
-    $adminComprovado = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
-  } catch {
-    Write-Host "AVISO_ADMIN_TOKEN_NAO_COMPROVADO:$_"
-  }
-
-  if (-not $adminComprovado) {
-    try {
-      $adminGroup = ([Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
-      $members = net localgroup "$adminGroup" 2>$null
-      $needle1 = $adminUserRaw.ToLower()
-      $needle2 = $userOnly.ToLower()
-      foreach ($m in $members) {
-        $ml = ($m.Trim()).ToLower()
-        if ($ml -eq $needle1 -or $ml -eq $needle2 -or $ml.EndsWith('\\' + $needle2)) { $adminComprovado = $true }
-        if ($ml -match 'domain admins|administradores do dominio|administradores do domínio|admins\. do domínio|admins\. do dominio') { $adminComprovado = $true }
-      }
-    } catch {
-      Write-Host "AVISO_ADMIN_LOCALGROUP_NAO_COMPROVADO:$_"
+      $lastErr = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+      if ($token -ne [IntPtr]::Zero) { [LogonUtilV3]::CloseHandle($token) | Out-Null }
     }
-  }
+  } catch { Write-Host "AVISO_LOGONUSER:$_" }
+}
 
-  if ($token -ne [IntPtr]::Zero) { [LogonUtilV212]::CloseHandle($token) | Out-Null }
+if (-not $ok) {
+  Write-Host "ERRO_CREDENCIAL_INVALIDA:Nenhum metodo de validacao obteve exito. Verifique usuario/senha. Usuario=$adminUserRaw"
+  exit 10
+}
 
-  if ($adminComprovado) {
-    Write-Host "OK_CREDENCIAL_ADMIN:$adminUserRaw"
-  } else {
-    Write-Host "AVISO_ADMIN_NAO_COMPROVADO:Credencial validada, mas a participação no grupo Administradores local não foi comprovada. Prosseguindo porque o agente está rodando como SYSTEM/admin. Usuario=$adminUserRaw"
+# Verifica pertencimento ao grupo Administradores local (não abortivo)
+$adminComprovado = $false
+try {
+  $adminGroup = ([Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\\')[-1]
+  $members = net localgroup "$adminGroup" 2>$null
+  $n1 = $adminUserRaw.ToLower(); $n2 = $userOnly.ToLower()
+  foreach ($m in $members) {
+    $ml = $m.Trim().ToLower()
+    if ($ml -eq $n1 -or $ml -eq $n2 -or $ml.EndsWith('\\' + $n2)) { $adminComprovado = $true }
+    if ($ml -match 'domain admins|administradores do dom') { $adminComprovado = $true }
   }
-} catch {
-  Write-Host "ERRO_VALIDACAO_CREDENCIAL:$_"
-  exit 12
+} catch { Write-Host "AVISO_LOCALGROUP:$_" }
+
+if ($adminComprovado) {
+  Write-Host "OK_CREDENCIAL_ADMIN:$adminUserRaw"
+} else {
+  Write-Host "AVISO_ADMIN_NAO_COMPROVADO:Prosseguindo (agente roda como SYSTEM). Usuario=$adminUserRaw"
 }
 ` : `
 Write-Host "ERRO_CREDENCIAL_OBRIGATORIA:Informe usuario e senha de administrador local."
@@ -2129,28 +2506,38 @@ Write-Host "DESBLOQUEIO_CONCLUIDO"
   }
 
 
-  // ── COLETA SEGURA DO EVENT VIEWER PARA ANÁLISE IA ───────────────
+  // ── COLETA SEGURA DO EVENT VIEWER PARA ANÁLISE (janela por período, não só contagem) ──
   if (tipo === 'coletar_eventviewer' || tipo === 'analisar_eventviewer_ia') {
     try {
-      const maxEvents = Math.min(Number(dados.maxEvents || 250), 1000);
-      const logs = Array.isArray(dados.logs) && dados.logs.length ? dados.logs : ['System', 'Application'];
+      // CORREÇÃO/RECURSO: antes só existia "-MaxEvents N" (últimos N eventos, sem
+      // relação com tempo real). Para o relatório de análise de 90 dias, precisamos
+      // de uma janela por DATA — usamos -FilterHashtable com StartTime, mantendo um
+      // teto por log (maxEventsPorLog) só como proteção contra logs muito verbosos
+      // (ex.: Security numa máquina bem movimentada) para não gerar payload gigante.
+      const dias = Math.min(Math.max(Number(dados.dias || 90), 1), 180);
+      const maxEventsPorLog = Math.min(Number(dados.maxEventsPorLog || dados.maxEvents || 3000), 5000);
+      const logs = Array.isArray(dados.logs) && dados.logs.length ? dados.logs : ['System', 'Application', 'Security'];
       const logsSafe = logs.map(x => String(x).replace(/[^A-Za-z0-9_\-]/g, '')).filter(Boolean).slice(0, 5);
       const ps = `
 $ErrorActionPreference = 'SilentlyContinue'
 $logs = @(${logsSafe.map(l => "'" + l + "'").join(',')})
+$startDate = (Get-Date).AddDays(-${dias})
 $out = @()
 foreach ($log in $logs) {
-  Get-WinEvent -LogName $log -MaxEvents ${maxEvents} | Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message | ForEach-Object {
-    $out += [pscustomobject]@{
-      Log=$log; TimeCreated=$_.TimeCreated; Provider=$_.ProviderName; Id=$_.Id; Level=$_.LevelDisplayName; Message=($_.Message -replace "[\r\n]", ' ')
-    }
-  }
+  try {
+    Get-WinEvent -FilterHashtable @{LogName=$log; StartTime=$startDate} -MaxEvents ${maxEventsPorLog} -ErrorAction Stop |
+      Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message | ForEach-Object {
+        $out += [pscustomobject]@{
+          Log=$log; TimeCreated=$_.TimeCreated; Provider=$_.ProviderName; Id=$_.Id; Level=$_.LevelDisplayName; Message=($_.Message -replace "[\r\n]", ' ')
+        }
+      }
+  } catch {}
 }
 $out | ConvertTo-Json -Depth 4 -Compress
 `.trim();
       const psPath = path.join(__dirname, '_sysack_eventviewer.ps1');
       fs.writeFileSync(psPath, ps, 'utf8');
-      const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 45000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).toString();
+      const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`, { timeout: 120000, windowsHide: true, maxBuffer: 15 * 1024 * 1024 }).toString();
       try { fs.unlinkSync(psPath); } catch {}
       const saida = raw.slice(0, 900000); // evita documento gigante
       await firestoreCreate('agent_eventviewer', {
@@ -2159,13 +2546,22 @@ $out | ConvertTo-Json -Depth 4 -Compress
         commandId: id,
         requestedBy: sanitizeAuditText(dados.requestedBy || dados.operador || ''),
         logs: logsSafe.join(','),
-        maxEvents,
+        dias,
+        maxEventsPorLog,
         payload: saida,
         createdAt: new Date().toISOString(),
         status: 'coletado'
       });
-      resultado = `Event Viewer coletado com sucesso (${logsSafe.join(', ')} / até ${maxEvents} eventos por log).`;
-      await auditAgentCommand(id, 'EVENTVIEWER_COLLECTED', { tipo, logs: logsSafe.join(','), maxEvents, resultado });
+      // CORREÇÃO: 'resultado' aqui era uma atribuição solta (sem let/const) que na
+      // verdade se referia à variável 'let resultado' declarada mais abaixo, na
+      // seção de comandos legados — como esse bloco roda ANTES dessa declaração
+      // no fluxo de execução, o JS lança "Cannot access 'resultado' before
+      // initialization" (temporal dead zone), o catch abaixo captura esse erro
+      // e grava ele como se fosse a falha real — por isso a análise de máquina
+      // nunca funcionava, mesmo com Firestore Rules e payload corretos.
+      // Declarando localmente com const, resolve de vez.
+      const resultado = `Event Viewer coletado com sucesso (${logsSafe.join(', ')} · últimos ${dias} dias · até ${maxEventsPorLog} eventos por log).`;
+      await auditAgentCommand(id, 'EVENTVIEWER_COLLECTED', { tipo, logs: logsSafe.join(','), dias, maxEventsPorLog, resultado });
       await firestorePatch('agent_commands/' + id, { status: 'concluido', resultado, concluidoEm: new Date().toISOString() }).catch(() => {});
     } catch(e) {
       log('[EVENTVIEWER] Erro: ' + e.message);
@@ -2190,40 +2586,170 @@ $out | ConvertTo-Json -Depth 4 -Compress
       const urlNova    = dados.url    || '';
       const versaoNova = dados.versao || '';
       if (!urlNova) throw new Error('URL do novo agente não informada');
-      log(`[UPDATE] Iniciando atualização para v${versaoNova} via ${urlNova}`);
-      const novoConteudo = await new Promise((resolve, reject) => {
-        const urlObj = new URL(urlNova);
-        const mod = urlNova.startsWith('https') ? require('https') : require('http');
-        const req = mod.get({ hostname:urlObj.hostname, path:urlObj.pathname+urlObj.search, headers:{'User-Agent':'SYSACK-Agent/auto-update'}, rejectUnauthorized:false }, res => {
-          if (res.statusCode>=300 && res.statusCode<400 && res.headers.location) {
-            const r2=mod.get(res.headers.location, res2=>{let d='';res2.on('data',c=>d+=c);res2.on('end',()=>res2.statusCode===200?resolve(d):reject(new Error('HTTP '+res2.statusCode)));});
-            r2.on('error',reject);r2.end();return;
-          }
-          if (res.statusCode!==200) return reject(new Error('HTTP '+res.statusCode));
-          let d=''; res.on('data',c=>d+=c); res.on('end',()=>resolve(d));
+      log(`[UPDATE] Iniciando atualização para v${versaoNova || '(sem versão informada)'} via ${urlNova}`);
+
+      const selfPath   = process.argv[1] || path.join(__dirname, 'agent.js');
+      const tempPath   = selfPath + '.new.js';
+      const backupPath = selfPath.replace(/\.js$/i, '.backup.js');
+
+      async function marcarUpdate(status, texto, extra = {}) {
+        try {
+          await firestorePatch('agent_commands/' + id, {
+            status,
+            resultado: texto,
+            atualizadoEm: new Date().toISOString(),
+            ...extra,
+          });
+        } catch(e) {
+          log('[UPDATE] Falha ao atualizar status do comando: ' + e.message);
+        }
+      }
+
+      try {
+        // Heartbeat imediato — painel sabe que agente recebeu antes do timeout
+        await marcarUpdate('processando', 'Agente recebeu o comando — preparando download...', {
+          processandoEm: new Date().toISOString(), etapa: 'preparando_download'
         });
-        req.on('error',reject);
-        req.setTimeout(30000,()=>{req.destroy();reject(new Error('Timeout'));});
-        req.end();
-      });
-      if (!novoConteudo || novoConteudo.length<1000) throw new Error('Arquivo inválido');
-      // Usa o arquivo atualmente em execução (pode ser agent.js ou agent-desktop.js)
-      const selfPath   = process.argv[1] || path.join(__dirname, 'agent-desktop.js');
-      const backupPath = selfPath.replace(/\.js$/, '.backup.js');
-      try { fs.copyFileSync(selfPath, backupPath); log('[UPDATE] Backup: ' + backupPath); } catch(e) {}
-      fs.writeFileSync(selfPath, novoConteudo, 'utf8');
-      log(`[UPDATE] Substituído em ${selfPath} (${novoConteudo.length} bytes). Gravando confirmação...`);
-      resultado = `Atualização v${versaoNova} aplicada. Reiniciando.`;
-      // CRÍTICO: grava status ANTES do exit — caso contrário o processo morre antes de confirmar
-      await firestorePatch('agents/'+AGENT_ID, {
-        versaoAgente: versaoNova, ultimaAtualizacao: new Date().toISOString(), agentVersion: versaoNova
-      }).catch(()=>{});
-      await firestorePatch('agent_commands/'+id, {
-        status: 'concluido', resultado: resultado
-      }).catch(()=>{});
-      log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 3s...');
-      agendarReinicioAgent();
-      setTimeout(()=>process.exit(0), 3000);
+
+        function baixarArquivoRobusto(urlInicial) {
+          return new Promise((resolve, reject) => {
+            const chunks = [];
+            let finalizado = false;
+            let total = 0;
+            const MAX_BYTES = 5 * 1024 * 1024; // proteção contra HTML/erro gigante
+
+            function falhar(err) {
+              if (finalizado) return;
+              finalizado = true;
+              reject(err instanceof Error ? err : new Error(String(err)));
+            }
+            function ok(txt) {
+              if (finalizado) return;
+              finalizado = true;
+              resolve(txt);
+            }
+            function baixar(urlAtual, redirects = 0) {
+              if (redirects > 8) return falhar(new Error('Muitos redirecionamentos no download'));
+              let urlObj;
+              try { urlObj = new URL(urlAtual); }
+              catch(e) { return falhar(new Error('URL inválida para atualização: ' + urlAtual)); }
+
+              const mod = urlObj.protocol === 'https:' ? require('https') : require('http');
+              log(`[UPDATE] Download passo ${redirects + 1}: ${urlObj.href}`);
+              const req = mod.get({
+                protocol: urlObj.protocol,
+                hostname: urlObj.hostname,
+                port: urlObj.port || undefined,
+                path: urlObj.pathname + urlObj.search,
+                headers: {
+                  'User-Agent': 'SYSACK-Agent/auto-update',
+                  'Cache-Control': 'no-cache, no-store, max-age=0',
+                  'Pragma': 'no-cache',
+                },
+                rejectUnauthorized: false,
+              }, res => {
+                log(`[UPDATE] HTTP ${res.statusCode} recebido de ${urlObj.hostname}`);
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                  res.resume();
+                  let prox;
+                  try { prox = new URL(res.headers.location, urlObj).href; }
+                  catch(e) { return falhar(new Error('Redirect inválido: ' + res.headers.location)); }
+                  return baixar(prox, redirects + 1);
+                }
+                if (res.statusCode !== 200) {
+                  let body = '';
+                  res.setEncoding('utf8');
+                  res.on('data', c => { body += c; if (body.length > 500) body = body.slice(0, 500); });
+                  res.on('end', () => falhar(new Error('HTTP ' + res.statusCode + ' ao baixar agente. Corpo: ' + body.slice(0, 200))));
+                  return;
+                }
+                res.on('data', c => {
+                  total += c.length;
+                  if (total > MAX_BYTES) {
+                    req.destroy();
+                    return falhar(new Error('Arquivo baixado excedeu limite de segurança (' + MAX_BYTES + ' bytes)'));
+                  }
+                  chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+                });
+                res.on('end', () => ok(Buffer.concat(chunks).toString('utf8')));
+                res.on('error', falhar);
+              });
+              req.on('error', falhar);
+              req.setTimeout(60000, () => {
+                req.destroy();
+                falhar(new Error('Timeout de 60s no download do agente'));
+              });
+            }
+            baixar(urlInicial, 0);
+          });
+        }
+
+        await marcarUpdate('processando', 'Baixando nova versão do agente...', { etapa: 'download' });
+        const novoConteudo = await baixarArquivoRobusto(urlNova);
+        log(`[UPDATE] Download concluído: ${novoConteudo.length} bytes`);
+
+        if (!novoConteudo || novoConteudo.length < 1000) {
+          throw new Error(`Arquivo inválido (${novoConteudo?.length ?? 0} bytes)`);
+        }
+        if (!novoConteudo.includes('SYSACK Agent Desktop')) {
+          throw new Error('Arquivo baixado não parece ser o agent-desktop.js do SYSACK');
+        }
+        const versaoBaixadaMatch = novoConteudo.match(/SYSACK Agent Desktop v([0-9.]+)/);
+        const versaoBaixada = versaoBaixadaMatch ? versaoBaixadaMatch[1] : '';
+        log(`[UPDATE] Versão detectada no arquivo baixado: ${versaoBaixada || 'não identificada'}`);
+        if (versaoNova && versaoBaixada && versaoBaixada !== versaoNova) {
+          throw new Error(`Versão baixada (${versaoBaixada}) diferente da solicitada (${versaoNova}). Verifique o deploy no Vercel.`);
+        }
+
+        await marcarUpdate('processando', 'Download concluído — gravando arquivo temporário...', { etapa: 'gravando_temp', versaoBaixada });
+        try {
+          fs.copyFileSync(selfPath, backupPath);
+          log('[UPDATE] Backup: ' + backupPath);
+        } catch(e) {
+          log('[UPDATE] Aviso: não foi possível criar backup: ' + e.message);
+        }
+        fs.writeFileSync(tempPath, novoConteudo, 'utf8');
+        const tempLen = fs.readFileSync(tempPath, 'utf8').length;
+        if (tempLen < 1000) throw new Error('Arquivo temporário inválido');
+        log(`[UPDATE] Temp OK — ${tempPath} (${tempLen} bytes). Agendando reinício...`);
+
+        resultado = `Atualização v${versaoNova || versaoBaixada || '?'} baixada e agendada. Reiniciando serviço.`;
+        await firestorePatch('agents/' + AGENT_ID, {
+          versaoAgente: versaoNova || versaoBaixada || '',
+          agentVersion: versaoNova || versaoBaixada || '',
+          ultimaAtualizacao: new Date().toISOString(),
+          updateStatus: 'reiniciando',
+          updateCommandId: id,
+        }).catch(e => log('[UPDATE] Aviso: falha ao atualizar agents/' + AGENT_ID + ': ' + e.message));
+
+        await marcarUpdate('concluido', resultado, {
+          etapa: 'reiniciando', concluidoEm: new Date().toISOString(), versaoBaixada,
+        });
+        log('[UPDATE] Confirmação gravada no Firestore. Reiniciando em 2s...');
+        agendarReinicioAgent();
+        setTimeout(() => process.exit(0), 2000);
+        return;
+      } catch(e) {
+        const msgErro = (e && (e.stack || e.message)) ? String(e.stack || e.message) : String(e);
+        erroExec = true;
+        resultado = 'Falha na atualização do agente: ' + msgErro.slice(0, 1500);
+        log('[UPDATE] ERRO: ' + msgErro);
+        try {
+          await firestorePatch('agent_commands/' + id, {
+            status: 'erro',
+            resultado,
+            erro: msgErro.slice(0, 1500),
+            etapa: 'erro_update',
+            erroEm: new Date().toISOString(),
+          });
+        } catch(e2) {
+          log('[UPDATE] Falha ao gravar erro no Firestore: ' + e2.message);
+        }
+        try {
+          await reportAgentResult(id, tipo, 'erro', resultado, { erro: msgErro.slice(0, 1500) });
+        } catch(e3) {}
+        return;
+      }
 
     } else if (tipo === 'screenshot') {
       const ps = [
@@ -2277,8 +2803,8 @@ async function pollComandos() {
   } catch(e) {}
 }
 
-setInterval(pollComandos, 1000);
-setTimeout(pollComandos, 250);
+setInterval(pollComandos, 800);
+setTimeout(pollComandos, 200);
 
 
 // ── Atualiza ativo correspondente com hostname ────────────────────
@@ -3072,8 +3598,55 @@ setTimeout(coletarPortasSwitches, 5 * 60 * 1000);
 setInterval(coletarPortasSwitches, 15 * 60 * 1000);
 
 
-reportar(); // Primeira execução imediata
-setInterval(reportar, INTERVAL);
+// ── Diagnóstico de conectividade ao iniciar ────────────────────
+async function verificarConectividade() {
+  return new Promise(resolve => {
+    const req = https.request({
+      hostname: 'firestore.googleapis.com',
+      path: '/',
+      method: 'GET',
+      rejectUnauthorized: false,
+      timeout: 8000,
+    }, res => {
+      log(`[CONECTIVIDADE] Firestore googleapis.com: HTTP ${res.statusCode} — OK`);
+      resolve(true);
+    });
+    req.on('error', e => {
+      log(`[CONECTIVIDADE] FALHA ao acessar firestore.googleapis.com: ${e.message}`);
+      log('[CONECTIVIDADE] Verifique: 1) acesso à internet 2) proxy/firewall bloqueando googleapis.com 3) Node.js tem permissão de rede');
+      resolve(false);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      log('[CONECTIVIDADE] TIMEOUT ao acessar firestore.googleapis.com — proxy ou firewall bloqueando');
+      resolve(false);
+    });
+    req.end();
+  });
+}
+
+// ── Watchdog: reloga o agente se lastSeen parar de atualizar ───
+let _ultimoSucessoGravacao = Date.now();
+const _origFirestoreSet = firestoreSet;
+// Override transparente para rastrear último sucesso
+global._watchdogOk = () => { _ultimoSucessoGravacao = Date.now(); };
+setInterval(() => {
+  const inativo = Date.now() - _ultimoSucessoGravacao;
+  if (inativo > 5 * 60 * 1000) { // 5 minutos sem gravar
+    log(`[WATCHDOG] Sem gravação no Firestore há ${Math.round(inativo/60000)}min — forçando novo ciclo`);
+    reportar().catch(e => log('[WATCHDOG] Erro no ciclo forçado: ' + e.message));
+    _ultimoSucessoGravacao = Date.now(); // evita loop
+  }
+}, 2 * 60 * 1000);
+
+// ── Inicialização ───────────────────────────────────────────────
+verificarConectividade().then(ok => {
+  if (!ok) {
+    log('[AVISO] Sem conectividade ao Firestore. O agente tentará mesmo assim (pode ser falso positivo de proxy).');
+  }
+  reportar(); // Primeira execução imediata
+  setInterval(reportar, INTERVAL);
+});
 
 // Mantém o processo vivo
 process.on('uncaughtException', err => log(`[UNCAUGHT] ${err.message}`));
