@@ -1,5 +1,5 @@
 /**
- * SYSACK Agent Desktop v2.2.7
+ * SYSACK Agent Desktop v2.2.8
  * Monitora o computador e reporta ao Firebase Firestore
  * Roda como serviço Windows (SYSTEM)
  */
@@ -1593,7 +1593,7 @@ async function reportar() {
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
-log(`[SYSACK Agent Desktop v2.2.7] Iniciando - hostname: ${AGENT_ID}`);
+log(`[SYSACK Agent Desktop v2.2.8] Iniciando - hostname: ${AGENT_ID}`);
 log(`[SYSACK Agent Desktop] Projeto Firebase: ${PROJECT_ID}`);
 log(`[SYSACK Agent Desktop] Intervalo: ${INTERVAL / 1000}s`);
 
@@ -1839,22 +1839,42 @@ async function firestoreQuery(collectionPath, filters) {
       path: urlObj.pathname + urlObj.search,
       method: 'POST',
       rejectUnauthorized: false,
+      timeout: 15000,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
+        // CORREÇÃO: essa função (usada por pollComandos, a fila de comandos
+        // como atualizar_agente) nunca checava o status HTTP e só detectava
+        // erro se a resposta viesse como array com [0].error — se o Firestore
+        // (ou um proxy no meio do caminho) devolvesse um erro em outro formato,
+        // ou até HTML de página de erro (quebrando o JSON.parse), o código
+        // silenciosamente resolvia como [] pra sempre, e o agente achava que
+        // nunca tinha comando pendente algum, sem nenhuma pista do motivo real.
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          log(`[Firestore] pollComandos HTTP ${res.statusCode} em ${collectionPath}: ${raw.slice(0, 300)}`);
+          log('[Firestore] DICA: HTTP 403 = Firestore Rules bloqueando. HTTP 429 = rate limit. HTML no corpo = proxy/firewall interceptando a requisição.');
+          return resolve([]);
+        }
         try {
           const parsed = JSON.parse(raw);
           // Firestore retorna array — se primeiro item tem 'error', logar
           if (Array.isArray(parsed) && parsed[0]?.error) {
             log('[Firestore] Query erro: ' + JSON.stringify(parsed[0].error));
+          } else if (!Array.isArray(parsed) && parsed?.error) {
+            log('[Firestore] Query erro (objeto único): ' + JSON.stringify(parsed.error));
+            return resolve([]);
           }
           resolve(parsed);
-        } catch(e) { resolve([]); }
+        } catch(e) {
+          log('[Firestore] pollComandos — resposta não era JSON válido (possível proxy/HTML no meio do caminho): ' + e.message + ' — corpo: ' + raw.slice(0, 200));
+          resolve([]);
+        }
       });
     });
     req.on('error', e => { log('[Firestore] Query falhou: ' + e.message); resolve([]); });
+    req.on('timeout', () => { req.destroy(); log('[Firestore] pollComandos — timeout de 15s em ' + collectionPath); resolve([]); });
     req.write(body);
     req.end();
   });

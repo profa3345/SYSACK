@@ -2,7 +2,7 @@
 // Módulo principal de aplicação
 
 const SYSACK_APP_VERSION = '2.2.2';
-const SYSACK_AGENT_VERSION = '2.2.7';
+const SYSACK_AGENT_VERSION = '2.2.8';
 
 
 // ============================================================
@@ -1636,8 +1636,9 @@ function renderChamados(filter='abertos') {
 // Filtro de tipo ativo para as abas
 let _ativoFiltroTipo = '';
 
-function filtrarAtivosPorTipo(tipos, el) {
+function filtrarAtivosPorTipo(tipos, el, modoAgente) {
   _ativoFiltroTipo = tipos;
+  window._ativoAgenteFiltro = modoAgente || null; // 'com' | 'sem' | null
   // Atualiza tab ativa
   document.querySelectorAll('#ativos-tabs .tab').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
@@ -1882,10 +1883,14 @@ function renderAtivos() {
       if (!tipos.some(ft => t.includes(ft) || ft.includes(t))) return false;
     }
     if (fSt && a.status !== fSt) return false;
-    // Modo "Computadores sem Agente": mostra só quem NÃO tem agente SYSACK reportando.
-    if (window._semAgenteMode) {
+    // Filtro por presença de agente: 'sem' mostra só quem NÃO tem agente
+    // reportando; 'com' mostra só quem TEM. Sem esse `else` explícito, o
+    // estado ficava "preso" ao trocar de aba dentro do mesmo card (ex.: ir
+    // de "Computadores sem Agente" pra "Todos" mantinha o filtro antigo ativo).
+    if (window._ativoAgenteFiltro === 'sem' || window._ativoAgenteFiltro === 'com') {
       const agExistente = sysackFindAgentForAtivo(a);
-      if (agExistente) return false;
+      if (window._ativoAgenteFiltro === 'sem' && agExistente) return false;
+      if (window._ativoAgenteFiltro === 'com' && !agExistente) return false;
     }
     if (window._filtroLoginAtivoIds?.size || window._filtroLoginAtivoPats?.size || window._filtroLoginTexto) {
       const agFiltro = sysackFindAgentForAtivo(a);
@@ -1919,6 +1924,7 @@ function renderAtivos() {
         if (a.pat) return a.pat;
         const _hn2 = hostnameFromAtivo(a);
         const _pp2 = extractPatrimonioFromHostname(_hn2);
+        if (_pp2.virtual) return '<span style="font-size:10px;background:#EDE9FE;color:#5B21B6;padding:2px 8px;border-radius:10px;font-weight:700;font-family:inherit">Servidor Virtual</span>';
         if (_pp2.pat) return _pp2.alerta
           ? '<span style="color:#EF4444;font-weight:700">'+_pp2.pat+' ⚠️</span>'
           : '<span style="color:#059669;font-weight:700">'+_pp2.pat+'</span>';
@@ -1962,10 +1968,10 @@ function renderAtivos() {
         <td>${ip}</td>`;
       })() : ''}
       ${isComp ? patMetricasHtml(a) : ''}
-      <td class="td-acoes">${window._semAgenteMode ? `
-        <div style="display:flex;align-items:center;gap:6px;color:var(--g500);font-size:11.5px">
-          <span>⬇️ Instale o agente</span>
-          <button class="btn btn-primary btn-xs" onclick="arInstalarAgente()" title="Baixar instalador do agente SYSACK">Instalar</button>
+      <td class="td-acoes">${window._ativoAgenteFiltro === 'sem' ? `
+        <div style="display:flex;align-items:center;gap:6px;color:var(--g500);font-size:11px;line-height:1.3">
+          <span>⬇️ Instalação inicial deve ser feita manualmente na máquina, ou via rede usando o instalador —</span>
+          <button class="btn btn-ghost btn-xs" style="text-decoration:underline;padding:0" onclick="document.querySelector('.nav-i[data-page=\\'assistencia-remota\\']')?.click()" title="Ir para Computadores com Agente para baixar o instalador">baixe em Computadores com Agente</button>
         </div>` : `<div class="flex gap-6 acoes-wrap">
         <button class="btn btn-ghost btn-xs" onclick="abrirHistorico('${a.pat||a.id}')" title="Histórico geral">📜</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirHistoricoUsuariosDoAtivo('${a.id}')" title="Histórico de logins">👥</button>` : ''}
@@ -1973,6 +1979,8 @@ function renderAtivos() {
         <button class="btn btn-ghost btn-xs" onclick="analisarAtivoPorIA('${a.pat||a.id}')" title="Análise IA">🤖</button>
         <button class="btn btn-secondary btn-xs" onclick="openModal('modal-transferencia')">↔</button>
         ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="patAbrirBusca()" title="Vincular PAT">🏷️</button>` : ''}
+        ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirEditarPatrimonioSYSACK('${a.id}','${escapeHtml(hostnameFromAtivo(a)||a.id)}','${escapeHtml(a.pat||'')}')" title="Adicionar/alterar patrimônio (manual ou por foto)">🔢</button>` : ''}
+        ${isComp ? `<button class="btn btn-ghost btn-xs" onclick="abrirEditarUnidadeSYSACK('','${escapeHtml(hostnameFromAtivo(a)||a.id)}','${a.id}','${escapeHtml(a.pat||'')}','${escapeHtml(a.area||'')}')" title="Alterar área">🏢</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs" title="Ver softwares instalados" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag?swInvVerSoftwaresMaquina(_ag.id):showToast('Agente não conectado — sem dados de software','warning')})()">🗂️</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs" title="Acesso remoto" onclick="(()=>{const _ag=sysackFindAgentForAtivo(a);_ag&&_ag.status==='online'?arAbrirViewer(_ag.id):showToast(_ag?'Agente offline':'Agente não conectado','warning')})()">🖥️</button>` : ''}
         ${isComp ? `<button class="btn btn-ghost btn-xs"
@@ -1990,8 +1998,17 @@ function renderAtivos() {
 // ============================================================
 function extractPatrimonioFromHostname(hostname) {
   if (!hostname) return { pat: null, alerta: true };
+  const hn = String(hostname).trim();
+  const hnLower = hn.toLowerCase();
+  // Servidores virtuais (VSERV/vserv/Vserv...) nunca têm patrimônio físico —
+  // não faz sentido tentar extrair número nenhum do hostname.
+  if (hnLower.startsWith('vserv')) return { pat: null, alerta: false, virtual: true };
+  // Servidores físicos (SERV, sem o "V" de virtual na frente) não seguem o
+  // padrão de patrimônio no hostname — precisa ser preenchido manualmente
+  // ou por foto da etiqueta física (ver abrirEditarPatrimonioSYSACK).
+  if (hnLower.startsWith('serv')) return { pat: null, alerta: false, manual: true };
   // Get trailing numeric digits after the last letter in hostname
-  const match = hostname.match(/[a-zA-Z]([0-9]+)$/);
+  const match = hn.match(/[a-zA-Z]([0-9]+)$/);
   if (!match) return { pat: null, alerta: true };
   const digits = match[1];
   if (digits.length < 4) return { pat: digits, alerta: true };
@@ -5683,17 +5700,17 @@ document.addEventListener('DOMContentLoaded', () => {
       // Se tiver data-tipo, aplica o filtro de categoria automaticamente
       if (tipo !== null && el.dataset.page === 'ativos') {
         _ativoFiltroTipo = tipo;
-        window._semAgenteMode = semAgente;
+        window._ativoAgenteFiltro = semAgente ? 'sem' : null;
         // Destaca a aba correta dentro da página de ativos
         const tabMap = {
-          'computador,workstation,notebook,desktop': 1,
-          'notebook': 2,
-          'monitor': 3,
-          'switch,router,ap,firewall,access point': 4,
+          'computador,workstation,notebook,desktop,servidor,server,server-linux': semAgente ? 2 : 1,
+          'notebook': 3,
+          'monitor': 4,
+          'switch,router,ap,firewall,access point': 7,
           'servidor,server-linux': 5,
-          'outro,rack,storage,appliance,ups,camera': 6,
+          'outro,rack,storage,appliance,ups,camera': 8,
           'impressora,printer': 6,
-          'software': 6,
+          'software': 8,
         };
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
@@ -5710,7 +5727,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (el.dataset.page === 'ativos' && !tipo) {
         // Clicou em "Ativos" sem tipo — mostra todos
         _ativoFiltroTipo = '';
-        window._semAgenteMode = false;
+        window._ativoAgenteFiltro = null;
         const tabs = document.querySelectorAll('#ativos-tabs .tab');
         tabs.forEach(t => t.classList.remove('active'));
         if (tabs[0]) tabs[0].classList.add('active');
@@ -8270,7 +8287,7 @@ function renderAssistenciaRemota() {
 
   if (!lista.length) {
     const carregando = !STATE_AGENTS._carregou;
-    tbody.innerHTML = `<tr><td colspan="16" style="text-align:center;padding:40px;color:var(--g400)">
+    tbody.innerHTML = `<tr><td colspan="17" style="text-align:center;padding:40px;color:var(--g400)">
       <div style="font-size:32px;margin-bottom:12px">${carregando ? '⏳' : '🖥️'}</div>
       <div style="font-weight:600;margin-bottom:6px">
         ${carregando ? 'Carregando agentes...' : (agentes.length ? 'Nenhum agente com esses filtros' : 'Nenhum agente instalado')}
@@ -8343,6 +8360,16 @@ function renderAssistenciaRemota() {
         ${patchBadge}
         ${a.emSessao ? '<span style="font-size:10px;background:#EFF6FF;color:#2563EB;padding:1px 6px;border-radius:10px;margin-left:4px">Em sessão</span>' : ''}
       </td>
+      <td class="td-mono fw-700" style="color:var(--accent);font-size:12px">${(()=>{
+        if (ativoRel?.pat) return escapeHtml(ativoRel.pat);
+        const _hn = a.hostname || ativoRel?.hostname || a.id;
+        const _pp = extractPatrimonioFromHostname(_hn);
+        if (_pp.virtual) return '<span style="font-size:9.5px;background:#EDE9FE;color:#5B21B6;padding:1px 6px;border-radius:10px;font-weight:700">Servidor Virtual</span>';
+        if (_pp.pat) return _pp.alerta
+          ? '<span style="color:#EF4444;font-weight:700">'+escapeHtml(_pp.pat)+' ⚠️</span>'
+          : '<span style="color:#059669;font-weight:700">'+escapeHtml(_pp.pat)+'</span>';
+        return '<span style="font-size:9.5px;background:#FEF3C7;color:#92400E;padding:1px 6px;border-radius:10px;font-weight:700">Sem Patrimônio</span>';
+      })()}</td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)" title="${escapeHtml(a.ip||'')}">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(a.osNome||'—')}">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
       <td style="font-size:12px;color:var(--g600);max-width:95px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioLogado)}">${escapeHtml(usuarioLogado)}</td>
@@ -24062,16 +24089,23 @@ window.evImprimirRelatorio = evImprimirRelatorio;
 // Reaproveita fsUpdate, que já faz update parcial e audita automaticamente
 // os campos 'area' e 'pat' em ativos/{id}/historico (sysackAuditarMudancaAtivo).
 // ════════════════════════════════════════════════════════════
-function abrirEditarUnidadeSYSACK(agentId, hostname, ativoId, patAtual, unidadeAtual) {
+async function abrirEditarUnidadeSYSACK(agentId, hostname, ativoId, patAtual, unidadeAtual) {
   document.getElementById('modal-editar-unidade')?.remove();
 
   if (!ativoId) {
-    showToast?.('Este agente ainda não está vinculado a um ativo cadastrado — não é possível editar unidade/patrimônio por aqui.', 'warning');
+    showToast?.('Este agente ainda não está vinculado a um ativo cadastrado — não é possível editar área/patrimônio por aqui.', 'warning');
     return;
   }
 
-  const unidades = [...new Set((STATE.orgUnidades || []).map(u => u.sigla).filter(Boolean))].sort();
-  const opcoesHtml = unidades.map(s => `<option value="${escapeHtml(s)}" ${s === unidadeAtual ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
+  // CORREÇÃO: a lista precisa vir de REDES_CESAN (mesma fonte usada pela
+  // validação automática de IP-vs-área, verificarIPArea/ipParaArea) — usar
+  // organograma_unidades aqui geraria áreas que o sistema não reconhece na
+  // hora de checar se o IP da máquina bate com a área escolhida.
+  await carregarRedesCesan();
+  const areasUnicas = new Map(); // nome -> codigo
+  (REDES_CESAN || []).forEach(([, codigo, nome]) => { if (nome) areasUnicas.set(nome, codigo); });
+  const nomesOrdenados = [...areasUnicas.keys()].sort();
+  const opcoesHtml = nomesOrdenados.map(n => `<option value="${escapeHtml(n)}" ${n === unidadeAtual ? 'selected' : ''}>${escapeHtml(n)}${areasUnicas.get(n) ? ' ('+escapeHtml(areasUnicas.get(n).toUpperCase())+')' : ''}</option>`).join('');
 
   const overlay = document.createElement('div');
   overlay.id = 'modal-editar-unidade';
@@ -24079,19 +24113,19 @@ function abrirEditarUnidadeSYSACK(agentId, hostname, ativoId, patAtual, unidadeA
   overlay.innerHTML = `
     <div style="background:#fff;border-radius:14px;width:420px;max-width:96vw;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.3)">
       <div style="padding:16px 20px;background:#0F172A;display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:15px;font-weight:800;color:#fff">🏢 Unidade / Patrimônio — ${escapeHtml(hostname)}</div>
+        <div style="font-size:15px;font-weight:800;color:#fff">🏢 Área / Patrimônio — ${escapeHtml(hostname)}</div>
         <button onclick="document.getElementById('modal-editar-unidade').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
       </div>
       <div style="padding:18px 20px">
         <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Patrimônio (PAT)</label>
         <input id="eu-input-pat" class="form-control" type="text" value="${escapeHtml(patAtual)}" placeholder="Ex.: 12345" style="width:100%;margin-bottom:14px">
 
-        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Unidade</label>
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Área</label>
         <select id="eu-select-unidade" class="form-control" style="width:100%;margin-bottom:6px">
           <option value="">— Selecione —</option>
           ${opcoesHtml}
         </select>
-        <div style="font-size:11px;color:var(--g400)">Unidade atual: ${escapeHtml(unidadeAtual || 'sem unidade cadastrada')} · Lista carregada de organograma_unidades (${unidades.length} cadastradas)</div>
+        <div style="font-size:11px;color:var(--g400)">Área atual: ${escapeHtml(unidadeAtual || 'sem área cadastrada')} · ${nomesOrdenados.length} áreas cadastradas. Se a área escolhida não bater com a rede/IP da máquina, o sistema vai alertar.</div>
       </div>
       <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px">
         <button onclick="document.getElementById('modal-editar-unidade').remove()" class="btn btn-ghost btn-sm">Cancelar</button>
@@ -24105,13 +24139,14 @@ function abrirEditarUnidadeSYSACK(agentId, hostname, ativoId, patAtual, unidadeA
 async function salvarUnidadePatrimonioSYSACK(ativoId, hostname, patAntigo, unidadeAntiga) {
   const btn = document.getElementById('eu-btn-salvar');
   const novoPat = (document.getElementById('eu-input-pat')?.value || '').trim();
-  const novaUnidade = document.getElementById('eu-select-unidade')?.value || '';
+  const novaArea = document.getElementById('eu-select-unidade')?.value || '';
 
   // Só envia os campos que realmente mudaram — fsUpdate audita e grava no
   // histórico do ativo automaticamente (só para os campos presentes no objeto).
   const data = {};
   if (novoPat !== (patAntigo || '')) data.pat = novoPat;
-  if (novaUnidade && novaUnidade !== (unidadeAntiga || '')) data.area = novaUnidade;
+  const areaMudou = novaArea && novaArea !== (unidadeAntiga || '');
+  if (areaMudou) { data.area = novaArea; data.local = novaArea; }
 
   if (!Object.keys(data).length) {
     showToast?.('Nenhuma alteração para salvar.', 'info');
@@ -24123,6 +24158,16 @@ async function salvarUnidadePatrimonioSYSACK(ativoId, hostname, patAntigo, unida
     await fsUpdate('ativos', ativoId, data);
     showToast?.(`✅ ${hostname} atualizado. Alteração registrada no histórico do ativo.`, 'success');
     document.getElementById('modal-editar-unidade')?.remove();
+
+    // Reaproveita a checagem de IP-vs-área já existente no sistema: se a área
+    // escolhida manualmente não bater com a rede real da máquina, dispara o
+    // alerta padrão do SYSACK (com pedido de justificativa) até ser corrigido.
+    if (areaMudou) {
+      const ativoAtualizado = (STATE.ativos || []).find(x => x.id === ativoId) || { id: ativoId };
+      await verificarIPArea({ ...ativoAtualizado, area: novaArea, local: novaArea }).catch(() => {});
+    }
+    renderAssistenciaRemota?.();
+    renderAtivos?.();
   } catch(e) {
     showToast?.('❌ Erro ao salvar: ' + e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
@@ -24130,6 +24175,112 @@ async function salvarUnidadePatrimonioSYSACK(ativoId, hostname, patAntigo, unida
 }
 
 window.abrirEditarUnidadeSYSACK = abrirEditarUnidadeSYSACK;
+
+// ════════════════════════════════════════════════════════════
+// EDITAR PATRIMÔNIO — manual ou por foto/câmera (OCR), com confirmação
+// Botão único reaproveitado em "Computadores com Agente" e "sem Agente".
+// ════════════════════════════════════════════════════════════
+let _tesseractCarregado = false;
+async function garantirTesseractCarregado() {
+  if (_tesseractCarregado && window.Tesseract) return;
+  await new Promise((resolve, reject) => {
+    if (window.Tesseract) { _tesseractCarregado = true; return resolve(); }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = () => { _tesseractCarregado = true; resolve(); };
+    s.onerror = () => reject(new Error('Falha ao carregar leitor de imagem (OCR).'));
+    document.head.appendChild(s);
+  });
+}
+
+function abrirEditarPatrimonioSYSACK(ativoId, hostname, patAtual) {
+  document.getElementById('modal-editar-patrimonio')?.remove();
+  if (!ativoId) {
+    showToast?.('Este computador ainda não está vinculado a um ativo cadastrado — não é possível editar o patrimônio por aqui.', 'warning');
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-editar-patrimonio';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:440px;max-width:96vw;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.3)">
+      <div style="padding:16px 20px;background:#0F172A;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:800;color:#fff">🏷️ Patrimônio — ${escapeHtml(hostname)}</div>
+        <button onclick="document.getElementById('modal-editar-patrimonio').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 8px">✕</button>
+      </div>
+      <div style="padding:18px 20px">
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Patrimônio atual</label>
+        <div style="font-size:13px;color:var(--g500);margin-bottom:16px">${escapeHtml(patAtual || 'sem patrimônio cadastrado')}</div>
+
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Digitar manualmente</label>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <input id="ep-input-pat" class="form-control" type="text" placeholder="Ex.: 12345" style="flex:1">
+          <button onclick="epSalvarManual('${ativoId}','${escapeHtml(hostname)}')" class="btn btn-primary btn-sm">Salvar</button>
+        </div>
+
+        <div style="height:1px;background:var(--line);margin-bottom:16px"></div>
+
+        <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Ou ler pela câmera / foto da etiqueta</label>
+        <input type="file" accept="image/*" capture="environment" id="ep-input-foto" style="width:100%;font-size:11.5px;margin-bottom:8px">
+        <button onclick="epLerFotoPatrimonio('${ativoId}','${escapeHtml(hostname)}')" class="btn btn-secondary btn-sm" style="width:100%">📷 Ler número da foto</button>
+        <div id="ep-ocr-status" style="font-size:11.5px;color:var(--g500);min-height:16px;margin-top:8px"></div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-editar-patrimonio').remove()" class="btn btn-ghost btn-sm">Fechar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function epSalvarManual(ativoId, hostname) {
+  const val = (document.getElementById('ep-input-pat')?.value || '').trim();
+  const soDigitos = val.replace(/[^0-9]/g, '');
+  if (!soDigitos) { showToast?.('Digite um número de patrimônio válido.', 'warning'); return; }
+  if (!confirm(`Confirma que o patrimônio de ${hostname} é ${soDigitos}?`)) return;
+  try {
+    await fsUpdate('ativos', ativoId, { pat: soDigitos });
+    showToast?.('✅ Patrimônio atualizado.', 'success');
+    document.getElementById('modal-editar-patrimonio')?.remove();
+  } catch(e) {
+    showToast?.('❌ Erro ao salvar: ' + e.message, 'danger');
+  }
+}
+
+async function epLerFotoPatrimonio(ativoId, hostname) {
+  const fileInput = document.getElementById('ep-input-foto');
+  const status = document.getElementById('ep-ocr-status');
+  const file = fileInput?.files?.[0];
+  if (!file) { showToast?.('Selecione ou tire uma foto da etiqueta primeiro.', 'warning'); return; }
+  if (status) status.textContent = '⏳ Carregando leitor de imagem...';
+  try {
+    await garantirTesseractCarregado();
+    if (status) status.textContent = '🔎 Lendo número na etiqueta...';
+    const { data: { text } } = await Tesseract.recognize(file, 'por', {});
+    // Etiquetas trazem formatos como "Patrimônio: 58.431" ou "58.438" — pega
+    // sequências de dígitos (ignorando pontos) com pelo menos 4 números.
+    const numeros = (text.match(/\d[\d.]{2,}\d|\d{4,}/g) || [])
+      .map(s => s.replace(/\./g, ''))
+      .filter(s => s.length >= 4 && s.length <= 8);
+    if (!numeros.length) {
+      if (status) status.textContent = '❌ Não consegui identificar um número de patrimônio nessa foto. Tente uma foto mais nítida ou digite manualmente.';
+      return;
+    }
+    // Prioriza o número mais longo (mais provável de ser o patrimônio, evita pegar CEP/CNPJ parcial)
+    const candidato = numeros.sort((a, b) => b.length - a.length)[0];
+    if (status) status.textContent = '';
+    if (!confirm(`Número identificado na foto: ${candidato}\n\nConfirma que este é o patrimônio de ${hostname}?`)) return;
+    await fsUpdate('ativos', ativoId, { pat: candidato });
+    showToast?.('✅ Patrimônio atualizado a partir da foto.', 'success');
+    document.getElementById('modal-editar-patrimonio')?.remove();
+  } catch(e) {
+    if (status) status.textContent = '❌ Erro na leitura: ' + e.message;
+  }
+}
+
+window.abrirEditarPatrimonioSYSACK = abrirEditarPatrimonioSYSACK;
+window.epSalvarManual = epSalvarManual;
+window.epLerFotoPatrimonio = epLerFotoPatrimonio;
 window.salvarUnidadePatrimonioSYSACK = salvarUnidadePatrimonioSYSACK;
 
 // ════════════════════════════════════════════════════════════
