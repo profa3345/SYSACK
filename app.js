@@ -8228,6 +8228,36 @@ function arFormatarUptimeAgente(a) {
   return mins + 'min';
 }
 
+let _arFiltroSoAssinatura = '';
+function arPopularFiltroSO(agentes) {
+  const sel = document.getElementById('ar-filter-os');
+  if (!sel) return;
+
+  const exatos = [...new Set((agentes || []).map(a => (a.osNome || '').trim()).filter(Boolean))].sort();
+  const assinatura = exatos.join('|');
+  if (assinatura === _arFiltroSoAssinatura) return; // nada mudou, não mexe (evita perder o foco/seleção do usuário)
+  _arFiltroSoAssinatura = assinatura;
+
+  // Famílias genéricas — só entram na lista se realmente existir alguma
+  // máquina com esse SO (não é uma lista fixa adivinhada, é derivada do parque real).
+  const familiasConhecidas = ['Windows 11', 'Windows 10', 'Windows Server', 'Windows 8', 'Windows 7', 'Linux', 'Ubuntu', 'macOS'];
+  const familiasPresentes = familiasConhecidas.filter(f => exatos.some(o => o.includes(f)));
+
+  const valorAtual = sel.value;
+  let html = '<option value="">Todos os SO</option>';
+  if (familiasPresentes.length) {
+    html += familiasPresentes.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)} (todas as versões)</option>`).join('');
+  }
+  if (exatos.length) {
+    html += '<optgroup label="Versão exata">' +
+      exatos.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('') +
+      '</optgroup>';
+  }
+  sel.innerHTML = html;
+  // Mantém a seleção do usuário se a opção ainda existir na lista nova
+  if (valorAtual && [...sel.options].some(o => o.value === valorAtual)) sel.value = valorAtual;
+}
+
 function renderAssistenciaRemota() {
   const tbody = document.getElementById('ar-tbody');
   if (!tbody) return;
@@ -8236,6 +8266,8 @@ function renderAssistenciaRemota() {
   const fSt    = document.getElementById('ar-filter-status')?.value || '';
   const fOs    = document.getElementById('ar-filter-os')?.value    || '';
   const agentes = STATE_AGENTS.list;
+
+  arPopularFiltroSO(agentes);
 
   // Stats
   const online  = agentes.filter(a => a.status === 'online').length;
