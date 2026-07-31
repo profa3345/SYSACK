@@ -12459,9 +12459,8 @@ function startAutoCheckin() {
 async function solicitarCheckinSM(smId) {
   if (!smId) return showToast('Smartphone não identificado', 'warning');
   try {
-    // Using getFbFunctions singleton
-    const fn = httpsCallable(getFunctions(app), 'enviarComandoFCM');
-    await fn({ smId, tipo: 'checkin_request' });
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem — SDK compat só.
+    await callFunction('enviarComandoFCM', { smId, tipo: 'checkin_request' });
     showToast('📡 Checkin solicitado — aguarde o celular responder', 'info', 4000);
   } catch (err) {
     if (err.message.includes('FCM registrado')) {
@@ -12741,11 +12740,10 @@ async function iniciarRDP(ip, hostname, motivo) {
 
   // Verifica se RDP está habilitado via Cloud Function
   try {
-    // Using getFbFunctions singleton
-    const fn  = httpsCallable(getFunctions(app), 'prepararAcessoRemoto');
-    const res = await fn({ ativoId: window._ativoEditando?.id, metodo: 'rdp', motivo });
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem — SDK compat só.
+    const data = await callFunction('prepararAcessoRemoto', { ativoId: window._ativoEditando?.id, metodo: 'rdp', motivo });
 
-    if (res.data.rdpHabilitado) {
+    if (data.rdpHabilitado) {
       showRemotoStatus('success', 'RDP disponivel — abrindo conexao...');
       // Gera arquivo .rdp e faz download para o técnico abrir
       const rdpContent = gerarArquivoRDP(ip, hostname);
@@ -12755,8 +12753,7 @@ async function iniciarRDP(ip, hostname, motivo) {
     } else {
       showRemotoStatus('warning', 'RDP nao habilitado. Habilitando remotamente...');
       // Envia comando via SYSACK Client para habilitar RDP
-      const fn2 = httpsCallable(getFunctions(app), 'executarComandoRemoto');
-      await fn2({
+      await callFunction('executarComandoRemoto', {
         ativoId: window._ativoEditando?.id,
         comando: 'EnableRDP',
         motivo,
@@ -12808,9 +12805,8 @@ function gerarArquivoRDP(ip, hostname) {
 async function solicitarAssistenciaRemota(ativo, motivo) {
   showRemotoStatus('info', 'Enviando solicitacao de assistencia ao usuario...');
   try {
-    // Using getFbFunctions singleton
-    const fn = httpsCallable(getFunctions(app), 'prepararAcessoRemoto');
-    await fn({ ativoId: ativo.id, metodo: 'assistencia', motivo });
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem — SDK compat só.
+    await callFunction('prepararAcessoRemoto', { ativoId: ativo.id, metodo: 'assistencia', motivo });
     showRemotoStatus('success', 'Solicitacao enviada! Aguardando usuario autorizar...');
     showToast('Solicitacao de assistencia remota enviada para ' + (ativo.hostname || ativo.ip), 'info', 5000);
     setTimeout(() => closeModal('modal-acesso-remoto'), 2000);
@@ -12906,15 +12902,16 @@ async function executarInstalacaoSoftware() {
 
   try {
     if (!FB_READY || !auth?.currentUser) throw new Error('Login necessario');
-    // Using getFbFunctions singleton
-    const fn = httpsCallable(getFunctions(app), 'instalarSoftwareRemoto');
-    const res = await fn({
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem neste projeto —
+    // só o SDK compat (firebase-functions-compat.js) está carregado, que expõe
+    // firebase.functions().httpsCallable(nome), não as funções nomeadas do SDK
+    // modular. Por isso reaproveito callFunction(), que já usa o padrão certo.
+    const data = await callFunction('instalarSoftwareRemoto', {
       ativoId: ativo.id,
       software: { nome, url, params },
       motivo,
     });
 
-    const data = res.data;
     (data.steps || []).forEach(s => softLog(s));
 
     if (data.sucesso) {
@@ -13691,9 +13688,8 @@ async function testarConexaoRemota() {
   // Chama Cloud Function para testar (ping + WinRM)
   try {
     if (!FB_READY || !auth?.currentUser) throw new Error('Login necessario');
-    // Using getFbFunctions singleton
-    const fn = httpsCallable(getFunctions(app), 'testarConexaoCliente');
-    const r  = await fn({ hostname });
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem — SDK compat só.
+    const r = { data: await callFunction('testarConexaoCliente', { hostname }) };
     if (r.data.ping) {
       deployLog('Ping: OK (' + r.data.latencyMs + 'ms)');
     } else {
@@ -13736,9 +13732,8 @@ async function deployClientVia4G(hostname, ativoId) {
 
   // Com FCM — envia comando de auto-instalação
   try {
-    // Using getFbFunctions singleton
-    const fn = httpsCallable(getFunctions(app), 'enviarInstalacaoRemota');
-    const r  = await fn({ ativoId: ativo.id, hostname });
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem — SDK compat só.
+    await callFunction('enviarInstalacaoRemota', { ativoId: ativo.id, hostname });
     showToast('📲 Comando enviado! O dispositivo vai instalar o client automaticamente.', 'success', 5000);
   } catch (err) {
     showToast('Erro: ' + err.message, 'danger');
@@ -13794,10 +13789,8 @@ async function executarDeployClient() {
     if (!FB_READY || !auth?.currentUser) throw new Error('Faca login para usar esta funcao');
 
     // Chama Cloud Function que executa o deploy remoto
-    // Using getFbFunctions singleton
-    const fn = httpsCallable(getFunctions(app), 'deployClienteRemoto');
-
-    const result = await fn({
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem — SDK compat só.
+    const data = await callFunction('deployClienteRemoto', {
       hostname,
       usuario: usuario || null,
       senha:   senha   || null,
@@ -13806,7 +13799,6 @@ async function executarDeployClient() {
       ativoPat: _deployAtivoAtual?.pat || null,
     });
 
-    const data = result.data;
     deployLog('');
     for (const step of (data.steps || [])) {
       deployLog(step);
