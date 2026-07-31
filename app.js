@@ -8364,7 +8364,7 @@ function renderAssistenciaRemota() {
         if (ativoRel?.pat) return escapeHtml(ativoRel.pat);
         const _hn = a.hostname || ativoRel?.hostname || a.id;
         const _pp = extractPatrimonioFromHostname(_hn);
-        if (_pp.virtual) return '<span style="font-size:9.5px;background:#EDE9FE;color:#5B21B6;padding:1px 6px;border-radius:10px;font-weight:700">Servidor Virtual</span>';
+        if (_pp.virtual) return '<span style="font-size:9.5px;background:#EDE9FE;color:#5B21B6;padding:1px 6px;border-radius:10px;font-weight:700;white-space:normal;display:inline-block">Servidor Virtual</span>';
         if (_pp.pat) return _pp.alerta
           ? '<span style="color:#EF4444;font-weight:700">'+escapeHtml(_pp.pat)+' ⚠️</span>'
           : '<span style="color:#059669;font-weight:700">'+escapeHtml(_pp.pat)+'</span>';
@@ -8372,7 +8372,7 @@ function renderAssistenciaRemota() {
       })()}</td>
       <td style="font-family:monospace;font-size:12px;color:var(--g500)" title="${escapeHtml(a.ip||'')}">${(()=>{ const _a=ipParaArea(a.ip); return (a.ip||'—') + (_a ? ' <span style="font-size:10px;color:#64748B;font-weight:500" title="'+escapeHtml(_a.nome)+'">'+escapeHtml(_a.codigo.toUpperCase())+'</span>' : ''); })()}</td>
       <td style="font-size:12px;max-width:126px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(a.osNome||'—')}">${escapeHtml((a.osNome||'—').replace('Microsoft Windows ','Win '))}</td>
-      <td style="font-size:12px;color:var(--g600);max-width:91px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioLogado)}">${escapeHtml(usuarioLogado)}</td>
+      <td style="font-size:12px;color:var(--g600);max-width:106px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioLogado)}">${escapeHtml(usuarioLogado)}</td>
       <td style="font-size:12px;color:var(--g700);max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(usuarioPrincipal)}">${escapeHtml(usuarioPrincipal)}${ativoRel?.maquinaCompartilhada ? '<span style="font-size:10px;background:#EDE9FE;color:#6D28D9;padding:1px 5px;border-radius:8px;margin-left:4px">comp.</span>' : ''}</td>
       <td style="font-size:11px;color:var(--g500);max-width:86px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ultimoLogin)}">${escapeHtml(ultimoLogin)}</td>
       <td style="font-size:12px;font-weight:700;color:var(--accent);text-align:center">${escapeHtml(String(diasAno))}</td>
