@@ -7999,6 +7999,27 @@ function startAgentsListener() {
           const data = d.data();
           // Garante que campos numéricos não virem string
           if (data.uptimeH != null) data.uptimeH = Number(data.uptimeH);
+
+          // ── Detecção de agente removido/offline prolongado ──────────
+          // Se lastSeen > 3 dias sem contato → status = 'sem_agente'
+          // O registro permanece no Firestore até remoção manual
+          // Se lastSeen > 30 dias → gera alerta automático
+          const ls = data.lastSeen;
+          if (ls) {
+            const lsDate = new Date(ls?.seconds ? ls.seconds * 1000 : ls);
+            const diasSemContato = (Date.now() - lsDate.getTime()) / 86400000;
+            if (diasSemContato > 5 && data.status === 'online') {
+              data.status = 'offline';
+            }
+            if (diasSemContato > 5) {
+              data._semAgente = true;
+              data._diasSemContato = Math.floor(diasSemContato);
+            }
+          } else if (!data.lastSeen) {
+            data._semAgente = true;
+            data._diasSemContato = null;
+          }
+
           if (data.uptime != null) data.uptime = Number(data.uptime);
           if (data.uptimeSeconds != null) data.uptimeSeconds = Number(data.uptimeSeconds);
           if (data.cpuPct  != null) data.cpuPct  = Number(data.cpuPct);
@@ -8269,23 +8290,104 @@ function renderAssistenciaRemota() {
 
   arPopularFiltroSO(agentes);
 
+  // ── Separa agentes ativos de máquinas sem agente ──────────────
+  // Agente sem contato >3 dias → vai para "Sem Agente"
+  // Agente sem contato >30 dias → gera alerta se ainda não gerado
+  const agentesAtivos = agentes.filter(a => !a._semAgente);
+  const agentesSemAgente = agentes.filter(a => a._semAgente);
+
+  // Verifica alertas de máquinas sem agente (uma vez por sessão)
+  if (!window._alertasSemAgenteVerificado) {
+    window._alertasSemAgenteVerificado = true;
+    agentesSemAgente.forEach(async a => {
+      const dias = a._diasSemContato || 0;
+      const tipo = dias >= 30 ? 'sem_agente_30d' : 'sem_agente_5d';
+      const severidade = dias >= 30 ? 'critico' : 'alto';
+      try {
+        const db = window.db || window._db;
+        if (!db) return;
+        // Só gera alerta se não houver alerta não resolvido para esta máquina
+        const snap = await db.collection('alertas')
+          .where('agentId','==',a.id)
+          .where('resolvido','==',false)
+          .limit(1).get().catch(()=>null);
+        if (snap && snap.empty) {
+          await db.collection('alertas').add({
+            tipo,
+            agentId: a.id,
+            hostname: a.hostname || a.id,
+            titulo: `Máquina sem contato há ${dias} dias`,
+            desc: `${a.hostname || a.id} (${a.ip || ''}) está sem contato com o SYSACK há ${dias} dias. Verifique se o agente foi desinstalado, a máquina foi formatada ou está desligada.`,
+            severidade,
+            createdAt: new Date().toISOString(),
+            resolvido: false,
+            lida: false,
+          }).catch(()=>{});
+        }
+      } catch {}
+    });
+  }
+
   // Stats
-  const online  = agentes.filter(a => a.status === 'online').length;
-  const offline = agentes.filter(a => a.status === 'offline' || (!a.status && a.lastSeen)).length;
-  const alertas = agentes.filter(a => ['alerta','critico'].includes(a.status)).length;
-  const sessoes = agentes.filter(a => a.emSessao).length;
+  const online  = agentesAtivos.filter(a => a.status === 'online').length;
+  const offline = agentesAtivos.filter(a => a.status === 'offline' || (!a.status && a.lastSeen)).length;
+  const alertas = agentesAtivos.filter(a => ['alerta','critico'].includes(a.status)).length;
+  const sessoes = agentesAtivos.filter(a => a.emSessao).length;
 
   sv('ar-stat-online',  online);
   sv('ar-stat-offline', offline);
   sv('ar-stat-alert',   alertas);
   sv('ar-stat-session', sessoes);
   sv('ar-stat-total',   agentes.length);
+  sv('ar-stat-sem-agente', agentesSemAgente.length);
+  // ── Seção: Máquinas sem agente ──────────────────────────────────
+  const semAgenteContainer = document.getElementById('ar-sem-agente-section');
+  if (semAgenteContainer) {
+    if (agentesSemAgente.length) {
+      semAgenteContainer.style.display = '';
+      const semAgenteEl = document.getElementById('ar-sem-agente-lista');
+      if (semAgenteEl) {
+        semAgenteEl.innerHTML = agentesSemAgente.map(a => {
+          const dias = a._diasSemContato;
+          const badge = dias >= 30
+            ? `<span style="background:#FEE2E2;color:#DC2626;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px">⚠️ ${dias}d sem contato</span>`
+            : dias >= 7
+            ? `<span style="background:#FEF3C7;color:#92400E;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px">⚠️ ${dias}d sem contato</span>`
+            : `<span style="background:#F1F5F9;color:#64748B;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px">${dias ? dias+'d' : '—'} sem contato</span>`;
+          return `<tr style="border-bottom:1px solid var(--line)">
+            <td style="padding:8px 10px">
+              <div style="font-size:13px;font-weight:600;color:var(--g700)">${escapeHtml(a.hostname||a.id||'—')}</div>
+              <div style="font-size:11px;color:var(--g400)">${escapeHtml(a.ip||'')}</div>
+            </td>
+            <td style="padding:8px 10px;font-size:12px;color:var(--g500)">${escapeHtml(a.osNome||a.so||'—')}</td>
+            <td style="padding:8px 10px;font-size:12px;color:var(--g500)">${escapeHtml(a.usuarioPrincipal||a.usuarioLogado||'—')}</td>
+            <td style="padding:8px 10px">${badge}</td>
+            <td style="padding:8px 10px">
+              <div style="display:flex;gap:6px">
+                <button onclick="arInstalarAgente()" title="Reinstalar agente"
+                  style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--g200);background:#EFF6FF;color:#1D4ED8;cursor:pointer">
+                  🖥️ Reinstalar
+                </button>
+                <button onclick="arRemoverAgente('${a.id}','${escapeHtml(a.hostname||a.id)}')"
+                  style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--g200);background:#FEE2E2;color:#DC2626;cursor:pointer">
+                  🗑️ Remover
+                </button>
+              </div>
+            </td>
+          </tr>`;
+        }).join('');
+      }
+    } else {
+      semAgenteContainer.style.display = 'none';
+    }
+  }
+
   nbUpdate('nb-agentes-online', online);
   document.getElementById('ar-last-update').textContent =
     'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
 
-  // Filtro
-  let lista = agentes;
+  // Filtro — usa apenas agentes ativos (sem_agente vai para seção própria)
+  let lista = agentesAtivos;
   if (q)   lista = lista.filter(a =>
     (a.hostname||'').toLowerCase().includes(q) ||
     (a.ip||'').includes(q) ||
@@ -10017,6 +10119,24 @@ function arInstalarPatches(agentId, hostname) {
 }
 
 // ── DOWNLOAD DO INSTALADOR ────────────────────────────────────
+// Remove agente da lista (exclui do Firestore)
+async function arRemoverAgente(agentId, hostname) {
+  if (!confirm(`Remover "${hostname}" da lista de máquinas?
+
+O histórico será excluído. Para voltar a gerenciar esta máquina, reinstale o agente SYSACK.`)) return;
+  try {
+    const db = window.db || window._db;
+    if (db) await db.collection('agents').doc(agentId).delete();
+    // Remove do STATE_AGENTS local imediatamente
+    STATE_AGENTS.list = STATE_AGENTS.list.filter(a => a.id !== agentId);
+    renderAssistenciaRemota();
+    showToast('✅ Máquina removida da lista.', 'success', 4000);
+  } catch(e) {
+    showToast('Erro ao remover: ' + e.message, 'danger');
+  }
+}
+window.arRemoverAgente = arRemoverAgente;
+
 function arInstalarAgente() {
   const u = SESSION_USER || CURRENT_USER;
   const role = u?.role || '';
@@ -12901,56 +13021,30 @@ async function executarInstalacaoSoftware() {
   softLog('URL/caminho: ' + url);
 
   try {
-    if (!FB_READY || !auth?.currentUser) throw new Error('Login necessário. Faça login no SYSACK.');
-    const db   = window.db || window._db;
-    if (!db) throw new Error('Firestore não inicializado.');
-
-    // Envia comando diretamente para o agente via agent_commands
-    const u     = SESSION_USER || CURRENT_USER || {};
-    const cmdId = 'soft_' + Date.now() + '_' + (ativo.id || '').slice(0,8);
-    await db.collection('agent_commands').doc(cmdId).set({
-      agentId:          ativo.id,
-      tipo:             'instalar_software',
-      dados:            JSON.stringify({ nome, url, params, motivo }),
-      status:           'pendente',
-      requestedBy:      u.nome || u.email || '',
-      requestedByRole:  u.role || 'tecnico',
+    if (!FB_READY || !auth?.currentUser) throw new Error('Login necessario');
+    // CORREÇÃO: httpsCallable/getFunctions soltos não existem neste projeto —
+    // só o SDK compat (firebase-functions-compat.js) está carregado, que expõe
+    // firebase.functions().httpsCallable(nome), não as funções nomeadas do SDK
+    // modular. Por isso reaproveito callFunction(), que já usa o padrão certo.
+    const data = await callFunction('instalarSoftwareRemoto', {
+      ativoId: ativo.id,
+      software: { nome, url, params },
       motivo,
-      criadoEm:         new Date().toISOString(),
     });
 
-    softLog('Comando enviado ao agente. Aguardando execução...');
+    (data.steps || []).forEach(s => softLog(s));
 
-    // Poll pelo resultado (max 5 min)
-    const inicio = Date.now();
-    let concluido = false;
-    while (Date.now() - inicio < 300000 && !concluido) {
-      await new Promise(r => setTimeout(r, 3000));
-      const snap = await db.collection('agent_commands').doc(cmdId).get();
-      const st   = snap.data()?.status;
-      const res  = snap.data()?.resultado || '';
-
-      if (st === 'concluido') {
-        concluido = true;
-        softLog('✅ ' + (res || nome + ' instalado com sucesso.'));
-        document.getElementById('soft-status').style.cssText =
-          'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#F0FDF4;color:#166534';
-        document.getElementById('soft-status').textContent = nome + ' instalado com sucesso!';
-        showToast(nome + ' instalado em ' + (ativo.hostname || ativo.ip), 'success', 5000);
-        auditLog('SOFTWARE_INSTALL', 'ativos', ativo.id, 'computador', { software: nome, url, motivo });
-      } else if (st === 'erro' || st === 'descartado') {
-        concluido = true;
-        softLog('❌ Erro: ' + (res || 'Falha desconhecida'));
-        document.getElementById('soft-status').style.cssText =
-          'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#FEF2F2;color:#991B1B';
-        document.getElementById('soft-status').textContent = 'Falha: ' + (res || 'Erro desconhecido');
-      } else if (st === 'executando' || st === 'processando') {
-        softLog('⏳ Instalando... (' + Math.round((Date.now()-inicio)/1000) + 's)');
-      }
-    }
-
-    if (!concluido) {
-      softLog('⏱️ Timeout — o agente não confirmou em 5 minutos. Verifique o log em C:\SYSACK\agent.log na máquina alvo.');
+    if (data.sucesso) {
+      document.getElementById('soft-status').style.cssText =
+        'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#F0FDF4;color:#166534';
+      document.getElementById('soft-status').textContent = nome + ' instalado com sucesso!';
+      showToast(nome + ' instalado em ' + (ativo.hostname || ativo.ip), 'success', 5000);
+      auditLog('SOFTWARE_INSTALL', 'ativos', ativo.id, 'computador', { software: nome, url, motivo });
+    } else {
+      softLog('ERRO: ' + (data.erro || 'Falha desconhecida'));
+      document.getElementById('soft-status').style.cssText =
+        'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#FEF2F2;color:#991B1B';
+      document.getElementById('soft-status').textContent = 'Falha: ' + (data.erro || '');
     }
   } catch (err) {
     softLog('Erro: ' + err.message);

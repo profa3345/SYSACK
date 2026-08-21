@@ -24,7 +24,7 @@ try { cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch(e) {}
 const PROJECT_ID = cfg.firebaseProjectId || 'sysack-829e2';
 const API_KEY    = cfg.firebaseApiKey    || 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
 const AGENT_ID   = cfg.agentId          || os.hostname();
-const INTERVAL   = (cfg.intervalSeconds || 60) * 1000;
+const INTERVAL   = (cfg.intervalSeconds || 120) * 1000; // 2 min padrão — reduz cota Firestore
 let _fsErrosConsecutivos = 0; // contador de falhas consecutivas no Firestore
 let TUNNEL_TOKEN = cfg.tunnelToken || process.env.TUNNEL_TOKEN || '';
 const SOFTWARE_INTERVAL = (cfg.softwareIntervalHours || 6) * 60 * 60 * 1000;
@@ -3084,65 +3084,6 @@ $out | ConvertTo-Json -Depth 4 -Compress
         { timeout: 20000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).toString().trim();
       try { fs.unlinkSync(psFile); } catch(e) {}
 
-    } else if (tipo === 'instalar_software') {
-      // ── Instalar software remotamente ────────────────────────────
-      const nome   = dados.nome   || dados.software?.nome   || '';
-      const url    = dados.url    || dados.software?.url    || '';
-      const params = dados.params || dados.software?.params || '/quiet /norestart';
-
-      if (!url) throw new Error('URL ou caminho do instalador não informado.');
-      log(`[SOFT] Instalando: ${nome} | URL: ${url} | Params: ${params}`);
-
-      const isHttp    = /^https?:\/\//i.test(url);
-      const ext       = url.split('?')[0].toLowerCase();
-      const isMsi     = ext.endsWith('.msi');
-      const isExe     = ext.endsWith('.exe');
-      const tmpDir    = process.env.TEMP || 'C:\Windows\Temp';
-      const tmpFile   = path.join(tmpDir, `sysack_install_${Date.now()}${isMsi ? '.msi' : '.exe'}`);
-
-      // 1. Download se for URL HTTP
-      if (isHttp) {
-        log(`[SOFT] Baixando de ${url}...`);
-        await new Promise((resolve, reject) => {
-          const proto = url.startsWith('https') ? require('https') : require('http');
-          const file  = fs.createWriteStream(tmpFile);
-          const req   = proto.get(url, { rejectUnauthorized: false }, res => {
-            if (res.statusCode !== 200) {
-              return reject(new Error('HTTP ' + res.statusCode + ' ao baixar ' + url));
-            }
-            res.pipe(file);
-            file.on('finish', () => { file.close(); resolve(); });
-          });
-          req.on('error', e => { fs.unlink(tmpFile, () => {}); reject(e); });
-          req.setTimeout(60000, () => { req.destroy(); reject(new Error('Timeout ao baixar instalador')); });
-        });
-        log(`[SOFT] Download concluído: ${tmpFile}`);
-      }
-
-      // 2. Executa o instalador
-      const alvoCaminho = isHttp ? tmpFile : url;
-      let cmdInstall;
-      if (isMsi || alvoCaminho.toLowerCase().endsWith('.msi')) {
-        cmdInstall = `msiexec /i "${alvoCaminho}" ${params}`;
-      } else {
-        cmdInstall = `"${alvoCaminho}" ${params}`;
-      }
-
-      log(`[SOFT] Executando: ${cmdInstall}`);
-      const saida = execSync(cmdInstall, {
-        timeout: 300000, // 5 min
-        windowsHide: true,
-        maxBuffer: 5 * 1024 * 1024,
-      }).toString().trim();
-
-      // 3. Remove arquivo temporário se foi download
-      if (isHttp) {
-        try { fs.unlinkSync(tmpFile); } catch(e) {}
-      }
-
-      resultado = nome + ' instalado com sucesso.' + (saida ? ' | ' + saida.slice(0, 200) : '');
-      log(`[SOFT] ${resultado}`);
-
     } else {
       resultado = 'tipo desconhecido: ' + tipo;
     }
@@ -3165,21 +3106,51 @@ $out | ConvertTo-Json -Depth 4 -Compress
 // Poll Firestore — somente para receber "iniciar_acesso_remoto" com sessaoId
 // Intervalo de 5s (era 3s) — depois que o relay RTDB inicia, não é mais usado
 async function pollComandos() {
-  try {
-    const docs = await firestoreQuery('agent_commands', [
-      ['agentId', 'EQUAL', AGENT_ID],
-      ['status',  'EQUAL', 'pendente']
-    ]);
-    if (Array.isArray(docs)) {
-      for (const doc of docs) {
-        if (doc.document) await executarComando(doc);
-      }
+  const docs = await firestoreQuery('agent_commands', [
+    ['agentId', 'EQUAL', AGENT_ID],
+    ['status',  'EQUAL', 'pendente']
+  ]);
+  // firestoreQuery lança erro em 429 — deixa propagar para o backoff
+  if (Array.isArray(docs)) {
+    for (const doc of docs) {
+      if (doc.document) await executarComando(doc);
     }
-  } catch(e) {}
+  }
 }
 
-setInterval(pollComandos, 800);
-setTimeout(pollComandos, 200);
+// ── Polling com backoff exponencial ──────────────────────────────
+// Intervalo base: 15s — evita esgotar cota do Firestore
+// Em caso de 429 (rate limit): backoff dobra até 5 min
+let _pollInterval = 15000;
+let _pollBackoff  = false;
+
+function agendarProximoPoll() {
+  setTimeout(async () => {
+    try {
+      await pollComandos();
+      // Sucesso — volta ao intervalo normal
+      if (_pollBackoff) {
+        _pollBackoff = false;
+        _pollInterval = 15000;
+        log('[POLL] Rate limit resolvido — intervalo voltou para 15s');
+      }
+    } catch(e) {
+      // 429 ou erro de rede — aumenta intervalo com backoff
+      if (e.message && (e.message.includes('429') || e.message.includes('RESOURCE_EXHAUSTED'))) {
+        _pollBackoff = true;
+        _pollInterval = Math.min(_pollInterval * 2, 300000); // máx 5 min
+        log(`[POLL] Rate limit (429) — próximo poll em ${Math.round(_pollInterval/1000)}s`);
+      }
+    }
+    agendarProximoPoll();
+  }, _pollInterval);
+}
+
+// Primeira execução após 5s (dá tempo do agente inicializar)
+setTimeout(async () => {
+  await pollComandos().catch(() => {});
+  agendarProximoPoll();
+}, 5000);
 
 
 // ── Atualiza ativo correspondente com hostname ────────────────────
