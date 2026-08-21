@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2563EB">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SYSACK Mobile">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>SYSACK — Cadastro de Celular</title>
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest-celular.json">
+
+  <!-- Ícone para iOS (Apple Touch Icon) -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='80' fill='%232563EB'/%3E%3Ctext x='256' y='330' font-size='280' text-anchor='middle' fill='white'%3E📱%3C/text%3E%3C/svg%3E">
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0F172A; color: #F1F5F9;
+      min-height: 100vh; min-height: -webkit-fill-available;
+      padding: 0 0 env(safe-area-inset-bottom);
+    }
+
+    /* Banner de instalação */
+    #install-banner {
+      display: none;
+      background: linear-gradient(135deg, #1D4ED8, #2563EB);
+      padding: 12px 16px;
+      align-items: center; gap: 12px;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    }
+    #install-banner.show { display: flex; }
+    #install-banner .txt { flex: 1; font-size: 13px; font-weight: 600; }
+    #install-banner .txt span { display: block; font-size: 11px; font-weight: 400; opacity: .8; margin-top: 2px; }
+    #btn-instalar-pwa {
+      background: #fff; color: #1D4ED8; border: none;
+      padding: 8px 16px; border-radius: 20px; font-size: 13px;
+      font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
+    #btn-fechar-banner {
+      background: none; border: none; color: rgba(255,255,255,.6);
+      font-size: 20px; cursor: pointer; padding: 0 4px;
+    }
+
+    /* Banner iOS */
+    #ios-banner {
+      display: none;
+      background: #1E293B; border-top: 1px solid rgba(255,255,255,.1);
+      padding: 14px 16px; font-size: 12.5px; color: #94A3B8;
+      text-align: center; line-height: 1.6;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+    }
+    #ios-banner.show { display: block; }
+    #ios-banner strong { color: #F1F5F9; }
+    #ios-banner .close-ios { display: block; margin-top: 8px; color: #2563EB; cursor: pointer; font-weight: 600; }
+
+    .header {
+      background: linear-gradient(135deg, #1E3A8A, #2563EB);
+      padding: 28px 20px 20px;
+      text-align: center;
+    }
+    .logo { font-size: 52px; margin-bottom: 8px; }
+    .header h1 { font-size: 20px; font-weight: 800; }
+    .header p  { font-size: 12px; color: rgba(255,255,255,.6); margin-top: 4px; }
+
+    .card {
+      background: #1E293B; border-radius: 16px;
+      margin: 14px 14px; padding: 18px;
+      border: 1px solid rgba(255,255,255,.07);
+    }
+    .card h2 {
+      font-size: 12px; font-weight: 700; color: #64748B;
+      text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px;
+    }
+
+    .info-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { font-size: 12.5px; color: #64748B; }
+    .info-value { font-size: 12.5px; font-weight: 600; color: #E2E8F0; text-align: right; max-width: 58%; word-break: break-all; }
+
+    label { display: block; font-size: 12px; font-weight: 600; color: #94A3B8; margin-bottom: 6px; }
+    input, select {
+      width: 100%; padding: 13px 14px; border-radius: 10px;
+      background: #0F172A; border: 1.5px solid rgba(255,255,255,.1);
+      color: #F1F5F9; font-size: 15px; margin-bottom: 14px;
+      -webkit-appearance: none; outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, select:focus { border-color: #2563EB; }
+
+    .btn {
+      width: 100%; padding: 15px; border-radius: 12px; border: none;
+      font-size: 16px; font-weight: 700; cursor: pointer;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn:active { opacity: .85; transform: scale(.98); }
+    .btn-primary { background: linear-gradient(135deg, #2563EB, #1D4ED8); color: #fff; }
+    .btn-ghost   { background: rgba(255,255,255,.07); color: #94A3B8; margin-top: 10px; }
+
+    .status {
+      border-radius: 12px; padding: 14px 16px;
+      font-size: 13px; font-weight: 600; text-align: center;
+      margin-top: 12px; display: none;
+    }
+    .status.success { background: rgba(5,150,105,.2); color: #34D399; border: 1px solid rgba(5,150,105,.3); }
+    .status.error   { background: rgba(220,38,38,.2);  color: #FCA5A5; border: 1px solid rgba(220,38,38,.3); }
+    .status.loading { background: rgba(37,99,235,.2);  color: #93C5FD; border: 1px solid rgba(37,99,235,.3); }
+
+    .ok-screen {
+      text-align: center; padding: 40px 20px;
+    }
+    .ok-screen .icon { font-size: 72px; margin-bottom: 16px; }
+    .ok-screen h2 { font-size: 22px; font-weight: 800; margin-bottom: 10px; }
+    .ok-screen p  { font-size: 13px; color: #64748B; line-height: 1.6; }
+
+    .bat-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); margin-top: 8px; overflow: hidden; }
+    .bat-fill { height: 100%; border-radius: 4px; background: #059669; transition: width .5s; }
+  </style>
+</head>
+<body>
+
+<!-- Banner instalação Android/Chrome -->
+<div id="install-banner">
+  <div class="txt">
+    📲 Instalar como aplicativo
+    <span>Toque em instalar para adicionar à tela inicial</span>
+  </div>
+  <button id="btn-instalar-pwa">Instalar</button>
+  <button id="btn-fechar-banner">✕</button>
+</div>
+
+<!-- Banner iOS -->
+<div id="ios-banner">
+  Para instalar: toque em <strong>Compartilhar</strong> (⬆️) e depois
+  <strong>"Adicionar à Tela de Início"</strong>
+  <span class="close-ios" onclick="document.getElementById('ios-banner').classList.remove('show')">Fechar</span>
+</div>
+
+<div class="header">
+  <div class="logo">📱</div>
+  <h1>SYSACK Mobile</h1>
+  <p>Cadastro de dispositivo corporativo</p>
+</div>
+
+<!-- Dados coletados -->
+<div class="card" id="card-dados">
+  <h2>📊 Dados do dispositivo</h2>
+  <div id="dados-lista">
+    <div class="info-row"><span class="info-label">Coletando dados...</span></div>
+  </div>
+  <div id="bat-wrap" style="margin-top:10px;display:none">
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+      <span style="font-size:12px;color:#64748B">Bateria</span>
+      <span style="font-size:12px;font-weight:600" id="bat-pct">—</span>
+    </div>
+    <div class="bat-bar"><div class="bat-fill" id="bat-bar" style="width:0%"></div></div>
+  </div>
+</div>
+
+<!-- Formulário -->
+<div class="card" id="card-form">
+  <h2>👤 Responsável pelo aparelho</h2>
+  <label>Login AD / Matrícula *</label>
+  <input type="text" id="inp-login" placeholder="Ex: ana.penha ou 123456"
+    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+  <label>Nome completo *</label>
+  <input type="text" id="inp-nome" placeholder="Ex: Ana Paula Lima Penha">
+  <label>Gerência / Área *</label>
+  <input type="text" id="inp-area" placeholder="Ex: A-DSI, Financeiro">
+  <label>Número do chip (linha telefônica)</label>
+  <input type="tel" id="inp-linha" placeholder="Ex: 27999990000">
+  <label>Patrimônio (PAT) — se houver etiqueta</label>
+  <input type="text" id="inp-pat" placeholder="Ex: 123456" inputmode="numeric">
+
+  <div style="height:1px;background:rgba(255,255,255,.06);margin:6px 0 16px"></div>
+
+  <button class="btn btn-primary" onclick="enviarAoSYSACK()">
+    📤 Enviar ao SYSACK
+  </button>
+
+  <div class="status" id="status-msg"></div>
+</div>
+
+<!-- Tela de sucesso -->
+<div class="card ok-screen" id="card-ok" style="display:none">
+  <div class="icon">✅</div>
+  <h2>Cadastro enviado!</h2>
+  <p>O aparelho foi registrado no SYSACK e está aguardando vinculação pela equipe de TI.</p>
+  <br>
+  <p style="font-size:12px;color:#475569">Você pode fechar este aplicativo.</p>
+  <button class="btn btn-ghost" onclick="reiniciar()" style="margin-top:20px">Cadastrar outro aparelho</button>
+</div>
+
+<script>
+// ── Firebase config ──────────────────────────────────────────
+const FB_PROJECT = 'sysack-829e2';
+const FB_API_KEY = 'AIzaSyBGb4GY-0nMbGg82AnG8tMySWrZxMvogww';
+
+// ── PWA: instação ────────────────────────────────────────────
+let _pwaPrompt = null;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+const isInStandaloneMode = () =>
+  window.matchMedia('(display-mode: standalone)').matches ||
+  window.navigator.standalone === true;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _pwaPrompt = e;
+  if (!isInStandaloneMode()) {
+    document.getElementById('install-banner').classList.add('show');
+  }
+});
+
+document.getElementById('btn-instalar-pwa')?.addEventListener('click', async () => {
+  if (!_pwaPrompt) return;
+  _pwaPrompt.prompt();
+  const { outcome } = await _pwaPrompt.userChoice;
+  if (outcome === 'accepted') {
+    document.getElementById('install-banner').classList.remove('show');
+  }
+  _pwaPrompt = null;
+});
+
+document.getElementById('btn-fechar-banner')?.addEventListener('click', () => {
+  document.getElementById('install-banner').classList.remove('show');
+});
+
+// iOS: mostra banner se não estiver em standalone
+if (isIOS && !isInStandaloneMode()) {
+  setTimeout(() => {
+    document.getElementById('ios-banner').classList.add('show');
+  }, 3000);
+}
+
+window.addEventListener('appinstalled', () => {
+  document.getElementById('install-banner').classList.remove('show');
+  document.getElementById('ios-banner').classList.remove('show');
+});
+
+// ── Service Worker ───────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw-celular.js', { scope: '/' })
+    .then(() => console.log('[SW] Registrado'))
+    .catch(e => console.warn('[SW] Erro:', e));
+}
+
+// ── Coleta de dados do dispositivo ──────────────────────────
+let dadosDispositivo = {};
+
+async function coletarDados() {
+  const ua = navigator.userAgent;
+  const dados = { userAgent: ua };
+
+  if (/Android/i.test(ua)) {
+    dados.so = 'Android';
+    const m = ua.match(/Android\s([0-9.]+)/);
+    dados.versaoSO = m ? m[1] : '—';
+  } else if (/iPhone|iPad|iPod/i.test(ua)) {
+    dados.so = 'iOS';
+    const m = ua.match(/OS\s([0-9_]+)/);
+    dados.versaoSO = m ? m[1].replace(/_/g, '.') : '—';
+  } else {
+    dados.so = navigator.platform || 'Outro';
+    dados.versaoSO = '—';
+  }
+
+  dados.modelo = detectarModelo(ua);
+  dados.resolucao = `${screen.width}×${screen.height}`;
+  dados.pixelRatio = window.devicePixelRatio || 1;
+  if (navigator.deviceMemory) dados.ramGB = navigator.deviceMemory + ' GB';
+
+  if (navigator.storage?.estimate) {
+    try {
+      const est = await navigator.storage.estimate();
+      dados.armazTotal = fmtBytes(est.quota || 0);
+      dados.armazLivre = fmtBytes((est.quota || 0) - (est.usage || 0));
+    } catch {}
+  }
+
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (conn) {
+    dados.rede = conn.effectiveType || conn.type || '—';
+  }
+
+  dados.idioma = navigator.language || '—';
+  dados.fusoHorario = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  dados.coletadoEm = new Date().toISOString();
+
+  if (navigator.getBattery) {
+    try {
+      const bat = await navigator.getBattery();
+      dados.bateria = Math.round(bat.level * 100);
+      dados.carregando = bat.charging;
+      const bar = document.getElementById('bat-bar');
+      const pct = document.getElementById('bat-pct');
+      const wrap = document.getElementById('bat-wrap');
+      if (bar) { bar.style.width = dados.bateria + '%'; bar.style.background = dados.bateria < 20 ? '#DC2626' : '#059669'; }
+      if (pct) pct.textContent = dados.bateria + '%' + (dados.carregando ? ' ⚡' : '');
+      if (wrap) wrap.style.display = '';
+    } catch {}
+  }
+
+  dadosDispositivo = dados;
+  renderDados(dados);
+}
+
+function detectarModelo(ua) {
+  let m = ua.match(/Samsung\/([^\s;)]+)/i) || ua.match(/SM-([A-Z0-9]+)/i);
+  if (m) return 'Samsung ' + m[1];
+  m = ua.match(/Moto\s([^\s;)]+)/i);
+  if (m) return 'Motorola ' + m[0];
+  m = ua.match(/Xiaomi\s([^\s;)]+)/i) || ua.match(/Redmi\s([^\s;)]+)/i);
+  if (m) return m[0];
+  if (/iPhone/i.test(ua)) return 'Apple iPhone';
+  if (/iPad/i.test(ua)) return 'Apple iPad';
+  m = ua.match(/\(([^;]+);\s*(?:U;)?\s*Android/);
+  if (m) return m[1].trim();
+  return 'Desconhecido';
+}
+
+function fmtBytes(b) {
+  if (b >= 1e9) return (b/1e9).toFixed(1) + ' GB';
+  if (b >= 1e6) return (b/1e6).toFixed(1) + ' MB';
+  return b + ' B';
+}
+
+function renderDados(d) {
+  const lista = [
+    ['Sistema', (d.so||'—') + ' ' + (d.versaoSO||'')],
+    ['Modelo',  d.modelo || '—'],
+    ['Resolução', d.resolucao || '—'],
+    ['RAM', d.ramGB || '—'],
+    ['Armazenamento', d.armazTotal ? d.armazTotal + ' (livre: ' + d.armazLivre + ')' : '—'],
+    ['Rede', d.rede || '—'],
+    ['Idioma', d.idioma || '—'],
+  ];
+  document.getElementById('dados-lista').innerHTML = lista.map(([k, v]) =>
+    `<div class="info-row">
+      <span class="info-label">${k}</span>
+      <span class="info-value">${v}</span>
+    </div>`
+  ).join('');
+}
+
+// ── Envio ao Firestore ───────────────────────────────────────
+async function enviarAoSYSACK() {
+  const login = document.getElementById('inp-login').value.trim();
+  const nome  = document.getElementById('inp-nome').value.trim();
+  const area  = document.getElementById('inp-area').value.trim();
+  const linha = document.getElementById('inp-linha').value.trim();
+  const pat   = document.getElementById('inp-pat').value.replace(/\D/g,'').trim();
+
+  if (!login) return mostrarStatus('Informe o login AD ou matrícula.', 'error');
+  if (!nome)  return mostrarStatus('Informe o nome completo.', 'error');
+  if (!area)  return mostrarStatus('Informe a gerência/área.', 'error');
+
+  mostrarStatus('⏳ Enviando dados...', 'loading');
+
+  const doc = { login, nome, area, linha: linha||'', pat: pat||'',
+    ...dadosDispositivo,
+    status: 'pendente_vinculacao', origem: 'sysack-mobile-pwa',
+    criadoEm: new Date().toISOString() };
+
+  const fields = {};
+  Object.entries(doc).forEach(([k, v]) => {
+    if (typeof v === 'boolean')     fields[k] = { booleanValue: v };
+    else if (typeof v === 'number') fields[k] = { doubleValue: v };
+    else if (v == null)             fields[k] = { nullValue: null };
+    else                            fields[k] = { stringValue: String(v) };
+  });
+
+  try {
+    const resp = await fetch(
+      `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents/smartphones?key=${FB_API_KEY}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fields }) }
+    );
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    document.getElementById('card-form').style.display  = 'none';
+    document.getElementById('card-dados').style.display = 'none';
+    document.getElementById('card-ok').style.display    = '';
+  } catch(e) {
+    mostrarStatus('❌ Erro ao enviar: ' + e.message, 'error');
+  }
+}
+
+function mostrarStatus(msg, tipo) {
+  const el = document.getElementById('status-msg');
+  el.style.display = msg ? '' : 'none';
+  el.className = 'status ' + tipo;
+  el.textContent = msg;
+}
+
+function reiniciar() {
+  document.getElementById('card-form').style.display  = '';
+  document.getElementById('card-dados').style.display = '';
+  document.getElementById('card-ok').style.display    = 'none';
+  ['inp-login','inp-nome','inp-area','inp-linha','inp-pat'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+}
+
+coletarDados();
+</script>
+</body>
+</html>

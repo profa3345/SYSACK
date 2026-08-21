@@ -10492,7 +10492,7 @@ async function executarAtualizacaoCliente() {
   const { user: credUser, pass: credPass } = _updGetCredenciais();
 
   // URL sempre fixa — busca diretamente da Vercel, transparente para o técnico
-  const AGENT_URL = 'https://sysack.vercel.app/agent-desktop.js?ts=' + Date.now();
+  const AGENT_URL = (window.__ENV__&&window.__ENV__.SYSACK_AGENT_URL ? window.__ENV__.SYSACK_AGENT_URL + '?ts=' + Date.now() : 'https://sysack.vercel.app/agent-desktop.js?ts=' + Date.now());
   const btn = document.getElementById('btn-upd-exec');
 
   let versao = btn?.dataset?.versao || SYSACK_AGENT_VERSION;
@@ -12901,30 +12901,56 @@ async function executarInstalacaoSoftware() {
   softLog('URL/caminho: ' + url);
 
   try {
-    if (!FB_READY || !auth?.currentUser) throw new Error('Login necessario');
-    // CORREÇÃO: httpsCallable/getFunctions soltos não existem neste projeto —
-    // só o SDK compat (firebase-functions-compat.js) está carregado, que expõe
-    // firebase.functions().httpsCallable(nome), não as funções nomeadas do SDK
-    // modular. Por isso reaproveito callFunction(), que já usa o padrão certo.
-    const data = await callFunction('instalarSoftwareRemoto', {
-      ativoId: ativo.id,
-      software: { nome, url, params },
+    if (!FB_READY || !auth?.currentUser) throw new Error('Login necessário. Faça login no SYSACK.');
+    const db   = window.db || window._db;
+    if (!db) throw new Error('Firestore não inicializado.');
+
+    // Envia comando diretamente para o agente via agent_commands
+    const u     = SESSION_USER || CURRENT_USER || {};
+    const cmdId = 'soft_' + Date.now() + '_' + (ativo.id || '').slice(0,8);
+    await db.collection('agent_commands').doc(cmdId).set({
+      agentId:          ativo.id,
+      tipo:             'instalar_software',
+      dados:            JSON.stringify({ nome, url, params, motivo }),
+      status:           'pendente',
+      requestedBy:      u.nome || u.email || '',
+      requestedByRole:  u.role || 'tecnico',
       motivo,
+      criadoEm:         new Date().toISOString(),
     });
 
-    (data.steps || []).forEach(s => softLog(s));
+    softLog('Comando enviado ao agente. Aguardando execução...');
 
-    if (data.sucesso) {
-      document.getElementById('soft-status').style.cssText =
-        'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#F0FDF4;color:#166534';
-      document.getElementById('soft-status').textContent = nome + ' instalado com sucesso!';
-      showToast(nome + ' instalado em ' + (ativo.hostname || ativo.ip), 'success', 5000);
-      auditLog('SOFTWARE_INSTALL', 'ativos', ativo.id, 'computador', { software: nome, url, motivo });
-    } else {
-      softLog('ERRO: ' + (data.erro || 'Falha desconhecida'));
-      document.getElementById('soft-status').style.cssText =
-        'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#FEF2F2;color:#991B1B';
-      document.getElementById('soft-status').textContent = 'Falha: ' + (data.erro || '');
+    // Poll pelo resultado (max 5 min)
+    const inicio = Date.now();
+    let concluido = false;
+    while (Date.now() - inicio < 300000 && !concluido) {
+      await new Promise(r => setTimeout(r, 3000));
+      const snap = await db.collection('agent_commands').doc(cmdId).get();
+      const st   = snap.data()?.status;
+      const res  = snap.data()?.resultado || '';
+
+      if (st === 'concluido') {
+        concluido = true;
+        softLog('✅ ' + (res || nome + ' instalado com sucesso.'));
+        document.getElementById('soft-status').style.cssText =
+          'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#F0FDF4;color:#166534';
+        document.getElementById('soft-status').textContent = nome + ' instalado com sucesso!';
+        showToast(nome + ' instalado em ' + (ativo.hostname || ativo.ip), 'success', 5000);
+        auditLog('SOFTWARE_INSTALL', 'ativos', ativo.id, 'computador', { software: nome, url, motivo });
+      } else if (st === 'erro' || st === 'descartado') {
+        concluido = true;
+        softLog('❌ Erro: ' + (res || 'Falha desconhecida'));
+        document.getElementById('soft-status').style.cssText =
+          'display:block;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:#FEF2F2;color:#991B1B';
+        document.getElementById('soft-status').textContent = 'Falha: ' + (res || 'Erro desconhecido');
+      } else if (st === 'executando' || st === 'processando') {
+        softLog('⏳ Instalando... (' + Math.round((Date.now()-inicio)/1000) + 's)');
+      }
+    }
+
+    if (!concluido) {
+      softLog('⏱️ Timeout — o agente não confirmou em 5 minutos. Verifique o log em C:\SYSACK\agent.log na máquina alvo.');
     }
   } catch (err) {
     softLog('Erro: ' + err.message);
@@ -24210,7 +24236,7 @@ async function garantirTesseractCarregado() {
   await new Promise((resolve, reject) => {
     if (window.Tesseract) { _tesseractCarregado = true; return resolve(); }
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
     s.onload = () => { _tesseractCarregado = true; resolve(); };
     s.onerror = () => reject(new Error('Falha ao carregar leitor de imagem (OCR).'));
     document.head.appendChild(s);
@@ -24245,9 +24271,10 @@ function abrirEditarPatrimonioSYSACK(ativoId, hostname, patAtual) {
         <div style="height:1px;background:var(--line);margin-bottom:16px"></div>
 
         <label style="font-size:12px;font-weight:700;color:var(--g600);display:block;margin-bottom:4px">Ou ler pela câmera / foto da etiqueta</label>
-        <input type="file" accept="image/*" capture="environment" id="ep-input-foto" style="width:100%;font-size:11.5px;margin-bottom:8px">
-        <button onclick="epLerFotoPatrimonio('${ativoId}','${escapeHtml(hostname)}')" class="btn btn-secondary btn-sm" style="width:100%">📷 Ler número da foto</button>
+        <input type="file" accept="image/*" capture="environment" id="ep-input-foto" style="width:100%;font-size:11.5px;margin-bottom:8px" onchange="epLerFotoPatrimonio('${ativoId}','${escapeHtml(hostname)}')">
+        <button onclick="epLerFotoPatrimonio('${ativoId}','${escapeHtml(hostname)}')" class="btn btn-secondary btn-sm" style="width:100%">📷 Ler novamente esta foto</button>
         <div id="ep-ocr-status" style="font-size:11.5px;color:var(--g500);min-height:16px;margin-top:8px"></div>
+        <div id="ep-ocr-candidatos" style="display:none;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
       </div>
       <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end">
         <button onclick="document.getElementById('modal-editar-patrimonio').remove()" class="btn btn-ghost btn-sm">Fechar</button>
@@ -24271,34 +24298,114 @@ async function epSalvarManual(ativoId, hostname) {
   }
 }
 
+// Pré-processa a foto num canvas (escala de cinza + esticamento de contraste + upscale
+// em fotos pequenas) antes de mandar pro OCR. Roda inteiro no navegador, sem custo,
+// e melhora bastante a leitura em etiquetas com pouco contraste (ex.: metal gravado).
+function epPreprocessarFoto(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = img.width < 900 ? 2 : 1;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      let min = 255, max = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        d[i] = d[i + 1] = d[i + 2] = g;
+        if (g < min) min = g;
+        if (g > max) max = g;
+      }
+      const range = Math.max(max - min, 1);
+      for (let i = 0; i < d.length; i += 4) {
+        const v = ((d[i] - min) / range) * 255;
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Falha ao preparar imagem.')), 'image/png');
+    };
+    img.onerror = () => reject(new Error('Não foi possível abrir a foto.'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// Extrai o número de patrimônio do texto lido pelo OCR. Etiquetas trazem formatos
+// como "PATRIMÔNIO 70.678" (impressa), "58.438" (metal gravado) ou "Patrimônio: 58.431"
+// (etiqueta de TI) — prioriza o número mais próximo da palavra "PATRIM" no texto,
+// em vez de assumir "o número mais longo", que erra fácil com código de barras/serial.
+function epExtrairPatrimonio(textoOcr) {
+  const norm = textoOcr.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const re = /\b(\d{2}\.?\d{3}|\d{4,8})\b/g;
+  let m, candidatos = [];
+  while ((m = re.exec(norm)) !== null) {
+    candidatos.push({ valor: m[1].replace(/\./g, ''), pos: m.index });
+  }
+  candidatos = candidatos.filter(c => c.valor.length >= 4 && c.valor.length <= 8);
+
+  const idxPalavra = norm.indexOf('PATRIM');
+  let melhor = null;
+  if (idxPalavra !== -1 && candidatos.length) {
+    melhor = [...candidatos].sort((a, b) => Math.abs(a.pos - idxPalavra) - Math.abs(b.pos - idxPalavra))[0];
+  } else if (candidatos.length) {
+    melhor = [...candidatos].sort((a, b) => b.valor.length - a.valor.length)[0];
+  }
+
+  const unicos = [...new Set(candidatos.map(c => c.valor))];
+  return {
+    melhor: melhor ? melhor.valor : null,
+    candidatos: unicos,
+    confianca: idxPalavra !== -1 && melhor ? 'alta' : (candidatos.length ? 'baixa' : 'nenhuma')
+  };
+}
+
 async function epLerFotoPatrimonio(ativoId, hostname) {
   const fileInput = document.getElementById('ep-input-foto');
   const status = document.getElementById('ep-ocr-status');
+  const candidatosBox = document.getElementById('ep-ocr-candidatos');
+  const campoInput = document.getElementById('ep-input-pat');
   const file = fileInput?.files?.[0];
   if (!file) { showToast?.('Selecione ou tire uma foto da etiqueta primeiro.', 'warning'); return; }
+  if (candidatosBox) { candidatosBox.style.display = 'none'; candidatosBox.innerHTML = ''; }
   if (status) status.textContent = '⏳ Carregando leitor de imagem...';
   try {
     await garantirTesseractCarregado();
+    if (status) status.textContent = '🖼️ Preparando foto...';
+    const fotoTratada = await epPreprocessarFoto(file);
     if (status) status.textContent = '🔎 Lendo número na etiqueta...';
-    const { data: { text } } = await Tesseract.recognize(file, 'por', {});
-    // Etiquetas trazem formatos como "Patrimônio: 58.431" ou "58.438" — pega
-    // sequências de dígitos (ignorando pontos) com pelo menos 4 números.
-    const numeros = (text.match(/\d[\d.]{2,}\d|\d{4,}/g) || [])
-      .map(s => s.replace(/\./g, ''))
-      .filter(s => s.length >= 4 && s.length <= 8);
-    if (!numeros.length) {
-      if (status) status.textContent = '❌ Não consegui identificar um número de patrimônio nessa foto. Tente uma foto mais nítida ou digite manualmente.';
+    // Não restringimos os caracteres reconhecidos: precisamos que o OCR capture
+    // a palavra "PATRIMÔNIO" também, para usá-la como âncora na extração abaixo.
+    const { data: { text } } = await Tesseract.recognize(fotoTratada, 'por', {});
+    const { melhor, candidatos, confianca } = epExtrairPatrimonio(text);
+
+    if (!melhor) {
+      if (status) status.textContent = '❌ Não consegui identificar um número nessa foto. Tente uma foto mais nítida, com menos reflexo, ou digite manualmente abaixo.';
       return;
     }
-    // Prioriza o número mais longo (mais provável de ser o patrimônio, evita pegar CEP/CNPJ parcial)
-    const candidato = numeros.sort((a, b) => b.length - a.length)[0];
-    if (status) status.textContent = '';
-    if (!confirm(`Número identificado na foto: ${candidato}\n\nConfirma que este é o patrimônio de ${hostname}?`)) return;
-    await fsUpdate('ativos', ativoId, { pat: candidato });
-    showToast?.('✅ Patrimônio atualizado a partir da foto.', 'success');
-    document.getElementById('modal-editar-patrimonio')?.remove();
+
+    if (campoInput) {
+      campoInput.value = melhor;
+      campoInput.focus();
+    }
+
+    if (confianca === 'alta') {
+      if (status) status.textContent = `✅ Número identificado: ${melhor} — confira e clique em "Salvar".`;
+    } else {
+      if (status) status.textContent = `⚠️ Não tenho certeza — confira o número ${melhor} antes de salvar (foto pouco nítida ou etiqueta em relevo).`;
+    }
+
+    const outros = candidatos.filter(c => c !== melhor).slice(0, 3);
+    if (outros.length && candidatosBox) {
+      candidatosBox.style.display = 'flex';
+      candidatosBox.innerHTML = '<span style="font-size:11px;color:var(--g500);width:100%">Outros números encontrados na foto:</span>' +
+        outros.map(c => `<button type="button" onclick="document.getElementById('ep-input-pat').value='${c}'" style="font-size:12px;font-weight:700;padding:4px 9px;border-radius:8px;background:#EEF1FA;color:#2F5FF5;border:1px solid #DBE1F5;cursor:pointer">${c}</button>`).join('');
+    }
   } catch(e) {
-    if (status) status.textContent = '❌ Erro na leitura: ' + e.message;
+    if (status) status.textContent = '❌ Erro na leitura: ' + e.message + ' — digite o número manualmente.';
   }
 }
 
@@ -27015,6 +27122,12 @@ function abrirAtribuirPatMonitor(serial, modelo, patAtual) {
   document.getElementById('mon-pat-obs').value     = '';
   document.getElementById('mon-pat-info').textContent =
     modelo + (serial ? ' · S/N: ' + serial : '');
+  var fotoInput = document.getElementById('mon-pat-input-foto');
+  if (fotoInput) fotoInput.value = '';
+  var ocrStatus = document.getElementById('mon-pat-ocr-status');
+  if (ocrStatus) ocrStatus.textContent = '';
+  var ocrCandidatos = document.getElementById('mon-pat-ocr-candidatos');
+  if (ocrCandidatos) { ocrCandidatos.style.display = 'none'; ocrCandidatos.innerHTML = ''; }
   openModal('modal-atribuir-pat-monitor');
 }
 
@@ -27055,6 +27168,54 @@ async function confirmarPatMonitor() {
     showToast('Erro: ' + e.message, 'danger');
   }
 }
+
+// Leitura por câmera para o modal de patrimônio do Monitor — reaproveita
+// epPreprocessarFoto() e epExtrairPatrimonio(), já usados no modal de
+// patrimônio de computadores, para não duplicar a lógica de OCR.
+async function epLerFotoPatMonitor() {
+  const fileInput = document.getElementById('mon-pat-input-foto');
+  const status = document.getElementById('mon-pat-ocr-status');
+  const candidatosBox = document.getElementById('mon-pat-ocr-candidatos');
+  const campoInput = document.getElementById('mon-pat-numero');
+  const file = fileInput?.files?.[0];
+  if (!file) { showToast?.('Selecione ou tire uma foto da etiqueta primeiro.', 'warning'); return; }
+  if (candidatosBox) { candidatosBox.style.display = 'none'; candidatosBox.innerHTML = ''; }
+  if (status) status.textContent = '⏳ Carregando leitor de imagem...';
+  try {
+    await garantirTesseractCarregado();
+    if (status) status.textContent = '🖼️ Preparando foto...';
+    const fotoTratada = await epPreprocessarFoto(file);
+    if (status) status.textContent = '🔎 Lendo número na etiqueta...';
+    const { data: { text } } = await Tesseract.recognize(fotoTratada, 'por', {});
+    const { melhor, candidatos, confianca } = epExtrairPatrimonio(text);
+
+    if (!melhor) {
+      if (status) status.textContent = '❌ Não consegui identificar um número nessa foto. Tente uma foto mais nítida, com menos reflexo, ou digite manualmente acima.';
+      return;
+    }
+
+    if (campoInput) {
+      campoInput.value = melhor;
+      campoInput.focus();
+    }
+
+    if (confianca === 'alta') {
+      if (status) status.textContent = `✅ Número identificado: ${melhor} — confira e clique em "Salvar Patrimônio".`;
+    } else {
+      if (status) status.textContent = `⚠️ Não tenho certeza — confira o número ${melhor} antes de salvar (foto pouco nítida ou etiqueta em relevo).`;
+    }
+
+    const outros = candidatos.filter(c => c !== melhor).slice(0, 3);
+    if (outros.length && candidatosBox) {
+      candidatosBox.style.display = 'flex';
+      candidatosBox.innerHTML = '<span style="font-size:11px;color:var(--g500);width:100%">Outros números encontrados na foto:</span>' +
+        outros.map(c => `<button type="button" onclick="document.getElementById('mon-pat-numero').value='${c}'" style="font-size:12px;font-weight:700;padding:4px 9px;border-radius:8px;background:#EEF1FA;color:#2F5FF5;border:1px solid #DBE1F5;cursor:pointer">${c}</button>`).join('');
+    }
+  } catch(e) {
+    if (status) status.textContent = '❌ Erro na leitura: ' + e.message + ' — digite o número manualmente.';
+  }
+}
+window.epLerFotoPatMonitor = epLerFotoPatMonitor;
 
 async function confirmarMoverReuso() {
   var ativoId = document.getElementById('reuso-busca-ativo-id').value;
@@ -34398,7 +34559,7 @@ function renderHistoricoUnificadoSYSACK(historico, usuarios, loginHistory, chama
 // SYSACK - Instalador local gerado dinamicamente
 // Não depende mais do arquivo /Instalar-SYSACK-Agent.bat publicado na Vercel.
 // O BAT gerado baixa sempre o agent-desktop.js atual da Vercel para C:\SYSACK\agent.js.
-window.SYSACK_AGENT_JS_URL = 'https://sysack.vercel.app/agent-desktop.js';
+window.SYSACK_AGENT_JS_URL = (window.__ENV__ && window.__ENV__.SYSACK_AGENT_URL) || 'https://sysack.vercel.app/agent-desktop.js';
 window.SYSACK_AGENT_INSTALLER_URL = window.SYSACK_AGENT_JS_URL;
 
 // ── Verificação periódica de versão do Node.js (roda no frontend SYSACK, não no cliente) ──

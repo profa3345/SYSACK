@@ -1,0 +1,21 @@
+{
+  "name": "SYSACK — Cadastro de Celular",
+  "short_name": "SYSACK Mobile",
+  "description": "Cadastro de dispositivo corporativo CESAN",
+  "start_url": "/instalar-celular.html",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#2563EB",
+  "orientation": "portrait",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='80' fill='%232563EB'/%3E%3Ctext x='256' y='320' font-size='280' text-anchor='middle' fill='white'%3E📱%3C/text%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "prefer_related_applications": false
+}

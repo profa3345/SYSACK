@@ -2,6 +2,15 @@
 <!-- build: 20260619-fix-ativos-scroll -->
 <html lang="pt-BR">
 <head>
+  <!-- Variáveis de ambiente injetadas pelo Apache SSI em runtime -->
+  <script>
+    window.__ENV__ = {
+      SYSACK_BASE_URL:  "<!--#echo var='SYSACK_BASE_URL' -->",
+      SYSACK_AGENT_URL: "<!--#echo var='SYSACK_AGENT_URL' -->",
+      SYSACK_ENV:       "<!--#echo var='SYSACK_ENV' -->"
+    };
+  </script>
+
 <meta charset="UTF-8">
   <!-- CSP via HTTP header in vercel.json -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -386,9 +395,9 @@ window.dispatchEvent(new Event('firebase-ready'));
     <button class="tb-btn" id="download-client-btn" onclick="baixarSysackClient()" title="Baixar SYSACK Client para Windows" style="display:none">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="4" rx="1" fill="currentColor" opacity=".3"/><path d="M12 8v8M9 13l3 3 3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="17" width="18" height="4" rx="1" fill="currentColor" opacity=".3"/></svg>
     </button>
-    <button id="pwa-install-btn" onclick="instalarPWA()" title="Instalar SYSACK no seu dispositivo">
+    <button id="pwa-install-btn" onclick="instalarPWA()" title="Instalar SYSACK no celular">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16l-4-4h3V4h2v8h3l-4 4z" fill="currentColor"/><path d="M20 18H4v2h16v-2z" fill="currentColor" opacity=".7"/></svg>
-      <span class="pwa-btn-text">Instalar App</span>
+      <span class="pwa-btn-text">📱 Instalar no Celular</span>
     </button>
     <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Alternar tema claro/escuro">🌙</button>
       <button class="tb-btn" id="notif-btn">
@@ -3255,7 +3264,7 @@ window.dispatchEvent(new Event('firebase-ready'));
           <span id="ar-last-update" style="font-size:11px;color:var(--g400);align-self:center"></span>
           <button class="btn btn-ghost btn-sm" onclick="renderAssistenciaRemota()">↺ Atualizar</button>
           <button class="btn btn-warning btn-sm" id="btn-atualizar-cliente" onclick="arAtualizarClientes()" title="Envia auto-update para todos os agentes online">🔄 Atualizar Cliente</button>
-          <button class="btn btn-secondary btn-sm" onclick="arInstalarAgente()">⬇️ Instalar Agente</button>
+          <button class="btn btn-secondary btn-sm" onclick="arInstalarAgente()">🖥️ Instalar no Computador</button>
         </div>
       </div>
 
@@ -3333,7 +3342,7 @@ window.dispatchEvent(new Event('firebase-ready'));
                 <div style="font-size:32px;margin-bottom:12px">🖥️</div>
                 <div style="font-weight:600;margin-bottom:6px">Nenhum agente instalado</div>
                 <div style="font-size:12px">Instale o SYSACK Agent Desktop nos computadores que deseja gerenciar.</div>
-                <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="arInstalarAgente()">⬇️ Baixar Instalador</button>
+                <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="arInstalarAgente()">🖥️ Instalar no Computador</button>
               </td></tr>
             </tbody>
           </table>
@@ -3777,7 +3786,7 @@ window.dispatchEvent(new Event('firebase-ready'));
       <div class="modal" style="max-width:580px">
         <div class="modal-header" style="background:#0F172A;color:#fff;border-radius:10px 10px 0 0">
           <div>
-            <h3 style="color:#fff;margin:0">⬇️ Instalar Agente SYSACK</h3>
+            <h3 style="color:#fff;margin:0">🖥️ Instalar no Computador</h3>
             <p style="color:rgba(255,255,255,.5);font-size:12px;margin:4px 0 0">Gerado automaticamente com a versão mais recente do agente</p>
           </div>
           <button class="close-btn" onclick="closeModal('modal-ar-download')" style="color:rgba(255,255,255,.5)">✕</button>
@@ -3841,7 +3850,7 @@ window.dispatchEvent(new Event('firebase-ready'));
                 <div style="font-weight:700;font-size:13px;color:#fff">SYSACK Mobile Agent</div>
                 <div style="font-size:11px;color:rgba(255,255,255,.5);margin-top:2px">Para smartphones — coleta IMEI, modelo, SO e apps</div>
               </div>
-              <button class="btn btn-primary btn-sm" onclick="closeModal('modal-ar-download');abrirDownloadMobile()">📲 Instalar</button>
+              <button class="btn btn-primary btn-sm" onclick="closeModal('modal-ar-download');instalarAgenteCelular()">📱 Instalar no Celular</button>
             </div>
           </div>
         </div>
@@ -6732,6 +6741,12 @@ function swTab(tab,el){['mapa','vlans','mac','log'].forEach(function(t){var p=do
         <label class="form-label">Observação</label>
         <input class="form-control" id="mon-pat-obs" placeholder="Ex: Monitor substituído em 05/2026">
       </div>
+      <div style="height:1px;background:var(--line);margin-bottom:14px"></div>
+      <label class="form-label">Ou ler pela câmera / foto da etiqueta</label>
+      <input type="file" accept="image/*" capture="environment" id="mon-pat-input-foto" style="width:100%;font-size:11.5px;margin-bottom:8px" onchange="epLerFotoPatMonitor()">
+      <button type="button" onclick="epLerFotoPatMonitor()" class="btn btn-secondary btn-sm" style="width:100%">📷 Ler novamente esta foto</button>
+      <div id="mon-pat-ocr-status" style="font-size:11.5px;color:var(--g500);min-height:16px;margin-top:8px"></div>
+      <div id="mon-pat-ocr-candidatos" style="display:none;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
     </div>
     <div class="modal-footer">
       <button onclick="closeModal('modal-atribuir-pat-monitor')" class="btn btn-secondary">Cancelar</button>
